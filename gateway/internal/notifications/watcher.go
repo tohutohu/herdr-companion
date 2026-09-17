@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -188,18 +189,32 @@ func Title(s model.Session, kind model.Status) string {
 }
 
 func Payload(s model.Session, kind model.Status) map[string]string {
-	body := s.Project
-	if s.LastMessage != "" {
-		body = strings.TrimSpace(body + "\n" + s.LastMessage)
-	}
 	return map[string]string{
 		"sessionId": s.ID,
 		"status":    string(kind),
 		"title":     Title(s, kind),
-		"body":      truncate(body, 300),
+		"body":      truncate(Body(s), 300),
 		"provider":  s.Provider,
 		"project":   s.Project,
+		// Lets Android offer a reply field only where a message would arrive.
+		"canSend": strconv.FormatBool(s.CanSend),
 	}
+}
+
+// Body names the session on its first line (which is all a collapsed
+// notification shows), then quotes what the agent said last.
+func Body(s model.Session) string {
+	head := s.Project
+	if s.Title != "" {
+		if head != "" {
+			head += " · "
+		}
+		head += s.Title
+	}
+	if s.LastMessage == "" {
+		return head
+	}
+	return strings.TrimSpace(head + "\n" + s.LastMessage)
 }
 
 func truncate(s string, n int) string {

@@ -56,7 +56,11 @@ func newWatcher(t *testing.T, sessions *fakeSessions, sender *fakeSender) (*Watc
 }
 
 func sess(status model.Status) model.Session {
-	return model.Session{ID: "claude:s1", Provider: "claude", ProviderName: "Claude Code", Project: "my-project", Status: status, LastMessage: "認証処理の修正が完了しました"}
+	return model.Session{
+		ID: "claude:s1", Provider: "claude", ProviderName: "Claude Code",
+		Project: "my-project", Title: "認証処理の修正", Status: status,
+		LastMessage: "認証処理の修正が完了しました", CanSend: true,
+	}
 }
 
 func Test状態遷移に応じて通知を送り重複は送らない(t *testing.T) {
@@ -94,8 +98,24 @@ func Test状態遷移に応じて通知を送り重複は送らない(t *testing
 	}
 	first := sender.sent[0]
 	if first.token != "tok-1" || first.data["sessionId"] != "claude:s1" || first.data["title"] != "Claude Code needs input" ||
-		first.data["body"] != "my-project\n認証処理の修正が完了しました" {
+		first.data["body"] != "my-project · 認証処理の修正\n認証処理の修正が完了しました" {
 		t.Errorf("payload = %+v", first)
+	}
+}
+
+func Testペイロードは見出しにプロジェクトとセッションタイトルを並べる(t *testing.T) {
+	s := sess(model.StatusCompleted)
+	got := Payload(s, model.StatusCompleted)
+	if got["body"] != "my-project · 認証処理の修正\n認証処理の修正が完了しました" || got["canSend"] != "true" {
+		t.Errorf("payload = %+v", got)
+	}
+
+	// タイトル未確定のセッションは見出しがプロジェクトだけになる
+	s.Title = ""
+	s.CanSend = false
+	got = Payload(s, model.StatusCompleted)
+	if got["body"] != "my-project\n認証処理の修正が完了しました" || got["canSend"] != "false" {
+		t.Errorf("payload = %+v", got)
 	}
 }
 

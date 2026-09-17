@@ -23,7 +23,7 @@ import android.util.Log
 
 /**
  * Gateway pushes are data-only, high priority messages:
- * {sessionId, status, title, body}. We show the notification ourselves and
+ * {sessionId, status, title, body, canSend}. We show the notification ourselves and
  * prefetch the conversation so it is readable immediately on tap.
  */
 class PushService : FirebaseMessagingService() {
@@ -37,6 +37,7 @@ class PushService : FirebaseMessagingService() {
             status = status,
             title = data["title"] ?: "Herdr Mobile",
             body = data["body"].orEmpty(),
+            canSend = data["canSend"] == "true",
         )
         PrefetchWorker.enqueue(this, sessionId)
     }

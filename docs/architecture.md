@@ -118,15 +118,24 @@ parsers on stored payloads.
 The watcher subscribes to `pane.agent_status_changed` for all panes (plus
 pane topology events to resubscribe) and re-evaluates every 15 s. Transitions
 into `completed` / `waiting_input` / `waiting_approval` / `failed` send an FCM
-data message `{sessionId, status, title, body, provider, project}` with
-Android priority `HIGH`. `running → idle` counts as completion because Herdr
-turns `done` into `idle` once the pane was looked at. The first observation
-after start never pushes.
+data message `{sessionId, status, title, body, provider, project, canSend}`
+with Android priority `HIGH`. `body` starts with `<project> · <session title>`
+because that first line is all a collapsed notification shows, then the last
+message. `running → idle` counts as completion because Herdr turns `done` into
+`idle` once the pane was looked at. The first observation after start never
+pushes.
 
 On Android, `PushService` shows the notification (channels *Completed*,
 *Needs attention*, *Errors*) and enqueues an expedited `PrefetchWorker` that
 fetches the session into Room, so tapping the notification opens a populated
 conversation. Foreground screens poll every 3 s (detail) / 5 s (list).
+
+A notification carries an inline *Reply* field when `canSend` is set and the
+session is not waiting on a question or an approval — those expect that exact
+answer, which only the in-app interaction UI can give. `ReplyReceiver` re-posts
+the notification with the typed text and hands it to `ReplyWorker`, which POSTs
+the message and retries an unreachable gateway; the notification reports the
+send as pending, done, or failed.
 
 ## Starting sessions
 
