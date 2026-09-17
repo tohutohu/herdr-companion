@@ -7,19 +7,26 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -30,6 +37,17 @@ import com.tohutohu.herdrmobile.data.api.QuestionDto
 
 /** Sentinel used as the "Other" option key. */
 private const val OTHER = "__herdr_other__"
+
+/**
+ * Colors inside the card are derived from the card's own content color, not from
+ * the surface roles: the pending card sits on [tertiaryContainer] and picking
+ * `onSurfaceVariant` there made the secondary text unreadable.
+ */
+private val Muted: Color
+    @Composable @ReadOnlyComposable get() = LocalContentColor.current.copy(alpha = 0.75f)
+
+private val Accent: Color
+    @Composable @ReadOnlyComposable get() = MaterialTheme.colorScheme.tertiary
 
 @Composable
 fun InteractionCard(
@@ -42,6 +60,7 @@ fun InteractionCard(
     Card(
         colors = CardDefaults.cardColors(
             containerColor = if (pending) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+            contentColor = if (pending) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
         ),
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -66,14 +85,28 @@ private fun AnsweredSummary(interaction: InteractionDto) {
         "answered" -> interaction.answer?.takeIf { it.isNotBlank() }?.let { "Answered: $it" } ?: "Answered"
         else -> "No longer waiting for an answer"
     }
-    Text(summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Text(summary, style = MaterialTheme.typography.bodySmall, color = Muted)
 }
 
 @Composable
 private fun Unsupported(onOpenTerminal: () -> Unit) {
     Text("This interaction isn't supported yet.")
-    OutlinedButton(onClick = onOpenTerminal) { Text("Open Terminal") }
+    OutlinedButton(onClick = onOpenTerminal, colors = outlinedButtonColors()) { Text("Open Terminal") }
 }
+
+@Composable
+private fun filledButtonColors() = ButtonDefaults.buttonColors(
+    containerColor = Accent,
+    contentColor = MaterialTheme.colorScheme.onTertiary,
+    disabledContainerColor = LocalContentColor.current.copy(alpha = 0.12f),
+    disabledContentColor = LocalContentColor.current.copy(alpha = 0.38f),
+)
+
+@Composable
+private fun outlinedButtonColors() = ButtonDefaults.outlinedButtonColors(
+    contentColor = LocalContentColor.current,
+    disabledContentColor = LocalContentColor.current.copy(alpha = 0.38f),
+)
 
 @Composable
 private fun Approval(interaction: InteractionDto, enabled: Boolean, onRespond: (InteractionResponseDto) -> Unit) {
@@ -90,9 +123,9 @@ private fun Approval(interaction: InteractionDto, enabled: Boolean, onRespond: (
             }
             val onClick = { onRespond(InteractionResponseDto(interactionId = interaction.id, decision = d)) }
             if (d == "deny") {
-                OutlinedButton(onClick = onClick, enabled = enabled) { Text(label) }
+                OutlinedButton(onClick = onClick, enabled = enabled, colors = outlinedButtonColors()) { Text(label) }
             } else {
-                Button(onClick = onClick, enabled = enabled) { Text(label) }
+                Button(onClick = onClick, enabled = enabled, colors = filledButtonColors()) { Text(label) }
             }
         }
     }
@@ -132,6 +165,7 @@ private fun Questions(interaction: InteractionDto, enabled: Boolean, onRespond: 
     val complete = answers.values.all { it != null }
     Button(
         enabled = enabled && complete,
+        colors = filledButtonColors(),
         onClick = {
             onRespond(
                 InteractionResponseDto(
@@ -154,7 +188,7 @@ private fun QuestionView(
     val multi = q.type == "multiselect"
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         q.header?.takeIf { it.isNotBlank() }?.let {
-            Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+            Text(it, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = Muted)
         }
         Text(q.question, style = MaterialTheme.typography.bodyLarge)
 
@@ -178,14 +212,29 @@ private fun QuestionView(
                     .clickable { toggle(key) },
             ) {
                 if (multi) {
-                    Checkbox(checked = key in selected, onCheckedChange = { toggle(key) })
+                    Checkbox(
+                        checked = key in selected,
+                        onCheckedChange = { toggle(key) },
+                        colors = CheckboxDefaults.colors(
+                            checkedColor = Accent,
+                            checkmarkColor = MaterialTheme.colorScheme.onTertiary,
+                            uncheckedColor = LocalContentColor.current.copy(alpha = 0.6f),
+                        ),
+                    )
                 } else {
-                    RadioButton(selected = key in selected, onClick = { toggle(key) })
+                    RadioButton(
+                        selected = key in selected,
+                        onClick = { toggle(key) },
+                        colors = RadioButtonDefaults.colors(
+                            selectedColor = Accent,
+                            unselectedColor = LocalContentColor.current.copy(alpha = 0.6f),
+                        ),
+                    )
                 }
                 Column {
                     Text(if (key == OTHER) "Other…" else key)
                     description?.takeIf { it.isNotBlank() }?.let {
-                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = Muted)
                     }
                 }
             }
@@ -195,6 +244,15 @@ private fun QuestionView(
                 value = otherText,
                 onValueChange = onOtherText,
                 placeholder = { Text("Your answer") },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = LocalContentColor.current,
+                    unfocusedTextColor = LocalContentColor.current,
+                    cursorColor = Accent,
+                    focusedBorderColor = Accent,
+                    unfocusedBorderColor = LocalContentColor.current.copy(alpha = 0.4f),
+                    focusedPlaceholderColor = Muted,
+                    unfocusedPlaceholderColor = Muted,
+                ),
                 modifier = Modifier.fillMaxWidth(),
             )
         }
