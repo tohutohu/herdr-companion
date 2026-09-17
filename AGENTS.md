@@ -92,3 +92,12 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.herdr-mobile.<name>.
 - Subscription limits come from the CodexBar CLI (`brew install --cask codexbar`); neither agent reports them itself. `herdr-mobile-gateway usage` prints one read.
 - Claude dialog key sequences and trust-dialog texts were verified against Claude Code 2.1.274 and Codex 0.154. Re-verify with a test session when those versions change.
 - Commit at each logical step. Commit messages end with the Co-Authored-By trailer; no "Generated with Claude Code" line.
+
+## TypeSafe / Jev
+
+- For Jev integration, prompt design, or evaluation work, read and use
+  [the TypeSafe skill](.agents/skills/typesafe-ai/SKILL.md).
+- It is installed project-locally for Codex with `npx skills add typesafe-ai/skills --skill typesafe-ai --agent codex --yes`;
+  `skills-lock.json` records the installed source.
+- Keep the API key in the existing private Gateway config (`jevApiKey`) or
+  `TYPESAFE_API_KEY`; never put it in source, test fixtures, or command output.
