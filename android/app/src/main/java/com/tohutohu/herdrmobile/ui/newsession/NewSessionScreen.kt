@@ -58,8 +58,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.tohutohu.herdrmobile.container
 import com.tohutohu.herdrmobile.data.DirectoryShortcuts
+import com.tohutohu.herdrmobile.data.api.CatalogOption
 import com.tohutohu.herdrmobile.data.api.DirListingDto
-import com.tohutohu.herdrmobile.data.api.ModelOptionDto
+import com.tohutohu.herdrmobile.data.api.EffortOptionDto
+import com.tohutohu.herdrmobile.data.api.ModelsResponse
 import com.tohutohu.herdrmobile.data.api.StartSessionRequest
 import kotlinx.coroutines.launch
 
@@ -91,10 +93,12 @@ fun NewSessionScreen(
     var trust by rememberSaveable { mutableStateOf(true) }
     var starting by remember { mutableStateOf(false) }
     var showMkdir by remember { mutableStateOf(false) }
-    // "" = the agent's default model.
+    // "" = the agent's default model / effort.
     var model by rememberSaveable { mutableStateOf("") }
-    var models by remember { mutableStateOf<List<ModelOptionDto>>(emptyList()) }
+    var effort by rememberSaveable { mutableStateOf("") }
+    var catalog by remember { mutableStateOf(ModelsResponse()) }
     var modelsError by remember { mutableStateOf<String?>(null) }
+    val efforts = effortsFor(catalog, model)
 
     suspend fun load(p: String) {
         loading = true
@@ -117,11 +121,12 @@ fun NewSessionScreen(
     LaunchedEffect(Unit) { load(path) }
 
     LaunchedEffect(provider) {
-        models = emptyList()
+        catalog = ModelsResponse()
         modelsError = null
         try {
-            models = api.models(provider)
-            if (model.isNotEmpty() && models.none { it.id == model }) model = ""
+            catalog = api.models(provider)
+            if (model.isNotEmpty() && catalog.models.none { it.id == model }) model = ""
+            if (effort.isNotEmpty() && effortsFor(catalog, model).none { it.id == effort }) effort = ""
         } catch (e: Exception) {
             modelsError = e.message
         }
@@ -175,12 +180,31 @@ fun NewSessionScreen(
                     Modifier.navigationBarsPadding().imePadding().padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    ModelPicker(
-                        models = models,
-                        selected = model,
-                        error = modelsError,
-                        onSelect = { model = it },
-                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OptionPicker(
+                            label = "Model",
+                            options = catalog.models,
+                            selected = model,
+                            error = modelsError,
+                            onSelect = { picked ->
+                                model = picked
+                                // The new model may not offer the picked effort.
+                                if (effortsFor(catalog, picked).none { it.id == effort }) effort = ""
+                            },
+                            // Model names are the longer ones.
+                            modifier = Modifier.weight(1.2f),
+                        )
+                        if (efforts.isNotEmpty()) {
+                            OptionPicker(
+                                label = "Effort",
+                                options = efforts,
+                                selected = effort,
+                                error = null,
+                                onSelect = { effort = it },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                    }
                     OutlinedTextField(
                         value = prompt,
                         onValueChange = { prompt = it },
@@ -204,7 +228,10 @@ fun NewSessionScreen(
                                 starting = true
                                 try {
                                     val res = api.startSession(
-                                        StartSessionRequest(provider, path, prompt.trim(), trust, model.ifEmpty { null }),
+                                        StartSessionRequest(
+                                            provider, path, prompt.trim(), trust,
+                                            model.ifEmpty { null }, effort.ifEmpty { null },
+                                        ),
                                     )
                                     runCatching { shortcutStore.recordUsed(path) }
                                     runCatching { repo.refreshSessions() }
@@ -308,26 +335,39 @@ fun NewSessionScreen(
     }
 }
 
-/** Model dropdown; the first entry keeps the agent's own default. */
+/**
+ * Efforts offered for the picked model; the catalog's own list covers the
+ * agent's default model and models that list none.
+ */
+fun effortsFor(catalog: ModelsResponse, modelId: String): List<EffortOptionDto> {
+    val own = catalog.models.firstOrNull { it.id == modelId }?.efforts.orEmpty()
+    return own.ifEmpty { catalog.efforts }
+}
+
+/** Model or effort dropdown; the first entry keeps the agent's own default. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ModelPicker(
-    models: List<ModelOptionDto>,
+private fun OptionPicker(
+    label: String,
+    options: List<CatalogOption>,
     selected: String,
     error: String?,
     onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val defaultName = models.firstOrNull { it.default }?.name
+    val defaultName = options.firstOrNull { it.default }?.name
     val defaultLabel = if (defaultName != null) "Default ($defaultName)" else "Default"
-    val current = models.firstOrNull { it.id == selected }?.name ?: defaultLabel
-    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+    val current = options.firstOrNull { it.id == selected }?.name ?: defaultLabel
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }, modifier = modifier) {
         OutlinedTextField(
             value = current,
             onValueChange = {},
             readOnly = true,
             singleLine = true,
-            label = { Text("Model") },
+            // Two pickers share the row, so the value gets the smaller size.
+            textStyle = MaterialTheme.typography.bodyMedium,
+            label = { Text(label) },
             supportingText = error?.let { { Text("Could not load models: $it") } },
             isError = error != null,
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
@@ -343,7 +383,7 @@ private fun ModelPicker(
                     expanded = false
                 },
             )
-            models.forEach { m ->
+            options.forEach { m ->
                 DropdownMenuItem(
                     text = {
                         Column {

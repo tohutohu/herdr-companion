@@ -154,21 +154,45 @@ data class StartSessionRequest(
     val trust: Boolean,
     /** Null uses the agent's default model. */
     val model: String? = null,
+    /** Null uses the agent's default reasoning effort. */
+    val effort: String? = null,
 )
 
 @Serializable
 data class ResumeRequest(val trust: Boolean)
 
-@Serializable
-data class ModelOptionDto(
-    val id: String,
-    val name: String,
-    val description: String? = null,
-    val default: Boolean = false,
-)
+/** A model or an effort the user can pick when starting a session. */
+interface CatalogOption {
+    val id: String
+    val name: String
+    val description: String?
+    val default: Boolean
+}
 
 @Serializable
-data class ModelsResponse(val models: List<ModelOptionDto> = emptyList())
+data class ModelOptionDto(
+    override val id: String,
+    override val name: String,
+    override val description: String? = null,
+    override val default: Boolean = false,
+    /** Empty means the catalog's efforts apply. */
+    val efforts: List<EffortOptionDto> = emptyList(),
+) : CatalogOption
+
+@Serializable
+data class EffortOptionDto(
+    override val id: String,
+    override val name: String,
+    override val description: String? = null,
+    override val default: Boolean = false,
+) : CatalogOption
+
+@Serializable
+data class ModelsResponse(
+    val models: List<ModelOptionDto> = emptyList(),
+    /** Efforts for a session started without a model. */
+    val efforts: List<EffortOptionDto> = emptyList(),
+)
 
 @Serializable
 data class StartSessionResponse(val sessionId: String? = null, val paneId: String, val warning: String? = null)
