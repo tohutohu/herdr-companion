@@ -9,7 +9,9 @@ import (
 )
 
 // fileRefPattern matches things like src/auth.go, ./a/b.kt:42, /abs/path/x.md:10:3
-var fileRefPattern = regexp.MustCompile(`(?:^|[\s(\[` + "`" + `'"])((?:\.{0,2}/)?(?:[\w.@+-]+/)*[\w@+-][\w.@+-]*\.[A-Za-z0-9]{1,10})(?::(\d+))?`)
+// The left boundary is any non-path character so references directly after
+// Japanese punctuation (e.g. "。src/a.go") are found too.
+var fileRefPattern = regexp.MustCompile(`(?:^|[^\w./@+-])((?:\.{0,2}/)?(?:[\w.@+-]+/)*[\w@+-][\w.@+-]*\.[A-Za-z0-9]{1,10})(?::(\d+))?`)
 
 const maxFileRefs = 20
 

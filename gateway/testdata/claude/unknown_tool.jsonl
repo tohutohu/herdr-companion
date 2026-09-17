@@ -1,0 +1,7 @@
+{"type":"user","message":{"role":"user","content":"test"},"uuid":"u1","timestamp":"2026-09-17T10:00:00.000Z","cwd":"/work/app","sessionId":"s2"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_foo","name":"FooTool","input":{"bar":1}}]},"uuid":"a1","timestamp":"2026-09-17T10:00:01.000Z","sessionId":"s2"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"hologram","data":"???"},{"type":"text","text":"続けます"}]},"uuid":"a2","timestamp":"2026-09-17T10:00:02.000Z","sessionId":"s2"}
+{"type":"assistant","message":{"role":"assist
+{"type":"brand-new-event","message":{"role":"assistant","content":"from the future"},"uuid":"n1","timestamp":"2026-09-17T10:00:03.000Z","sessionId":"s2"}
+{"type":"future-metadata","value":42,"sessionId":"s2"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"完了"}]},"uuid":"a3","timestamp":"2026-09-17T10:00:04.000Z","sessionId":"s2"}

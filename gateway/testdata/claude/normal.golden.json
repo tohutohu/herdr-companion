@@ -1,0 +1,103 @@
+[
+  {
+    "id": "u1",
+    "role": "user",
+    "timestamp": "2026-09-17T10:00:00Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "認証処理直して"
+      }
+    ]
+  },
+  {
+    "id": "a2",
+    "role": "assistant",
+    "timestamp": "2026-09-17T10:00:02Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "確認します。"
+      }
+    ]
+  },
+  {
+    "id": "a3",
+    "role": "assistant",
+    "timestamp": "2026-09-17T10:00:03Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "Read src/auth.go"
+      },
+      {
+        "type": "file",
+        "path": "src/auth.go"
+      }
+    ]
+  },
+  {
+    "id": "u2",
+    "role": "tool",
+    "timestamp": "2026-09-17T10:00:04Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "1\tpackage auth"
+      }
+    ]
+  },
+  {
+    "id": "a4",
+    "role": "assistant",
+    "timestamp": "2026-09-17T10:00:05Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "修正しました。src/auth.go:3 を確認してください。"
+      },
+      {
+        "type": "file",
+        "path": "src/auth.go",
+        "line": 3
+      }
+    ]
+  },
+  {
+    "id": "u4",
+    "role": "user",
+    "timestamp": "2026-09-17T10:01:01Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "/model opus"
+      }
+    ]
+  },
+  {
+    "id": "u5",
+    "role": "user",
+    "timestamp": "2026-09-17T10:02:00Z",
+    "blocks": [
+      {
+        "type": "image",
+        "url": "/v1/sessions/claude:test/messages/u5/images/0"
+      },
+      {
+        "type": "text",
+        "text": "この画像を見て"
+      }
+    ]
+  },
+  {
+    "id": "a5",
+    "role": "system",
+    "timestamp": "2026-09-17T10:02:01Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "API Error: 529 overloaded"
+      }
+    ]
+  }
+]

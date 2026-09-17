@@ -1,0 +1,189 @@
+[
+  {
+    "id": "5f7b626d-f703-4b19-8e4d-696622d43559",
+    "role": "user",
+    "timestamp": "2026-09-17T14:03:01.772Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "Use the AskUserQuestion tool exactly once with two questions: Q1 header 'Color' question 'Which color?' single-select options Red, Green, Blue. Q2 header 'Fruits' question 'Which fruits?' multiSelect true options Apple, Banana, Cherry. After answers, just reply with the answers."
+      }
+    ]
+  },
+  {
+    "id": "720df631-e67f-4af9-a673-be5680badeab",
+    "role": "assistant",
+    "timestamp": "2026-09-17T14:03:05.733Z",
+    "blocks": [
+      {
+        "type": "interaction",
+        "interaction": {
+          "id": "toolu_01R4XLkhyTiM7RTPSj6sbYYY",
+          "type": "questions",
+          "state": "answered",
+          "title": "Claude needs input",
+          "questions": [
+            {
+              "id": "0",
+              "type": "select",
+              "header": "Color",
+              "question": "Which color?",
+              "options": [
+                {
+                  "label": "Red",
+                  "description": "The color red"
+                },
+                {
+                  "label": "Green",
+                  "description": "The color green"
+                },
+                {
+                  "label": "Blue",
+                  "description": "The color blue"
+                }
+              ],
+              "allowOther": true
+            },
+            {
+              "id": "1",
+              "type": "multiselect",
+              "header": "Fruits",
+              "question": "Which fruits?",
+              "options": [
+                {
+                  "label": "Apple",
+                  "description": "Apple fruit"
+                },
+                {
+                  "label": "Banana",
+                  "description": "Banana fruit"
+                },
+                {
+                  "label": "Cherry",
+                  "description": "Cherry fruit"
+                }
+              ],
+              "allowOther": true
+            }
+          ],
+          "supported": true,
+          "answer": "\"Which color?\"=\"Green\", \"Which fruits?\"=\"Apple, Cherry\""
+        }
+      }
+    ]
+  },
+  {
+    "id": "20cc4b12-ae71-4840-ba34-431d5470d24e",
+    "role": "assistant",
+    "timestamp": "2026-09-17T14:03:44.621Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "ご回答ありがとうございます。\n\n**あなたの選択：**\n- 色: **Green（緑）**\n- 果物: **Apple（りんご）** と **Cherry（さくらんぼ）**"
+      }
+    ]
+  },
+  {
+    "id": "846be7b5-5fe0-4a61-829d-bec383a2c44e",
+    "role": "user",
+    "timestamp": "2026-09-17T14:03:49.762Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "Use AskUserQuestion once with a single question: header 'Name' question 'Pick a name' options Alice, Bob. Then reply with the answer."
+      }
+    ]
+  },
+  {
+    "id": "da9a61a0-46f6-4749-a839-e1b15dd36852",
+    "role": "assistant",
+    "timestamp": "2026-09-17T14:03:51.656Z",
+    "blocks": [
+      {
+        "type": "interaction",
+        "interaction": {
+          "id": "toolu_0157TNuURGpGu89rriLAACHM",
+          "type": "questions",
+          "state": "answered",
+          "title": "Claude needs input",
+          "questions": [
+            {
+              "id": "0",
+              "type": "select",
+              "header": "Name",
+              "question": "Pick a name",
+              "options": [
+                {
+                  "label": "Alice",
+                  "description": "Alice"
+                },
+                {
+                  "label": "Bob",
+                  "description": "Bob"
+                }
+              ],
+              "allowOther": true
+            }
+          ],
+          "supported": true,
+          "answer": "The user answered: \"Pick a name\"=\"Carol\". Read the answers carefully — they may request clarification, changes, or that you not proceed — and follow what they actually say."
+        }
+      }
+    ]
+  },
+  {
+    "id": "bc425216-2e30-4214-bb42-037ddd41f68a",
+    "role": "assistant",
+    "timestamp": "2026-09-17T14:04:01.845Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "**ご回答：Carol**\n\n選択肢以外の「Carol」を選ばれたのですね。"
+      }
+    ]
+  },
+  {
+    "id": "da2849a2-4c4b-4c7c-a8f6-84593b5e592c",
+    "role": "user",
+    "timestamp": "2026-09-17T14:04:13.932Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "Run this exact bash command with the Bash tool: touch approved.txt"
+      }
+    ]
+  },
+  {
+    "id": "526a6430-22a9-4459-8797-33fc6ac5c819",
+    "role": "assistant",
+    "timestamp": "2026-09-17T14:04:15.639Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "Create the approved.txt file\n$ touch approved.txt"
+      }
+    ]
+  },
+  {
+    "id": "60929435-dd2e-4225-a977-e6de8f92fc0c",
+    "role": "tool",
+    "timestamp": "2026-09-17T14:04:23.878Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "(Bash completed with no output)"
+      }
+    ]
+  },
+  {
+    "id": "173a6cde-65f2-4708-92a7-58a74467446b",
+    "role": "assistant",
+    "timestamp": "2026-09-17T14:04:25.056Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "完了しました。`approved.txt` ファイルを作成しました。"
+      }
+    ]
+  }
+]

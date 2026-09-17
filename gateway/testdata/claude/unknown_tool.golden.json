@@ -1,0 +1,61 @@
+[
+  {
+    "id": "u1",
+    "role": "user",
+    "timestamp": "2026-09-17T10:00:00Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "test"
+      }
+    ]
+  },
+  {
+    "id": "a1",
+    "role": "assistant",
+    "timestamp": "2026-09-17T10:00:01Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "▸ FooTool {\"bar\":1}"
+      }
+    ]
+  },
+  {
+    "id": "a2",
+    "role": "assistant",
+    "timestamp": "2026-09-17T10:00:02Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "Unsupported content: hologram"
+      },
+      {
+        "type": "text",
+        "text": "続けます"
+      }
+    ]
+  },
+  {
+    "id": "n1",
+    "role": "system",
+    "timestamp": "2026-09-17T10:00:03Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "Unsupported event: brand-new-event"
+      }
+    ]
+  },
+  {
+    "id": "a3",
+    "role": "assistant",
+    "timestamp": "2026-09-17T10:00:04Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "完了"
+      }
+    ]
+  }
+]
