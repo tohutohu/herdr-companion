@@ -36,6 +36,7 @@ type Session struct {
 	UpdatedAt    time.Time `json:"updatedAt"`
 	LastMessage  string    `json:"lastMessage,omitempty"`
 	PaneID       string    `json:"paneId,omitempty"` // where it currently runs; not an identity
+	Model        string    `json:"model,omitempty"`  // last used model, provider naming
 	CanSend      bool      `json:"canSend"`
 }
 

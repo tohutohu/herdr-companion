@@ -219,7 +219,7 @@ func (p *Provider) Summary(ctx context.Context, nativeID string, live *providers
 }
 
 func summaryFromThread(th *Thread) providers.Summary {
-	s := providers.Summary{NativeID: th.ID, Cwd: th.Cwd, LastMessage: providers.OneLine(th.Preview, 160)}
+	s := providers.Summary{NativeID: th.ID, Cwd: th.Cwd, Model: th.Model, LastMessage: providers.OneLine(th.Preview, 160)}
 	if th.Name != nil {
 		s.Title = *th.Name
 	}
@@ -600,11 +600,74 @@ func (d *daemonConn) interactions(thread string, sink deadletter.Sink) []model.M
 
 // LaunchArgs attaches new Codex TUIs to the shared daemon when it runs, so
 // approvals and questions can be answered from the app.
-func (p *Provider) LaunchArgs() []string {
+func (p *Provider) LaunchArgs(modelID string) []string {
+	var args []string
 	if _, err := os.Stat(p.daemonSock); err == nil {
-		return []string{"--remote", "unix://" + p.daemonSock}
+		args = append(args, "--remote", "unix://"+p.daemonSock)
 	}
-	return nil
+	if modelID != "" {
+		args = append(args, "--model", modelID)
+	}
+	return args
+}
+
+type catalogModel struct {
+	ID          string `json:"id"`
+	Model       string `json:"model"`
+	DisplayName string `json:"displayName"`
+	Description string `json:"description"`
+	Hidden      bool   `json:"hidden"`
+	IsDefault   bool   `json:"isDefault"`
+}
+
+// Models reads Codex's model catalog (model/list).
+func (p *Provider) Models(ctx context.Context) ([]providers.ModelOption, error) {
+	c, err := p.client(ctx)
+	if err != nil {
+		return nil, err
+	}
+	cctx, cancel := context.WithTimeout(ctx, callTimeout)
+	defer cancel()
+	var out []providers.ModelOption
+	cursor := ""
+	for range 10 {
+		params := map[string]any{"includeHidden": false}
+		if cursor != "" {
+			params["cursor"] = cursor
+		}
+		var r struct {
+			Data       []catalogModel `json:"data"`
+			NextCursor *string        `json:"nextCursor"`
+		}
+		if err := c.call(cctx, "model/list", params, &r); err != nil {
+			return nil, err
+		}
+		out = append(out, modelOptions(r.Data)...)
+		if r.NextCursor == nil || *r.NextCursor == "" {
+			break
+		}
+		cursor = *r.NextCursor
+	}
+	return out, nil
+}
+
+func modelOptions(ms []catalogModel) []providers.ModelOption {
+	var out []providers.ModelOption
+	for _, m := range ms {
+		id := m.Model
+		if id == "" {
+			id = m.ID
+		}
+		if m.Hidden || !providers.ValidModelID(id) {
+			continue
+		}
+		name := m.DisplayName
+		if name == "" {
+			name = id
+		}
+		out = append(out, providers.ModelOption{ID: id, Name: name, Description: m.Description, Default: m.IsDefault})
+	}
+	return out
 }
 
 // StartupKeys accepts Codex's folder trust screen, whose default choice is

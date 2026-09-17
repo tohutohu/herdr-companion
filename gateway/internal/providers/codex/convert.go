@@ -19,6 +19,7 @@ type Thread struct {
 	Preview   string          `json:"preview"`
 	Name      *string         `json:"name"`
 	Cwd       string          `json:"cwd"`
+	Model     string          `json:"model"`
 	CreatedAt int64           `json:"createdAt"`
 	UpdatedAt int64           `json:"updatedAt"`
 	Status    ThreadStatus    `json:"status"`

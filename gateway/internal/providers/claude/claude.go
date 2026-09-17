@@ -352,7 +352,25 @@ func singleLine(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
-func (p *Provider) LaunchArgs() []string { return nil }
+func (p *Provider) LaunchArgs(modelID string) []string {
+	if modelID == "" {
+		return nil
+	}
+	return []string{"--model", modelID}
+}
+
+// Claude Code has no model catalog API; these are its CLI aliases, which
+// always point at the latest model of each family.
+var models = []providers.ModelOption{
+	{ID: "fable", Name: "Fable", Description: "Most capable"},
+	{ID: "opus", Name: "Opus", Description: "Complex tasks"},
+	{ID: "sonnet", Name: "Sonnet", Description: "Everyday tasks"},
+	{ID: "haiku", Name: "Haiku", Description: "Fastest"},
+}
+
+func (p *Provider) Models(ctx context.Context) ([]providers.ModelOption, error) {
+	return models, nil
+}
 
 // StartupKeys accepts Claude Code's workspace trust dialog. Two variants exist:
 //   - "❯ No, exit" / "Yes, I trust this folder" (No is focused)

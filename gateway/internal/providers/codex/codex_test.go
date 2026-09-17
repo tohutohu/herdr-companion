@@ -292,6 +292,20 @@ func (f *fakeServer) serve(p *pipeTransport, send func(any)) {
 			send(map[string]any{"id": 0, "method": "item/commandExecution/requestApproval", "params": map[string]any{"threadId": "thread-000001", "turnId": "t1", "itemId": "i1", "startedAtMs": 1, "command": "rm -rf build"}})
 		case "thread/read":
 			result = map[string]any{"thread": f.thread}
+		case "model/list":
+			var params struct{ Cursor string }
+			json.Unmarshal(m.Params, &params)
+			if params.Cursor == "" {
+				result = map[string]any{"nextCursor": "p2", "data": []map[string]any{
+					{"id": "gpt-6-astra", "model": "gpt-6-astra", "displayName": "GPT-6 Astra", "description": "Frontier", "isDefault": true},
+					{"id": "hidden", "model": "gpt-internal", "displayName": "Internal", "hidden": true},
+				}}
+			} else {
+				result = map[string]any{"nextCursor": nil, "data": []map[string]any{
+					{"id": "mini", "model": "gpt-6-mini", "displayName": "", "description": "Fast"},
+					{"id": "bad", "model": "--oops", "displayName": "Bad"},
+				}}
+			}
 		}
 		send(map[string]any{"id": m.ID, "result": result})
 	}
@@ -402,5 +416,53 @@ func TestDaemonがなければペインへ入力しブロック中は端末フ�
 	}
 	if err := p.Respond(context.Background(), "thread-000001", live, model.InteractionResponse{InteractionID: blockedPromptID}); !errors.Is(err, providers.ErrUnsupported) {
 		t.Errorf("terminal prompt respond err = %v", err)
+	}
+}
+
+func Testスレッドのモデルをサマリーに含める(t *testing.T) {
+	th, _ := loadThread(t, "normal.json")
+	if s := summaryFromThread(th); s.Model != "gpt-6-astra" {
+		t.Errorf("model = %q", s.Model)
+	}
+}
+
+func Testモデル一覧をページングして取得し非表示や不正なIDを除く(t *testing.T) {
+	f := &fakeServer{t: t}
+	pt := &pipeTransport{in: make(chan []byte, 16), out: make(chan []byte, 16), closed: make(chan struct{})}
+	go f.serve(pt, func(v any) {
+		b, _ := json.Marshal(v)
+		pt.in <- b
+	})
+	p := New("codex-not-used", "/nonexistent.sock", &fakeTerm{}, deadletter.Nop{})
+	p.reader = newRPCClient(pt, nil)
+	defer p.reader.close()
+
+	models, err := p.Models(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []providers.ModelOption{
+		{ID: "gpt-6-astra", Name: "GPT-6 Astra", Description: "Frontier", Default: true},
+		{ID: "gpt-6-mini", Name: "gpt-6-mini", Description: "Fast"},
+	}
+	got, _ := json.Marshal(models)
+	exp, _ := json.Marshal(want)
+	if string(got) != string(exp) {
+		t.Errorf("models = %s", got)
+	}
+}
+
+func Test起動引数にdaemon接続とモデル指定を含める(t *testing.T) {
+	sock := filepath.Join(t.TempDir(), "cx.sock")
+	p := New("codex", sock, &fakeTerm{}, deadletter.Nop{})
+	if got := strings.Join(p.LaunchArgs("gpt-6-mini"), " "); got != "--model gpt-6-mini" {
+		t.Errorf("without daemon = %q", got)
+	}
+	os.WriteFile(sock, nil, 0o600)
+	if got := strings.Join(p.LaunchArgs(""), " "); got != "--remote unix://"+sock {
+		t.Errorf("default model = %q", got)
+	}
+	if got := strings.Join(p.LaunchArgs("gpt-6-mini"), " "); got != "--remote unix://"+sock+" --model gpt-6-mini" {
+		t.Errorf("with daemon = %q", got)
 	}
 }

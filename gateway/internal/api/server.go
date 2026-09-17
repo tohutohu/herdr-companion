@@ -48,6 +48,7 @@ func (s *Server) Handler() http.Handler {
 	api := http.NewServeMux()
 	api.HandleFunc("GET /v1/sessions", s.listSessions)
 	api.HandleFunc("POST /v1/sessions", s.startSession)
+	api.HandleFunc("GET /v1/models", s.listModels)
 	api.HandleFunc("GET /v1/directories", s.listDirectories)
 	api.HandleFunc("POST /v1/directories", s.createDirectory)
 	api.HandleFunc("GET /v1/sessions/{id}", s.getSession)
@@ -137,7 +138,7 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, sessionID, op stri
 		if herr.Code == "agent_blocked" {
 			status = http.StatusConflict
 		}
-	case errors.Is(err, errBadRequest), errors.Is(err, launcher.ErrInvalidName), errors.Is(err, launcher.ErrUnknownProvider):
+	case errors.Is(err, errBadRequest), errors.Is(err, launcher.ErrInvalidName), errors.Is(err, launcher.ErrUnknownProvider), errors.Is(err, launcher.ErrInvalidModel):
 		status = http.StatusBadRequest
 	case errors.Is(err, os.ErrExist):
 		status = http.StatusConflict
@@ -512,6 +513,19 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, res)
+}
+
+func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {
+	provider := r.URL.Query().Get("provider")
+	models, err := s.Launcher.Models(r.Context(), provider)
+	if err != nil {
+		s.fail(w, r, "", "list_models", err)
+		return
+	}
+	if models == nil {
+		models = []providers.ModelOption{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"models": models})
 }
 
 func (s *Server) listDirectories(w http.ResponseWriter, r *http.Request) {

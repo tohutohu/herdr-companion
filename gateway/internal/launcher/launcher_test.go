@@ -133,9 +133,17 @@ func (f *fakeHerdr) Pane(context.Context, string) (*herdr.Pane, error) {
 
 type fakeProvider struct{ providers.Provider }
 
-func (fakeProvider) Name() string         { return "claude" }
-func (fakeProvider) HerdrAgent() string   { return "claude" }
-func (fakeProvider) LaunchArgs() []string { return []string{"--model", "haiku"} }
+func (fakeProvider) Name() string       { return "claude" }
+func (fakeProvider) HerdrAgent() string { return "claude" }
+func (fakeProvider) LaunchArgs(m string) []string {
+	if m == "" {
+		return []string{"--default"}
+	}
+	return []string{"--model", m}
+}
+func (fakeProvider) Models(context.Context) ([]providers.ModelOption, error) {
+	return []providers.ModelOption{{ID: "haiku", Name: "Haiku"}}, nil
+}
 func (fakeProvider) StartupKeys(s string) []string {
 	if strings.Contains(s, "trust this folder") {
 		return []string{"down", "enter"}
@@ -154,7 +162,7 @@ func newLauncher(t *testing.T, fh *fakeHerdr) (*Launcher, string) {
 func Test信頼ダイアログを承認して起動しプロンプトを送る(t *testing.T) {
 	fh := &fakeHerdr{status: herdr.StatusBlocked, screen: "Yes, I trust this folder", startErr: &herdr.Error{Code: "agent_not_ready"}}
 	l, root := newLauncher(t, fh)
-	res, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: filepath.Join(root, "app-b"), Prompt: "hello", Trust: true})
+	res, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: filepath.Join(root, "app-b"), Prompt: "hello", Model: "haiku", Trust: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,6 +201,11 @@ func Test不正な起動リクエストは拒否する(t *testing.T) {
 	if _, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: "/etc"}); !errors.Is(err, files.ErrForbidden) {
 		t.Errorf("cwd err = %v", err)
 	}
+	for _, m := range []string{"--dangerously-skip-permissions", "a b", "x;rm"} {
+		if _, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: root, Model: m}); !errors.Is(err, ErrInvalidModel) {
+			t.Errorf("model %q err = %v", m, err)
+		}
+	}
 	if len(fh.calls) != 0 {
 		t.Errorf("nothing should be created: %v", fh.calls)
 	}
@@ -200,5 +213,11 @@ func Test不正な起動リクエストは拒否する(t *testing.T) {
 	res, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: root})
 	if err != nil || res.SessionID != "" || !strings.Contains(res.Warning, "integration") {
 		t.Errorf("res = %+v err = %v", res, err)
+	}
+	if last := fh.calls[len(fh.calls)-1]; last != "start claude --default" {
+		t.Errorf("default model start = %q", last)
+	}
+	if _, err := l.Models(context.Background(), "gemini"); !errors.Is(err, ErrUnknownProvider) {
+		t.Errorf("models err = %v", err)
 	}
 }

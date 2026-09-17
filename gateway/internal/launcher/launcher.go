@@ -23,6 +23,7 @@ import (
 var (
 	ErrInvalidName     = errors.New("invalid directory name")
 	ErrUnknownProvider = errors.New("unknown provider")
+	ErrInvalidModel    = errors.New("invalid model")
 )
 
 // Herdr is the subset of the Herdr client used to launch agents.
@@ -159,6 +160,8 @@ type StartRequest struct {
 	Provider string `json:"provider"`
 	Cwd      string `json:"cwd"`
 	Prompt   string `json:"prompt"`
+	// Model is a model id from Models; empty uses the agent's default.
+	Model string `json:"model,omitempty"`
 	// Trust accepts the agent's folder-trust dialog on the user's behalf.
 	Trust bool `json:"trust"`
 }
@@ -181,6 +184,15 @@ func (l *Launcher) provider(name string) (providers.Provider, providers.Launchab
 	return nil, nil, ErrUnknownProvider
 }
 
+// Models lists the models a provider offers for new sessions.
+func (l *Launcher) Models(ctx context.Context, provider string) ([]providers.ModelOption, error) {
+	_, lp, err := l.provider(provider)
+	if err != nil {
+		return nil, err
+	}
+	return lp.Models(ctx)
+}
+
 func agentName(kind string) string {
 	b := make([]byte, 3)
 	rand.Read(b)
@@ -192,6 +204,9 @@ func (l *Launcher) Start(ctx context.Context, req StartRequest) (*StartResult, e
 	p, lp, err := l.provider(req.Provider)
 	if err != nil {
 		return nil, err
+	}
+	if req.Model != "" && !providers.ValidModelID(req.Model) {
+		return nil, ErrInvalidModel
 	}
 	cwd, err := l.resolveDir(req.Cwd)
 	if err != nil {
@@ -205,7 +220,7 @@ func (l *Launcher) Start(ctx context.Context, req StartRequest) (*StartResult, e
 	log := slog.With("provider", p.Name(), "operation", "launch", "pane", pane)
 
 	sctx, cancel := context.WithTimeout(ctx, l.startTimeout()+5*time.Second)
-	err = l.Herdr.StartAgent(sctx, agentName(p.HerdrAgent()), p.HerdrAgent(), pane, lp.LaunchArgs(), l.startTimeout())
+	err = l.Herdr.StartAgent(sctx, agentName(p.HerdrAgent()), p.HerdrAgent(), pane, lp.LaunchArgs(req.Model), l.startTimeout())
 	cancel()
 	var herr *herdr.Error
 	// Herdr may report success or agent_not_ready while a startup dialog
@@ -232,7 +247,7 @@ func (l *Launcher) Start(ctx context.Context, req StartRequest) (*StartResult, e
 	if res.SessionID == "" && res.Warning == "" {
 		res.Warning = "Started, but Herdr has not reported the session id yet (is `herdr integration install " + p.HerdrAgent() + "` done?)."
 	}
-	log.Info("session launched", "session_id", res.SessionID, "cwd", cwd)
+	log.Info("session launched", "session_id", res.SessionID, "cwd", cwd, "model", req.Model)
 	return res, nil
 }
 

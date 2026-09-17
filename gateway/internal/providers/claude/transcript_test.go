@@ -304,3 +304,47 @@ func Test信頼ダイアログの2種類の文言に対応するキーを返す(
 		}
 	}
 }
+
+func TestClaudeのモデルは最新の応答と_modelコマンドから決まる(t *testing.T) {
+	lines := []string{
+		`{"type":"user","uuid":"u1","timestamp":"2026-09-01T00:00:00Z","message":{"role":"user","content":"hi"}}`,
+		`{"type":"assistant","uuid":"a1","timestamp":"2026-09-01T00:00:01Z","message":{"role":"assistant","model":"claude-opus-5","content":[{"type":"text","text":"hello"}]}}`,
+		`{"type":"assistant","uuid":"a2","timestamp":"2026-09-01T00:00:02Z","message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"No response requested."}]}}`,
+	}
+	decode := func(ls []string) *Transcript {
+		tr, err := Decode(strings.NewReader(strings.Join(ls, "\n")), "claude:test", deadletter.Nop{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tr
+	}
+	if s := decode(lines).summary(ParseOptions{}); s.Model != "claude-opus-5" {
+		t.Errorf("model = %q", s.Model)
+	}
+	lines = append(lines,
+		`{"type":"user","uuid":"u2","timestamp":"2026-09-01T00:00:03Z","message":{"role":"user","content":"<local-command-stdout>Set model to `+"`Sonnet 5`"+` and saved as your default for new sessions</local-command-stdout>"}}`)
+	if s := decode(lines).summary(ParseOptions{}); s.Model != "Sonnet 5" {
+		t.Errorf("model after /model = %q", s.Model)
+	}
+	lines = append(lines,
+		`{"type":"assistant","uuid":"a3","timestamp":"2026-09-01T00:00:04Z","message":{"role":"assistant","model":"claude-sonnet-5","content":[{"type":"text","text":"ok"}]}}`)
+	if s := decode(lines).summary(ParseOptions{}); s.Model != "claude-sonnet-5" {
+		t.Errorf("model after reply = %q", s.Model)
+	}
+}
+
+func Test起動時のモデル指定をCLI引数にする(t *testing.T) {
+	p := New(t.TempDir(), nil, deadletter.Nop{})
+	if args := p.LaunchArgs(""); args != nil {
+		t.Errorf("default = %v", args)
+	}
+	if got := strings.Join(p.LaunchArgs("sonnet"), " "); got != "--model sonnet" {
+		t.Errorf("args = %q", got)
+	}
+	models, _ := p.Models(context.Background())
+	for _, m := range models {
+		if !providers.ValidModelID(m.ID) {
+			t.Errorf("invalid id %q", m.ID)
+		}
+	}
+}

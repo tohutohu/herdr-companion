@@ -5,6 +5,7 @@ package providers
 import (
 	"context"
 	"errors"
+	"regexp"
 	"time"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
@@ -48,6 +49,8 @@ type Summary struct {
 	Pending model.InteractionType
 	// Status, when set, is an authoritative provider status (e.g. Codex daemon).
 	Status model.Status
+	// Model is the model the session last used, as the provider names it.
+	Model string
 }
 
 type Provider interface {
@@ -76,10 +79,27 @@ func FileImageURL(sessionID, path string) string {
 	return "/v1/sessions/" + sessionID + "/files/content?path=" + queryEscape(path)
 }
 
+// ModelOption is a model the user can pick when starting a session.
+type ModelOption struct {
+	ID          string `json:"id"` // value passed to the CLI's --model
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	// Default marks the model used when none is given.
+	Default bool `json:"default,omitempty"`
+}
+
+var modelIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/\[\]-]{0,99}$`)
+
+// ValidModelID reports whether id is safe to pass as a CLI argument.
+func ValidModelID(id string) bool { return modelIDPattern.MatchString(id) }
+
 // Launchable providers can be started in a new Herdr pane.
 type Launchable interface {
 	// LaunchArgs are native CLI arguments passed after Herdr's agent kind.
-	LaunchArgs() []string
+	// modelID is empty for the provider's default model.
+	LaunchArgs(modelID string) []string
+	// Models lists the models offered when starting a session.
+	Models(ctx context.Context) ([]ModelOption, error)
 	// StartupKeys returns the keys that accept a folder-trust dialog shown on
 	// screen, or nil when the screen is not a known trust dialog.
 	StartupKeys(screen string) []string

@@ -135,6 +135,16 @@ conversation. Foreground screens poll every 3 s (detail) / 5 s (list).
 their folder-trust dialog. The dialog is answered only when the request says
 `trust: true`. The native session id is then read from the pane's
 `agent_session`, which the Herdr integration hook reports at startup.
+An optional model id is passed as the CLI's `--model`. Claude Code has no
+catalog API, so its list is the CLI aliases (`fable`, `opus`, `sonnet`,
+`haiku`); Codex's comes from `model/list`. Switching the model of a running
+Claude session is not offered because `/model` also changes the user's
+default for new sessions.
+
+Sessions report the model they last used (`model`): for Claude the `model`
+of the newest assistant reply, or the display name from a later `/model`
+change; for Codex the thread's `model`.
+
 Directories are restricted to `workspaceRoots` with the same checks as file
 access; new folder names must be a single, non-hidden path segment.
 
@@ -151,7 +161,8 @@ Paths are cleaned, symlink-resolved and must stay inside an allowed root;
 |---|---|---|
 | GET | `/healthz` | no auth |
 | GET | `/v1/sessions` | live + recent offline sessions |
-| POST | `/v1/sessions` | start `{provider, cwd, prompt, trust}` in a new Herdr workspace → `{sessionId?, paneId, warning?}` |
+| POST | `/v1/sessions` | start `{provider, cwd, prompt, model?, trust}` in a new Herdr workspace → `{sessionId?, paneId, warning?}` |
+| GET | `/v1/models?provider=` | models offered for new sessions `{models[{id, name, description?, default?}]}` |
 | GET | `/v1/directories?path=` | workspace roots, or subfolders of `path` |
 | POST | `/v1/directories` | create `{parent, name}` under a root |
 | GET | `/v1/sessions/{id}` | one session |

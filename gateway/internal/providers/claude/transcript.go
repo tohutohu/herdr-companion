@@ -35,6 +35,7 @@ type entry struct {
 
 type apiMessage struct {
 	Role    string          `json:"role"`
+	Model   string          `json:"model"`
 	Content json.RawMessage `json:"content"`
 }
 
@@ -97,6 +98,9 @@ type Transcript struct {
 	Cwd       string
 	Title     string
 	Updated   time.Time
+	// Model is the latest model: from assistant replies, or a `/model`
+	// change made after them.
+	Model string
 }
 
 // Decode reads JSONL. Broken lines are dead-lettered and skipped.
@@ -143,7 +147,18 @@ func (t *Transcript) add(e *entry, raw []byte) {
 	if e.Timestamp.After(t.Updated) {
 		t.Updated = e.Timestamp
 	}
+	if e.Type == "user" && e.Message != nil {
+		var s string
+		if json.Unmarshal(e.Message.Content, &s) == nil {
+			if m := modelChangeRe.FindStringSubmatch(s); m != nil {
+				t.Model = m[1]
+			}
+		}
+	}
 	if e.Type == "assistant" && e.Message != nil {
+		if m := e.Message.Model; m != "" && m != "<synthetic>" {
+			t.Model = m
+		}
 		blocks, _ := decodeBlocks(e.Message.Content)
 		for _, b := range blocks {
 			if b.Type == "tool_use" {
@@ -234,6 +249,7 @@ var (
 	commandNameRe    = regexp.MustCompile(`(?s)<command-name>(.*?)</command-name>`)
 	commandArgsRe    = regexp.MustCompile(`(?s)<command-args>(.*?)</command-args>`)
 	answerPairRe     = regexp.MustCompile(`"([^"]*)"="([^"]*)"`)
+	modelChangeRe    = regexp.MustCompile("^<local-command-stdout>Set model to `([^`]+)`")
 	systemReminderRe = regexp.MustCompile(`(?s)<system-reminder>.*?</system-reminder>`)
 )
 
@@ -704,7 +720,7 @@ func (t *Transcript) imageAt(messageID string, index int) (*imageSource, bool) {
 
 // summary extracts list information.
 func (t *Transcript) summary(opt ParseOptions) providers.Summary {
-	s := providers.Summary{Cwd: t.Cwd, Title: t.Title, UpdatedAt: t.Updated}
+	s := providers.Summary{Cwd: t.Cwd, Title: t.Title, UpdatedAt: t.Updated, Model: t.Model}
 	msgs := t.Messages(ParseOptions{SessionID: opt.SessionID, Live: opt.Live, Sink: deadletter.Nop{}})
 	for i := len(msgs) - 1; i >= 0; i-- {
 		m := msgs[i]

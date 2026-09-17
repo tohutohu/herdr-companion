@@ -15,6 +15,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/config"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/launcher"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/sessions"
@@ -52,7 +53,7 @@ func (p *fakeProvider) Summary(_ context.Context, id string, live *providers.Liv
 	if id != "s1" && id != "old" {
 		return nil, providers.ErrNotFound
 	}
-	return &providers.Summary{NativeID: id, Cwd: p.root, UpdatedAt: time.Unix(100, 0), LastMessage: "done"}, nil
+	return &providers.Summary{NativeID: id, Cwd: p.root, UpdatedAt: time.Unix(100, 0), LastMessage: "done", Model: "fake-large"}, nil
 }
 func (p *fakeProvider) Recent(context.Context, time.Time) ([]providers.Summary, error) {
 	return []providers.Summary{
@@ -80,6 +81,11 @@ func (p *fakeProvider) Send(_ context.Context, id string, live *providers.Live, 
 	p.sent = append(p.sent, in)
 	return nil
 }
+func (p *fakeProvider) LaunchArgs(string) []string  { return nil }
+func (p *fakeProvider) StartupKeys(string) []string { return nil }
+func (p *fakeProvider) Models(context.Context) ([]providers.ModelOption, error) {
+	return []providers.ModelOption{{ID: "fake-large", Name: "Large", Default: true}}, nil
+}
 func (p *fakeProvider) Respond(_ context.Context, id string, live *providers.Live, r model.InteractionResponse) error {
 	p.resp = append(p.resp, r)
 	return nil
@@ -104,6 +110,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *fakeProvider, *fakeHerdr, s
 	}}
 	fp := &fakeProvider{root: root}
 	srv := &Server{
+		Launcher: &launcher.Launcher{Roots: []string{root}, Providers: []providers.Provider{fp}},
 		Sessions: sessions.New(fh, time.Hour, fp),
 		Terminal: fh,
 		Uploads:  uploads.New(t.TempDir(), time.Hour),
@@ -162,6 +169,9 @@ func Testセッション一覧はHerdrの状態とオフラインセッション
 	live, off := got.Sessions[0], got.Sessions[1]
 	if live.ID != "fake:s1" || live.Status != model.StatusCompleted || live.Project != "my-project" || live.PaneID != "w1:p1" || !live.CanSend {
 		t.Errorf("live session = %+v", live)
+	}
+	if live.Model != "fake-large" {
+		t.Errorf("model = %q", live.Model)
 	}
 	if off.ID != "fake:old" || off.Status != model.StatusOffline || off.CanSend {
 		t.Errorf("offline session = %+v", off)
@@ -279,5 +289,21 @@ func Test端末登録でFCMトークンが設定に保存される(t *testing.T)
 	resp, _ = do(t, ts, tok, "DELETE", "/v1/devices?fcmToken=abc", nil, "")
 	if resp.StatusCode != 200 {
 		t.Fatalf("delete status %d", resp.StatusCode)
+	}
+}
+
+func Testプロバイダーごとのモデル一覧を返す(t *testing.T) {
+	ts, _, _, tok := newTestServer(t)
+	resp, body := do(t, ts, tok, "GET", "/v1/models?provider=fake", nil, "")
+	if resp.StatusCode != 200 || string(bytes.TrimSpace(body)) != `{"models":[{"id":"fake-large","name":"Large","default":true}]}` {
+		t.Errorf("status %d: %s", resp.StatusCode, body)
+	}
+	resp, _ = do(t, ts, tok, "GET", "/v1/models?provider=nope", nil, "")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("unknown provider status = %d", resp.StatusCode)
+	}
+	resp, _ = do(t, ts, tok, "POST", "/v1/sessions", []byte(`{"provider":"fake","cwd":"/tmp","model":"--bad"}`), "application/json")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("invalid model status = %d", resp.StatusCode)
 	}
 }
