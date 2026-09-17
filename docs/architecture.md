@@ -149,6 +149,15 @@ the shared daemon. Codex lists the efforts per model in `model/list`, so
 `/v1/models` returns them on each model plus a catalog-level list (Claude's
 levels, or the default model's for Codex) used when no model is picked.
 
+The app does not ask for the agent, the model and the effort separately on
+every start: the combinations the user keeps coming back to are saved as
+favorites (agent id, model id, effort id, plus the names the catalog gave them
+so a favorite of the other agent can be labelled without loading its catalog)
+in the `agent_presets` DataStore, and offered as one-tap chips. Anything else
+is picked in the full pickers behind *Other…*, which is also where a
+combination is starred or unstarred. The combination a session was started
+with is remembered and preselected next time.
+
 Sessions report the model they last used (`model`), the reasoning effort
 (`effort`) and a display label for the mode (`mode`):
 

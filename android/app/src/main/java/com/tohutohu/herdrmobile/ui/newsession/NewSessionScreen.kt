@@ -23,10 +23,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExposedDropdownMenuAnchorType
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -34,9 +30,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -58,18 +51,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.tohutohu.herdrmobile.container
 import com.tohutohu.herdrmobile.data.DirectoryShortcuts
-import com.tohutohu.herdrmobile.data.api.CatalogOption
 import com.tohutohu.herdrmobile.data.api.DirListingDto
-import com.tohutohu.herdrmobile.data.api.EffortOptionDto
 import com.tohutohu.herdrmobile.data.api.ModelsResponse
 import com.tohutohu.herdrmobile.data.api.StartSessionRequest
 import kotlinx.coroutines.launch
 
-private val PROVIDERS = listOf("claude" to "Claude Code", "codex" to "Codex")
-
 /**
- * Pick a provider and a working directory (browse or create one under the
- * gateway's workspace roots), then start the agent in a new Herdr workspace.
+ * Pick how the agent runs (a favorite agent / model / effort combination, or
+ * any other one from the full pickers) and a working directory (browse or
+ * create one under the gateway's workspace roots), then start the agent in a
+ * new Herdr workspace.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -81,7 +72,10 @@ fun NewSessionScreen(
     val api = context.container.api
     val repo = context.container.repository
     val shortcutStore = context.container.directoryShortcuts
+    val presetStore = context.container.agentPresets
     val shortcuts by shortcutStore.shortcuts.collectAsState(initial = DirectoryShortcuts())
+    // Null until the store has been read; restoring waits for it.
+    val presets by presetStore.presets.collectAsState(initial = null)
     val scope = rememberCoroutineScope()
 
     var provider by rememberSaveable { mutableStateOf("claude") }
@@ -93,12 +87,20 @@ fun NewSessionScreen(
     var trust by rememberSaveable { mutableStateOf(true) }
     var starting by remember { mutableStateOf(false) }
     var showMkdir by remember { mutableStateOf(false) }
+    var showPicker by remember { mutableStateOf(false) }
     // "" = the agent's default model / effort.
     var model by rememberSaveable { mutableStateOf("") }
     var effort by rememberSaveable { mutableStateOf("") }
     var catalog by remember { mutableStateOf(ModelsResponse()) }
     var modelsError by remember { mutableStateOf<String?>(null) }
-    val efforts = effortsFor(catalog, model)
+    var restored by rememberSaveable { mutableStateOf(false) }
+
+    val saved = presets?.presets.orEmpty()
+    val current = withKnownNames(
+        agentPreset(provider, model, effort, catalog),
+        saved + listOfNotNull(presets?.lastUsed),
+    )
+    val favorite = saved.any { it.key == current.key }
 
     suspend fun load(p: String) {
         loading = true
@@ -119,6 +121,18 @@ fun NewSessionScreen(
     }
 
     LaunchedEffect(Unit) { load(path) }
+
+    // Start where the last session left off, once.
+    LaunchedEffect(presets) {
+        val loaded = presets ?: return@LaunchedEffect
+        if (restored) return@LaunchedEffect
+        restored = true
+        loaded.lastUsed?.let {
+            provider = it.provider
+            model = it.model
+            effort = it.effort
+        }
+    }
 
     LaunchedEffect(provider) {
         catalog = ModelsResponse()
@@ -165,6 +179,26 @@ fun NewSessionScreen(
         )
     }
 
+    if (showPicker) {
+        AgentPickerDialog(
+            provider = provider,
+            model = model,
+            effort = effort,
+            catalog = catalog,
+            modelsError = modelsError,
+            favorite = favorite,
+            onProvider = { provider = it },
+            onModel = { picked ->
+                model = picked
+                // The new model may not offer the picked effort.
+                if (effortsFor(catalog, picked).none { it.id == effort }) effort = ""
+            },
+            onEffort = { effort = it },
+            onToggleFavorite = { scope.launch { presetStore.toggle(current) } },
+            onDismiss = { showPicker = false },
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -180,31 +214,16 @@ fun NewSessionScreen(
                     Modifier.navigationBarsPadding().imePadding().padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OptionPicker(
-                            label = "Model",
-                            options = catalog.models,
-                            selected = model,
-                            error = modelsError,
-                            onSelect = { picked ->
-                                model = picked
-                                // The new model may not offer the picked effort.
-                                if (effortsFor(catalog, picked).none { it.id == effort }) effort = ""
-                            },
-                            // Model names are the longer ones.
-                            modifier = Modifier.weight(1.2f),
-                        )
-                        if (efforts.isNotEmpty()) {
-                            OptionPicker(
-                                label = "Effort",
-                                options = efforts,
-                                selected = effort,
-                                error = null,
-                                onSelect = { effort = it },
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                    }
+                    AgentPresetsRow(
+                        presets = saved,
+                        current = current,
+                        onSelect = {
+                            provider = it.provider
+                            model = it.model
+                            effort = it.effort
+                        },
+                        onCustomize = { showPicker = true },
+                    )
                     OutlinedTextField(
                         value = prompt,
                         onValueChange = { prompt = it },
@@ -234,6 +253,7 @@ fun NewSessionScreen(
                                         ),
                                     )
                                     runCatching { shortcutStore.recordUsed(path) }
+                                    runCatching { presetStore.recordUsed(current) }
                                     runCatching { repo.refreshSessions() }
                                     onStarted(res.sessionId, res.warning)
                                 } catch (e: Exception) {
@@ -248,9 +268,8 @@ fun NewSessionScreen(
                             CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                             Text("  Starting…")
                         } else {
-                            val name = PROVIDERS.first { it.first == provider }.second
                             Text(
-                                "Start $name in ${path.substringAfterLast('/').ifEmpty { "…" }}",
+                                "Start ${providerName(provider)} in ${path.substringAfterLast('/').ifEmpty { "…" }}",
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
@@ -261,20 +280,12 @@ fun NewSessionScreen(
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
-            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-                PROVIDERS.forEachIndexed { i, (id, label) ->
-                    SegmentedButton(
-                        selected = provider == id,
-                        onClick = { provider = id },
-                        shape = SegmentedButtonDefaults.itemShape(i, PROVIDERS.size),
-                    ) { Text(label) }
-                }
-            }
             DirectoryShortcutsRow(
                 shortcuts = shortcuts,
                 currentPath = path,
                 enabled = !loading,
                 onOpen = { scope.launch { load(it) } },
+                modifier = Modifier.padding(top = 8.dp),
             )
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -292,14 +303,14 @@ fun NewSessionScreen(
                     overflow = TextOverflow.StartEllipsis,
                     modifier = Modifier.weight(1f),
                 )
-                val favorite = path in shortcuts.favorites
+                val favoriteDir = path in shortcuts.favorites
                 IconButton(
                     enabled = path.isNotEmpty(),
                     onClick = { scope.launch { shortcutStore.toggleFavorite(path) } },
                 ) {
                     Icon(
-                        if (favorite) Icons.Default.Star else Icons.Default.StarBorder,
-                        contentDescription = if (favorite) "Remove from favorites" else "Add to favorites",
+                        if (favoriteDir) Icons.Default.Star else Icons.Default.StarBorder,
+                        contentDescription = if (favoriteDir) "Remove from favorites" else "Add to favorites",
                     )
                 }
                 IconButton(enabled = path.isNotEmpty() && !loading, onClick = { showMkdir = true }) {
@@ -330,74 +341,6 @@ fun NewSessionScreen(
                         Text(dir.name, modifier = Modifier.padding(start = 12.dp))
                     }
                 }
-            }
-        }
-    }
-}
-
-/**
- * Efforts offered for the picked model; the catalog's own list covers the
- * agent's default model and models that list none.
- */
-fun effortsFor(catalog: ModelsResponse, modelId: String): List<EffortOptionDto> {
-    val own = catalog.models.firstOrNull { it.id == modelId }?.efforts.orEmpty()
-    return own.ifEmpty { catalog.efforts }
-}
-
-/** Model or effort dropdown; the first entry keeps the agent's own default. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun OptionPicker(
-    label: String,
-    options: List<CatalogOption>,
-    selected: String,
-    error: String?,
-    onSelect: (String) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    val defaultName = options.firstOrNull { it.default }?.name
-    val defaultLabel = if (defaultName != null) "Default ($defaultName)" else "Default"
-    val current = options.firstOrNull { it.id == selected }?.name ?: defaultLabel
-    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }, modifier = modifier) {
-        OutlinedTextField(
-            value = current,
-            onValueChange = {},
-            readOnly = true,
-            singleLine = true,
-            // Two pickers share the row, so the value gets the smaller size.
-            textStyle = MaterialTheme.typography.bodyMedium,
-            label = { Text(label) },
-            supportingText = error?.let { { Text("Could not load models: $it") } },
-            isError = error != null,
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
-        )
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(
-                text = { Text(defaultLabel) },
-                onClick = {
-                    onSelect("")
-                    expanded = false
-                },
-            )
-            options.forEach { m ->
-                DropdownMenuItem(
-                    text = {
-                        Column {
-                            Text(m.name)
-                            m.description?.takeIf { it.isNotBlank() }?.let {
-                                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                    },
-                    onClick = {
-                        onSelect(m.id)
-                        expanded = false
-                    },
-                )
             }
         }
     }

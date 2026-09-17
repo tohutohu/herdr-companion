@@ -5,6 +5,7 @@ import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
+import com.tohutohu.herdrmobile.data.AgentPresetsStore
 import com.tohutohu.herdrmobile.data.DirectoryShortcutsStore
 import com.tohutohu.herdrmobile.data.FileDownloads
 import com.tohutohu.herdrmobile.data.SessionRepository
@@ -24,6 +25,7 @@ class AppContainer(app: Application) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val settings = SettingsStore(app, scope)
     val directoryShortcuts = DirectoryShortcutsStore(app)
+    val agentPresets = AgentPresetsStore(app)
 
     private val baseHttp = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
