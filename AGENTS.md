@@ -12,7 +12,7 @@ go test ./...                                  # must pass
 go test ./internal/providers/... -update       # regenerate golden JSON after intended parser changes
 go vet ./...
 go build -o ~/.local/bin/herdr-mobile-gateway ./cmd/herdr-mobile-gateway   # installs the binary launchd runs
-herdr-mobile-gateway token | devices | notify-test | debug replay FILE
+herdr-mobile-gateway token | devices | usage | notify-test | debug replay FILE
 
 # Android (JDK 17 required; the default `java` is 24)
 cd android
@@ -85,5 +85,6 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.herdr-mobile.<name>.
 
 - Test names are in Japanese. Parser tests use fixtures in `gateway/testdata/{claude,codex}` (anonymized real data) with golden JSON.
 - New agent output formats: add the raw payload from dead letters as a fixture, then update the adapter.
+- Subscription limits come from the CodexBar CLI (`brew install --cask codexbar`); neither agent reports them itself. `herdr-mobile-gateway usage` prints one read.
 - Claude dialog key sequences and trust-dialog texts were verified against Claude Code 2.1.274 and Codex 0.154. Re-verify with a test session when those versions change.
 - Commit at each logical step. Commit messages end with the Co-Authored-By trailer; no "Generated with Claude Code" line.
