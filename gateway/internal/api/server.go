@@ -26,6 +26,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/sessions"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/uploads"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/usage"
 )
 
 // Terminal is the Herdr subset used by the terminal fallback endpoints.
@@ -43,6 +44,8 @@ type Server struct {
 	Sink     deadletter.Sink
 	Launcher *launcher.Launcher
 	Archive  *archive.Store
+	// Usage is nil when subscription limit reporting is turned off.
+	Usage *usage.Service
 }
 
 func (s *Server) Handler() http.Handler {
@@ -69,6 +72,8 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("GET /v1/sessions/{id}/terminal", s.readTerminal)
 	api.HandleFunc("POST /v1/sessions/{id}/terminal", s.writeTerminal)
 	api.HandleFunc("POST /v1/uploads", s.upload)
+	api.HandleFunc("GET /v1/usage", s.getUsage)
+	api.HandleFunc("POST /v1/usage/refresh", s.refreshUsage)
 	api.HandleFunc("POST /v1/devices", s.registerDevice)
 	api.HandleFunc("DELETE /v1/devices", s.unregisterDevice)
 	mux.Handle("/v1/", s.auth(api))
@@ -685,4 +690,15 @@ func (s *Server) resumeSession(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("unarchive after resume failed", "session_id", id, "error", err)
 	}
 	writeJSON(w, http.StatusCreated, out)
+}
+
+// getUsage serves the cached subscription limits; reading them takes several
+// seconds, so the gateway refreshes them in the background.
+func (s *Server) getUsage(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.Usage.Snapshot())
+}
+
+// refreshUsage re-reads the limits now. Concurrent callers share one read.
+func (s *Server) refreshUsage(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.Usage.Refresh(r.Context()))
 }

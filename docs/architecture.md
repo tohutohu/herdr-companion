@@ -189,6 +189,23 @@ session's working directory (and the upload directory, for sent images).
 Paths are cleaned, symlink-resolved and must stay inside an allowed root;
 `.ssh`, `.gnupg`, `.aws` are always refused. Text is served as `text/plain`.
 
+## Subscription limits
+
+Neither Claude Code nor Codex prints how much of the plan's rate limits is
+left: Claude Code only shows it in `/usage`, and Codex only inside the TUI.
+Reading either would mean re-implementing an OAuth flow and handling their
+credentials in the gateway, so `internal/usage` shells out to the CodexBar CLI
+(`brew install --cask codexbar`), which already talks to both dashboards, and
+normalises its JSON into windows (`5h`, `7d`, and Claude's per-model weekly
+bucket).
+
+A read takes several seconds, so it runs in the background every
+`usageRefreshMinutes` (default 5) and `GET /v1/usage` answers from the cache.
+`POST /v1/usage/refresh` forces a read; concurrent callers share one run and a
+client that hangs up does not cancel it. A failed read keeps the last good
+providers and reports the error next to them. `usageCommand: "off"` turns the
+whole thing off, and `herdr-mobile-gateway usage` prints one read.
+
 ## HTTP API
 
 | Method | Path | |
@@ -212,4 +229,6 @@ Paths are cleaned, symlink-resolved and must stay inside an allowed root;
 | GET | `/v1/sessions/{id}/terminal?lines=` | recent pane text |
 | POST | `/v1/sessions/{id}/terminal` | `{text, keys[]}` (allow-listed keys) |
 | POST | `/v1/uploads` | raw image body → `{id}` (deleted after 24 h) |
+| GET | `/v1/usage` | cached subscription limits `{providers[{provider, displayName, plan?, account?, windows[{key, label, scope?, usedPercent, windowMinutes?, resetsAt?}], updatedAt?, error?}], fetchedAt?, error?}` |
+| POST | `/v1/usage/refresh` | re-read the limits now (takes ~10 s) → same shape |
 | POST / DELETE | `/v1/devices` | FCM token registration |

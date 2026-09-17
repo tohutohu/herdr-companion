@@ -38,6 +38,10 @@ type Config struct {
 	WorkspaceRoots []string `json:"workspaceRoots,omitempty"`
 	// Sessions not running in Herdr are listed as offline when updated within this window.
 	OfflineSessionDays int `json:"offlineSessionDays,omitempty"`
+	// Command that reports subscription limits (CodexBar's CLI). "off" disables it.
+	UsageCommand string `json:"usageCommand,omitempty"`
+	// How often the limits are re-read in the background (default 5).
+	UsageRefreshMinutes int `json:"usageRefreshMinutes,omitempty"`
 }
 
 // Store serialises access to the config file.

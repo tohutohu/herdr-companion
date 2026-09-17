@@ -30,6 +30,7 @@ docs/      設計ドキュメント
 | 対象 | 必要なもの |
 |---|---|
 | Mac | Go 1.24+、Herdr 0.9+、Claude Code および/または Codex CLI、Tailscale |
+| 残量表示 | CodexBar（`brew install --cask codexbar`、任意） |
 | Android | Android 10 (API 29) 以上、Tailscale アプリ（同じ tailnet にログイン） |
 | ビルド | JDK 17、Android SDK（compileSdk 37）|
 | 通知 | Firebase プロジェクト（無料枠で可） |
@@ -76,9 +77,20 @@ herdr-mobile-gateway token          # 初回実行で ~/.config/herdr-mobile/con
 }
 ```
 
-任意項目: `fcmCredentialsFile`, `herdrSocket`, `claudeConfigDir`, `codexBinary`, `codexDaemonSocket`, `uploadDir`, `workspaceRoots`。
+任意項目: `fcmCredentialsFile`, `herdrSocket`, `claudeConfigDir`, `codexBinary`, `codexDaemonSocket`, `uploadDir`, `workspaceRoots`, `usageCommand`, `usageRefreshMinutes`。
 
 `workspaceRoots`（既定: `~/workspace`、なければホーム）は、アプリからフォルダを選択・作成してセッションを起動できる範囲です。
+
+### サブスクの残量表示
+
+Claude / Codex のプラン上限の消費率をアプリの一覧画面に表示します。Claude Code も Codex も残量を CLI から出せないため、両方のダッシュボードを見に行く CodexBar の CLI を使います。
+
+```bash
+brew install --cask codexbar     # /opt/homebrew/bin/codexbar が入る
+herdr-mobile-gateway usage       # 取得できるか確認
+```
+
+Gateway は既定で 5 分ごとに読み直してキャッシュし、アプリはそれを表示します（カードの更新ボタンで即時再取得）。間隔は `usageRefreshMinutes`、無効化は `usageCommand: "off"` です。CodexBar が入っていなければ機能が無効になるだけで、他の動作には影響しません。
 
 ### アプリからのセッション起動
 

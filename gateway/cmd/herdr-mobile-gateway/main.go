@@ -28,14 +28,16 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/codex"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/sessions"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/uploads"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/usage"
 )
 
-const usage = `herdr-mobile-gateway — Herdr Mobile gateway
+const helpText = `herdr-mobile-gateway — Herdr Mobile gateway
 
 Usage:
   herdr-mobile-gateway [serve] [flags]     run the gateway (default)
   herdr-mobile-gateway token [--rotate]    print (or rotate) the auth token
   herdr-mobile-gateway devices             list registered FCM devices
+  herdr-mobile-gateway usage               print the current subscription limits
   herdr-mobile-gateway notify-test         send a test push to every registered device
   herdr-mobile-gateway debug replay FILE   re-parse dead-letter entries with the current adapters
 
@@ -59,14 +61,16 @@ func main() {
 		err = tokenCmd(args)
 	case "devices":
 		err = devicesCmd()
+	case "usage":
+		err = usageCmd()
 	case "notify-test":
 		err = notifyTestCmd()
 	case "debug":
 		err = debugCmd(args)
 	case "help", "-h", "--help":
-		fmt.Print(usage)
+		fmt.Print(helpText)
 	default:
-		fmt.Fprint(os.Stderr, usage)
+		fmt.Fprint(os.Stderr, helpText)
 		os.Exit(2)
 	}
 	if err != nil {
@@ -121,6 +125,9 @@ func serve(args []string) error {
 	}
 	launch := &launcher.Launcher{Herdr: hc, Roots: roots, Providers: []providers.Provider{claudeProvider, codexProvider}}
 
+	limits := usage.New(cfg.UsageCommand, time.Duration(cfg.UsageRefreshMinutes)*time.Minute)
+	go limits.Run(ctx)
+
 	watcher := &notifications.Watcher{Herdr: hc, Sessions: svc, Config: store, Sink: sink}
 	if sender, err := newSender(cfg); err != nil {
 		slog.Warn("push notifications disabled", "operation", "fcm", "error", err)
@@ -131,7 +138,7 @@ func serve(args []string) error {
 
 	srv := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           (&api.Server{Sessions: svc, Terminal: hc, Uploads: up, Config: store, Sink: sink, Launcher: launch, Archive: archived}).Handler(),
+		Handler:           (&api.Server{Sessions: svc, Terminal: hc, Uploads: up, Config: store, Sink: sink, Launcher: launch, Archive: archived, Usage: limits}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {
@@ -171,6 +178,38 @@ func devicesCmd() error {
 	}
 	for _, d := range store.Get().Devices {
 		fmt.Printf("%s\t%s\t%s…\n", d.Name, d.RegisteredAt.Format(time.RFC3339), d.FCMToken[:min(12, len(d.FCMToken))])
+	}
+	return nil
+}
+
+// usageCmd reads the limits once, for checking that the reporter is set up.
+func usageCmd() error {
+	store, err := config.Load(config.DefaultPath())
+	if err != nil {
+		return err
+	}
+	cfg := store.Get()
+	limits := usage.New(cfg.UsageCommand, time.Duration(cfg.UsageRefreshMinutes)*time.Minute)
+	snap := limits.Refresh(context.Background())
+	if snap.Error != "" {
+		return errors.New(snap.Error)
+	}
+	for _, p := range snap.Providers {
+		if p.Error != "" {
+			fmt.Printf("%s\t%s\n", p.DisplayName, p.Error)
+			continue
+		}
+		for _, w := range p.Windows {
+			label := w.Label
+			if w.Scope != "" {
+				label += " (" + w.Scope + ")"
+			}
+			resets := ""
+			if w.ResetsAt != nil {
+				resets = "\tresets " + w.ResetsAt.Local().Format(time.RFC3339)
+			}
+			fmt.Printf("%s\t%s\t%d%% used%s\n", p.DisplayName, label, w.UsedPercent, resets)
+		}
 	}
 	return nil
 }

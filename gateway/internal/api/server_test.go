@@ -22,6 +22,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/sessions"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/uploads"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/usage"
 )
 
 type fakeHerdr struct {
@@ -469,5 +470,78 @@ func Test停止中のセッションを再開しアーカイブからも外す(t
 	resp, _ = do(t, ts, tok, "POST", "/v1/sessions/fake:s1/resume", nil, "")
 	if resp.StatusCode != http.StatusConflict {
 		t.Errorf("live resume status = %d", resp.StatusCode)
+	}
+}
+
+// usageServer serves the limits from a stub command that prints fixed JSON.
+func usageServer(t *testing.T, out string) (*httptest.Server, string) {
+	t.Helper()
+	script := filepath.Join(t.TempDir(), "fake-usage")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\ncat <<'OUT'\n"+out+"\nOUT\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	store, err := config.Load(filepath.Join(t.TempDir(), "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &Server{Config: store, Usage: usage.New(script, time.Hour)}
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	return ts, store.Get().AuthToken
+}
+
+func Testサブスクの残量はキャッシュされ明示的に再取得できる(t *testing.T) {
+	const out = `[{"provider":"claude","usage":{"primary":{"usedPercent":16,"windowMinutes":300,` +
+		`"resetsAt":"2026-09-18T02:30:00Z"},"updatedAt":"2026-09-17T22:01:25Z"}}]`
+	ts, tok := usageServer(t, out)
+
+	// Nothing has been read yet, so the cache is empty rather than an error.
+	resp, body := do(t, ts, tok, "GET", "/v1/usage", nil, "")
+	var got model.Usage
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d: %s", resp.StatusCode, body)
+	}
+	json.Unmarshal(body, &got)
+	if len(got.Providers) != 0 || got.FetchedAt != nil {
+		t.Fatalf("初期状態 = %+v", got)
+	}
+
+	resp, body = do(t, ts, tok, "POST", "/v1/usage/refresh", nil, "application/json")
+	if resp.StatusCode != 200 {
+		t.Fatalf("refresh status = %d: %s", resp.StatusCode, body)
+	}
+	json.Unmarshal(body, &got)
+	if len(got.Providers) != 1 || got.Providers[0].Provider != "claude" {
+		t.Fatalf("refresh = %+v", got)
+	}
+	if w := got.Providers[0].Windows; len(w) != 1 || w[0].Label != "5h" || w[0].UsedPercent != 16 {
+		t.Fatalf("windows = %+v", w)
+	}
+
+	// The next GET is served from the cache.
+	got = model.Usage{}
+	_, body = do(t, ts, tok, "GET", "/v1/usage", nil, "")
+	json.Unmarshal(body, &got)
+	if len(got.Providers) != 1 || got.FetchedAt == nil {
+		t.Errorf("キャッシュ = %+v", got)
+	}
+}
+
+func Test使用状況が無効なときも一覧は空で返る(t *testing.T) {
+	store, err := config.Load(filepath.Join(t.TempDir(), "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer((&Server{Config: store, Usage: usage.New(usage.Disabled, 0)}).Handler())
+	t.Cleanup(ts.Close)
+
+	resp, body := do(t, ts, store.Get().AuthToken, "GET", "/v1/usage", nil, "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	var got model.Usage
+	json.Unmarshal(body, &got)
+	if got.Error == "" || len(got.Providers) != 0 {
+		t.Errorf("無効時 = %+v", got)
 	}
 }
