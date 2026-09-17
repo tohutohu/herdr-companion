@@ -55,6 +55,7 @@ import com.tohutohu.herdrmobile.data.DirectoryShortcuts
 import com.tohutohu.herdrmobile.data.api.DirListingDto
 import com.tohutohu.herdrmobile.data.api.ModelsResponse
 import com.tohutohu.herdrmobile.data.api.StartSessionRequest
+import com.tohutohu.herdrmobile.ui.usage.UsageCard
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -327,6 +328,7 @@ fun NewSessionScreen(
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
+            UsageCard()
             DirectoryShortcutsRow(
                 shortcuts = shortcuts,
                 currentPath = path,
