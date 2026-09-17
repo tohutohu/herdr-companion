@@ -240,6 +240,7 @@ func toSession(r *Resolved, sum *providers.Summary) model.Session {
 		Model:        sum.Model,
 		Effort:       sum.Effort,
 		Mode:         sum.Mode,
+		Context:      sum.Context,
 		Status:       Normalize(r.Live, sum),
 	}
 	if r.Live != nil {

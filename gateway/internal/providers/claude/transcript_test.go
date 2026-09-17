@@ -507,3 +507,46 @@ func Testタスク通知は要約とイベントだけをシステムメッセ�
 		})
 	}
 }
+
+func TestClaudeのコンテキスト使用量は最新の本流の応答から決まる(t *testing.T) {
+	usage := `"usage":{"input_tokens":2,"cache_creation_input_tokens":1000,"cache_read_input_tokens":59000,"output_tokens":998}`
+	lines := []string{
+		`{"type":"user","uuid":"u1","timestamp":"2026-09-01T00:00:00Z","message":{"role":"user","content":"hi"}}`,
+		`{"type":"assistant","uuid":"a1","timestamp":"2026-09-01T00:00:01Z","message":{"role":"assistant","model":"claude-opus-5","content":[{"type":"text","text":"hello"}],` + usage + `}}`,
+	}
+	decode := func(ls []string) *Transcript {
+		tr, err := Decode(strings.NewReader(strings.Join(ls, "\n")), "claude:test", deadletter.Nop{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tr
+	}
+	// 60000 / 200000 = 30%
+	if c := decode(lines).summary(ParseOptions{}).Context; c == nil || c.UsedTokens != 61000 || c.WindowTokens != 200_000 || c.UsedPercent != 31 {
+		t.Errorf("context = %+v", c)
+	}
+	// サブエージェント(sidechain)は自分の窓を使うので本流の値を上書きしない。
+	lines = append(lines,
+		`{"type":"assistant","uuid":"s1","isSidechain":true,"timestamp":"2026-09-01T00:00:02Z","message":{"role":"assistant","model":"claude-haiku-4-5","content":[{"type":"text","text":"sub"}],"usage":{"input_tokens":5,"cache_read_input_tokens":100,"output_tokens":5}}}`)
+	if c := decode(lines).summary(ParseOptions{}).Context; c == nil || c.UsedTokens != 61000 {
+		t.Errorf("context after sidechain = %+v", c)
+	}
+	// modelアタッチメントだけが1M版かどうかを伝える。
+	lines = append(lines,
+		`{"type":"attachment","uuid":"m1","timestamp":"2026-09-01T00:00:03Z","attachment":{"type":"model","identity":{"modelId":"claude-opus-5[1m]"}}}`)
+	if c := decode(lines).summary(ParseOptions{}).Context; c == nil || c.WindowTokens != 1_000_000 || c.UsedPercent != 6 {
+		t.Errorf("context with 1M model = %+v", c)
+	}
+}
+
+func Test使用量の記録がないセッションはコンテキスト不明になる(t *testing.T) {
+	tr, err := Decode(strings.NewReader(
+		`{"type":"assistant","uuid":"a1","timestamp":"2026-09-01T00:00:01Z","message":{"role":"assistant","model":"claude-opus-5","content":[{"type":"text","text":"hi"}]}}`,
+	), "claude:test", deadletter.Nop{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := tr.summary(ParseOptions{}).Context; c != nil {
+		t.Errorf("context = %+v, want nil", c)
+	}
+}

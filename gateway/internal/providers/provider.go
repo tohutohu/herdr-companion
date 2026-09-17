@@ -56,6 +56,9 @@ type Summary struct {
 	Effort string
 	// Mode is a display label for the permission / collaboration mode.
 	Mode string
+	// Context is how full the session's context window is, when the provider
+	// reports it.
+	Context *model.ContextUsage
 }
 
 type Provider interface {

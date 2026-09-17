@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -561,5 +562,50 @@ func TestDaemon上で指定ディレクトリに新しく作られたスレッ�
 	f.mu.Unlock()
 	if id := p.LocateLaunched(ctx, "/w/app", time.Unix(999, 0)); id != "" {
 		t.Errorf("ephemeral thread = %q", id)
+	}
+}
+
+func TestCodexのコンテキスト使用量をrolloutファイルの末尾から読む(t *testing.T) {
+	count := func(total, window int64) string {
+		return fmt.Sprintf(`{"timestamp":"2026-09-18T07:32:18.059Z","type":"event_msg","payload":{"type":"token_count",`+
+			`"info":{"last_token_usage":{"total_tokens":%d},"model_context_window":%d}}}`, total, window)
+	}
+	lines := []string{
+		`{"type":"session_meta","payload":{"id":"thread-1"}}`,
+		count(10_000, 258_400),
+		`{"type":"response_item","payload":{"type":"message"}}`,
+		count(64_600, 258_400),
+		// 中断したターンはinfoなしのtoken_countを残すので、その手前まで遡る。
+		`{"timestamp":"2026-09-18T07:33:00.000Z","type":"event_msg","payload":{"type":"token_count","info":null}}`,
+	}
+	path := filepath.Join(t.TempDir(), "rollout.jsonl")
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := contextFromRollout(path)
+	if c == nil || c.UsedTokens != 64_600 || c.WindowTokens != 258_400 || c.UsedPercent != 25 {
+		t.Errorf("context = %+v", c)
+	}
+	if c := contextFromRollout(filepath.Join(t.TempDir(), "missing.jsonl")); c != nil {
+		t.Errorf("missing rollout = %+v, want nil", c)
+	}
+	if c := contextFromRollout(""); c != nil {
+		t.Errorf("empty path = %+v, want nil", c)
+	}
+}
+
+func TestCodexのrolloutが大きくても末尾だけ読んで使用量を求める(t *testing.T) {
+	var b strings.Builder
+	b.WriteString(`{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":1},"model_context_window":100}}}` + "\n")
+	for b.Len() < rolloutTail*2 {
+		b.WriteString(`{"type":"response_item","payload":{"type":"message","content":"` + strings.Repeat("x", 500) + `"}}` + "\n")
+	}
+	b.WriteString(`{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":50},"model_context_window":100}}}` + "\n")
+	path := filepath.Join(t.TempDir(), "big.jsonl")
+	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if c := contextFromRollout(path); c == nil || c.UsedPercent != 50 {
+		t.Errorf("context = %+v", c)
 	}
 }

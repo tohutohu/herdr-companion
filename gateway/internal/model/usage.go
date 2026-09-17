@@ -1,6 +1,9 @@
 package model
 
-import "time"
+import (
+	"math"
+	"time"
+)
 
 // UsageWindow is one subscription rate-limit window (Claude's 5h / weekly
 // buckets, Codex's weekly bucket, ...).
@@ -36,4 +39,26 @@ type Usage struct {
 	Providers []UsageProvider `json:"providers"`
 	FetchedAt *time.Time      `json:"fetchedAt,omitempty"`
 	Error     string          `json:"error,omitempty"`
+}
+
+// ContextUsage is how much of a session's context window its conversation
+// currently fills. Nil means the agent has not reported it yet (no turn ran,
+// or the session predates the reporting).
+type ContextUsage struct {
+	UsedTokens   int64 `json:"usedTokens"`
+	WindowTokens int64 `json:"windowTokens"`
+	UsedPercent  int   `json:"usedPercent"`
+}
+
+// NewContextUsage returns nil unless both numbers are known, so clients can
+// tell "not reported" from "context is empty".
+func NewContextUsage(used, window int64) *ContextUsage {
+	if used <= 0 || window <= 0 {
+		return nil
+	}
+	percent := int(math.Round(float64(used) / float64(window) * 100))
+	if percent > 100 {
+		percent = 100
+	}
+	return &ContextUsage{UsedTokens: used, WindowTokens: window, UsedPercent: percent}
 }

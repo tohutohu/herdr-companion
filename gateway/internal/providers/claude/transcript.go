@@ -41,13 +41,35 @@ type apiMessage struct {
 	Role    string          `json:"role"`
 	Model   string          `json:"model"`
 	Content json.RawMessage `json:"content"`
+	Usage   *apiUsage       `json:"usage"`
+}
+
+// apiUsage is the token accounting of one assistant reply. Its input side is
+// everything the model saw, so it doubles as the size of the context window
+// in use at that point.
+type apiUsage struct {
+	InputTokens         int64 `json:"input_tokens"`
+	CacheCreationTokens int64 `json:"cache_creation_input_tokens"`
+	CacheReadTokens     int64 `json:"cache_read_input_tokens"`
+	OutputTokens        int64 `json:"output_tokens"`
+}
+
+func (u *apiUsage) total() int64 {
+	if u == nil {
+		return 0
+	}
+	return u.InputTokens + u.CacheCreationTokens + u.CacheReadTokens + u.OutputTokens
 }
 
 // attachment is the payload of an "attachment" entry. Only queued_command
-// carries conversation content.
+// carries conversation content; "model" attachments name the exact model,
+// which assistant entries report without its context-length suffix.
 type attachment struct {
-	Type   string `json:"type"`
-	Prompt string `json:"prompt"`
+	Type     string `json:"type"`
+	Prompt   string `json:"prompt"`
+	Identity *struct {
+		ModelID string `json:"modelId"`
+	} `json:"identity"`
 }
 
 type contentBlock struct {
@@ -88,7 +110,26 @@ const (
 	// attachmentQueuedCommand marks a prompt the user sent while the agent was
 	// working, once it is taken into the running turn.
 	attachmentQueuedCommand = "queued_command"
+	// attachmentModel records the model a session runs on.
+	attachmentModel = "model"
+
+	// defaultContextWindow is what every Claude model offers unless its id
+	// asks for the long-context variant.
+	defaultContextWindow = 200_000
+	longContextWindow    = 1_000_000
+	longContextSuffix    = "[1m]"
 )
+
+// contextWindow is how many tokens the model fits. Claude Code appends
+// "[1m]" to the ids of the 1M-token variants.
+func contextWindow(modelIDs ...string) int64 {
+	for _, id := range modelIDs {
+		if strings.Contains(id, longContextSuffix) {
+			return longContextWindow
+		}
+	}
+	return defaultContextWindow
+}
 
 // ParseOptions carries context needed while converting.
 type ParseOptions struct {
@@ -117,6 +158,11 @@ type Transcript struct {
 	Model          string
 	Effort         string
 	PermissionMode string
+	// ModelID is the exact model id, "[1m]" suffix included; only "model"
+	// attachments carry it.
+	ModelID string
+	// ContextTokens is the context the newest main-chain reply consumed.
+	ContextTokens int64
 }
 
 // Decode reads JSONL. Broken lines are dead-lettered and skipped.
@@ -176,9 +222,18 @@ func (t *Transcript) add(e *entry, raw []byte) {
 			}
 		}
 	}
+	if e.Type == "attachment" && e.Attachment != nil && e.Attachment.Type == attachmentModel && e.Attachment.Identity != nil {
+		t.ModelID = e.Attachment.Identity.ModelID
+	}
 	if e.Type == "assistant" && e.Message != nil {
 		if m := e.Message.Model; m != "" && m != "<synthetic>" {
 			t.Model = m
+		}
+		// Sidechains are subagents: they fill their own window, not this one.
+		if !e.IsSidechain {
+			if n := e.Message.Usage.total(); n > 0 {
+				t.ContextTokens = n
+			}
 		}
 		if e.Effort != "" {
 			t.Effort = e.Effort
@@ -858,7 +913,8 @@ func (t *Transcript) imageAt(messageID string, index int) (*imageSource, bool) {
 // summary extracts list information.
 func (t *Transcript) summary(opt ParseOptions) providers.Summary {
 	s := providers.Summary{Cwd: t.Cwd, Title: t.Title, UpdatedAt: t.Updated,
-		Model: t.Model, Effort: t.Effort, Mode: modeLabel(t.PermissionMode)}
+		Model: t.Model, Effort: t.Effort, Mode: modeLabel(t.PermissionMode),
+		Context: model.NewContextUsage(t.ContextTokens, contextWindow(t.ModelID, t.Model))}
 	msgs := t.Messages(ParseOptions{SessionID: opt.SessionID, Live: opt.Live, Sink: deadletter.Nop{}})
 	for i := len(msgs) - 1; i >= 0; i-- {
 		m := msgs[i]

@@ -19,6 +19,7 @@ type Thread struct {
 	Preview   string          `json:"preview"`
 	Name      *string         `json:"name"`
 	Cwd       string          `json:"cwd"`
+	Path      string          `json:"path"` // rollout file, the only source of token counts
 	Model     string          `json:"model"`
 	Effort    *string         `json:"reasoningEffort"`
 	CreatedAt int64           `json:"createdAt"`

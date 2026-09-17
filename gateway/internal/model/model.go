@@ -41,6 +41,8 @@ type Session struct {
 	Mode         string    `json:"mode,omitempty"`   // display label, e.g. "Plan", "Accept edits"
 	CanSend      bool      `json:"canSend"`
 	Archived     bool      `json:"archived,omitempty"`
+	// Context is how full the model's context window is; nil when unknown.
+	Context *ContextUsage `json:"context,omitempty"`
 }
 
 type Role string
