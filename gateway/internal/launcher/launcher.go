@@ -106,6 +106,9 @@ func (l *Launcher) resolveDir(path string) (string, error) {
 	return real, nil
 }
 
+// ResolveDir validates an absolute working directory using the launch restrictions.
+func (l *Launcher) ResolveDir(path string) (string, error) { return l.resolveDir(path) }
+
 // List lists the roots (path == "") or the visible subdirectories of path.
 func (l *Launcher) List(path string) (*Listing, error) {
 	if path == "" {

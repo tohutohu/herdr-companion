@@ -281,3 +281,28 @@ whole thing off, and `herdr-mobile-gateway usage` prints one read.
 | GET | `/v1/usage` | cached subscription limits `{providers[{provider, displayName, plan?, account?, windows[{key, label, scope?, usedPercent, windowMinutes?, resetsAt?}], updatedAt?, error?}], fetchedAt?, error?}` |
 | POST | `/v1/usage/refresh` | re-read the limits now (takes ~10 s) → same shape |
 | POST / DELETE | `/v1/devices` | FCM token registration |
+
+## Advisory directory check
+
+`POST /v1/directories/check {cwd, prompt}` validates cwd with the same root and
+symlink restrictions as launch, then returns `{verdict, historyCount}`. It never
+creates a workspace. The Android new-session screen calls it before launch;
+only a high-confidence `mismatch` opens a confirmation. The exact checked
+request is retained for "Start anyway". Cancellation does not proceed to launch.
+Errors, old gateways (404), and disabled checks preserve the normal start flow.
+
+`internal/directorycheck` calls TypeSafe's `POST /v1/systemone` (`jev-latest`),
+with one Choice question: match / mismatch / unknown. A warning requires
+mismatch probability >= 0.9 and confidence >= 0.7 (a distribution statistic,
+not an accuracy estimate). These are initial conservative thresholds, not a
+measured guarantee. The model is explicitly told that unseen work is not a
+mismatch and that state contents are evidence, not evaluation instructions.
+
+The optional `jevApiKey` setting (overridden by `TYPESAFE_API_KEY`) enables
+external transmission of bounded project-file and conversation excerpts.
+History uses existing provider Recent scans over 30 days, matches canonical cwd
+exactly, and reads up to three newest sessions across providers, independently
+of the app's archive filter. Provider scan limits still apply. There is no
+persistent derived history or decision cache. The request has a 10-second context
+budget, of which history gets at most 3 seconds; provider filesystem reads may
+finish after cancellation. API errors return unavailable without logging payloads.

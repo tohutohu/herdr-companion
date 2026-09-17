@@ -50,10 +50,12 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.tohutohu.herdrmobile.container
+import com.tohutohu.herdrmobile.data.AgentPreset
 import com.tohutohu.herdrmobile.data.DirectoryShortcuts
 import com.tohutohu.herdrmobile.data.api.DirListingDto
 import com.tohutohu.herdrmobile.data.api.ModelsResponse
 import com.tohutohu.herdrmobile.data.api.StartSessionRequest
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 /**
@@ -86,6 +88,8 @@ fun NewSessionScreen(
     var prompt by rememberSaveable { mutableStateOf("") }
     var trust by rememberSaveable { mutableStateOf(true) }
     var starting by remember { mutableStateOf(false) }
+    var checking by remember { mutableStateOf(false) }
+    var pendingStart by remember { mutableStateOf<Pair<StartSessionRequest, AgentPreset>?>(null) }
     var showMkdir by remember { mutableStateOf(false) }
     var showPicker by remember { mutableStateOf(false) }
     // "" = the agent's default model / effort.
@@ -101,6 +105,47 @@ fun NewSessionScreen(
         saved + listOfNotNull(presets?.lastUsed),
     )
     val favorite = saved.any { it.key == current.key }
+
+    suspend fun start(request: StartSessionRequest, preset: AgentPreset) {
+        starting = true
+        error = null
+        try {
+            val res = api.startSession(request)
+            runCatching { shortcutStore.recordUsed(request.cwd) }
+            runCatching { presetStore.recordUsed(preset) }
+            runCatching { repo.refreshSessions() }
+            onStarted(res.sessionId, res.warning)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            error = "Start failed: ${e.message}"
+        } finally {
+            starting = false
+        }
+    }
+
+    pendingStart?.let { (request, preset) ->
+        AlertDialog(
+            onDismissRequest = { pendingStart = null },
+            title = { Text("Check the working folder") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("This request may belong to a different project, based on this folder's files and available session history.")
+                    Text(request.cwd, fontFamily = FontFamily.Monospace)
+                    Text(request.prompt, maxLines = 6, overflow = TextOverflow.Ellipsis)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingStart = null
+                    scope.launch { start(request, preset) }
+                }) { Text("Start anyway") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingStart = null }) { Text("Change folder") }
+            },
+        )
+    }
 
     suspend fun load(p: String) {
         loading = true
@@ -227,6 +272,7 @@ fun NewSessionScreen(
                     OutlinedTextField(
                         value = prompt,
                         onValueChange = { prompt = it },
+                        enabled = !starting && !checking,
                         label = { Text("First prompt (optional)") },
                         maxLines = 4,
                         modifier = Modifier.fillMaxWidth(),
@@ -240,33 +286,34 @@ fun NewSessionScreen(
                         )
                     }
                     Button(
-                        enabled = path.isNotEmpty() && !starting,
+                        enabled = path.isNotEmpty() && !starting && !checking && !loading && pendingStart == null,
                         modifier = Modifier.fillMaxWidth(),
                         onClick = {
+                            // Capture all selections before suspension; confirmation must
+                            // start exactly the request that was checked.
+                            val request = StartSessionRequest(
+                                provider, path, prompt.trim(), trust,
+                                model.ifEmpty { null }, effort.ifEmpty { null },
+                            )
+                            val preset = current
                             scope.launch {
-                                starting = true
+                                checking = true
+                                error = null
                                 try {
-                                    val res = api.startSession(
-                                        StartSessionRequest(
-                                            provider, path, prompt.trim(), trust,
-                                            model.ifEmpty { null }, effort.ifEmpty { null },
-                                        ),
-                                    )
-                                    runCatching { shortcutStore.recordUsed(path) }
-                                    runCatching { presetStore.recordUsed(current) }
-                                    runCatching { repo.refreshSessions() }
-                                    onStarted(res.sessionId, res.warning)
-                                } catch (e: Exception) {
-                                    error = "Start failed: ${e.message}"
+                                    if (needsDirectoryConfirmation(request) { api.checkDirectory(it.cwd, it.prompt) }) {
+                                        pendingStart = request to preset
+                                    } else {
+                                        start(request, preset)
+                                    }
                                 } finally {
-                                    starting = false
+                                    checking = false
                                 }
                             }
                         },
                     ) {
-                        if (starting) {
+                        if (starting || checking) {
                             CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                            Text("  Starting…")
+                            Text(if (starting) "  Starting…" else "  Checking folder…")
                         } else {
                             Text(
                                 "Start ${providerName(provider)} in ${path.substringAfterLast('/').ifEmpty { "…" }}",
@@ -283,7 +330,7 @@ fun NewSessionScreen(
             DirectoryShortcutsRow(
                 shortcuts = shortcuts,
                 currentPath = path,
-                enabled = !loading,
+                enabled = !loading && !checking && !starting,
                 onOpen = { scope.launch { load(it) } },
                 modifier = Modifier.padding(top = 8.dp),
             )
@@ -292,7 +339,7 @@ fun NewSessionScreen(
                 modifier = Modifier.padding(start = 8.dp, end = 8.dp),
             ) {
                 IconButton(
-                    enabled = listing?.parent != null && !loading,
+                    enabled = listing?.parent != null && !loading && !checking && !starting,
                     onClick = { scope.launch { load(listing?.parent.orEmpty()) } },
                 ) { Icon(Icons.Default.ArrowUpward, contentDescription = "Parent folder") }
                 Text(
@@ -313,7 +360,7 @@ fun NewSessionScreen(
                         contentDescription = if (favoriteDir) "Remove from favorites" else "Add to favorites",
                     )
                 }
-                IconButton(enabled = path.isNotEmpty() && !loading, onClick = { showMkdir = true }) {
+                IconButton(enabled = path.isNotEmpty() && !loading && !checking && !starting, onClick = { showMkdir = true }) {
                     Icon(Icons.Default.CreateNewFolder, contentDescription = "New folder")
                 }
             }
@@ -334,7 +381,7 @@ fun NewSessionScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable(enabled = !loading) { scope.launch { load(dir.path) } }
+                            .clickable(enabled = !loading && !checking && !starting) { scope.launch { load(dir.path) } }
                             .padding(horizontal = 16.dp, vertical = 12.dp),
                     ) {
                         Icon(Icons.Default.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary)

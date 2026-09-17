@@ -19,6 +19,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/archive"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/config"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/directorycheck"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/launcher"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/logging"
@@ -125,6 +126,12 @@ func serve(args []string) error {
 	}
 	launch := &launcher.Launcher{Herdr: hc, Roots: roots, Providers: []providers.Provider{claudeProvider, codexProvider}}
 
+	jevKey := os.Getenv("TYPESAFE_API_KEY")
+	if jevKey == "" {
+		jevKey = cfg.JevAPIKey
+	}
+	dirCheck := &directorycheck.Checker{APIKey: jevKey, Providers: []directorycheck.History{claudeProvider, codexProvider}}
+
 	limits := usage.New(cfg.UsageCommand, time.Duration(cfg.UsageRefreshMinutes)*time.Minute)
 	go limits.Run(ctx)
 
@@ -138,7 +145,7 @@ func serve(args []string) error {
 
 	srv := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           (&api.Server{Sessions: svc, Terminal: hc, Uploads: up, Config: store, Sink: sink, Launcher: launch, Archive: archived, Usage: limits}).Handler(),
+		Handler:           (&api.Server{Sessions: svc, Terminal: hc, Uploads: up, Config: store, Sink: sink, Launcher: launch, Archive: archived, Usage: limits, DirectoryCheck: dirCheck}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {

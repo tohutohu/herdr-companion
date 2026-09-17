@@ -21,6 +21,9 @@ type Device struct {
 }
 
 type Config struct {
+	// Optional TypeSafe key for advisory directory checks; TYPESAFE_API_KEY overrides it.
+	JevAPIKey string `json:"jevApiKey,omitempty"`
+
 	Listen    string   `json:"listen"`
 	AuthToken string   `json:"authToken"`
 	Devices   []Device `json:"devices"`

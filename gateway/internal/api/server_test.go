@@ -545,3 +545,26 @@ func Test使用状況が無効なときも一覧は空で返る(t *testing.T) {
 		t.Errorf("無効時 = %+v", got)
 	}
 }
+
+func Testディレクトリ判定は認証とパス制限を守り起動しない(t *testing.T) {
+	ts, p, h, token := newTestServer(t)
+	defer ts.Close()
+	for _, tc := range []struct {
+		token, cwd string
+		want       int
+	}{
+		{"", p.root, 401}, {token, p.root, 200}, {token, t.TempDir(), 403}, {token, "relative", 403},
+	} {
+		body, _ := json.Marshal(map[string]string{"cwd": tc.cwd, "prompt": "通知を直して"})
+		resp, b := do(t, ts, tc.token, "POST", "/v1/directories/check", body, "application/json")
+		if resp.StatusCode != tc.want {
+			t.Fatalf("got %d: %s", resp.StatusCode, b)
+		}
+		if tc.want == 200 && !bytes.Contains(b, []byte(`"verdict":"disabled"`)) {
+			t.Fatalf("%s", b)
+		}
+	}
+	if len(h.calls) != 0 {
+		t.Fatalf("check launched: %v", h.calls)
+	}
+}

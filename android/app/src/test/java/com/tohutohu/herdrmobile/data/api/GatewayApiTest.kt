@@ -27,6 +27,22 @@ class GatewayApiTest {
     fun tearDown() = server.close()
 
     @Test
+    fun `フォルダ判定は指示とパスを認証付きで送り起動しない`() = runBlocking {
+        server.enqueue(MockResponse.Builder().body("""{"verdict":"mismatch","historyCount":3}""").build())
+        val result = api.checkDirectory("/workspace/app", "通知を直して")
+        assertEquals("mismatch", result.verdict)
+        assertEquals(3, result.historyCount)
+        val req = server.takeRequest()
+        assertEquals("POST", req.method)
+        assertEquals("/v1/directories/check", req.target)
+        assertEquals("Bearer secret", req.headers["Authorization"])
+        val sent = GatewayApi.json.decodeFromString<DirectoryCheckRequest>(req.body!!.utf8())
+        assertEquals("/workspace/app", sent.cwd)
+        assertEquals("通知を直して", sent.prompt)
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
     fun `メッセージ一覧をパースし未知のブロックやフィールドも受け付ける`() = runBlocking {
         server.enqueue(
             MockResponse.Builder().body(

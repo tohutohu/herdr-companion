@@ -19,6 +19,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/archive"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/config"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/directorycheck"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/files"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/launcher"
@@ -37,13 +38,14 @@ type Terminal interface {
 }
 
 type Server struct {
-	Sessions *sessions.Service
-	Terminal Terminal
-	Uploads  *uploads.Store
-	Config   *config.Store
-	Sink     deadletter.Sink
-	Launcher *launcher.Launcher
-	Archive  *archive.Store
+	DirectoryCheck *directorycheck.Checker
+	Sessions       *sessions.Service
+	Terminal       Terminal
+	Uploads        *uploads.Store
+	Config         *config.Store
+	Sink           deadletter.Sink
+	Launcher       *launcher.Launcher
+	Archive        *archive.Store
 	// Usage is nil when subscription limit reporting is turned off.
 	Usage *usage.Service
 }
@@ -58,6 +60,7 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("GET /v1/models", s.listModels)
 	api.HandleFunc("GET /v1/directories", s.listDirectories)
 	api.HandleFunc("POST /v1/directories", s.createDirectory)
+	api.HandleFunc("POST /v1/directories/check", s.checkDirectory)
 	api.HandleFunc("GET /v1/sessions/{id}", s.getSession)
 	api.HandleFunc("POST /v1/sessions/{id}/archive", s.archiveSession)
 	api.HandleFunc("DELETE /v1/sessions/{id}/archive", s.unarchiveSession)
@@ -701,4 +704,22 @@ func (s *Server) getUsage(w http.ResponseWriter, r *http.Request) {
 // refreshUsage re-reads the limits now. Concurrent callers share one read.
 func (s *Server) refreshUsage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.Usage.Refresh(r.Context()))
+}
+
+// checkDirectory is read-only: even a mismatch never creates a workspace.
+func (s *Server) checkDirectory(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Cwd    string `json:"cwd"`
+		Prompt string `json:"prompt"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil || req.Cwd == "" {
+		writeError(w, http.StatusBadRequest, "cwd and a valid request are required")
+		return
+	}
+	dir, err := s.Launcher.ResolveDir(req.Cwd)
+	if err != nil {
+		s.fail(w, r, "", "check_directory", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.DirectoryCheck.Check(r.Context(), dir, req.Prompt))
 }

@@ -164,6 +164,13 @@ class GatewayApi(
         return json.decodeFromString<MkdirResponse>(body).path
     }
 
+    suspend fun checkDirectory(cwd: String, prompt: String): DirectoryCheckResult = withContext(Dispatchers.IO) {
+        val body = json.encodeToString(DirectoryCheckRequest(cwd, prompt)).toRequestBody(jsonType)
+        val req = request(url("v1", "directories", "check")).post(body).build()
+        val bounded = http.newBuilder().callTimeout(12, TimeUnit.SECONDS).build()
+        bounded.newCall(req).execute().use { resp -> json.decodeFromString(bodyOrThrow(resp)) }
+    }
+
     suspend fun startSession(body: StartSessionRequest): StartSessionResponse =
         slowPost(url("v1", "sessions"), json.encodeToString(body))
 

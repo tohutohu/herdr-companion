@@ -248,3 +248,9 @@ data class ModelsResponse(
 
 @Serializable
 data class StartSessionResponse(val sessionId: String? = null, val paneId: String, val warning: String? = null)
+
+@Serializable
+data class DirectoryCheckRequest(val cwd: String, val prompt: String)
+
+@Serializable
+data class DirectoryCheckResult(val verdict: String = "unknown", val historyCount: Int = 0)
