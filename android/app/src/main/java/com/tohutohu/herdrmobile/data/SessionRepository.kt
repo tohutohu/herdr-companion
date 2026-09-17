@@ -88,6 +88,8 @@ class SessionRepository(
         paneId = paneId,
         canSend = canSend,
         model = model,
+        effort = effort,
+        mode = mode,
         listed = listed,
         lastSyncedAt = now,
     )

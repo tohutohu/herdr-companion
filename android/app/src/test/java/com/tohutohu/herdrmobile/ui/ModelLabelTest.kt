@@ -17,4 +17,13 @@ class ModelLabelTest {
         assertEquals("gpt-6-astra", modelLabel("gpt-6-astra"))
         assertEquals("Sonnet 5", modelLabel("Sonnet 5"))
     }
+
+    @Test
+    fun `モデルとエフォートとモードを1行にまとめる`() {
+        assertEquals("Opus 5 (high) · Plan", agentSettingsLabel("claude-opus-5", "high", "Plan"))
+        assertEquals("gpt-6-astra (low)", agentSettingsLabel("gpt-6-astra", "low", null))
+        assertEquals("effort max · Accept edits", agentSettingsLabel(null, "max", "Accept edits"))
+        assertEquals("Default", agentSettingsLabel("", null, "Default"))
+        assertEquals(null, agentSettingsLabel(null, "", " "))
+    }
 }

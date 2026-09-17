@@ -13,3 +13,19 @@ fun modelLabel(model: String): String {
     val suffix = if (longContext.isEmpty()) "" else " (1M)"
     return family.replaceFirstChar { it.uppercase() } + " " + version + suffix
 }
+
+/**
+ * One-line summary of how the agent runs, e.g. "Opus 5 (high) · Plan".
+ * Returns null when nothing is known.
+ */
+fun agentSettingsLabel(model: String?, effort: String?, mode: String?): String? {
+    val m = model?.takeIf { it.isNotBlank() }?.let(::modelLabel)
+    val e = effort?.takeIf { it.isNotBlank() }
+    val head = when {
+        m != null && e != null -> "$m ($e)"
+        m != null -> m
+        e != null -> "effort $e"
+        else -> null
+    }
+    return listOfNotNull(head, mode?.takeIf { it.isNotBlank() }).joinToString(" · ").ifEmpty { null }
+}

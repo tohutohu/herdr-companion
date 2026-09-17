@@ -56,7 +56,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import com.tohutohu.herdrmobile.container
-import com.tohutohu.herdrmobile.ui.modelLabel
+import com.tohutohu.herdrmobile.ui.agentSettingsLabel
 import com.tohutohu.herdrmobile.ui.statusStyle
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -115,9 +115,9 @@ fun SessionDetailScreen(
                             val st = statusStyle(it.status)
                             Row {
                                 Text("${st.symbol} ${st.label}", color = st.color, style = MaterialTheme.typography.labelMedium)
-                                it.model?.takeIf { m -> m.isNotBlank() }?.let { m ->
+                                agentSettingsLabel(it.model, it.effort, it.mode)?.let { label ->
                                     Text(
-                                        " · " + modelLabel(m),
+                                        " · $label",
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         style = MaterialTheme.typography.labelMedium,
                                         maxLines = 1,

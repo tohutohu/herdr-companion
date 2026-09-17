@@ -19,6 +19,10 @@ data class SessionDto(
     val canSend: Boolean = false,
     /** Model the session last used, as the provider names it. */
     val model: String? = null,
+    /** Reasoning effort: low, medium, high, ... */
+    val effort: String? = null,
+    /** Display label of the permission / collaboration mode. */
+    val mode: String? = null,
 )
 
 @Serializable

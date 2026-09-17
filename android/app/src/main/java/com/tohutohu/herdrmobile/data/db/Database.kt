@@ -27,6 +27,8 @@ data class SessionEntity(
     val paneId: String?,
     val canSend: Boolean,
     val model: String? = null,
+    val effort: String? = null,
+    val mode: String? = null,
     /** Whether the gateway still lists it; stale rows are kept for deep links. */
     val listed: Boolean,
     val lastSyncedAt: Long,
@@ -100,9 +102,9 @@ interface MessageDao {
 
 @Database(
     entities = [SessionEntity::class, MessageEntity::class],
-    version = 2,
+    version = 3,
     exportSchema = true,
-    autoMigrations = [AutoMigration(from = 1, to = 2)],
+    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun sessions(): SessionDao
