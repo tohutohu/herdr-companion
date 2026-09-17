@@ -165,6 +165,14 @@ JDK 17 を使ってください（例: `export JAVA_HOME=$(/usr/libexec/java_hom
 `local.properties` に `sdk.dir` がない場合は Android Studio で一度開くか手動で作成します。
 
 初回起動時に Gateway URL と認証トークンを入力し、「Test connection」→「Save」。
+スマホで MagicDNS 名が引けない場合は Tailscale IP（`http://100.x.y.z:8765`）を使ってください。
+
+デバッグビルドは adb から設定を渡せます（日本語 IME で `adb shell input text` が変換されるのを避けるため）:
+
+```bash
+adb shell am start -n com.tohutohu.herdrmobile/.MainActivity \
+  --es gateway_url "http://100.x.y.z:8765" --es token "$(herdr-mobile-gateway token)"
+```
 Android 13 以降は通知の許可を求められます。
 
 ## 開発

@@ -64,7 +64,7 @@ fun SettingsScreen(onDone: () -> Unit) {
                 label = { Text("Gateway URL") },
                 placeholder = { Text("http://my-mac.tailnet-name.ts.net:8765") },
                 singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false),
                 modifier = Modifier.fillMaxWidth(),
             )
             OutlinedTextField(
@@ -74,6 +74,7 @@ fun SettingsScreen(onDone: () -> Unit) {
                 supportingText = { Text("Run `herdr-mobile-gateway token` on the Mac") },
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
                 modifier = Modifier.fillMaxWidth(),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
