@@ -191,6 +191,24 @@ window size, percent), omitted until an agent has accounted for a turn:
   and `thread/read` both return. The last `token_count` record there gives
   `last_token_usage.total_tokens` and `model_context_window`.
 
+Sessions also carry what they cost (`cost`: dollars, plus `estimated`).
+Neither agent reports a running total, so `internal/pricing` prices the token
+counts the transcripts keep, with the providers' list rates per million
+tokens - money a subscription is not actually billed. An unknown model is
+left unpriced rather than guessed, and the field is omitted entirely.
+
+- Claude: every assistant reply's `usage`, per model. Claude Code writes an
+  entry per content block, all repeating the same usage, so replies are
+  counted once by `message.id`; subagents bill to the session that started
+  them, so sidechains count too. Cache writes are priced per TTL
+  (`cache_creation`), reads at the cheaper rate. When the session ends Claude
+  Code appends a `cost-state` entry with its own exact total, which then
+  replaces the estimate (`estimated: false`).
+- Codex: `total_token_usage` from the last `token_count` record of the
+  rollout file. Its input side includes the cached tokens, which bill less.
+  Codex keeps one total per thread rather than per model, so the model the
+  thread runs on now prices all of it.
+
 A new pane's shell may still be running its startup files; Herdr then
 answers `agent.start` with `agent_pane_busy`, which is retried until the
 start timeout. A workspace whose agent fails to start is closed again.
