@@ -44,9 +44,10 @@ type Provider struct {
 	term       providers.Terminal
 	sink       deadletter.Sink
 
-	mu     sync.Mutex
-	reader *rpcClient
-	daemon *daemonConn
+	mu              sync.Mutex
+	reader          *rpcClient
+	daemon          *daemonConn
+	terminalInputMu sync.Mutex
 }
 
 func DefaultDaemonSocket() string {
@@ -281,6 +282,11 @@ func (p *Provider) Messages(ctx context.Context, nativeID string, live *provider
 	if d := p.currentDaemon(); d != nil {
 		pending = d.interactions(nativeID, p.sink)
 	}
+	if len(pending) == 0 && live != nil {
+		if ia := p.asyncInteraction(ctx, th, live); ia != nil {
+			pending = []model.Message{{ID: ia.ID, Role: model.RoleAssistant, Timestamp: time.Unix(th.UpdatedAt, 0).UTC(), Blocks: []model.Block{{Type: model.BlockInteraction, Interaction: ia}}}}
+		}
+	}
 	if len(pending) == 0 && live.Blocked() {
 		// Codex shows a dialog we have no structured data for (TUI not on
 		// the shared daemon): offer the terminal.
@@ -350,6 +356,9 @@ func (p *Provider) sendStructured(ctx context.Context, d *daemonConn, id string,
 }
 
 func (p *Provider) Respond(ctx context.Context, nativeID string, live *providers.Live, r model.InteractionResponse) error {
+	if strings.HasPrefix(r.InteractionID, asyncInputPrefix) {
+		return p.respondAsync(ctx, nativeID, live, r)
+	}
 	if r.InteractionID == blockedPromptID {
 		return providers.ErrUnsupported
 	}

@@ -83,6 +83,7 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.herdr-mobile.<name>.
 
 ## Conventions
 
+- Herdr API changes: run `herdr api schema --output /private/tmp/herdr-api-schema.json` and check request/response types and `protocol` before editing the client. `herdr api snapshot` reports live runtime state; do not rely only on CLI help or an older client struct.
 - Test names are in Japanese. Parser tests use fixtures in `gateway/testdata/{claude,codex}` (anonymized real data) with golden JSON.
 - New agent output formats: add the raw payload from dead letters as a fixture, then update the adapter.
 - Session costs are priced by `gateway/internal/pricing` from list rates as of

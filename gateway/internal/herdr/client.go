@@ -195,10 +195,22 @@ func (c *Client) Snapshot(ctx context.Context) (*Snapshot, error) {
 
 // ReadPane returns recent terminal text (ANSI stripped, soft wraps joined).
 func (c *Client) ReadPane(ctx context.Context, paneID string, lines int) (*ReadResult, error) {
+	return c.readPane(ctx, paneID, "recent_unwrapped", lines)
+}
+
+// ReadVisiblePane excludes scrollback when checking an interactive dialog.
+func (c *Client) ReadVisiblePane(ctx context.Context, paneID string) (*ReadResult, error) {
+	return c.readPane(ctx, paneID, "visible", 0)
+}
+
+func (c *Client) readPane(ctx context.Context, paneID, source string, lines int) (*ReadResult, error) {
 	var r struct {
 		Read ReadResult `json:"read"`
 	}
-	params := map[string]any{"pane_id": paneID, "source": "recent_unwrapped", "lines": lines, "format": "text", "strip_ansi": true}
+	params := map[string]any{"pane_id": paneID, "source": source, "format": "text", "strip_ansi": true}
+	if lines > 0 {
+		params["lines"] = lines
+	}
 	if err := c.Call(ctx, "pane.read", params, &r); err != nil {
 		return nil, err
 	}

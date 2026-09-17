@@ -1,0 +1,15 @@
+{
+  "id": "codex-async:async-question-1",
+  "type": "questions",
+  "state": "pending",
+  "title": "Codex needs input",
+  "questions": [
+    {
+      "id": "0",
+      "type": "text",
+      "question": "APIキーの保存先を教えてください。",
+      "allowOther": true
+    }
+  ],
+  "supported": true
+}

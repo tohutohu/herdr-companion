@@ -89,8 +89,15 @@ Adding OpenCode means one more package implementing it and one line in
   file-change / permission approvals) are kept in memory and shown as
   interactions; answers are sent as JSON-RPC responses. Messages are sent with
   `turn/start` (or `turn/steer` during an active turn) including `localImage`.
-- Without the daemon, messages go through the pane, and a blocked pane shows an
-  "unsupported" interaction that links to the terminal.
+- Without the daemon, messages go through the pane. A single queued async
+  question (`agentMessage` with `delivery: "async"` and `questions`) is shown
+  as a question card after checking the current visible terminal screen.
+  Answers open the queue with Alt+Up, verify the question, and submit through
+  the TUI. Existing drafts are not overwritten. This also works after the
+  originating turn completes. Multi-question queues and other unsupported
+  dialogs retain the terminal fallback. Keys were checked against Codex 0.154.0.
+- Herdr's `api schema` (protocol 22) defines the `pane.read` visible source
+  and the key/text request shapes used here; scrollback is not dialog state.
 
 ## Message model
 

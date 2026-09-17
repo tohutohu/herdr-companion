@@ -1,0 +1,29 @@
+{
+  "thread": {
+    "id": "thread-async-001",
+    "cwd": "/work/app",
+    "updatedAt": 100,
+    "turns": [
+      {
+        "id": "turn-1",
+        "status": "completed",
+        "items": [
+          {
+            "type": "agentMessage",
+            "id": "async-question-1",
+            "text": "APIキーの保存先を教えてください。",
+            "phase": "final_answer",
+            "memoryCitation": null,
+            "delivery": "async",
+            "questions": [
+              {
+                "title": "APIキーの保存先を教えてください。",
+                "options": null
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

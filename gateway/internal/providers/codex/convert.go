@@ -70,8 +70,10 @@ type item struct {
 	Type string `json:"type"`
 	ID   string `json:"id"`
 
-	Content []userInput `json:"content"` // userMessage
-	Text    string      `json:"text"`    // agentMessage, plan
+	Content   []userInput     `json:"content"` // userMessage
+	Text      string          `json:"text"`    // agentMessage, plan
+	Delivery  string          `json:"delivery"`
+	Questions []asyncQuestion `json:"questions"`
 
 	Command          string          `json:"command"`
 	CommandActions   []commandAction `json:"commandActions"`
