@@ -81,8 +81,8 @@ func (p *fakeProvider) Send(_ context.Context, id string, live *providers.Live, 
 	p.sent = append(p.sent, in)
 	return nil
 }
-func (p *fakeProvider) LaunchArgs(string) []string  { return nil }
-func (p *fakeProvider) StartupKeys(string) []string { return nil }
+func (p *fakeProvider) LaunchArgs(_, _ string) []string { return nil }
+func (p *fakeProvider) StartupKeys(string) []string     { return nil }
 func (p *fakeProvider) Models(context.Context) ([]providers.ModelOption, error) {
 	return []providers.ModelOption{{ID: "fake-large", Name: "Large", Default: true}}, nil
 }

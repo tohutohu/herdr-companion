@@ -669,11 +669,12 @@ func (d *daemonConn) interactions(thread string, sink deadletter.Sink) []model.M
 }
 
 // LaunchArgs attaches new Codex TUIs to the shared daemon when it runs, so
-// approvals and questions can be answered from the app.
-func (p *Provider) LaunchArgs(modelID string) []string {
+// approvals and questions can be answered from the app. A remote TUI would
+// otherwise start its thread in the daemon's directory, so cwd is explicit.
+func (p *Provider) LaunchArgs(modelID, cwd string) []string {
 	var args []string
 	if _, err := os.Stat(p.daemonSock); err == nil {
-		args = append(args, "--remote", "unix://"+p.daemonSock)
+		args = append(args, "--remote", "unix://"+p.daemonSock, "--cd", cwd)
 	}
 	if modelID != "" {
 		args = append(args, "--model", modelID)

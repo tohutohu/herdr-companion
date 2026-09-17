@@ -337,10 +337,10 @@ func TestClaudeのモデルとエフォートとモードは最新の記録か�
 
 func Test起動時のモデル指定をCLI引数にする(t *testing.T) {
 	p := New(t.TempDir(), nil, deadletter.Nop{})
-	if args := p.LaunchArgs(""); args != nil {
+	if args := p.LaunchArgs("", "/w"); args != nil {
 		t.Errorf("default = %v", args)
 	}
-	if got := strings.Join(p.LaunchArgs("sonnet"), " "); got != "--model sonnet" {
+	if got := strings.Join(p.LaunchArgs("sonnet", "/w"), " "); got != "--model sonnet" {
 		t.Errorf("args = %q", got)
 	}
 	models, _ := p.Models(context.Background())

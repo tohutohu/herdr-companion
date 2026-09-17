@@ -135,7 +135,7 @@ type fakeProvider struct{ providers.Provider }
 
 func (fakeProvider) Name() string       { return "claude" }
 func (fakeProvider) HerdrAgent() string { return "claude" }
-func (fakeProvider) LaunchArgs(m string) []string {
+func (fakeProvider) LaunchArgs(m, _ string) []string {
 	if m == "" {
 		return []string{"--default"}
 	}

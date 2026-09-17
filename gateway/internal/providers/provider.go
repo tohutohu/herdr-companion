@@ -100,8 +100,9 @@ func ValidModelID(id string) bool { return modelIDPattern.MatchString(id) }
 // Launchable providers can be started in a new Herdr pane.
 type Launchable interface {
 	// LaunchArgs are native CLI arguments passed after Herdr's agent kind.
-	// modelID is empty for the provider's default model.
-	LaunchArgs(modelID string) []string
+	// modelID is empty for the provider's default model; cwd is the pane's
+	// working directory.
+	LaunchArgs(modelID, cwd string) []string
 	// Models lists the models offered when starting a session.
 	Models(ctx context.Context) ([]ModelOption, error)
 	// StartupKeys returns the keys that accept a folder-trust dialog shown on

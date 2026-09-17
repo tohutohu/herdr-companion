@@ -220,7 +220,7 @@ func (l *Launcher) Start(ctx context.Context, req StartRequest) (*StartResult, e
 	log := slog.With("provider", p.Name(), "operation", "launch", "pane", pane)
 
 	sctx, cancel := context.WithTimeout(ctx, l.startTimeout()+5*time.Second)
-	err = l.Herdr.StartAgent(sctx, agentName(p.HerdrAgent()), p.HerdrAgent(), pane, lp.LaunchArgs(req.Model), l.startTimeout())
+	err = l.Herdr.StartAgent(sctx, agentName(p.HerdrAgent()), p.HerdrAgent(), pane, lp.LaunchArgs(req.Model, cwd), l.startTimeout())
 	cancel()
 	var herr *herdr.Error
 	// Herdr may report success or agent_not_ready while a startup dialog

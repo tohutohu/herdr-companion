@@ -352,7 +352,7 @@ func singleLine(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
-func (p *Provider) LaunchArgs(modelID string) []string {
+func (p *Provider) LaunchArgs(modelID, cwd string) []string {
 	if modelID == "" {
 		return nil
 	}

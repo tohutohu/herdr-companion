@@ -457,14 +457,15 @@ func Testモデル一覧をページングして取得し非表示や不正なID
 func Test起動引数にdaemon接続とモデル指定を含める(t *testing.T) {
 	sock := filepath.Join(t.TempDir(), "cx.sock")
 	p := New("codex", sock, &fakeTerm{}, deadletter.Nop{})
-	if got := strings.Join(p.LaunchArgs("gpt-6-mini"), " "); got != "--model gpt-6-mini" {
+	if got := strings.Join(p.LaunchArgs("gpt-6-mini", "/w/app"), " "); got != "--model gpt-6-mini" {
 		t.Errorf("without daemon = %q", got)
 	}
 	os.WriteFile(sock, nil, 0o600)
-	if got := strings.Join(p.LaunchArgs(""), " "); got != "--remote unix://"+sock {
+	// daemon に繋ぐときは作業ディレクトリを明示する
+	if got := strings.Join(p.LaunchArgs("", "/w/app"), " "); got != "--remote unix://"+sock+" --cd /w/app" {
 		t.Errorf("default model = %q", got)
 	}
-	if got := strings.Join(p.LaunchArgs("gpt-6-mini"), " "); got != "--remote unix://"+sock+" --model gpt-6-mini" {
+	if got := strings.Join(p.LaunchArgs("gpt-6-mini", "/w/app"), " "); got != "--remote unix://"+sock+" --cd /w/app --model gpt-6-mini" {
 		t.Errorf("with daemon = %q", got)
 	}
 }
