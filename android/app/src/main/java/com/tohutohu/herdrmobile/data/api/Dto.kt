@@ -23,10 +23,20 @@ data class SessionDto(
     val effort: String? = null,
     /** Display label of the permission / collaboration mode. */
     val mode: String? = null,
+    /** How full the context window is; null when the agent has not reported it. */
+    val context: ContextUsageDto? = null,
     val archived: Boolean = false,
 ) {
     val isLive get() = status != Status.OFFLINE
 }
+
+/** How much of a session's context window its conversation currently fills. */
+@Serializable
+data class ContextUsageDto(
+    val usedTokens: Long = 0,
+    val windowTokens: Long = 0,
+    val usedPercent: Int = 0,
+)
 
 @Serializable
 data class SessionsResponse(val sessions: List<SessionDto>)

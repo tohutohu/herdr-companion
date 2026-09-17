@@ -55,6 +55,7 @@ import com.tohutohu.herdrmobile.container
 import com.tohutohu.herdrmobile.data.api.Status
 import com.tohutohu.herdrmobile.data.db.SessionEntity
 import com.tohutohu.herdrmobile.ui.agentSettingsLabel
+import com.tohutohu.herdrmobile.ui.contextLabel
 import com.tohutohu.herdrmobile.ui.statusStyle
 import com.tohutohu.herdrmobile.ui.usage.UsageCard
 import kotlinx.coroutines.delay
@@ -212,14 +213,17 @@ internal fun SessionRow(
                     )
                 }
                 Text(s.providerName, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                agentSettingsLabel(s.model, s.effort, s.mode)?.let {
-                    Text(
-                        " · $it",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                    )
-                }
+                listOfNotNull(agentSettingsLabel(s.model, s.effort, s.mode), contextLabel(s.contextUsedPercent))
+                    .joinToString(" · ")
+                    .takeIf { it.isNotEmpty() }
+                    ?.let {
+                        Text(
+                            " · $it",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                    }
                 Text(
                     "  " + DateUtils.getRelativeTimeSpanString(s.updatedAt),
                     style = MaterialTheme.typography.labelSmall,

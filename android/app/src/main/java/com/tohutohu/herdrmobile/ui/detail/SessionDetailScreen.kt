@@ -68,6 +68,7 @@ import coil3.compose.AsyncImage
 import com.tohutohu.herdrmobile.container
 import com.tohutohu.herdrmobile.data.api.Status
 import com.tohutohu.herdrmobile.data.db.SessionEntity
+import com.tohutohu.herdrmobile.ui.ContextBar
 import com.tohutohu.herdrmobile.ui.agentSettingsLabel
 import com.tohutohu.herdrmobile.ui.sessions.SessionRef
 import com.tohutohu.herdrmobile.ui.sessions.rememberSessionActions
@@ -201,6 +202,9 @@ fun SessionDetailScreen(
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
+            session?.let {
+                ContextBar(it.contextUsedTokens, it.contextWindowTokens, it.contextUsedPercent)
+            }
             error?.let {
                 Text(
                     it,

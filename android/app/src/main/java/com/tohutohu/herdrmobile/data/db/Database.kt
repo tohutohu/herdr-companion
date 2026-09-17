@@ -30,6 +30,10 @@ data class SessionEntity(
     val model: String? = null,
     val effort: String? = null,
     val mode: String? = null,
+    /** Context window fill, as the gateway last reported it; null when unknown. */
+    val contextUsedTokens: Long? = null,
+    val contextWindowTokens: Long? = null,
+    val contextUsedPercent: Int? = null,
     @ColumnInfo(defaultValue = "0")
     val archived: Boolean = false,
     /** Whether the gateway still lists it; stale rows are kept for deep links. */
@@ -105,12 +109,13 @@ interface MessageDao {
 
 @Database(
     entities = [SessionEntity::class, MessageEntity::class],
-    version = 4,
+    version = 5,
     exportSchema = true,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
         AutoMigration(from = 3, to = 4),
+        AutoMigration(from = 4, to = 5),
     ],
 )
 abstract class AppDatabase : RoomDatabase() {
