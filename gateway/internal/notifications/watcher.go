@@ -202,14 +202,12 @@ func Payload(s model.Session, kind model.Status) map[string]string {
 }
 
 // Body names the session on its first line (which is all a collapsed
-// notification shows), then quotes what the agent said last.
+// notification shows), then quotes what the agent said last. The title says
+// what the session is about; the project only stands in until there is one.
 func Body(s model.Session) string {
-	head := s.Project
-	if s.Title != "" {
-		if head != "" {
-			head += " · "
-		}
-		head += s.Title
+	head := s.Title
+	if head == "" {
+		head = s.Project
 	}
 	if s.LastMessage == "" {
 		return head

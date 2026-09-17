@@ -119,9 +119,9 @@ The watcher subscribes to `pane.agent_status_changed` for all panes (plus
 pane topology events to resubscribe) and re-evaluates every 15 s. Transitions
 into `completed` / `waiting_input` / `waiting_approval` / `failed` send an FCM
 data message `{sessionId, status, title, body, provider, project, canSend}`
-with Android priority `HIGH`. `body` starts with `<project> · <session title>`
-because that first line is all a collapsed notification shows, then the last
-message. `running → idle` counts as completion because Herdr turns `done` into
+with Android priority `HIGH`. `body` starts with the session title (the
+project name only stands in until there is one) because that first line is all
+a collapsed notification shows, then the last message. `running → idle` counts as completion because Herdr turns `done` into
 `idle` once the pane was looked at. The first observation after start never
 pushes.
 
