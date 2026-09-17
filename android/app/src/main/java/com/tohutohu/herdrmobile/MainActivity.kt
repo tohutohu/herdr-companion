@@ -60,7 +60,12 @@ class MainActivity : ComponentActivity() {
                 val open by pendingSession.collectAsState()
                 LaunchedEffect(open) {
                     val id = open ?: return@LaunchedEffect
-                    nav.navigate(DetailRoute(id)) { launchSingleTop = true }
+                    // Replace any detail already on the stack: notification taps
+                    // should not pile up screens behind the one being opened.
+                    nav.navigate(DetailRoute(id, focusLatest = true)) {
+                        launchSingleTop = true
+                        popUpTo<DetailRoute> { inclusive = true }
+                    }
                     pendingSession.value = null
                 }
                 val start: Any = if (settings.current.isConfigured) SessionsRoute else SettingsRoute
@@ -103,6 +108,7 @@ class MainActivity : ComponentActivity() {
                         val route = entry.toRoute<DetailRoute>()
                         SessionDetailScreen(
                             sessionId = route.sessionId,
+                            focusLatest = route.focusLatest,
                             onBack = {
                                 if (!nav.popBackStack()) nav.navigate(SessionsRoute)
                             },

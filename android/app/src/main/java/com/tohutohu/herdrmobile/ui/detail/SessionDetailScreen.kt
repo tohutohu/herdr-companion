@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.items
@@ -52,6 +54,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onSizeChanged
@@ -75,6 +78,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun SessionDetailScreen(
     sessionId: String,
+    focusLatest: Boolean = false,
     onBack: () -> Unit,
     onOpenFile: (String, Int) -> Unit,
     onOpenImage: (String) -> Unit,
@@ -101,19 +105,33 @@ fun SessionDetailScreen(
     // The list is laid out bottom-up, so it opens at the newest message and
     // growing items (streamed output, loading images) keep the bottom in place.
     val listState = rememberLazyListState()
+    // Messages hidden above the viewport or under the pinned panel feed the panel.
+    var panelHeight by remember { mutableIntStateOf(0) }
+    // Opened from a notification: the newest message is what the notification
+    // announced, so park it on its first line instead of its tail. Holds until
+    // the reader scrolls somewhere themselves.
+    var readFromStart by rememberSaveable(sessionId) { mutableStateOf(focusLatest) }
+    LaunchedEffect(listState) {
+        listState.interactionSource.interactions.collect {
+            if (it is DragInteraction.Start) readFromStart = false
+        }
+    }
     val lastId = messages.lastOrNull()?.id
     var prevLastId by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(lastId) {
         val prev = prevLastId
         prevLastId = lastId
-        if (prev == null || lastId == null) return@LaunchedEffect
+        if (lastId == null) return@LaunchedEffect
+        if (readFromStart) {
+            listState.showNewestFromStart { panelHeight }
+            return@LaunchedEffect
+        }
+        if (prev == null) return@LaunchedEffect
         // Follow new messages only while the previous newest one is on screen.
         val nearBottom = listState.layoutInfo.visibleItemsInfo.any { it.key == prev || it.key == lastId }
         if (nearBottom) listState.animateScrollToItem(0)
     }
 
-    // Messages hidden above the viewport or under the pinned panel feed the panel.
-    var panelHeight by remember { mutableIntStateOf(0) }
     val stack by remember(messages) {
         derivedStateOf {
             val info = listState.layoutInfo
@@ -222,12 +240,45 @@ fun SessionDetailScreen(
                         providerName = session?.providerName ?: "Agent",
                         onJump = { id ->
                             val i = messages.indexOfFirst { it.id == id }
-                            if (i >= 0) scope.launch { listState.animateScrollToItem(messages.lastIndex - i) }
+                            if (i >= 0) {
+                                readFromStart = false
+                                scope.launch { listState.animateScrollToItem(messages.lastIndex - i) }
+                            }
                         },
                     )
                 }
             }
         }
+    }
+}
+
+/**
+ * How far the newest message has to be pushed past the bottom edge for its
+ * first line to sit right under the pinned panel. Zero once it already fits.
+ */
+internal fun messageStartOffset(messageHeight: Int, viewportHeight: Int, panelHeight: Int): Int =
+    (messageHeight - (viewportHeight - panelHeight)).coerceAtLeast(0)
+
+/**
+ * Scrolls the newest message so that reading starts at its first line.
+ * The panel only appears once the message above is off screen, so its height
+ * is read again after every scroll until the target stops moving.
+ */
+private suspend fun LazyListState.showNewestFromStart(panelHeight: () -> Int) {
+    scrollToItem(0)
+    var applied = 0
+    repeat(3) {
+        val info = layoutInfo
+        if (info.viewportSize.height <= 0) return
+        val height = info.visibleItemsInfo.firstOrNull { it.index == 0 }?.size ?: return
+        val offset = messageStartOffset(height, info.viewportSize.height, panelHeight())
+        if (offset == applied) return
+        applied = offset
+        scrollToItem(0, offset)
+        // One frame for the panel to recompose against the new position,
+        // a second one for its measured height to reach panelHeight.
+        withFrameNanos {}
+        withFrameNanos {}
     }
 }
 

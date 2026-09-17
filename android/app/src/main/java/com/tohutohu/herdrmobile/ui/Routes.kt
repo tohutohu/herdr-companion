@@ -9,7 +9,11 @@ object SessionsRoute
 object SettingsRoute
 
 @Serializable
-data class DetailRoute(val sessionId: String)
+data class DetailRoute(
+    val sessionId: String,
+    /** Opened from a notification: start reading the newest message from its top. */
+    val focusLatest: Boolean = false,
+)
 
 @Serializable
 data class FileRoute(val sessionId: String, val path: String, val line: Int = 0)
