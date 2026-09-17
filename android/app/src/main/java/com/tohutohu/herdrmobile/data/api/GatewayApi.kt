@@ -2,6 +2,7 @@ package com.tohutohu.herdrmobile.data.api
 
 import com.tohutohu.herdrmobile.data.Settings
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl
@@ -13,6 +14,7 @@ import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
+import java.io.OutputStream
 import java.util.concurrent.TimeUnit
 
 class GatewayException(val code: Int, message: String) : IOException(message)
@@ -125,6 +127,29 @@ class GatewayApi(
                 throw GatewayException(resp.code, msg)
             }
             (resp.header("Content-Type") ?: "application/octet-stream") to resp.body.bytes()
+        }
+    }
+
+    suspend fun fileStat(id: String, path: String): FileInfoDto =
+        get(url("v1", "sessions", id, "files", "stat", query = mapOf("path" to path)))
+
+    /** Streams a file of any size into [out], reporting bytes written so far. */
+    suspend fun downloadFile(id: String, path: String, out: OutputStream, onProgress: (Long) -> Unit) = withContext(Dispatchers.IO) {
+        val req = request(url("v1", "sessions", id, "files", "content", query = mapOf("path" to path, "download" to "1"))).get().build()
+        http.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) bodyOrThrow(resp)
+            resp.body.byteStream().use { input ->
+                val buf = ByteArray(64 * 1024)
+                var total = 0L
+                while (true) {
+                    ensureActive()
+                    val n = input.read(buf)
+                    if (n < 0) break
+                    out.write(buf, 0, n)
+                    total += n
+                    onProgress(total)
+                }
+            }
         }
     }
 

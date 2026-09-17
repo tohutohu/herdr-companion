@@ -1,12 +1,16 @@
 package com.tohutohu.herdrmobile.ui.files
 
+import android.text.format.Formatter
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -15,16 +19,20 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -37,11 +45,15 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.tohutohu.herdrmobile.container
+import com.tohutohu.herdrmobile.data.DownloadState
+import com.tohutohu.herdrmobile.data.FileDownloads
+import com.tohutohu.herdrmobile.data.api.FileInfoDto
 
 private sealed interface FileState {
     data object Loading : FileState
     data class Text(val lines: List<String>) : FileState
     data class Image(val bytes: ByteArray) : FileState
+    data class Download(val info: FileInfoDto) : FileState
     data class Error(val message: String) : FileState
 }
 
@@ -54,11 +66,16 @@ fun FileViewerScreen(sessionId: String, path: String, line: Int, onBack: () -> U
     var state by remember { mutableStateOf<FileState>(FileState.Loading) }
     LaunchedEffect(sessionId, path) {
         state = try {
-            val (type, bytes) = api.fileContent(sessionId, path)
-            when {
-                type.startsWith("image/") -> FileState.Image(bytes)
-                type.startsWith("text/") -> FileState.Text(bytes.decodeToString().lines().take(MAX_LINES))
-                else -> FileState.Error("Cannot preview $type")
+            val info = api.fileStat(sessionId, path)
+            if (!info.previewable) {
+                FileState.Download(info)
+            } else {
+                val (type, bytes) = api.fileContent(sessionId, path)
+                when {
+                    type.startsWith("image/") -> FileState.Image(bytes)
+                    type.startsWith("text/") -> FileState.Text(bytes.decodeToString().lines().take(MAX_LINES))
+                    else -> FileState.Download(info)
+                }
             }
         } catch (e: Exception) {
             FileState.Error(e.message ?: e.toString())
@@ -83,10 +100,63 @@ fun FileViewerScreen(sessionId: String, path: String, line: Int, onBack: () -> U
                 is FileState.Error -> Text(s.message, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp))
                 is FileState.Image -> AsyncImage(model = s.bytes, contentDescription = path, modifier = Modifier.fillMaxSize())
                 is FileState.Text -> CodeView(path, s.lines, line)
+                is FileState.Download -> DownloadView(sessionId, s.info)
             }
         }
     }
 }
+
+@Composable
+private fun DownloadView(sessionId: String, info: FileInfoDto) {
+    val context = LocalContext.current
+    val downloads = context.container.downloads
+    val state by remember(sessionId, info.path) { downloads.state(sessionId, info.path) }.collectAsState()
+    var openFailed by remember { mutableStateOf(false) }
+    Column(
+        Modifier.fillMaxSize().padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
+    ) {
+        Icon(Icons.AutoMirrored.Filled.InsertDriveFile, contentDescription = null, modifier = Modifier.size(48.dp))
+        Text(info.name, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+        Text(
+            "${Formatter.formatFileSize(context, info.size)} · ${displayType(info)}",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(info.path, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, textAlign = TextAlign.Center)
+        when (val s = state) {
+            DownloadState.Idle -> Button(onClick = { downloads.start(sessionId, info.path, info.name, info.size) }) {
+                Text("Download")
+            }
+            is DownloadState.Running -> {
+                if (s.total > 0) {
+                    LinearProgressIndicator(progress = { s.bytes.toFloat() / s.total }, modifier = Modifier.fillMaxWidth())
+                } else {
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
+                Text(
+                    "${Formatter.formatShortFileSize(context, s.bytes)} / ${Formatter.formatShortFileSize(context, s.total)}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            is DownloadState.Done -> {
+                Text("Saved to Downloads", style = MaterialTheme.typography.bodyMedium)
+                Button(onClick = { openFailed = !downloads.open(s) }) { Text("Open") }
+                if (openFailed) Text("No app can open this file", color = MaterialTheme.colorScheme.error)
+            }
+            is DownloadState.Failed -> {
+                Text(s.message, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
+                Button(onClick = { downloads.start(sessionId, info.path, info.name, info.size) }) { Text("Retry") }
+            }
+        }
+    }
+}
+
+/** The gateway sniffs content (an APK is a zip); the extension is more telling. */
+private fun displayType(info: FileInfoDto): String =
+    FileDownloads.mimeTypeFor(info.name).takeIf { it != "application/octet-stream" }
+        ?: info.contentType.substringBefore(';')
 
 @Composable
 private fun CodeView(path: String, lines: List<String>, target: Int) {

@@ -6,6 +6,7 @@ import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import com.tohutohu.herdrmobile.data.DirectoryShortcutsStore
+import com.tohutohu.herdrmobile.data.FileDownloads
 import com.tohutohu.herdrmobile.data.SessionRepository
 import com.tohutohu.herdrmobile.data.SettingsStore
 import com.tohutohu.herdrmobile.data.api.GatewayApi
@@ -48,6 +49,7 @@ class AppContainer(app: Application) {
     val db = AppDatabase.create(app)
     val repository = SessionRepository(db, api)
     val pushRegistration = PushRegistration(app, api, scope)
+    val downloads = FileDownloads(app, api, scope)
 }
 
 class HerdrMobileApp : Application(), SingletonImageLoader.Factory {

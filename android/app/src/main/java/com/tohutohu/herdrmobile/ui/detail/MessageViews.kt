@@ -1,5 +1,6 @@
 package com.tohutohu.herdrmobile.ui.detail
 
+import android.text.format.Formatter
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -31,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -133,7 +135,12 @@ private fun BlockView(
             )
         }
         "file" -> block.path?.let { path ->
-            val label = if ((block.line ?: 0) > 0) "$path:${block.line}" else path
+            val context = LocalContext.current
+            val label = buildString {
+                append(path)
+                if ((block.line ?: 0) > 0) append(":${block.line}")
+                block.size?.let { append(" · ").append(Formatter.formatShortFileSize(context, it)) }
+            }
             AssistChip(
                 onClick = { onOpenFile(path, block.line ?: 0) },
                 label = { Text(label, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelSmall) },

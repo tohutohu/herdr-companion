@@ -49,6 +49,7 @@ data class BlockDto(
     val url: String? = null,
     val path: String? = null,
     val line: Int? = null,
+    val size: Long? = null,
     val interaction: InteractionDto? = null,
 )
 
@@ -104,6 +105,15 @@ data class TerminalInput(val text: String? = null, val keys: List<String> = empt
 
 @Serializable
 data class FileEntryDto(val name: String, val path: String, val isDir: Boolean, val size: Long = 0)
+
+@Serializable
+data class FileInfoDto(
+    val path: String,
+    val name: String,
+    val size: Long,
+    val contentType: String,
+    val previewable: Boolean,
+)
 
 @Serializable
 data class FilesResponse(val root: String, val entries: List<FileEntryDto>)
