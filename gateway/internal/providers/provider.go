@@ -97,12 +97,23 @@ var modelIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/\[\]-]{0,99}$
 // ValidModelID reports whether id is safe to pass as a CLI argument.
 func ValidModelID(id string) bool { return modelIDPattern.MatchString(id) }
 
+// SessionLocator is implemented by providers whose integration hook cannot
+// always report the session to Herdr (Codex TUIs on the shared daemon run
+// hooks in the daemon, outside the pane).
+type SessionLocator interface {
+	// LocateLaunched returns the native id of a session started in cwd at or
+	// after since, or "" when none is known.
+	LocateLaunched(ctx context.Context, cwd string, since time.Time) string
+}
+
 // Launchable providers can be started in a new Herdr pane.
 type Launchable interface {
 	// LaunchArgs are native CLI arguments passed after Herdr's agent kind.
 	// modelID is empty for the provider's default model; cwd is the pane's
 	// working directory.
 	LaunchArgs(modelID, cwd string) []string
+	// ResumeArgs are native CLI arguments that reopen an existing session.
+	ResumeArgs(nativeID, cwd string) []string
 	// Models lists the models offered when starting a session.
 	Models(ctx context.Context) ([]ModelOption, error)
 	// StartupKeys returns the keys that accept a folder-trust dialog shown on

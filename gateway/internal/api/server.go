@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tohutohu/herdr-android-client/gateway/internal/archive"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/config"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/files"
@@ -39,6 +40,7 @@ type Server struct {
 	Config   *config.Store
 	Sink     deadletter.Sink
 	Launcher *launcher.Launcher
+	Archive  *archive.Store
 }
 
 func (s *Server) Handler() http.Handler {
@@ -52,6 +54,9 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("GET /v1/directories", s.listDirectories)
 	api.HandleFunc("POST /v1/directories", s.createDirectory)
 	api.HandleFunc("GET /v1/sessions/{id}", s.getSession)
+	api.HandleFunc("POST /v1/sessions/{id}/archive", s.archiveSession)
+	api.HandleFunc("DELETE /v1/sessions/{id}/archive", s.unarchiveSession)
+	api.HandleFunc("POST /v1/sessions/{id}/resume", s.resumeSession)
 	api.HandleFunc("GET /v1/sessions/{id}/messages", s.getMessages)
 	api.HandleFunc("POST /v1/sessions/{id}/messages", s.postMessage)
 	api.HandleFunc("POST /v1/sessions/{id}/respond", s.respond)
@@ -121,7 +126,8 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, sessionID, op stri
 	switch {
 	case errors.Is(err, providers.ErrNotFound), errors.Is(err, files.ErrNotFound), errors.Is(err, uploads.ErrNotFound):
 		status = http.StatusNotFound
-	case errors.Is(err, providers.ErrNotLive), errors.Is(err, providers.ErrInteractionGone):
+	case errors.Is(err, providers.ErrNotLive), errors.Is(err, providers.ErrInteractionGone),
+		errors.Is(err, errAlreadyLive), errors.Is(err, launcher.ErrNoCwd):
 		status = http.StatusConflict
 	case errors.Is(err, providers.ErrUnsupported):
 		status = http.StatusUnprocessableEntity
@@ -152,12 +158,21 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, sessionID, op stri
 	writeError(w, status, err.Error())
 }
 
-var errBadRequest = errors.New("bad request")
+var (
+	errBadRequest  = errors.New("bad request")
+	errAlreadyLive = errors.New("session is already running in herdr")
+)
 
 func badRequest(msg string) error { return errors.Join(errBadRequest, errors.New(msg)) }
 
 func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
-	list, err := s.Sessions.List(r.Context())
+	var list []model.Session
+	var err error
+	if r.URL.Query().Get("archived") == "true" {
+		list = s.Sessions.Archived(r.Context())
+	} else {
+		list, err = s.Sessions.List(r.Context())
+	}
 	if err != nil {
 		s.fail(w, r, "", "list_sessions", err)
 		return
@@ -554,4 +569,79 @@ func (s *Server) createDirectory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]string{"path": p})
+}
+
+// archiveSession stops a running session (closing its Herdr pane) and hides
+// it from the session list.
+func (s *Server) archiveSession(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	sess, res, err := s.Sessions.Get(r.Context(), id)
+	if err != nil {
+		s.fail(w, r, id, "archive_session", err)
+		return
+	}
+	if res.Live != nil {
+		if err := s.Launcher.Stop(r.Context(), res.Live.PaneID); err != nil {
+			s.fail(w, r, id, "archive_session", err)
+			return
+		}
+		sess.Status, sess.PaneID, sess.CanSend = model.StatusOffline, "", false
+	}
+	if err := s.Archive.Add(id); err != nil {
+		s.fail(w, r, id, "archive_session", err)
+		return
+	}
+	sess.Archived = true
+	slog.Info("session archived", "provider", sess.Provider, "session_id", id, "operation", "archive_session", "stopped", res.Live != nil)
+	writeJSON(w, http.StatusOK, sess)
+}
+
+func (s *Server) unarchiveSession(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := s.Archive.Remove(id); err != nil {
+		s.fail(w, r, id, "unarchive_session", err)
+		return
+	}
+	sess, _, err := s.Sessions.Get(r.Context(), id)
+	if err != nil {
+		s.fail(w, r, id, "unarchive_session", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, sess)
+}
+
+type resumeRequest struct {
+	Trust bool `json:"trust"`
+}
+
+// resumeSession reopens a session that is not running in Herdr and takes it
+// out of the archive.
+func (s *Server) resumeSession(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req resumeRequest
+	if r.ContentLength != 0 {
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+			s.fail(w, r, id, "resume_session", badRequest("invalid json"))
+			return
+		}
+	}
+	sess, res, err := s.Sessions.Get(r.Context(), id)
+	if err != nil {
+		s.fail(w, r, id, "resume_session", err)
+		return
+	}
+	if res.Live != nil {
+		s.fail(w, r, id, "resume_session", errAlreadyLive)
+		return
+	}
+	out, err := s.Launcher.Resume(r.Context(), res.Provider.Name(), res.NativeID, sess.Cwd, req.Trust)
+	if err != nil {
+		s.Sink.Record(res.Provider.Name(), id, deadletter.SendError, "resume session: "+err.Error(), nil)
+		s.fail(w, r, id, "resume_session", err)
+		return
+	}
+	if err := s.Archive.Remove(id); err != nil {
+		slog.Warn("unarchive after resume failed", "session_id", id, "error", err)
+	}
+	writeJSON(w, http.StatusCreated, out)
 }

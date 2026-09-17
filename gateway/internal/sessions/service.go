@@ -20,10 +20,18 @@ type Snapshotter interface {
 	Snapshot(ctx context.Context) (*herdr.Snapshot, error)
 }
 
+// Archive is the set of archived session ids.
+type Archive interface {
+	Has(id string) bool
+	IDs() []string
+}
+
 type Service struct {
 	herdr         Snapshotter
 	providers     []providers.Provider
 	offlineWindow time.Duration
+	// Archive hides archived offline sessions from List. Optional.
+	Archive Archive
 }
 
 func New(h Snapshotter, offlineWindow time.Duration, ps ...providers.Provider) *Service {
@@ -115,7 +123,7 @@ func (s *Service) Session(ctx context.Context, r *Resolved) (model.Session, erro
 	if err != nil {
 		return model.Session{}, err
 	}
-	return toSession(r, sum), nil
+	return s.toSession(r, sum), nil
 }
 
 func (s *Service) Get(ctx context.Context, id string) (model.Session, *Resolved, error) {
@@ -146,7 +154,7 @@ func (s *Service) liveSessions(ctx context.Context, live map[string]*Resolved) [
 			slog.Debug("summary unavailable", "provider", r.Provider.Name(), "session_id", r.ID(), "error", err)
 			sum = &providers.Summary{NativeID: r.NativeID, Cwd: r.Live.Cwd, UpdatedAt: time.Now()}
 		}
-		out = append(out, toSession(r, sum))
+		out = append(out, s.toSession(r, sum))
 	}
 	return out
 }
@@ -167,7 +175,10 @@ func (s *Service) List(ctx context.Context) ([]model.Session, error) {
 				if _, ok := live[r.ID()]; ok {
 					continue
 				}
-				out = append(out, toSession(r, &recent[i]))
+				if s.archived(r.ID()) {
+					continue
+				}
+				out = append(out, s.toSession(r, &recent[i]))
 			}
 		}
 	}
@@ -179,6 +190,42 @@ func (s *Service) List(ctx context.Context) ([]model.Session, error) {
 		return out[i].UpdatedAt.After(out[j].UpdatedAt)
 	})
 	return out, nil
+}
+
+// Archived lists archived sessions, most recently archived first. Sessions
+// the provider no longer knows are skipped.
+func (s *Service) Archived(ctx context.Context) []model.Session {
+	if s.Archive == nil {
+		return nil
+	}
+	live := s.live(s.snapshot(ctx))
+	var out []model.Session
+	for _, id := range s.Archive.IDs() {
+		r, ok := live[id]
+		if !ok {
+			pname, native, valid := SplitID(id)
+			p := s.provider(pname)
+			if !valid || p == nil {
+				continue
+			}
+			r = &Resolved{Provider: p, NativeID: native}
+		}
+		sess, err := s.Session(ctx, r)
+		if err != nil {
+			slog.Debug("archived session unavailable", "session_id", id, "error", err)
+			continue
+		}
+		out = append(out, sess)
+	}
+	return out
+}
+
+func (s *Service) archived(id string) bool { return s.Archive != nil && s.Archive.Has(id) }
+
+func (s *Service) toSession(r *Resolved, sum *providers.Summary) model.Session {
+	sess := toSession(r, sum)
+	sess.Archived = s.archived(sess.ID)
+	return sess
 }
 
 func toSession(r *Resolved, sum *providers.Summary) model.Session {

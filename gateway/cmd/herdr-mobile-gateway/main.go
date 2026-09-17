@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/api"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/archive"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/config"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
@@ -108,6 +109,11 @@ func serve(args []string) error {
 	codexProvider := codex.New(cfg.CodexBinary, cfg.CodexDaemonSock, hc, sink)
 	go codexProvider.Run(ctx)
 	svc := sessions.New(hc, time.Duration(cfg.OfflineSessionDays)*24*time.Hour, claudeProvider, codexProvider)
+	archived, err := archive.Open(filepath.Join(config.StateDir(), "archive.json"))
+	if err != nil {
+		return err
+	}
+	svc.Archive = archived
 
 	roots := cfg.WorkspaceRoots
 	if len(roots) == 0 {
@@ -125,7 +131,7 @@ func serve(args []string) error {
 
 	srv := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           (&api.Server{Sessions: svc, Terminal: hc, Uploads: up, Config: store, Sink: sink, Launcher: launch}).Handler(),
+		Handler:           (&api.Server{Sessions: svc, Terminal: hc, Uploads: up, Config: store, Sink: sink, Launcher: launch, Archive: archived}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {

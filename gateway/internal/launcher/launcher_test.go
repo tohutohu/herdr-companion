@@ -88,7 +88,10 @@ type fakeHerdr struct {
 	status   string
 	session  *herdr.AgentSession
 	startErr error
-	calls    []string
+	// startErrs are returned by successive StartAgent calls before startErr.
+	startErrs []error
+	snap      *herdr.Snapshot
+	calls     []string
 }
 
 func (f *fakeHerdr) record(s string) {
@@ -103,6 +106,13 @@ func (f *fakeHerdr) CreateWorkspace(_ context.Context, cwd, label string) (strin
 }
 func (f *fakeHerdr) StartAgent(_ context.Context, name, kind, pane string, args []string, _ time.Duration) error {
 	f.record("start " + kind + " " + strings.Join(args, " "))
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.startErrs) > 0 {
+		err := f.startErrs[0]
+		f.startErrs = f.startErrs[1:]
+		return err
+	}
 	return f.startErr
 }
 func (f *fakeHerdr) ReadVisible(context.Context, string) (string, error) {
@@ -124,6 +134,22 @@ func (f *fakeHerdr) Prompt(_ context.Context, _ string, text string) error {
 	f.mu.Unlock()
 	return nil
 }
+func (f *fakeHerdr) Snapshot(context.Context) (*herdr.Snapshot, error) { return f.snap, nil }
+func (f *fakeHerdr) ClosePane(_ context.Context, pane string) error {
+	f.record("close pane " + pane)
+	return nil
+}
+func (f *fakeHerdr) CloseWorkspace(_ context.Context, ws string) error {
+	f.record("close workspace " + ws)
+	return nil
+}
+func (f *fakeHerdr) ReportAgentSession(_ context.Context, pane, agent, id string) error {
+	f.record("report " + agent + " " + id)
+	f.mu.Lock()
+	f.session = &herdr.AgentSession{Agent: agent, Kind: "id", Value: id}
+	f.mu.Unlock()
+	return nil
+}
 func (f *fakeHerdr) Pane(context.Context, string) (*herdr.Pane, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -141,6 +167,7 @@ func (fakeProvider) LaunchArgs(m, _ string) []string {
 	}
 	return []string{"--model", m}
 }
+func (fakeProvider) ResumeArgs(id, _ string) []string { return []string{"--resume", id} }
 func (fakeProvider) Models(context.Context) ([]providers.ModelOption, error) {
 	return []providers.ModelOption{{ID: "haiku", Name: "Haiku"}}, nil
 }
@@ -219,5 +246,123 @@ func Test不正な起動リクエストは拒否する(t *testing.T) {
 	}
 	if _, err := l.Models(context.Background(), "gemini"); !errors.Is(err, ErrUnknownProvider) {
 		t.Errorf("models err = %v", err)
+	}
+}
+
+func Test作成直後のシェルがbusyなら待って再試行する(t *testing.T) {
+	busy := &herdr.Error{Code: "agent_pane_busy", Message: "not an available shell"}
+	fh := &fakeHerdr{status: herdr.StatusIdle, startErrs: []error{busy, busy}}
+	l, root := newLauncher(t, fh)
+	res, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: root, Prompt: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.SessionID != "claude:abc-123" {
+		t.Errorf("result = %+v", res)
+	}
+	want := "create workspace|start claude --default|start claude --default|start claude --default|prompt hi"
+	if got := strings.Join(fh.calls, "|"); got != want {
+		t.Errorf("calls = %s", got)
+	}
+}
+
+func Test起動に失敗したら作ったワークスペースを閉じる(t *testing.T) {
+	fh := &fakeHerdr{status: herdr.StatusIdle, startErr: &herdr.Error{Code: "agent_pane_busy"}}
+	l, root := newLauncher(t, fh)
+	l.StartTimeout = 30 * time.Millisecond
+	if _, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: root}); err == nil {
+		t.Fatal("expected error")
+	}
+	if last := fh.calls[len(fh.calls)-1]; last != "close workspace w9" {
+		t.Errorf("calls = %v", fh.calls)
+	}
+
+	fh = &fakeHerdr{status: herdr.StatusIdle, startErr: &herdr.Error{Code: "invalid_kind"}}
+	l, root = newLauncher(t, fh)
+	if _, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: root}); err == nil {
+		t.Fatal("expected error")
+	}
+	// busy 以外のエラーは再試行しない
+	if got := strings.Join(fh.calls, "|"); got != "create workspace|start claude --default|close workspace w9" {
+		t.Errorf("calls = %s", got)
+	}
+}
+
+func Test既存セッションを作業ディレクトリで再開する(t *testing.T) {
+	fh := &fakeHerdr{status: herdr.StatusIdle, session: &herdr.AgentSession{Agent: "claude", Kind: "id", Value: "abc-123"}}
+	l, root := newLauncher(t, fh)
+	res, err := l.Resume(context.Background(), "claude", "abc-123", filepath.Join(root, "app-b"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.SessionID != "claude:abc-123" {
+		t.Errorf("result = %+v", res)
+	}
+	if got := strings.Join(fh.calls, "|"); got != "create app-b|start claude --resume abc-123" {
+		t.Errorf("calls = %s", got)
+	}
+	if _, err := l.Resume(context.Background(), "claude", "abc-123", "", false); !errors.Is(err, ErrNoCwd) {
+		t.Errorf("no cwd err = %v", err)
+	}
+	if _, err := l.Resume(context.Background(), "claude", "abc-123", "/etc", false); !errors.Is(err, files.ErrForbidden) {
+		t.Errorf("outside err = %v", err)
+	}
+}
+
+func Test停止はペインだけのワークスペースなら丸ごと閉じる(t *testing.T) {
+	fh := &fakeHerdr{snap: &herdr.Snapshot{Panes: []herdr.Pane{
+		{PaneID: "w1:p1", WorkspaceID: "w1"},
+		{PaneID: "w2:p1", WorkspaceID: "w2"},
+		{PaneID: "w2:p2", WorkspaceID: "w2"},
+	}}}
+	l, _ := newLauncher(t, fh)
+	ctx := context.Background()
+	for _, pane := range []string{"w1:p1", "w2:p2", "w9:p9"} {
+		if err := l.Stop(ctx, pane); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := strings.Join(fh.calls, "|"); got != "close workspace w1|close pane w2:p2" {
+		t.Errorf("calls = %s", got)
+	}
+}
+
+type locatingProvider struct {
+	fakeProvider
+	cwd   string
+	since time.Time
+}
+
+func (p *locatingProvider) LocateLaunched(_ context.Context, cwd string, since time.Time) string {
+	p.cwd, p.since = cwd, since
+	return "thread-9"
+}
+
+func Testフックが報告しないセッションはproviderが見つけてHerdrに報告する(t *testing.T) {
+	fh := &fakeHerdr{status: herdr.StatusIdle}
+	l, root := newLauncher(t, fh)
+	lp := &locatingProvider{}
+	l.Providers = []providers.Provider{lp}
+	before := time.Now()
+	res, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.SessionID != "claude:thread-9" || res.Warning != "" {
+		t.Errorf("result = %+v", res)
+	}
+	if lp.cwd != root || lp.since.After(before) {
+		t.Errorf("locate args = %s %v", lp.cwd, lp.since)
+	}
+	if last := fh.calls[len(fh.calls)-1]; last != "report claude thread-9" {
+		t.Errorf("calls = %v", fh.calls)
+	}
+
+	// 再開時は既知の id をそのまま報告する
+	fh = &fakeHerdr{status: herdr.StatusIdle}
+	l.Herdr = fh
+	res, err = l.Resume(context.Background(), "claude", "known-1", root, false)
+	if err != nil || res.SessionID != "claude:known-1" {
+		t.Errorf("resume = %+v %v", res, err)
 	}
 }

@@ -672,14 +672,52 @@ func (d *daemonConn) interactions(thread string, sink deadletter.Sink) []model.M
 // approvals and questions can be answered from the app. A remote TUI would
 // otherwise start its thread in the daemon's directory, so cwd is explicit.
 func (p *Provider) LaunchArgs(modelID, cwd string) []string {
-	var args []string
-	if _, err := os.Stat(p.daemonSock); err == nil {
-		args = append(args, "--remote", "unix://"+p.daemonSock, "--cd", cwd)
-	}
+	args := p.remoteArgs(cwd)
 	if modelID != "" {
 		args = append(args, "--model", modelID)
 	}
 	return args
+}
+
+func (p *Provider) remoteArgs(cwd string) []string {
+	if _, err := os.Stat(p.daemonSock); err == nil {
+		return []string{"--remote", "unix://" + p.daemonSock, "--cd", cwd}
+	}
+	return nil
+}
+
+// ResumeArgs reopens a thread with `codex resume <id>`.
+func (p *Provider) ResumeArgs(nativeID, cwd string) []string {
+	return append([]string{"resume", nativeID}, p.remoteArgs(cwd)...)
+}
+
+// LocateLaunched finds the newest thread loaded on the shared daemon that
+// was created in cwd since the given time.
+func (p *Provider) LocateLaunched(ctx context.Context, cwd string, since time.Time) string {
+	d := p.currentDaemon()
+	if d == nil {
+		return ""
+	}
+	cctx, cancel := context.WithTimeout(ctx, callTimeout)
+	defer cancel()
+	var loaded struct {
+		Data []string `json:"data"`
+	}
+	if err := d.c.call(cctx, "thread/loaded/list", map[string]any{}, &loaded); err != nil {
+		return ""
+	}
+	best, bestAt := "", int64(0)
+	for _, id := range loaded.Data {
+		th, err := p.readThread(ctx, id, false)
+		// Codex also runs short-lived ephemeral threads in the same cwd.
+		if err != nil || th.Ephemeral || th.Cwd != cwd || th.CreatedAt < since.Unix() {
+			continue
+		}
+		if th.CreatedAt >= bestAt {
+			best, bestAt = id, th.CreatedAt
+		}
+	}
+	return best
 }
 
 type catalogModel struct {

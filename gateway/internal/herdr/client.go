@@ -317,6 +317,23 @@ func (c *Client) StartAgent(ctx context.Context, name, kind, paneID string, args
 	return c.Call(ctx, "agent.start", params, nil)
 }
 
+// ReportAgentSession tells Herdr which native session runs in a pane, the
+// way the agent integration hooks do.
+func (c *Client) ReportAgentSession(ctx context.Context, paneID, agent, sessionID string) error {
+	params := map[string]any{"pane_id": paneID, "source": "herdr:" + agent, "agent": agent, "agent_session_id": sessionID}
+	return c.Call(ctx, "pane.report_agent_session", params, nil)
+}
+
+// ClosePane closes a pane, ending the process running in it.
+func (c *Client) ClosePane(ctx context.Context, paneID string) error {
+	return c.Call(ctx, "pane.close", map[string]any{"pane_id": paneID}, nil)
+}
+
+// CloseWorkspace closes a workspace and all of its panes.
+func (c *Client) CloseWorkspace(ctx context.Context, workspaceID string) error {
+	return c.Call(ctx, "workspace.close", map[string]any{"workspace_id": workspaceID}, nil)
+}
+
 // ReadVisible returns the currently rendered screen of a pane.
 func (c *Client) ReadVisible(ctx context.Context, paneID string) (string, error) {
 	var r struct {

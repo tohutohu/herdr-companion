@@ -292,7 +292,9 @@ func (f *fakeServer) serve(p *pipeTransport, send func(any)) {
 				"thread": map[string]any{"id": "thread-000001", "status": map[string]any{"type": "active", "activeFlags": []string{"waitingOnApproval"}}}}
 			send(map[string]any{"id": 0, "method": "item/commandExecution/requestApproval", "params": map[string]any{"threadId": "thread-000001", "turnId": "t1", "itemId": "i1", "startedAtMs": 1, "command": "rm -rf build"}})
 		case "thread/read":
+			f.mu.Lock()
 			result = map[string]any{"thread": f.thread}
+			f.mu.Unlock()
 		case "model/list":
 			var params struct{ Cursor string }
 			json.Unmarshal(m.Params, &params)
@@ -503,5 +505,40 @@ func Test設定変更通知でスレッドのモードを更新する(t *testing
 	d.Notification("thread/closed", json.RawMessage(`{"threadId":"th1"}`))
 	if m := d.mode("th1"); m != "" {
 		t.Errorf("closed thread mode = %q", m)
+	}
+}
+
+func TestDaemon上で指定ディレクトリに新しく作られたスレッドを見つける(t *testing.T) {
+	thread := json.RawMessage(`{"id":"thread-000001","cwd":"/w/app","createdAt":1000,"status":{"type":"idle"},"turns":[]}`)
+	f := &fakeServer{t: t, thread: thread}
+	pt := &pipeTransport{in: make(chan []byte, 16), out: make(chan []byte, 16), closed: make(chan struct{})}
+	go f.serve(pt, func(v any) {
+		b, _ := json.Marshal(v)
+		pt.in <- b
+	})
+	p := New("codex-not-used", "/nonexistent.sock", &fakeTerm{}, deadletter.Nop{})
+	ctx := context.Background()
+	if id := p.LocateLaunched(ctx, "/w/app", time.Unix(0, 0)); id != "" {
+		t.Errorf("without daemon = %q", id)
+	}
+	d := newDaemonConn(deadletter.Nop{})
+	d.c = newRPCClient(pt, d)
+	defer d.c.close()
+	p.daemon = d
+
+	if id := p.LocateLaunched(ctx, "/w/app", time.Unix(999, 0)); id != "thread-000001" {
+		t.Errorf("located = %q", id)
+	}
+	if id := p.LocateLaunched(ctx, "/w/other", time.Unix(999, 0)); id != "" {
+		t.Errorf("other cwd = %q", id)
+	}
+	if id := p.LocateLaunched(ctx, "/w/app", time.Unix(1001, 0)); id != "" {
+		t.Errorf("older thread = %q", id)
+	}
+	f.mu.Lock()
+	f.thread = json.RawMessage(`{"id":"thread-000001","cwd":"/w/app","createdAt":1000,"ephemeral":true,"status":{"type":"idle"}}`)
+	f.mu.Unlock()
+	if id := p.LocateLaunched(ctx, "/w/app", time.Unix(999, 0)); id != "" {
+		t.Errorf("ephemeral thread = %q", id)
 	}
 }

@@ -22,6 +22,7 @@ type Thread struct {
 	Model     string          `json:"model"`
 	Effort    *string         `json:"reasoningEffort"`
 	CreatedAt int64           `json:"createdAt"`
+	Ephemeral bool            `json:"ephemeral"`
 	UpdatedAt int64           `json:"updatedAt"`
 	Status    ThreadStatus    `json:"status"`
 	Source    json.RawMessage `json:"source"`

@@ -359,6 +359,11 @@ func (p *Provider) LaunchArgs(modelID, cwd string) []string {
 	return []string{"--model", modelID}
 }
 
+// ResumeArgs continues the transcript under the same session id.
+func (p *Provider) ResumeArgs(nativeID, cwd string) []string {
+	return []string{"--resume", nativeID}
+}
+
 // Claude Code has no model catalog API; these are its CLI aliases, which
 // always point at the latest model of each family.
 var models = []providers.ModelOption{

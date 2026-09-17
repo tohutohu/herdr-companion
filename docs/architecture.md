@@ -23,7 +23,8 @@ herdr-mobile-gateway (Go, on the Mac)
   provider's own storage and converts on the fly. Restarting the gateway loses
   nothing.
 - **Persistent gateway state** is limited to `~/.config/herdr-mobile/config.json`
-  (listen address, auth token, FCM device tokens, optional paths) and
+  (listen address, auth token, FCM device tokens, optional paths), the set of
+  archived session ids (`~/.local/state/herdr-mobile/archive.json`) and
   dead-letter / log files under `~/.local/state/herdr-mobile/`.
 - **In-memory only:** last seen status per session (push de-duplication),
   the FCM access token, and — for Codex — pending server requests received on
@@ -152,6 +153,25 @@ Sessions report the model they last used (`model`), the reasoning effort
   threads loaded on the shared daemon: `thread/resume` gives the approval
   policy and sandbox, `thread/settings/updated` also gives Plan mode.
 
+A new pane's shell may still be running its startup files; Herdr then
+answers `agent.start` with `agent_pane_busy`, which is retried until the
+start timeout. A workspace whose agent fails to start is closed again.
+
+Codex TUIs on the shared daemon run their hooks inside the daemon, so Herdr
+never learns the thread id. The launcher then finds the newest non-ephemeral
+thread created in that directory (`providers.SessionLocator`) and reports it
+with `pane.report_agent_session`.
+
+## Archive and resume
+
+- Archive: a running session's pane is closed (the whole workspace when it
+  was the only pane) and the id is stored in `archive.json`. Archived
+  sessions are left out of the offline part of `GET /v1/sessions`; a live
+  one is still listed (e.g. resumed from a terminal).
+- Resume opens a session that is not in Herdr in a new workspace in its
+  working directory (`claude --resume <id>`, `codex resume <id>`) and
+  removes it from the archive. Both keep the native id.
+
 Directories are restricted to `workspaceRoots` with the same checks as file
 access; new folder names must be a single, non-hidden path segment.
 
@@ -172,7 +192,10 @@ Paths are cleaned, symlink-resolved and must stay inside an allowed root;
 | GET | `/v1/models?provider=` | models offered for new sessions `{models[{id, name, description?, default?}]}` |
 | GET | `/v1/directories?path=` | workspace roots, or subfolders of `path` |
 | POST | `/v1/directories` | create `{parent, name}` under a root |
+| GET | `/v1/sessions?archived=true` | archived sessions |
 | GET | `/v1/sessions/{id}` | one session |
+| POST / DELETE | `/v1/sessions/{id}/archive` | archive (stops a running session) / unarchive |
+| POST | `/v1/sessions/{id}/resume` | `{trust}` reopen in a new Herdr workspace → `{sessionId?, paneId, warning?}` |
 | GET | `/v1/sessions/{id}/messages?after=` | `{session, messages}` |
 | POST | `/v1/sessions/{id}/messages` | `{text, uploads[]}` |
 | POST | `/v1/sessions/{id}/respond` | `{interactionId, answers{qid:{selected[],text}}, decision}` |

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tohutohu/herdr-android-client/gateway/internal/archive"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/config"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
@@ -37,6 +38,45 @@ func (f *fakeHerdr) SendKeys(_ context.Context, pane string, keys ...string) err
 }
 func (f *fakeHerdr) SendText(_ context.Context, pane, text string) error {
 	f.calls = append(f.calls, "text:"+text)
+	return nil
+}
+
+func (f *fakeHerdr) CreateWorkspace(_ context.Context, cwd, label string) (string, string, error) {
+	f.calls = append(f.calls, "create:"+label)
+	return "w2", "w2:p1", nil
+}
+func (f *fakeHerdr) StartAgent(_ context.Context, name, kind, pane string, args []string, _ time.Duration) error {
+	f.calls = append(f.calls, "start:"+kind+" "+strings.Join(args, " "))
+	f.snap.Panes = append(f.snap.Panes, herdr.Pane{
+		PaneID: pane, WorkspaceID: "w2", Agent: str(kind), AgentStatus: herdr.StatusIdle,
+		AgentSession: &herdr.AgentSession{Agent: kind, Kind: "id", Value: args[len(args)-1]},
+	})
+	return nil
+}
+func (f *fakeHerdr) ReadVisible(context.Context, string) (string, error) { return "", nil }
+func (f *fakeHerdr) Prompt(context.Context, string, string) error        { return nil }
+func (f *fakeHerdr) Pane(_ context.Context, pane string) (*herdr.Pane, error) {
+	for i := range f.snap.Panes {
+		if f.snap.Panes[i].PaneID == pane {
+			return &f.snap.Panes[i], nil
+		}
+	}
+	return nil, &herdr.Error{Code: "pane_not_found"}
+}
+func (f *fakeHerdr) ReportAgentSession(context.Context, string, string, string) error { return nil }
+func (f *fakeHerdr) ClosePane(_ context.Context, pane string) error {
+	f.calls = append(f.calls, "close-pane:"+pane)
+	return nil
+}
+func (f *fakeHerdr) CloseWorkspace(_ context.Context, ws string) error {
+	f.calls = append(f.calls, "close-workspace:"+ws)
+	var keep []herdr.Pane
+	for _, p := range f.snap.Panes {
+		if p.WorkspaceID != ws {
+			keep = append(keep, p)
+		}
+	}
+	f.snap.Panes = keep
 	return nil
 }
 
@@ -81,8 +121,9 @@ func (p *fakeProvider) Send(_ context.Context, id string, live *providers.Live, 
 	p.sent = append(p.sent, in)
 	return nil
 }
-func (p *fakeProvider) LaunchArgs(_, _ string) []string { return nil }
-func (p *fakeProvider) StartupKeys(string) []string     { return nil }
+func (p *fakeProvider) LaunchArgs(_, _ string) []string  { return nil }
+func (p *fakeProvider) ResumeArgs(id, _ string) []string { return []string{"resume", id} }
+func (p *fakeProvider) StartupKeys(string) []string      { return nil }
 func (p *fakeProvider) Models(context.Context) ([]providers.ModelOption, error) {
 	return []providers.ModelOption{{ID: "fake-large", Name: "Large", Default: true}}, nil
 }
@@ -109,9 +150,19 @@ func newTestServer(t *testing.T) (*httptest.Server, *fakeProvider, *fakeHerdr, s
 		}},
 	}}
 	fp := &fakeProvider{root: root}
+	arch, err := archive.Open(filepath.Join(t.TempDir(), "archive.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := sessions.New(fh, time.Hour, fp)
+	svc.Archive = arch
 	srv := &Server{
-		Launcher: &launcher.Launcher{Roots: []string{root}, Providers: []providers.Provider{fp}},
-		Sessions: sessions.New(fh, time.Hour, fp),
+		Launcher: &launcher.Launcher{
+			Herdr: fh, Roots: []string{root}, Providers: []providers.Provider{fp},
+			StartTimeout: time.Second, PollInterval: time.Millisecond, IdentityWait: 100 * time.Millisecond,
+		},
+		Archive:  arch,
+		Sessions: svc,
 		Terminal: fh,
 		Uploads:  uploads.New(t.TempDir(), time.Hour),
 		Config:   store,
@@ -305,5 +356,82 @@ func Testプロバイダーごとのモデル一覧を返す(t *testing.T) {
 	resp, _ = do(t, ts, tok, "POST", "/v1/sessions", []byte(`{"provider":"fake","cwd":"/tmp","model":"--bad"}`), "application/json")
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("invalid model status = %d", resp.StatusCode)
+	}
+}
+
+func sessionIDs(t *testing.T, body []byte) []string {
+	t.Helper()
+	var got struct{ Sessions []model.Session }
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, s := range got.Sessions {
+		ids = append(ids, s.ID)
+	}
+	return ids
+}
+
+func Test実行中のセッションをアーカイブすると停止して一覧から外れ戻せる(t *testing.T) {
+	ts, _, fh, tok := newTestServer(t)
+	resp, body := do(t, ts, tok, "POST", "/v1/sessions/fake:s1/archive", nil, "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status %d: %s", resp.StatusCode, body)
+	}
+	var sess model.Session
+	json.Unmarshal(body, &sess)
+	if !sess.Archived || sess.Status != model.StatusOffline || sess.PaneID != "" {
+		t.Errorf("archived session = %+v", sess)
+	}
+	if strings.Join(fh.calls, ",") != "close-workspace:w1" {
+		t.Errorf("herdr calls = %v", fh.calls)
+	}
+
+	_, body = do(t, ts, tok, "GET", "/v1/sessions", nil, "")
+	if ids := sessionIDs(t, body); strings.Join(ids, ",") != "fake:old" {
+		t.Errorf("list = %v", ids)
+	}
+	_, body = do(t, ts, tok, "GET", "/v1/sessions?archived=true", nil, "")
+	if ids := sessionIDs(t, body); strings.Join(ids, ",") != "fake:s1" {
+		t.Errorf("archived list = %v", ids)
+	}
+
+	resp, body = do(t, ts, tok, "DELETE", "/v1/sessions/fake:s1/archive", nil, "")
+	sess = model.Session{}
+	json.Unmarshal(body, &sess)
+	if resp.StatusCode != 200 || sess.Archived {
+		t.Errorf("unarchive status %d: %s", resp.StatusCode, body)
+	}
+	_, body = do(t, ts, tok, "GET", "/v1/sessions", nil, "")
+	if ids := sessionIDs(t, body); strings.Join(ids, ",") != "fake:s1,fake:old" {
+		t.Errorf("list after unarchive = %v", ids)
+	}
+}
+
+func Test停止中のセッションを再開しアーカイブからも外す(t *testing.T) {
+	ts, _, fh, tok := newTestServer(t)
+	do(t, ts, tok, "POST", "/v1/sessions/fake:old/archive", nil, "")
+
+	resp, body := do(t, ts, tok, "POST", "/v1/sessions/fake:old/resume", []byte(`{"trust":true}`), "application/json")
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status %d: %s", resp.StatusCode, body)
+	}
+	var res launcher.StartResult
+	json.Unmarshal(body, &res)
+	if res.SessionID != "fake:old" || res.PaneID != "w2:p1" {
+		t.Errorf("result = %+v", res)
+	}
+	if got := strings.Join(fh.calls, ","); !strings.Contains(got, "start:fake resume old") {
+		t.Errorf("herdr calls = %s", got)
+	}
+	_, body = do(t, ts, tok, "GET", "/v1/sessions?archived=true", nil, "")
+	if ids := sessionIDs(t, body); len(ids) != 0 {
+		t.Errorf("archived after resume = %v", ids)
+	}
+
+	// 実行中のセッションは再開できない
+	resp, _ = do(t, ts, tok, "POST", "/v1/sessions/fake:s1/resume", nil, "")
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("live resume status = %d", resp.StatusCode)
 	}
 }

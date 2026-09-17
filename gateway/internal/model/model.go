@@ -40,6 +40,7 @@ type Session struct {
 	Effort       string    `json:"effort,omitempty"` // reasoning effort: low, medium, high, ...
 	Mode         string    `json:"mode,omitempty"`   // display label, e.g. "Plan", "Accept edits"
 	CanSend      bool      `json:"canSend"`
+	Archived     bool      `json:"archived,omitempty"`
 }
 
 type Role string
