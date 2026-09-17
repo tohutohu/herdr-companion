@@ -60,7 +60,9 @@ class SessionRepository(
         val anchor = if (full) null else db.messages().lastId(sessionId)
         val resp = api.messages(sessionId, after = anchor)
         val now = System.currentTimeMillis()
-        db.sessions().upsert(listOf(resp.session.toEntity(now, listed = true)))
+        // An archived session is only listed while it runs.
+        val s = resp.session
+        db.sessions().upsert(listOf(s.toEntity(now, listed = !s.archived || s.isLive)))
 
         val anchorPos = anchor?.let { db.messages().positionOf(sessionId, it) }
         val incremental = anchor != null && anchorPos != null && resp.messages.firstOrNull()?.id == anchor
@@ -69,30 +71,30 @@ class SessionRepository(
         db.messages().replaceFrom(sessionId, start, rows)
     }
 
+    suspend fun archivedSessions(): List<SessionDto> = api.archivedSessions()
+
+    suspend fun archive(sessionId: String) {
+        val s = api.archive(sessionId)
+        db.sessions().upsert(listOf(s.toEntity(System.currentTimeMillis(), listed = false)))
+    }
+
+    suspend fun unarchive(sessionId: String) {
+        val s = api.unarchive(sessionId)
+        db.sessions().upsert(listOf(s.toEntity(System.currentTimeMillis(), listed = true)))
+    }
+
+    /** Returns a warning when the agent started only partially. */
+    suspend fun resume(sessionId: String, trust: Boolean = true): String? {
+        val res = api.resume(sessionId, trust)
+        runCatching { refreshSessions() }
+        return res.warning
+    }
+
     suspend fun send(sessionId: String, text: String, uploads: List<String>) =
         api.sendMessage(sessionId, text, uploads)
 
     suspend fun respond(sessionId: String, response: InteractionResponseDto) =
         api.respond(sessionId, response)
-
-    private fun SessionDto.toEntity(now: Long, listed: Boolean) = SessionEntity(
-        id = id,
-        provider = provider,
-        providerName = providerName,
-        project = project,
-        title = title,
-        cwd = cwd,
-        status = status,
-        updatedAt = parseTime(updatedAt),
-        lastMessage = lastMessage,
-        paneId = paneId,
-        canSend = canSend,
-        model = model,
-        effort = effort,
-        mode = mode,
-        listed = listed,
-        lastSyncedAt = now,
-    )
 
     private fun MessageDto.toEntity(sessionId: String, position: Int) = MessageEntity(
         sessionId = sessionId,
@@ -109,3 +111,23 @@ class SessionRepository(
         fun parseTime(s: String): Long = runCatching { Instant.parse(s).toEpochMilli() }.getOrDefault(0L)
     }
 }
+
+fun SessionDto.toEntity(now: Long, listed: Boolean) = SessionEntity(
+    id = id,
+    provider = provider,
+    providerName = providerName,
+    project = project,
+    title = title,
+    cwd = cwd,
+    status = status,
+    updatedAt = SessionRepository.parseTime(updatedAt),
+    lastMessage = lastMessage,
+    paneId = paneId,
+    canSend = canSend,
+    model = model,
+    effort = effort,
+    mode = mode,
+    archived = archived,
+    listed = listed,
+    lastSyncedAt = now,
+)

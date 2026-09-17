@@ -1,7 +1,9 @@
 package com.tohutohu.herdrmobile.ui.sessions
 
 import android.text.format.DateUtils
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,12 +14,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -41,6 +45,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.tohutohu.herdrmobile.container
+import com.tohutohu.herdrmobile.data.api.Status
 import com.tohutohu.herdrmobile.data.db.SessionEntity
 import com.tohutohu.herdrmobile.ui.agentSettingsLabel
 import com.tohutohu.herdrmobile.ui.statusStyle
@@ -51,7 +56,7 @@ private const val LIST_POLL_MS = 5_000L
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SessionListScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onNew: () -> Unit) {
+fun SessionListScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onNew: () -> Unit, onArchived: () -> Unit) {
     val repo = LocalContext.current.container.repository
     val sessionsFlow = remember(repo) { repo.observeSessions() }
     val sessions by sessionsFlow.collectAsState(initial = emptyList())
@@ -68,6 +73,8 @@ fun SessionListScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onNew: (
             e.message ?: e.toString()
         }
     }
+    val actions = rememberSessionActions(onChanged = { refresh() })
+    actions.Dialogs()
 
     // Poll only while visible; always refresh when returning to foreground.
     LaunchedEffect(lifecycle) {
@@ -84,6 +91,7 @@ fun SessionListScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onNew: (
             TopAppBar(
                 title = { Text("Sessions") },
                 actions = {
+                    IconButton(onClick = onArchived) { Icon(Icons.Default.Inventory2, contentDescription = "Archived sessions") }
                     IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, contentDescription = "Settings") }
                 },
             )
@@ -127,7 +135,7 @@ fun SessionListScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onNew: (
                     }
                 }
                 items(sessions, key = { it.id }) { s ->
-                    SessionRow(s, onClick = { onOpen(s.id) })
+                    SessionRow(s, actions, busy = actions.busyId == s.id, onClick = { onOpen(s.id) })
                     HorizontalDivider()
                 }
             }
@@ -135,46 +143,53 @@ fun SessionListScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onNew: (
     }
 }
 
+/** A session; long press opens archive / resume actions. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SessionRow(s: SessionEntity, onClick: () -> Unit) {
+internal fun SessionRow(s: SessionEntity, actions: SessionActions, busy: Boolean, onClick: () -> Unit) {
     val style = statusStyle(s.status)
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(s.providerName, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-            agentSettingsLabel(s.model, s.effort, s.mode)?.let {
+    var menu by remember { mutableStateOf(false) }
+    Box {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .combinedClickable(onClick = onClick, onLongClick = { menu = true }, onLongClickLabel = "Session actions")
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(s.providerName, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                agentSettingsLabel(s.model, s.effort, s.mode)?.let {
+                    Text(
+                        " · $it",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                }
                 Text(
-                    " · $it",
-                    style = MaterialTheme.typography.labelMedium,
+                    "  " + DateUtils.getRelativeTimeSpanString(s.updatedAt),
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
+                    modifier = Modifier.weight(1f),
+                )
+                Text("${style.symbol} ${style.label}", color = style.color, style = MaterialTheme.typography.labelMedium)
+            }
+            Text(s.project.ifBlank { s.cwd ?: s.id }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            s.title?.takeIf { it.isNotBlank() }?.let {
+                Text(it, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            s.lastMessage?.takeIf { it.isNotBlank() }?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
-            Text(
-                "  " + DateUtils.getRelativeTimeSpanString(s.updatedAt),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f),
-            )
-            Text("${style.symbol} ${style.label}", color = style.color, style = MaterialTheme.typography.labelMedium)
         }
-        Text(s.project.ifBlank { s.cwd ?: s.id }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        s.title?.takeIf { it.isNotBlank() }?.let {
-            Text(it, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        s.lastMessage?.takeIf { it.isNotBlank() }?.let {
-            Text(
-                it,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
+        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.BottomCenter))
+        actions.Menu(SessionRef(s.id, live = s.status != Status.OFFLINE, archived = s.archived), menu) { menu = false }
     }
 }

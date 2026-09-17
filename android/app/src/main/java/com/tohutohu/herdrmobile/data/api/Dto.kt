@@ -23,7 +23,10 @@ data class SessionDto(
     val effort: String? = null,
     /** Display label of the permission / collaboration mode. */
     val mode: String? = null,
-)
+    val archived: Boolean = false,
+) {
+    val isLive get() = status != Status.OFFLINE
+}
 
 @Serializable
 data class SessionsResponse(val sessions: List<SessionDto>)
@@ -142,6 +145,9 @@ data class StartSessionRequest(
     /** Null uses the agent's default model. */
     val model: String? = null,
 )
+
+@Serializable
+data class ResumeRequest(val trust: Boolean)
 
 @Serializable
 data class ModelOptionDto(

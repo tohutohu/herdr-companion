@@ -22,3 +22,6 @@ data class TerminalRoute(val sessionId: String)
 
 @Serializable
 object NewSessionRoute
+
+@Serializable
+object ArchivedRoute

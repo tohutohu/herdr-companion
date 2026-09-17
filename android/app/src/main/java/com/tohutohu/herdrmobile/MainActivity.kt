@@ -17,6 +17,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import com.tohutohu.herdrmobile.push.Notifications
+import com.tohutohu.herdrmobile.ui.ArchivedRoute
 import com.tohutohu.herdrmobile.ui.DetailRoute
 import com.tohutohu.herdrmobile.ui.FileRoute
 import com.tohutohu.herdrmobile.ui.HerdrTheme
@@ -29,6 +30,7 @@ import com.tohutohu.herdrmobile.ui.TerminalRoute
 import com.tohutohu.herdrmobile.ui.detail.SessionDetailScreen
 import com.tohutohu.herdrmobile.ui.files.FileViewerScreen
 import com.tohutohu.herdrmobile.ui.files.ImageViewerScreen
+import com.tohutohu.herdrmobile.ui.sessions.ArchivedSessionsScreen
 import com.tohutohu.herdrmobile.ui.sessions.SessionListScreen
 import com.tohutohu.herdrmobile.ui.settings.SettingsScreen
 import com.tohutohu.herdrmobile.ui.terminal.TerminalScreen
@@ -68,6 +70,13 @@ class MainActivity : ComponentActivity() {
                             onOpen = { nav.navigate(DetailRoute(it)) },
                             onSettings = { nav.navigate(SettingsRoute) },
                             onNew = { nav.navigate(NewSessionRoute) },
+                            onArchived = { nav.navigate(ArchivedRoute) },
+                        )
+                    }
+                    composable<ArchivedRoute> {
+                        ArchivedSessionsScreen(
+                            onBack = { nav.popBackStack() },
+                            onOpen = { nav.navigate(DetailRoute(it)) },
                         )
                     }
                     composable<NewSessionRoute> {

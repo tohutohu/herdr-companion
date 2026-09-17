@@ -71,6 +71,20 @@ class GatewayApi(
 
     suspend fun session(id: String): SessionDto = get(url("v1", "sessions", id))
 
+    suspend fun archivedSessions(): List<SessionDto> =
+        get<SessionsResponse>(url("v1", "sessions", query = mapOf("archived" to "true"))).sessions
+
+    /** Archiving a running session closes its Herdr pane. */
+    suspend fun archive(id: String): SessionDto =
+        json.decodeFromString(post(url("v1", "sessions", id, "archive"), ByteArray(0).toRequestBody(jsonType)))
+
+    suspend fun unarchive(id: String): SessionDto =
+        json.decodeFromString(execute(request(url("v1", "sessions", id, "archive")).delete().build()))
+
+    /** Reopens a stopped session in a new Herdr workspace. */
+    suspend fun resume(id: String, trust: Boolean): StartSessionResponse =
+        slowPost(url("v1", "sessions", id, "resume"), json.encodeToString(ResumeRequest(trust)))
+
     suspend fun messages(id: String, after: String? = null): MessagesResponse =
         get(url("v1", "sessions", id, "messages", query = mapOf("after" to after)))
 
@@ -125,11 +139,12 @@ class GatewayApi(
         return json.decodeFromString<MkdirResponse>(body).path
     }
 
+    suspend fun startSession(body: StartSessionRequest): StartSessionResponse =
+        slowPost(url("v1", "sessions"), json.encodeToString(body))
+
     /** Starting an agent can take up to a minute (startup dialogs, session id). */
-    suspend fun startSession(body: StartSessionRequest): StartSessionResponse = withContext(Dispatchers.IO) {
-        val req = request(url("v1", "sessions"))
-            .post(json.encodeToString(body).toRequestBody(jsonType))
-            .build()
+    private suspend inline fun <reified T> slowPost(url: HttpUrl, body: String): T = withContext(Dispatchers.IO) {
+        val req = request(url).post(body.toRequestBody(jsonType)).build()
         val slow = http.newBuilder().readTimeout(150, TimeUnit.SECONDS).callTimeout(160, TimeUnit.SECONDS).build()
         slow.newCall(req).execute().use { resp -> json.decodeFromString(bodyOrThrow(resp)) }
     }

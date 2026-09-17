@@ -91,4 +91,32 @@ class GatewayApiTest {
         api.startSession(StartSessionRequest("codex", "/w/app", "", true))
         assertTrue(!server.takeRequest().body!!.utf8().contains("model"))
     }
+
+    @Test
+    fun `アーカイブ一覧の取得とアーカイブ解除と再開のリクエストを送る`() = runBlocking {
+        val session = """{"id":"claude:s1","provider":"claude","status":"offline","updatedAt":"2026-09-17T10:00:00Z","archived":true}"""
+        server.enqueue(MockResponse.Builder().body("""{"sessions":[$session]}""").build())
+        val archived = api.archivedSessions()
+        assertEquals("/v1/sessions?archived=true", server.takeRequest().target)
+        assertTrue(archived.single().archived)
+        assertTrue(!archived.single().isLive)
+
+        server.enqueue(MockResponse.Builder().body(session).build())
+        assertTrue(api.archive("claude:s1").archived)
+        server.takeRequest().let {
+            assertEquals("POST", it.method)
+            assertEquals("/v1/sessions/claude:s1/archive", it.target)
+        }
+
+        server.enqueue(MockResponse.Builder().body(session.replace("\"archived\":true", "\"archived\":false")).build())
+        assertTrue(!api.unarchive("claude:s1").archived)
+        assertEquals("DELETE", server.takeRequest().method)
+
+        server.enqueue(MockResponse.Builder().code(201).body("""{"sessionId":"claude:s1","paneId":"w2:p1","warning":"dialog"}""").build())
+        assertEquals("dialog", api.resume("claude:s1", trust = true).warning)
+        server.takeRequest().let {
+            assertEquals("/v1/sessions/claude:s1/resume", it.target)
+            assertEquals("""{"trust":true}""", it.body!!.utf8())
+        }
+    }
 }

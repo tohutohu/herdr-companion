@@ -27,6 +27,9 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -56,7 +59,11 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import com.tohutohu.herdrmobile.container
+import com.tohutohu.herdrmobile.data.api.Status
+import com.tohutohu.herdrmobile.data.db.SessionEntity
 import com.tohutohu.herdrmobile.ui.agentSettingsLabel
+import com.tohutohu.herdrmobile.ui.sessions.SessionRef
+import com.tohutohu.herdrmobile.ui.sessions.rememberSessionActions
 import com.tohutohu.herdrmobile.ui.statusStyle
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -74,6 +81,9 @@ fun SessionDetailScreen(
     }
     val api = context.container.api
     val session by vm.session.collectAsState()
+    val actions = rememberSessionActions(onChanged = { vm.refresh() })
+    actions.Dialogs()
+    var menu by remember { mutableStateOf(false) }
     val messages by vm.messages.collectAsState()
     val error by vm.error.collectAsState()
     val sending by vm.sending.collectAsState()
@@ -131,15 +141,28 @@ fun SessionDetailScreen(
                     IconButton(onClick = onOpenTerminal, enabled = session?.paneId != null) {
                         Icon(Icons.Default.Terminal, contentDescription = "Terminal")
                     }
+                    session?.let { s ->
+                        Box {
+                            IconButton(onClick = { menu = true }) {
+                                Icon(Icons.Default.MoreVert, contentDescription = "Session actions")
+                            }
+                            actions.Menu(s.ref(), menu) { menu = false }
+                        }
+                    }
                 },
             )
         },
         bottomBar = {
-            Composer(
-                enabled = session?.canSend == true && !sending,
-                sending = sending,
-                onSend = { text, images, clear -> vm.send(text, images, clear) },
-            )
+            val s = session
+            if (s != null && s.status == Status.OFFLINE) {
+                ResumeBar(busy = actions.busyId == s.id, onResume = { actions.resume(s.ref()) })
+            } else {
+                Composer(
+                    enabled = s?.canSend == true && !sending,
+                    sending = sending,
+                    onSend = { text, images, clear -> vm.send(text, images, clear) },
+                )
+            }
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
@@ -230,6 +253,34 @@ private fun Composer(
                         },
                     ) { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send") }
                 }
+            }
+        }
+    }
+}
+
+private fun SessionEntity.ref() = SessionRef(id, live = status != Status.OFFLINE, archived = archived)
+
+/** Shown instead of the composer while the session is not running. */
+@Composable
+private fun ResumeBar(busy: Boolean, onResume: () -> Unit) {
+    Surface(tonalElevation = 3.dp) {
+        Row(
+            Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Not running in Herdr",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            Button(onClick = onResume, enabled = !busy) {
+                if (busy) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                } else {
+                    Icon(Icons.Default.PlayArrow, contentDescription = null)
+                }
+                Text("  Resume")
             }
         }
     }
