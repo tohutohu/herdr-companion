@@ -55,3 +55,16 @@ type stubProvider struct{ providers.Provider }
 
 func (stubProvider) Name() string       { return "claude" }
 func (stubProvider) HerdrAgent() string { return "claude" }
+
+func Test稼働中セッションのcwdはファイルリンクと同じペインのcwdを使う(t *testing.T) {
+	r := &Resolved{Provider: stubProvider{}, NativeID: "x", Live: &providers.Live{PaneID: "w1:p1", Cwd: "/work/app"}}
+	if got := toSession(r, &providers.Summary{Cwd: "/work/app/sub"}).Cwd; got != "/work/app" {
+		t.Errorf("live cwd = %q", got)
+	}
+	off := &Resolved{Provider: stubProvider{}, NativeID: "x"}
+	if got := toSession(off, &providers.Summary{Cwd: "/work/app/sub"}).Cwd; got != "/work/app/sub" {
+		t.Errorf("offline cwd = %q", got)
+	}
+}
+
+func (stubProvider) DisplayName() string { return "Claude Code" }
