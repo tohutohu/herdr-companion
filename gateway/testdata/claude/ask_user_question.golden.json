@@ -67,7 +67,7 @@
             }
           ],
           "supported": true,
-          "answer": "\"Which color?\"=\"Green\", \"Which fruits?\"=\"Apple, Cherry\""
+          "answer": "Which color? → Green\nWhich fruits? → Apple, Cherry"
         }
       }
     ]
@@ -126,7 +126,7 @@
             }
           ],
           "supported": true,
-          "answer": "The user answered: \"Pick a name\"=\"Carol\". Read the answers carefully — they may request clarification, changes, or that you not proceed — and follow what they actually say."
+          "answer": "Pick a name → Carol"
         }
       }
     ]

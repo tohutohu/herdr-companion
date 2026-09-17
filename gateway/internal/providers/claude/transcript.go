@@ -233,6 +233,7 @@ var (
 	tagPattern       = regexp.MustCompile(`(?s)<([a-z-]+)>(.*?)</([a-z-]+)>`)
 	commandNameRe    = regexp.MustCompile(`(?s)<command-name>(.*?)</command-name>`)
 	commandArgsRe    = regexp.MustCompile(`(?s)<command-args>(.*?)</command-args>`)
+	answerPairRe     = regexp.MustCompile(`"([^"]*)"="([^"]*)"`)
 	systemReminderRe = regexp.MustCompile(`(?s)<system-reminder>.*?</system-reminder>`)
 )
 
@@ -617,8 +618,14 @@ func answerSummary(res toolResult) string {
 	if res.block.IsError {
 		return "Not answered"
 	}
-	text = strings.TrimPrefix(text, "Your questions have been answered: ")
-	text = strings.TrimSuffix(text, ". You can now continue with these answers in mind.")
+	// The result text is prose around `"question"="answer"` pairs; keep the pairs.
+	var pairs []string
+	for _, m := range answerPairRe.FindAllStringSubmatch(text, -1) {
+		pairs = append(pairs, m[1]+" → "+m[2])
+	}
+	if len(pairs) > 0 {
+		return model.Truncate(strings.Join(pairs, "\n"), 500)
+	}
 	return model.Truncate(text, 500)
 }
 

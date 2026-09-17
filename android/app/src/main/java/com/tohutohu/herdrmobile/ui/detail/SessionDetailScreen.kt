@@ -83,12 +83,15 @@ fun SessionDetailScreen(
     }
 
     val listState = rememberLazyListState()
-    // Follow new messages when the user is already near the bottom.
+    // Jump to the end on first load; afterwards follow new messages only
+    // when the user is already near the bottom.
+    var initialScrollDone by rememberSaveable(sessionId) { mutableStateOf(false) }
     LaunchedEffect(messages.size) {
         if (messages.isEmpty()) return@LaunchedEffect
         val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-        if (listState.layoutInfo.totalItemsCount == 0 || lastVisible >= listState.layoutInfo.totalItemsCount - 3) {
-            listState.scrollToItem(messages.size - 1)
+        if (!initialScrollDone || lastVisible >= listState.layoutInfo.totalItemsCount - 3) {
+            listState.scrollToItem(messages.size - 1, Int.MAX_VALUE)
+            initialScrollDone = true
         }
     }
 
