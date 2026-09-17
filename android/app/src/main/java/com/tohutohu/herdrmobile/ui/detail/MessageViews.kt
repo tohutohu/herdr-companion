@@ -42,6 +42,7 @@ import coil3.compose.AsyncImage
 import com.tohutohu.herdrmobile.data.Message
 import com.tohutohu.herdrmobile.data.api.BlockDto
 import com.tohutohu.herdrmobile.data.api.InteractionResponseDto
+import com.tohutohu.herdrmobile.ui.markdown.MarkdownText
 
 @Composable
 fun MessageItem(
@@ -119,7 +120,7 @@ private fun BlockView(
                 if (role == "assistant" && isToolCallText(text)) {
                     CollapsibleTool(text, output = false)
                 } else {
-                    SelectionContainer { Text(text, style = MaterialTheme.typography.bodyMedium) }
+                    SelectionContainer { MarkdownText(text) }
                 }
             }
         }
