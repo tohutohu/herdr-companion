@@ -1,17 +1,22 @@
 package com.tohutohu.herdrmobile.ui.detail
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -29,13 +34,12 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.tohutohu.herdrmobile.data.Message
 import com.tohutohu.herdrmobile.data.api.BlockDto
 import com.tohutohu.herdrmobile.data.api.InteractionResponseDto
-
-private const val TOOL_PREVIEW_LINES = 6
 
 @Composable
 fun MessageItem(
@@ -101,14 +105,21 @@ private fun BlockView(
 ) {
     when (block.type) {
         "text" -> when (role) {
-            "tool" -> ToolText(block.text.orEmpty())
+            "tool" -> CollapsibleTool(block.text.orEmpty(), output = true)
             "system" -> Text(
                 block.text.orEmpty(),
                 style = MaterialTheme.typography.bodySmall,
                 fontStyle = FontStyle.Italic,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            else -> SelectionContainer { Text(block.text.orEmpty(), style = MaterialTheme.typography.bodyMedium) }
+            else -> {
+                val text = block.text.orEmpty()
+                if (role == "assistant" && isToolCallText(text)) {
+                    CollapsibleTool(text, output = false)
+                } else {
+                    SelectionContainer { Text(text, style = MaterialTheme.typography.bodyMedium) }
+                }
+            }
         }
         "image" -> block.url?.let { url ->
             AsyncImage(
@@ -137,25 +148,48 @@ private fun BlockView(
     }
 }
 
+/** Tool calls and outputs start collapsed to one line; tap to toggle. */
 @Composable
-private fun ToolText(text: String) {
-    var expanded by rememberSaveable(text) { mutableStateOf(false) }
-    val lines = text.lines()
-    val long = lines.size > TOOL_PREVIEW_LINES
-    val shown = if (expanded || !long) text else lines.take(TOOL_PREVIEW_LINES).joinToString("\n") + "\n…"
+private fun CollapsibleTool(text: String, output: Boolean) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val collapsible = text.trimEnd().contains('\n') || text.length > 80
     Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant,
+        color = if (output) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surfaceContainerHigh,
         shape = RoundedCornerShape(6.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(enabled = long) { expanded = !expanded },
+            .clickable(enabled = collapsible) { expanded = !expanded }
+            .animateContentSize(),
     ) {
-        Text(
-            shown,
-            fontFamily = FontFamily.Monospace,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(8.dp),
-        )
+        Row(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.Top) {
+            if (expanded) {
+                SelectionContainer(Modifier.weight(1f)) {
+                    Text(
+                        text.trimEnd(),
+                        fontFamily = FontFamily.Monospace,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else {
+                Text(
+                    toolSummary(text),
+                    fontFamily = FontFamily.Monospace,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            if (collapsible) {
+                Icon(
+                    if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (expanded) "Collapse" else "Expand",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 4.dp).size(16.dp),
+                )
+            }
+        }
     }
 }

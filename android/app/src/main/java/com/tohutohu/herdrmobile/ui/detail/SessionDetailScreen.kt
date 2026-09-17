@@ -83,17 +83,18 @@ fun SessionDetailScreen(
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { vm.pollWhileVisible() }
     }
 
+    // The list is laid out bottom-up, so it opens at the newest message and
+    // growing items (streamed output, loading images) keep the bottom in place.
     val listState = rememberLazyListState()
-    // Jump to the end on first load; afterwards follow new messages only
-    // when the user is already near the bottom.
-    var initialScrollDone by rememberSaveable(sessionId) { mutableStateOf(false) }
-    LaunchedEffect(messages.size) {
-        if (messages.isEmpty()) return@LaunchedEffect
-        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-        if (!initialScrollDone || lastVisible >= listState.layoutInfo.totalItemsCount - 3) {
-            listState.scrollToItem(messages.size - 1, Int.MAX_VALUE)
-            initialScrollDone = true
-        }
+    val lastId = messages.lastOrNull()?.id
+    var prevLastId by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(lastId) {
+        val prev = prevLastId
+        prevLastId = lastId
+        if (prev == null || lastId == null) return@LaunchedEffect
+        // Follow new messages only while the previous newest one is on screen.
+        val nearBottom = listState.layoutInfo.visibleItemsInfo.any { it.key == prev || it.key == lastId }
+        if (nearBottom) listState.animateScrollToItem(0)
     }
 
     Scaffold(
@@ -157,8 +158,10 @@ fun SessionDetailScreen(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(vertical = 8.dp),
+                reverseLayout = true,
             ) {
-                itemsIndexed(messages, key = { _, m -> m.id }) { i, m ->
+                itemsIndexed(messages.asReversed(), key = { _, m -> m.id }) { r, m ->
+                    val i = messages.lastIndex - r
                     MessageItem(
                         message = m,
                         showRole = i == 0 || messages[i - 1].role != m.role,
