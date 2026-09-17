@@ -19,8 +19,10 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/config"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/launcher"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/logging"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/notifications"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/claude"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/codex"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/sessions"
@@ -107,6 +109,12 @@ func serve(args []string) error {
 	go codexProvider.Run(ctx)
 	svc := sessions.New(hc, time.Duration(cfg.OfflineSessionDays)*24*time.Hour, claudeProvider, codexProvider)
 
+	roots := cfg.WorkspaceRoots
+	if len(roots) == 0 {
+		roots = launcher.DefaultRoots()
+	}
+	launch := &launcher.Launcher{Herdr: hc, Roots: roots, Providers: []providers.Provider{claudeProvider, codexProvider}}
+
 	watcher := &notifications.Watcher{Herdr: hc, Sessions: svc, Config: store, Sink: sink}
 	if sender, err := newSender(cfg); err != nil {
 		slog.Warn("push notifications disabled", "operation", "fcm", "error", err)
@@ -117,7 +125,7 @@ func serve(args []string) error {
 
 	srv := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           (&api.Server{Sessions: svc, Terminal: hc, Uploads: up, Config: store, Sink: sink}).Handler(),
+		Handler:           (&api.Server{Sessions: svc, Terminal: hc, Uploads: up, Config: store, Sink: sink, Launcher: launch}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {

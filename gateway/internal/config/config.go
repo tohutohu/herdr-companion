@@ -34,6 +34,8 @@ type Config struct {
 	CodexBinary     string `json:"codexBinary,omitempty"`
 	CodexDaemonSock string `json:"codexDaemonSocket,omitempty"`
 	UploadDir       string `json:"uploadDir,omitempty"`
+	// Directories under which the app may browse, create folders and start sessions.
+	WorkspaceRoots []string `json:"workspaceRoots,omitempty"`
 	// Sessions not running in Herdr are listed as offline when updated within this window.
 	OfflineSessionDays int `json:"offlineSessionDays,omitempty"`
 }

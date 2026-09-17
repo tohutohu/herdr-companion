@@ -597,3 +597,22 @@ func (d *daemonConn) interactions(thread string, sink deadletter.Sink) []model.M
 	}
 	return out
 }
+
+// LaunchArgs attaches new Codex TUIs to the shared daemon when it runs, so
+// approvals and questions can be answered from the app.
+func (p *Provider) LaunchArgs() []string {
+	if _, err := os.Stat(p.daemonSock); err == nil {
+		return []string{"--remote", "unix://" + p.daemonSock}
+	}
+	return nil
+}
+
+// StartupKeys accepts Codex's folder trust screen, whose default choice is
+// to trust and continue.
+func (p *Provider) StartupKeys(screen string) []string {
+	s := strings.ToLower(screen)
+	if strings.Contains(s, "trust and continue") || strings.Contains(s, "do you trust") || strings.Contains(s, "trust this folder") {
+		return []string{"enter"}
+	}
+	return nil
+}

@@ -293,3 +293,52 @@ func deref(s *string) string {
 	}
 	return *s
 }
+
+// CreateWorkspace opens a new workspace (without focusing it) and returns its root pane.
+func (c *Client) CreateWorkspace(ctx context.Context, cwd, label string) (workspaceID, paneID string, err error) {
+	var r struct {
+		Workspace Workspace `json:"workspace"`
+		RootPane  Pane      `json:"root_pane"`
+	}
+	params := map[string]any{"cwd": cwd, "label": label, "focus": false}
+	if err := c.Call(ctx, "workspace.create", params, &r); err != nil {
+		return "", "", err
+	}
+	return r.Workspace.WorkspaceID, r.RootPane.PaneID, nil
+}
+
+// StartAgent launches an agent in a shell pane. Herdr returns agent_not_ready
+// when the agent is blocked by a startup dialog.
+func (c *Client) StartAgent(ctx context.Context, name, kind, paneID string, args []string, timeout time.Duration) error {
+	if args == nil {
+		args = []string{} // herdr rejects null
+	}
+	params := map[string]any{"name": name, "kind": kind, "pane_id": paneID, "args": args, "timeout_ms": timeout.Milliseconds()}
+	return c.Call(ctx, "agent.start", params, nil)
+}
+
+// ReadVisible returns the currently rendered screen of a pane.
+func (c *Client) ReadVisible(ctx context.Context, paneID string) (string, error) {
+	var r struct {
+		Read ReadResult `json:"read"`
+	}
+	params := map[string]any{"pane_id": paneID, "source": "visible", "format": "text", "strip_ansi": true}
+	if err := c.Call(ctx, "pane.read", params, &r); err != nil {
+		return "", err
+	}
+	return r.Read.Text, nil
+}
+
+// Pane returns one pane from a fresh snapshot.
+func (c *Client) Pane(ctx context.Context, paneID string) (*Pane, error) {
+	snap, err := c.Snapshot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range snap.Panes {
+		if snap.Panes[i].PaneID == paneID {
+			return &snap.Panes[i], nil
+		}
+	}
+	return nil, &Error{Code: "pane_not_found", Message: paneID}
+}

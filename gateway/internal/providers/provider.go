@@ -75,3 +75,12 @@ func ImageURL(sessionID, messageID string, index int) string {
 func FileImageURL(sessionID, path string) string {
 	return "/v1/sessions/" + sessionID + "/files/content?path=" + queryEscape(path)
 }
+
+// Launchable providers can be started in a new Herdr pane.
+type Launchable interface {
+	// LaunchArgs are native CLI arguments passed after Herdr's agent kind.
+	LaunchArgs() []string
+	// StartupKeys returns the keys that accept a folder-trust dialog shown on
+	// screen, or nil when the screen is not a known trust dialog.
+	StartupKeys(screen string) []string
+}

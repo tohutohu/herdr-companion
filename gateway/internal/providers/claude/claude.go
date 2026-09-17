@@ -351,3 +351,14 @@ func optionIndex(q model.Question, label string) int {
 func singleLine(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
+
+func (p *Provider) LaunchArgs() []string { return nil }
+
+// StartupKeys accepts Claude Code's workspace trust dialog
+// ("❯ No, exit" / "Yes, I trust this folder").
+func (p *Provider) StartupKeys(screen string) []string {
+	if strings.Contains(screen, "Yes, I trust this folder") {
+		return []string{"down", "enter"}
+	}
+	return nil
+}

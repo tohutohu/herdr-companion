@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/files"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/launcher"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/sessions"
@@ -36,6 +38,7 @@ type Server struct {
 	Uploads  *uploads.Store
 	Config   *config.Store
 	Sink     deadletter.Sink
+	Launcher *launcher.Launcher
 }
 
 func (s *Server) Handler() http.Handler {
@@ -44,6 +47,9 @@ func (s *Server) Handler() http.Handler {
 
 	api := http.NewServeMux()
 	api.HandleFunc("GET /v1/sessions", s.listSessions)
+	api.HandleFunc("POST /v1/sessions", s.startSession)
+	api.HandleFunc("GET /v1/directories", s.listDirectories)
+	api.HandleFunc("POST /v1/directories", s.createDirectory)
 	api.HandleFunc("GET /v1/sessions/{id}", s.getSession)
 	api.HandleFunc("GET /v1/sessions/{id}/messages", s.getMessages)
 	api.HandleFunc("POST /v1/sessions/{id}/messages", s.postMessage)
@@ -131,8 +137,10 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, sessionID, op stri
 		if herr.Code == "agent_blocked" {
 			status = http.StatusConflict
 		}
-	case errors.Is(err, errBadRequest):
+	case errors.Is(err, errBadRequest), errors.Is(err, launcher.ErrInvalidName), errors.Is(err, launcher.ErrUnknownProvider):
 		status = http.StatusBadRequest
+	case errors.Is(err, os.ErrExist):
+		status = http.StatusConflict
 	}
 	provider, _, _ := sessions.SplitID(sessionID)
 	level := slog.LevelWarn
@@ -489,4 +497,47 @@ func (s *Server) unregisterDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
+	var req launcher.StartRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil || req.Provider == "" || req.Cwd == "" {
+		s.fail(w, r, "", "start_session", badRequest("provider and cwd are required"))
+		return
+	}
+	res, err := s.Launcher.Start(r.Context(), req)
+	if err != nil {
+		s.Sink.Record(req.Provider, "", deadletter.SendError, "start session: "+err.Error(), req)
+		s.fail(w, r, "", "start_session", err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, res)
+}
+
+func (s *Server) listDirectories(w http.ResponseWriter, r *http.Request) {
+	res, err := s.Launcher.List(r.URL.Query().Get("path"))
+	if err != nil {
+		s.fail(w, r, "", "list_directories", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+type mkdirRequest struct {
+	Parent string `json:"parent"`
+	Name   string `json:"name"`
+}
+
+func (s *Server) createDirectory(w http.ResponseWriter, r *http.Request) {
+	var req mkdirRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+		s.fail(w, r, "", "create_directory", badRequest("invalid json"))
+		return
+	}
+	p, err := s.Launcher.Mkdir(req.Parent, req.Name)
+	if err != nil {
+		s.fail(w, r, "", "create_directory", err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]string{"path": p})
 }
