@@ -127,9 +127,16 @@ func (s *Service) Get(ctx context.Context, id string) (model.Session, *Resolved,
 	return sess, r, err
 }
 
-// List returns live sessions first plus recently updated offline ones.
-func (s *Service) List(ctx context.Context) ([]model.Session, error) {
-	live := s.live(s.snapshot(ctx))
+// LiveSessions returns only sessions currently hosted by Herdr.
+func (s *Service) LiveSessions(ctx context.Context) ([]model.Session, error) {
+	snap, err := s.herdr.Snapshot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.liveSessions(ctx, s.live(snap)), nil
+}
+
+func (s *Service) liveSessions(ctx context.Context, live map[string]*Resolved) []model.Session {
 	var out []model.Session
 	for _, r := range live {
 		sum, err := r.Provider.Summary(ctx, r.NativeID, r.Live)
@@ -141,6 +148,13 @@ func (s *Service) List(ctx context.Context) ([]model.Session, error) {
 		}
 		out = append(out, toSession(r, sum))
 	}
+	return out
+}
+
+// List returns live sessions first plus recently updated offline ones.
+func (s *Service) List(ctx context.Context) ([]model.Session, error) {
+	live := s.live(s.snapshot(ctx))
+	out := s.liveSessions(ctx, live)
 	if s.offlineWindow > 0 {
 		since := time.Now().Add(-s.offlineWindow)
 		for _, p := range s.providers {

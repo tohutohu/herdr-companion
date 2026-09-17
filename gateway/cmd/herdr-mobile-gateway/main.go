@@ -20,6 +20,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/logging"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/notifications"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/claude"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/codex"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/sessions"
@@ -32,6 +33,7 @@ Usage:
   herdr-mobile-gateway [serve] [flags]     run the gateway (default)
   herdr-mobile-gateway token [--rotate]    print (or rotate) the auth token
   herdr-mobile-gateway devices             list registered FCM devices
+  herdr-mobile-gateway notify-test         send a test push to every registered device
   herdr-mobile-gateway debug replay FILE   re-parse dead-letter entries with the current adapters
 
 Environment:
@@ -54,6 +56,8 @@ func main() {
 		err = tokenCmd(args)
 	case "devices":
 		err = devicesCmd()
+	case "notify-test":
+		err = notifyTestCmd()
 	case "debug":
 		err = debugCmd(args)
 	case "help", "-h", "--help":
@@ -103,6 +107,14 @@ func serve(args []string) error {
 	go codexProvider.Run(ctx)
 	svc := sessions.New(hc, time.Duration(cfg.OfflineSessionDays)*24*time.Hour, claudeProvider, codexProvider)
 
+	watcher := &notifications.Watcher{Herdr: hc, Sessions: svc, Config: store, Sink: sink}
+	if sender, err := newSender(cfg); err != nil {
+		slog.Warn("push notifications disabled", "operation", "fcm", "error", err)
+	} else {
+		watcher.Sender = sender
+	}
+	go watcher.Run(ctx)
+
 	srv := &http.Server{
 		Addr:              cfg.Listen,
 		Handler:           (&api.Server{Sessions: svc, Terminal: hc, Uploads: up, Config: store, Sink: sink}).Handler(),
@@ -145,6 +157,43 @@ func devicesCmd() error {
 	}
 	for _, d := range store.Get().Devices {
 		fmt.Printf("%s\t%s\t%s…\n", d.Name, d.RegisteredAt.Format(time.RFC3339), d.FCMToken[:min(12, len(d.FCMToken))])
+	}
+	return nil
+}
+
+func newSender(cfg config.Config) (*notifications.FCM, error) {
+	path := notifications.CredentialsPath(cfg.FCMCredentialsFile)
+	if path == "" {
+		return nil, errors.New("no Firebase service account (set HERDR_MOBILE_FCM_CREDENTIALS or fcmCredentialsFile)")
+	}
+	return notifications.NewFCM(path)
+}
+
+func notifyTestCmd() error {
+	store, err := config.Load(config.DefaultPath())
+	if err != nil {
+		return err
+	}
+	sender, err := newSender(store.Get())
+	if err != nil {
+		return err
+	}
+	devices := store.Get().Devices
+	if len(devices) == 0 {
+		return errors.New("no devices registered; open the app and save the gateway settings first")
+	}
+	data := map[string]string{
+		"sessionId": "test:notification",
+		"status":    "completed",
+		"title":     "Herdr Mobile test",
+		"body":      "Push notifications are working.",
+	}
+	for _, d := range devices {
+		if err := sender.Send(context.Background(), d.FCMToken, data); err != nil {
+			fmt.Printf("%s: %v\n", d.Name, err)
+		} else {
+			fmt.Printf("%s: sent\n", d.Name)
+		}
 	}
 	return nil
 }
