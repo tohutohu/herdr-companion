@@ -17,6 +17,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -41,6 +43,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -54,6 +57,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.tohutohu.herdrmobile.container
+import com.tohutohu.herdrmobile.data.DirectoryShortcuts
 import com.tohutohu.herdrmobile.data.api.DirListingDto
 import com.tohutohu.herdrmobile.data.api.ModelOptionDto
 import com.tohutohu.herdrmobile.data.api.StartSessionRequest
@@ -74,6 +78,8 @@ fun NewSessionScreen(
     val context = LocalContext.current
     val api = context.container.api
     val repo = context.container.repository
+    val shortcutStore = context.container.directoryShortcuts
+    val shortcuts by shortcutStore.shortcuts.collectAsState(initial = DirectoryShortcuts())
     val scope = rememberCoroutineScope()
 
     var provider by rememberSaveable { mutableStateOf("claude") }
@@ -200,6 +206,7 @@ fun NewSessionScreen(
                                     val res = api.startSession(
                                         StartSessionRequest(provider, path, prompt.trim(), trust, model.ifEmpty { null }),
                                     )
+                                    runCatching { shortcutStore.recordUsed(path) }
                                     runCatching { repo.refreshSessions() }
                                     onStarted(res.sessionId, res.warning)
                                 } catch (e: Exception) {
@@ -236,6 +243,12 @@ fun NewSessionScreen(
                     ) { Text(label) }
                 }
             }
+            DirectoryShortcutsRow(
+                shortcuts = shortcuts,
+                currentPath = path,
+                enabled = !loading,
+                onOpen = { scope.launch { load(it) } },
+            )
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.padding(start = 8.dp, end = 8.dp),
@@ -252,6 +265,16 @@ fun NewSessionScreen(
                     overflow = TextOverflow.StartEllipsis,
                     modifier = Modifier.weight(1f),
                 )
+                val favorite = path in shortcuts.favorites
+                IconButton(
+                    enabled = path.isNotEmpty(),
+                    onClick = { scope.launch { shortcutStore.toggleFavorite(path) } },
+                ) {
+                    Icon(
+                        if (favorite) Icons.Default.Star else Icons.Default.StarBorder,
+                        contentDescription = if (favorite) "Remove from favorites" else "Add to favorites",
+                    )
+                }
                 IconButton(enabled = path.isNotEmpty() && !loading, onClick = { showMkdir = true }) {
                     Icon(Icons.Default.CreateNewFolder, contentDescription = "New folder")
                 }
