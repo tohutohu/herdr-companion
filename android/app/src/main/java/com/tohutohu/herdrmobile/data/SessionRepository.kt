@@ -87,6 +87,7 @@ class SessionRepository(
         lastMessage = lastMessage,
         paneId = paneId,
         canSend = canSend,
+        model = model,
         listed = listed,
         lastSyncedAt = now,
     )

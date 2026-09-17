@@ -17,6 +17,8 @@ data class SessionDto(
     val lastMessage: String? = null,
     val paneId: String? = null,
     val canSend: Boolean = false,
+    /** Model the session last used, as the provider names it. */
+    val model: String? = null,
 )
 
 @Serializable
@@ -128,7 +130,25 @@ data class MkdirRequest(val parent: String, val name: String)
 data class MkdirResponse(val path: String)
 
 @Serializable
-data class StartSessionRequest(val provider: String, val cwd: String, val prompt: String, val trust: Boolean)
+data class StartSessionRequest(
+    val provider: String,
+    val cwd: String,
+    val prompt: String,
+    val trust: Boolean,
+    /** Null uses the agent's default model. */
+    val model: String? = null,
+)
+
+@Serializable
+data class ModelOptionDto(
+    val id: String,
+    val name: String,
+    val description: String? = null,
+    val default: Boolean = false,
+)
+
+@Serializable
+data class ModelsResponse(val models: List<ModelOptionDto> = emptyList())
 
 @Serializable
 data class StartSessionResponse(val sessionId: String? = null, val paneId: String, val warning: String? = null)

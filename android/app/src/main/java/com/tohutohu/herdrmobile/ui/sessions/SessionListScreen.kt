@@ -42,6 +42,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.tohutohu.herdrmobile.container
 import com.tohutohu.herdrmobile.data.db.SessionEntity
+import com.tohutohu.herdrmobile.ui.modelLabel
 import com.tohutohu.herdrmobile.ui.statusStyle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -146,6 +147,14 @@ private fun SessionRow(s: SessionEntity, onClick: () -> Unit) {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(s.providerName, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+            s.model?.takeIf { it.isNotBlank() }?.let {
+                Text(
+                    " · " + modelLabel(it),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
             Text(
                 "  " + DateUtils.getRelativeTimeSpanString(s.updatedAt),
                 style = MaterialTheme.typography.labelSmall,

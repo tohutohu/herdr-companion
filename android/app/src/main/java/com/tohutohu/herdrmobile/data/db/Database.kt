@@ -1,6 +1,7 @@
 package com.tohutohu.herdrmobile.data.db
 
 import android.content.Context
+import androidx.room.AutoMigration
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
@@ -25,6 +26,7 @@ data class SessionEntity(
     val lastMessage: String?,
     val paneId: String?,
     val canSend: Boolean,
+    val model: String? = null,
     /** Whether the gateway still lists it; stale rows are kept for deep links. */
     val listed: Boolean,
     val lastSyncedAt: Long,
@@ -96,7 +98,12 @@ interface MessageDao {
     }
 }
 
-@Database(entities = [SessionEntity::class, MessageEntity::class], version = 1, exportSchema = true)
+@Database(
+    entities = [SessionEntity::class, MessageEntity::class],
+    version = 2,
+    exportSchema = true,
+    autoMigrations = [AutoMigration(from = 1, to = 2)],
+)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun sessions(): SessionDao
     abstract fun messages(): MessageDao

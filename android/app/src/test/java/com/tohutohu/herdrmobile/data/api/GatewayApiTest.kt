@@ -69,4 +69,26 @@ class GatewayApiTest {
         assertEquals("session is not running in herdr", e.message)
         assertEquals("""{"text":"hi"}""", server.takeRequest().body?.utf8())
     }
+
+    @Test
+    fun `モデル一覧を取得し起動リクエストにモデルを含める`() = runBlocking {
+        server.enqueue(
+            MockResponse.Builder().body(
+                """{"models":[{"id":"gpt-6-astra","name":"GPT-6 Astra","default":true},{"id":"gpt-6-mini","name":"Mini","description":"Fast"}]}""",
+            ).build(),
+        )
+        val models = api.models("codex")
+        assertEquals("/v1/models?provider=codex", server.takeRequest().target)
+        assertEquals(listOf("gpt-6-astra", "gpt-6-mini"), models.map { it.id })
+        assertTrue(models[0].default)
+        assertEquals("Fast", models[1].description)
+
+        server.enqueue(MockResponse.Builder().code(201).body("""{"sessionId":"codex:t1","paneId":"w1:p1"}""").build())
+        api.startSession(StartSessionRequest("codex", "/w/app", "", true, "gpt-6-mini"))
+        assertTrue(server.takeRequest().body!!.utf8().contains("\"model\":\"gpt-6-mini\""))
+
+        server.enqueue(MockResponse.Builder().code(201).body("""{"paneId":"w1:p2"}""").build())
+        api.startSession(StartSessionRequest("codex", "/w/app", "", true))
+        assertTrue(!server.takeRequest().body!!.utf8().contains("model"))
+    }
 }

@@ -114,6 +114,9 @@ class GatewayApi(
         }
     }
 
+    suspend fun models(provider: String): List<ModelOptionDto> =
+        get<ModelsResponse>(url("v1", "models", query = mapOf("provider" to provider))).models
+
     suspend fun directories(path: String?): DirListingDto =
         get(url("v1", "directories", query = mapOf("path" to path)))
 

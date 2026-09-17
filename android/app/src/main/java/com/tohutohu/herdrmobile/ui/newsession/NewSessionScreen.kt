@@ -21,6 +21,10 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -51,6 +55,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.tohutohu.herdrmobile.container
 import com.tohutohu.herdrmobile.data.api.DirListingDto
+import com.tohutohu.herdrmobile.data.api.ModelOptionDto
 import com.tohutohu.herdrmobile.data.api.StartSessionRequest
 import kotlinx.coroutines.launch
 
@@ -80,6 +85,10 @@ fun NewSessionScreen(
     var trust by rememberSaveable { mutableStateOf(true) }
     var starting by remember { mutableStateOf(false) }
     var showMkdir by remember { mutableStateOf(false) }
+    // "" = the agent's default model.
+    var model by rememberSaveable { mutableStateOf("") }
+    var models by remember { mutableStateOf<List<ModelOptionDto>>(emptyList()) }
+    var modelsError by remember { mutableStateOf<String?>(null) }
 
     suspend fun load(p: String) {
         loading = true
@@ -100,6 +109,17 @@ fun NewSessionScreen(
     }
 
     LaunchedEffect(Unit) { load(path) }
+
+    LaunchedEffect(provider) {
+        models = emptyList()
+        modelsError = null
+        try {
+            models = api.models(provider)
+            if (model.isNotEmpty() && models.none { it.id == model }) model = ""
+        } catch (e: Exception) {
+            modelsError = e.message
+        }
+    }
 
     if (showMkdir) {
         var name by remember { mutableStateOf("") }
@@ -149,6 +169,12 @@ fun NewSessionScreen(
                     Modifier.navigationBarsPadding().imePadding().padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    ModelPicker(
+                        models = models,
+                        selected = model,
+                        error = modelsError,
+                        onSelect = { model = it },
+                    )
                     OutlinedTextField(
                         value = prompt,
                         onValueChange = { prompt = it },
@@ -171,7 +197,9 @@ fun NewSessionScreen(
                             scope.launch {
                                 starting = true
                                 try {
-                                    val res = api.startSession(StartSessionRequest(provider, path, prompt.trim(), trust))
+                                    val res = api.startSession(
+                                        StartSessionRequest(provider, path, prompt.trim(), trust, model.ifEmpty { null }),
+                                    )
                                     runCatching { repo.refreshSessions() }
                                     onStarted(res.sessionId, res.warning)
                                 } catch (e: Exception) {
@@ -187,7 +215,11 @@ fun NewSessionScreen(
                             Text("  Starting…")
                         } else {
                             val name = PROVIDERS.first { it.first == provider }.second
-                            Text("Start $name in ${path.substringAfterLast('/').ifEmpty { "…" }}")
+                            Text(
+                                "Start $name in ${path.substringAfterLast('/').ifEmpty { "…" }}",
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         }
                     }
                 }
@@ -248,6 +280,61 @@ fun NewSessionScreen(
                         Text(dir.name, modifier = Modifier.padding(start = 12.dp))
                     }
                 }
+            }
+        }
+    }
+}
+
+/** Model dropdown; the first entry keeps the agent's own default. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ModelPicker(
+    models: List<ModelOptionDto>,
+    selected: String,
+    error: String?,
+    onSelect: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val defaultName = models.firstOrNull { it.default }?.name
+    val defaultLabel = if (defaultName != null) "Default ($defaultName)" else "Default"
+    val current = models.firstOrNull { it.id == selected }?.name ?: defaultLabel
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+        OutlinedTextField(
+            value = current,
+            onValueChange = {},
+            readOnly = true,
+            singleLine = true,
+            label = { Text("Model") },
+            supportingText = error?.let { { Text("Could not load models: $it") } },
+            isError = error != null,
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text(defaultLabel) },
+                onClick = {
+                    onSelect("")
+                    expanded = false
+                },
+            )
+            models.forEach { m ->
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(m.name)
+                            m.description?.takeIf { it.isNotBlank() }?.let {
+                                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    },
+                    onClick = {
+                        onSelect(m.id)
+                        expanded = false
+                    },
+                )
             }
         }
     }
