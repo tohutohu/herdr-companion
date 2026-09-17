@@ -217,9 +217,13 @@ Gateway は FCM HTTP v1 API に data-only / priority HIGH のメッセージを�
 
 ```bash
 cd android
-./gradlew assembleDebug                    # app/build/outputs/apk/debug/app-debug.apk
-./gradlew installDebug                     # 接続中の端末へインストール
+./gradlew --console=plain assembleRelease   # app/build/outputs/apk/release/app-release.apk
+./gradlew installRelease                   # 接続中の端末へインストール
 ```
+
+通常のAPKビルドは **release版（R8・リソース圧縮ともに有効）** を使います。
+現在はインストール用にdebug署名キーで署名していますが、ビルド自体は最適化済みのrelease版です。
+debug版が明示的に必要な場合だけ `assembleDebug` / `installDebug` を使ってください。
 
 JDK 17 を使ってください（例: `export JAVA_HOME=$(/usr/libexec/java_home -v 17)`）。
 `local.properties` に `sdk.dir` がない場合は Android Studio で一度開くか手動で作成します。

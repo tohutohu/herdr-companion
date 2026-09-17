@@ -17,9 +17,16 @@ herdr-mobile-gateway token | devices | usage | notify-test | debug replay FILE
 # Android (JDK 17 required; the default `java` is 24)
 cd android
 export JAVA_HOME=$HOME/Library/Java/JavaVirtualMachines/jbr-17.0.14/Contents/Home
-./gradlew --console=plain assembleDebug testDebugUnitTest
+./gradlew --console=plain assembleRelease          # default for APK build requests (R8 + resource shrinking)
+./gradlew --console=plain assembleDebug testDebugUnitTest  # development checks
 ANDROID_SERIAL=<serial> ./gradlew installDebug
 ```
+
+### APK build requests
+
+- 「APKをビルドして」 means `assembleRelease`: R8 (`isMinifyEnabled = true`) and resource shrinking (`isShrinkResources = true`) must both be enabled. Do not deliver a debug APK unless the user explicitly requests one.
+- Before reporting completion, confirm the release build succeeded and link `android/app/build/outputs/apk/release/app-release.apk`.
+- Release currently uses the debug signing key so it is installable; this does not disable R8 or resource shrinking.
 
 `compileSdk` is 37 because Navigation 2.10 / Coil 3.6 require it (targetSdk stays 36).
 
