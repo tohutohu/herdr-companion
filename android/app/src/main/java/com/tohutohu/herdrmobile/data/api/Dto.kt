@@ -118,6 +118,39 @@ data class FileInfoDto(
 @Serializable
 data class FilesResponse(val root: String, val entries: List<FileEntryDto>)
 
+/** One rate-limit window of a subscription (Claude's 5h / weekly, Codex's weekly). */
+@Serializable
+data class UsageWindowDto(
+    val key: String = "",
+    /** Window length, ready to display: "5h", "7d". */
+    val label: String = "",
+    /** Set when the window covers one model only, e.g. "Fable only". */
+    val scope: String? = null,
+    val usedPercent: Int = 0,
+    val windowMinutes: Int = 0,
+    val resetsAt: String? = null,
+)
+
+@Serializable
+data class UsageProviderDto(
+    val provider: String,
+    val displayName: String = provider,
+    val plan: String? = null,
+    val account: String? = null,
+    val windows: List<UsageWindowDto> = emptyList(),
+    val updatedAt: String? = null,
+    /** Only this provider could not be read. */
+    val error: String? = null,
+)
+
+/** Providers keeps the last good reading even when [error] is set. */
+@Serializable
+data class UsageDto(
+    val providers: List<UsageProviderDto> = emptyList(),
+    val fetchedAt: String? = null,
+    val error: String? = null,
+)
+
 @Serializable
 data class DeviceRequest(val name: String, val fcmToken: String)
 

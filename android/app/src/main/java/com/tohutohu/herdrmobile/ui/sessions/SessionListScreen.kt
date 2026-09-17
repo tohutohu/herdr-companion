@@ -56,6 +56,7 @@ import com.tohutohu.herdrmobile.data.api.Status
 import com.tohutohu.herdrmobile.data.db.SessionEntity
 import com.tohutohu.herdrmobile.ui.agentSettingsLabel
 import com.tohutohu.herdrmobile.ui.statusStyle
+import com.tohutohu.herdrmobile.ui.usage.UsageCard
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -140,35 +141,38 @@ fun SessionListScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onNew: (
             },
             modifier = Modifier.padding(padding).fillMaxSize(),
         ) {
-            LazyColumn(Modifier.fillMaxSize(), state = listState) {
-                error?.let {
-                    item {
-                        Text(
-                            "Gateway unreachable: $it",
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(16.dp),
-                        )
+            Column(Modifier.fillMaxSize()) {
+                UsageCard()
+                LazyColumn(Modifier.fillMaxSize(), state = listState) {
+                    error?.let {
+                        item {
+                            Text(
+                                "Gateway unreachable: $it",
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.padding(16.dp),
+                            )
+                        }
                     }
-                }
-                if (sessions.isEmpty() && error == null) {
-                    item {
-                        Text(
-                            "No sessions. Start Claude Code or Codex inside Herdr on your Mac.",
-                            modifier = Modifier.padding(16.dp),
-                        )
+                    if (sessions.isEmpty() && error == null) {
+                        item {
+                            Text(
+                                "No sessions. Start Claude Code or Codex inside Herdr on your Mac.",
+                                modifier = Modifier.padding(16.dp),
+                            )
+                        }
                     }
-                }
-                items(sessions, key = { it.id }) { s ->
-                    SessionRow(
-                        s,
-                        busy = actions.busy(s.id),
-                        selected = selection.contains(s.id),
-                        selecting = selection.active,
-                        onClick = { if (selection.active) selection.toggle(s.id) else onOpen(s.id) },
-                        onLongClick = { selection.toggle(s.id) },
-                    )
-                    HorizontalDivider()
+                    items(sessions, key = { it.id }) { s ->
+                        SessionRow(
+                            s,
+                            busy = actions.busy(s.id),
+                            selected = selection.contains(s.id),
+                            selecting = selection.active,
+                            onClick = { if (selection.active) selection.toggle(s.id) else onOpen(s.id) },
+                            onLongClick = { selection.toggle(s.id) },
+                        )
+                        HorizontalDivider()
+                    }
                 }
             }
         }

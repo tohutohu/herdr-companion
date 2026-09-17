@@ -174,6 +174,12 @@ class GatewayApi(
         slow.newCall(req).execute().use { resp -> json.decodeFromString(bodyOrThrow(resp)) }
     }
 
+    /** Subscription limits as the gateway last read them. */
+    suspend fun usage(): UsageDto = get(url("v1", "usage"))
+
+    /** Re-reads the limits on the Mac; takes several seconds. */
+    suspend fun refreshUsage(): UsageDto = slowPost(url("v1", "usage", "refresh"), "{}")
+
     suspend fun registerDevice(name: String, token: String) {
         post(url("v1", "devices"), json.encodeToString(DeviceRequest(name, token)).toRequestBody(jsonType))
     }
