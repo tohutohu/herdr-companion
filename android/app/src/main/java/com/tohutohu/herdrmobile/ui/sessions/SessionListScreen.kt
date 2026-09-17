@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Inventory2
@@ -73,6 +74,13 @@ fun SessionListScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onNew: (
             e.message ?: e.toString()
         }
     }
+    // Keyed items keep the scroll anchor, which would hide sessions that
+    // appear above the first row; stay at the top when the user is there.
+    val listState = rememberLazyListState()
+    val firstId = sessions.firstOrNull()?.id
+    LaunchedEffect(firstId) {
+        if (listState.firstVisibleItemIndex <= 1) listState.scrollToItem(0)
+    }
     val actions = rememberSessionActions(onChanged = { refresh() })
     actions.Dialogs()
 
@@ -115,7 +123,7 @@ fun SessionListScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onNew: (
             },
             modifier = Modifier.padding(padding).fillMaxSize(),
         ) {
-            LazyColumn(Modifier.fillMaxSize()) {
+            LazyColumn(Modifier.fillMaxSize(), state = listState) {
                 error?.let {
                     item {
                         Text(
