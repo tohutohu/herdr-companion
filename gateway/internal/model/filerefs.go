@@ -75,3 +75,15 @@ func Truncate(s string, n int) string {
 	}
 	return string(r[:n]) + "\n… (truncated)"
 }
+
+// DisplayPath returns p relative to root when it lies inside root.
+func DisplayPath(root, p string) string {
+	if root == "" || !filepath.IsAbs(p) {
+		return p
+	}
+	rel, err := filepath.Rel(root, p)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, "../") {
+		return p
+	}
+	return rel
+}

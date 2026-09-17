@@ -1,0 +1,76 @@
+[
+  {
+    "id": "codex-request:7",
+    "type": "questions",
+    "state": "pending",
+    "title": "Codex needs input",
+    "questions": [
+      {
+        "id": "color",
+        "type": "select",
+        "header": "Color",
+        "question": "Which color?",
+        "options": [
+          {
+            "label": "Red",
+            "description": "Choose red."
+          },
+          {
+            "label": "Blue",
+            "description": "Choose blue."
+          }
+        ],
+        "allowOther": true
+      },
+      {
+        "id": "name",
+        "type": "text",
+        "header": "Name",
+        "question": "Project name?",
+        "allowOther": false
+      }
+    ],
+    "supported": true
+  },
+  {
+    "id": "codex-request:8",
+    "type": "approval",
+    "state": "pending",
+    "title": "Run command?",
+    "detail": "/bin/zsh -lc 'echo ok \u003e codex-approved.txt'\n(in /work/app)\nThe read-only sandbox blocked creating the file.",
+    "supported": true,
+    "decisions": [
+      "approve",
+      "approve_session",
+      "deny"
+    ]
+  },
+  {
+    "id": "codex-request:9",
+    "type": "approval",
+    "state": "pending",
+    "title": "Grant additional permissions?",
+    "detail": "needs network\n{\"network\":{\"enabled\":true}}",
+    "supported": true,
+    "decisions": [
+      "approve",
+      "approve_session",
+      "deny"
+    ]
+  },
+  {
+    "id": "codex-request:10",
+    "type": "questions",
+    "state": "pending",
+    "title": "MCP server request",
+    "detail": "Sign in",
+    "supported": false
+  },
+  {
+    "id": "codex-request:12",
+    "type": "approval",
+    "state": "pending",
+    "title": "Codex request: item/brandNew/request",
+    "supported": false
+  }
+]

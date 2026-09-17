@@ -1,0 +1,59 @@
+[
+ {
+  "id": 7,
+  "method": "item/tool/requestUserInput",
+  "params": {
+   "threadId": "01a0afc5-1515-7970-ae39-12bc2b518ce2",
+   "turnId": "turn-3",
+   "itemId": "call-1",
+   "isBlocking": true,
+   "autoResolutionMs": null,
+   "questions": [
+    {"id": "color", "header": "Color", "question": "Which color?", "isOther": true, "isSecret": false,
+     "options": [{"label": "Red", "description": "Choose red."}, {"label": "Blue", "description": "Choose blue."}]},
+    {"id": "name", "header": "Name", "question": "Project name?", "isOther": false, "isSecret": false, "options": null}
+   ]
+  }
+ },
+ {
+  "id": 8,
+  "method": "item/commandExecution/requestApproval",
+  "params": {
+   "threadId": "01a0afc5-1515-7970-ae39-12bc2b518ce2",
+   "turnId": "turn-3",
+   "itemId": "exec-1",
+   "startedAtMs": 1789600000000,
+   "command": "/bin/zsh -lc 'echo ok > codex-approved.txt'",
+   "cwd": "/work/app",
+   "reason": "The read-only sandbox blocked creating the file."
+  }
+ },
+ {
+  "id": 9,
+  "method": "item/permissions/requestApproval",
+  "params": {
+   "threadId": "01a0afc5-1515-7970-ae39-12bc2b518ce2",
+   "turnId": "turn-3",
+   "itemId": "perm-1",
+   "startedAtMs": 1789600000000,
+   "cwd": "/work/app",
+   "reason": "needs network",
+   "permissions": {"network": {"enabled": true}}
+  }
+ },
+ {
+  "id": 10,
+  "method": "mcpServer/elicitation/request",
+  "params": {"threadId": "01a0afc5-1515-7970-ae39-12bc2b518ce2", "serverName": "docs", "mode": "url", "message": "Sign in", "url": "https://example.com", "elicitationId": "e1"}
+ },
+ {
+  "id": 11,
+  "method": "item/tool/call",
+  "params": {"threadId": "01a0afc5-1515-7970-ae39-12bc2b518ce2", "turnId": "turn-3", "callId": "d1", "tool": "x", "arguments": {}}
+ },
+ {
+  "id": 12,
+  "method": "item/brandNew/request",
+  "params": {"threadId": "01a0afc5-1515-7970-ae39-12bc2b518ce2", "foo": "bar"}
+ }
+]

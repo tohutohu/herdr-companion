@@ -536,7 +536,7 @@ func (t *Transcript) toolUseBlocks(b contentBlock, res toolResult, answered, pen
 		if p == "" {
 			p = str("notebook_path")
 		}
-		blocks = append(blocks, model.TextBlock(b.Name+" "+displayPath(p, opt.Root)))
+		blocks = append(blocks, model.TextBlock(b.Name+" "+model.DisplayPath(opt.Root, p)))
 		if rel, ok := model.RelativeExisting(opt.Root, p); ok {
 			line := 0
 			if off, ok := in["offset"].(float64); ok {
@@ -620,22 +620,6 @@ func answerSummary(res toolResult) string {
 	text = strings.TrimPrefix(text, "Your questions have been answered: ")
 	text = strings.TrimSuffix(text, ". You can now continue with these answers in mind.")
 	return model.Truncate(text, 500)
-}
-
-func displayPath(p, root string) string {
-	if root != "" {
-		if rel, err := relIfInside(root, p); err == nil {
-			return rel
-		}
-	}
-	return p
-}
-
-func relIfInside(root, p string) (string, error) {
-	if !strings.HasPrefix(p, strings.TrimSuffix(root, "/")+"/") {
-		return "", fmt.Errorf("outside")
-	}
-	return strings.TrimPrefix(p, strings.TrimSuffix(root, "/")+"/"), nil
 }
 
 func todoText(in map[string]any) string {

@@ -1,0 +1,154 @@
+[
+  {
+    "id": "u1",
+    "role": "user",
+    "timestamp": "2026-09-16T23:06:40Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "画面を直して"
+      },
+      {
+        "type": "image",
+        "url": "/v1/sessions/codex:test/files/content?path=%2Ftmp%2Fherdr-mobile%2Fuploads%2Fabc.png"
+      },
+      {
+        "type": "image",
+        "url": "/v1/sessions/codex:test/messages/u1/images/2"
+      }
+    ]
+  },
+  {
+    "id": "a1",
+    "role": "assistant",
+    "timestamp": "2026-09-16T23:06:40Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "src/Main.kt を修正します。"
+      },
+      {
+        "type": "file",
+        "path": "src/Main.kt"
+      }
+    ]
+  },
+  {
+    "id": "c1",
+    "role": "tool",
+    "timestamp": "2026-09-16T23:06:40Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "$ cat src/Main.kt\nfun main() {}"
+      },
+      {
+        "type": "file",
+        "path": "src/Main.kt"
+      }
+    ]
+  },
+  {
+    "id": "c2",
+    "role": "tool",
+    "timestamp": "2026-09-16T23:06:40Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "$ false\n(exit 1)"
+      }
+    ]
+  },
+  {
+    "id": "f1",
+    "role": "tool",
+    "timestamp": "2026-09-16T23:06:40Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "update src/Main.kt\n@@ -1 +1 @@\n-fun main() {}\n+fun main() { println(1) }"
+      },
+      {
+        "type": "file",
+        "path": "src/Main.kt"
+      }
+    ]
+  },
+  {
+    "id": "m1",
+    "role": "tool",
+    "timestamp": "2026-09-16T23:06:40Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "▸ docs.search {\"q\":\"compose\"}\nfound 3"
+      }
+    ]
+  },
+  {
+    "id": "v1",
+    "role": "tool",
+    "timestamp": "2026-09-16T23:06:40Z",
+    "blocks": [
+      {
+        "type": "image",
+        "url": "/v1/sessions/codex:test/files/content?path=screenshot.png"
+      }
+    ]
+  },
+  {
+    "id": "w1",
+    "role": "tool",
+    "timestamp": "2026-09-16T23:06:40Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "WebSearch jetpack compose lazycolumn"
+      }
+    ]
+  },
+  {
+    "id": "x1",
+    "role": "system",
+    "timestamp": "2026-09-16T23:06:40Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "Unsupported event: hologramCall"
+      }
+    ]
+  },
+  {
+    "id": "a2",
+    "role": "assistant",
+    "timestamp": "2026-09-16T23:06:40Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "完了しました。"
+      }
+    ]
+  },
+  {
+    "id": "u2",
+    "role": "user",
+    "timestamp": "2026-09-16T23:07:30Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "続けて"
+      }
+    ]
+  },
+  {
+    "id": "turn-2#error",
+    "role": "system",
+    "timestamp": "2026-09-16T23:07:30Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "Turn failed: model requires a newer version"
+      }
+    ]
+  }
+]

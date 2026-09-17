@@ -1,0 +1,50 @@
+{
+ "thread": {
+  "id": "01a0b000-0000-7000-8000-000000000001",
+  "preview": "画面を直して",
+  "name": "UI修正",
+  "cwd": "/work/app",
+  "createdAt": 1789600000,
+  "updatedAt": 1789600100,
+  "status": {"type": "notLoaded"},
+  "turns": [
+   {
+    "id": "turn-1",
+    "status": "completed",
+    "startedAt": 1789600000,
+    "items": [
+     {"type": "userMessage", "id": "u1", "content": [
+       {"type": "text", "text": "画面を直して", "text_elements": []},
+       {"type": "localImage", "path": "/tmp/herdr-mobile/uploads/abc.png"},
+       {"type": "image", "url": "data:image/png;base64,iVBORw0KGgo="}
+     ]},
+     {"type": "reasoning", "id": "r1", "summary": [], "content": []},
+     {"type": "agentMessage", "id": "a1", "text": "src/Main.kt を修正します。", "phase": "commentary"},
+     {"type": "commandExecution", "id": "c1", "command": "/bin/zsh -lc 'cat src/Main.kt'", "cwd": "/work/app", "status": "completed",
+      "commandActions": [{"type": "read", "command": "cat src/Main.kt", "name": "Main.kt", "path": "/work/app/src/Main.kt"}],
+      "aggregatedOutput": "fun main() {}\n", "exitCode": 0},
+     {"type": "commandExecution", "id": "c2", "command": "/bin/zsh -lc 'false'", "cwd": "/work/app", "status": "failed",
+      "commandActions": [{"type": "unknown", "command": "false"}], "aggregatedOutput": "", "exitCode": 1},
+     {"type": "fileChange", "id": "f1", "status": "completed", "changes": [
+       {"path": "/work/app/src/Main.kt", "kind": {"type": "update", "move_path": null}, "diff": "@@ -1 +1 @@\n-fun main() {}\n+fun main() { println(1) }\n"}
+     ]},
+     {"type": "mcpToolCall", "id": "m1", "server": "docs", "tool": "search", "status": "completed", "arguments": {"q": "compose"},
+      "result": {"content": [{"type": "text", "text": "found 3"}]}, "error": null},
+     {"type": "imageView", "id": "v1", "path": "/work/app/screenshot.png"},
+     {"type": "webSearch", "id": "w1", "query": "jetpack compose lazycolumn"},
+     {"type": "hologramCall", "id": "x1", "payload": 42},
+     {"type": "agentMessage", "id": "a2", "text": "完了しました。", "phase": "final_answer"}
+    ]
+   },
+   {
+    "id": "turn-2",
+    "status": "failed",
+    "startedAt": 1789600050,
+    "error": {"message": "{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"model requires a newer version\"}}"},
+    "items": [
+     {"type": "userMessage", "id": "u2", "content": [{"type": "text", "text": "続けて", "text_elements": []}]}
+    ]
+   }
+  ]
+ }
+}

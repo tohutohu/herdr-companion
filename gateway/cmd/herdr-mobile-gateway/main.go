@@ -21,6 +21,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/logging"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/claude"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/codex"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/sessions"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/uploads"
 )
@@ -98,7 +99,9 @@ func serve(args []string) error {
 	go up.RunCleanup(ctx, time.Hour)
 
 	claudeProvider := claude.New(cfg.ClaudeConfigDir, hc, sink)
-	svc := sessions.New(hc, time.Duration(cfg.OfflineSessionDays)*24*time.Hour, claudeProvider)
+	codexProvider := codex.New(cfg.CodexBinary, cfg.CodexDaemonSock, hc, sink)
+	go codexProvider.Run(ctx)
+	svc := sessions.New(hc, time.Duration(cfg.OfflineSessionDays)*24*time.Hour, claudeProvider, codexProvider)
 
 	srv := &http.Server{
 		Addr:              cfg.Listen,
