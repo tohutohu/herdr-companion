@@ -67,7 +67,7 @@ class PrefetchWorker(context: Context, params: WorkerParameters) : CoroutineWork
 
     // Required for expedited work on Android 11 and lower.
     override suspend fun getForegroundInfo(): ForegroundInfo {
-        val n = NotificationCompat.Builder(applicationContext, Notifications.CHANNEL_COMPLETED)
+        val n = NotificationCompat.Builder(applicationContext, Notifications.CHANNEL_SYNC)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("Syncing session")
             .setSilent(true)

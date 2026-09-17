@@ -15,20 +15,30 @@ import com.tohutohu.herdrmobile.R
 import com.tohutohu.herdrmobile.data.api.Status
 
 object Notifications {
-    const val CHANNEL_COMPLETED = "completed"
+    // A channel's importance cannot be raised after it is created, so the
+    // suffix is bumped whenever the level changes and the old id is dropped.
+    const val CHANNEL_COMPLETED = "completed_v2"
     const val CHANNEL_ATTENTION = "attention"
     const val CHANNEL_ERRORS = "errors"
+    /** Background syncing: must never interrupt, unlike the session channels. */
+    const val CHANNEL_SYNC = "sync"
     const val EXTRA_SESSION_ID = "session_id"
+
+    private val RETIRED_CHANNELS = listOf("completed")
 
     fun createChannels(context: Context) {
         val nm = context.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannels(
             listOf(
-                NotificationChannel(CHANNEL_COMPLETED, "Completed", NotificationManager.IMPORTANCE_DEFAULT),
+                // All three pop up as a heads-up: an agent that stopped is
+                // worth looking at right away.
+                NotificationChannel(CHANNEL_COMPLETED, "Completed", NotificationManager.IMPORTANCE_HIGH),
                 NotificationChannel(CHANNEL_ATTENTION, "Needs attention", NotificationManager.IMPORTANCE_HIGH),
                 NotificationChannel(CHANNEL_ERRORS, "Errors", NotificationManager.IMPORTANCE_HIGH),
+                NotificationChannel(CHANNEL_SYNC, "Syncing", NotificationManager.IMPORTANCE_LOW),
             ),
         )
+        RETIRED_CHANNELS.forEach { nm.deleteNotificationChannel(it) }
     }
 
     fun channelFor(status: String): String = when (status) {
@@ -61,6 +71,8 @@ object Notifications {
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            // Ignored from API 26 on, but it keeps the intent explicit.
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(sessionIntent(context, sessionId))
             .build()
         // One notification per session: a newer state replaces the older one.
