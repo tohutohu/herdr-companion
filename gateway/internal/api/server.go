@@ -8,8 +8,10 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -63,6 +65,7 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("GET /v1/sessions/{id}/messages/{mid}/images/{n}", s.getImage)
 	api.HandleFunc("GET /v1/sessions/{id}/files", s.listFiles)
 	api.HandleFunc("GET /v1/sessions/{id}/files/content", s.fileContent)
+	api.HandleFunc("GET /v1/sessions/{id}/files/stat", s.fileStat)
 	api.HandleFunc("GET /v1/sessions/{id}/terminal", s.readTerminal)
 	api.HandleFunc("POST /v1/sessions/{id}/terminal", s.writeTerminal)
 	api.HandleFunc("POST /v1/uploads", s.upload)
@@ -369,17 +372,55 @@ func (s *Server) fileContent(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, id, "file_content", err)
 		return
 	}
-	f, size, ctype, err := files.Open(roots, p)
+	download := r.URL.Query().Get("download") == "1"
+	limit := int64(files.MaxFileSize)
+	if download {
+		limit = 0
+	}
+	f, size, ctype, err := files.Open(roots, p, limit)
 	if err != nil {
 		s.fileError(id, p, err)
 		s.fail(w, r, id, "file_content", err)
 		return
 	}
 	defer f.Close()
+	if download {
+		w.Header().Set("Content-Type", ctype)
+		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filepath.Base(f.Name())}))
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		var mod time.Time
+		if st, err := f.Stat(); err == nil {
+			mod = st.ModTime()
+		}
+		// ServeContent handles Range so interrupted downloads can resume.
+		http.ServeContent(w, r, "", mod, f)
+		return
+	}
 	w.Header().Set("Content-Type", ctype)
 	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	io.Copy(w, f)
+}
+
+func (s *Server) fileStat(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	p := r.URL.Query().Get("path")
+	if p == "" {
+		s.fail(w, r, id, "file_stat", badRequest("path is required"))
+		return
+	}
+	roots, err := s.roots(r.Context(), id)
+	if err != nil {
+		s.fail(w, r, id, "file_stat", err)
+		return
+	}
+	info, err := files.Stat(roots, p)
+	if err != nil {
+		s.fileError(id, p, err)
+		s.fail(w, r, id, "file_stat", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, info)
 }
 
 func (s *Server) fileError(id, path string, err error) {

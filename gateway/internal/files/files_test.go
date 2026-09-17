@@ -29,7 +29,7 @@ func setup(t *testing.T) (root, outside string) {
 func Testワークスペース配下のファイルは読める(t *testing.T) {
 	root, _ := setup(t)
 	for _, p := range []string{"src/main.go", "./src/../src/main.go", filepath.Join(root, "src/main.go"), "link-in/main.go"} {
-		f, _, ctype, err := Open([]string{root}, p)
+		f, _, ctype, err := Open([]string{root}, p, MaxFileSize)
 		if err != nil {
 			t.Errorf("%s: %v", p, err)
 			continue
@@ -40,7 +40,7 @@ func Testワークスペース配下のファイルは読める(t *testing.T) {
 			t.Errorf("%s: content %q type %q", p, b, ctype)
 		}
 	}
-	_, _, ctype, err := Open([]string{root}, "logo.png")
+	_, _, ctype, err := Open([]string{root}, "logo.png", MaxFileSize)
 	if err != nil || ctype != "image/png" {
 		t.Errorf("png: %q %v", ctype, err)
 	}

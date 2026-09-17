@@ -21,6 +21,7 @@ var (
 	ErrNoRoot    = errors.New("session has no workspace root")
 )
 
+// MaxFileSize limits files returned for in-app preview. Downloads are unlimited.
 const MaxFileSize = 10 << 20
 
 // Names that are never served even inside a workspace.
@@ -118,7 +119,8 @@ func List(roots []string, p string) ([]Entry, error) {
 }
 
 // Open opens a regular file inside the workspace and detects its content type.
-func Open(roots []string, p string) (f *os.File, size int64, contentType string, err error) {
+// maxSize <= 0 means no limit.
+func Open(roots []string, p string, maxSize int64) (f *os.File, size int64, contentType string, err error) {
 	real, err := Resolve(roots, p)
 	if err != nil {
 		return nil, 0, "", err
@@ -130,7 +132,7 @@ func Open(roots []string, p string) (f *os.File, size int64, contentType string,
 	if !st.Mode().IsRegular() {
 		return nil, 0, "", ErrNotFound
 	}
-	if st.Size() > MaxFileSize {
+	if maxSize > 0 && st.Size() > maxSize {
 		return nil, 0, "", ErrTooLarge
 	}
 	f, err = os.Open(real)
@@ -165,4 +167,24 @@ func looksText(b []byte) bool {
 		}
 	}
 	return true
+}
+
+type Info struct {
+	Path        string `json:"path"`
+	Name        string `json:"name"`
+	Size        int64  `json:"size"`
+	ContentType string `json:"contentType"`
+	// Previewable is true when the app can show the file inline.
+	Previewable bool `json:"previewable"`
+}
+
+// Stat describes a file inside the workspace without returning its content.
+func Stat(roots []string, p string) (*Info, error) {
+	f, size, ctype, err := Open(roots, p, 0)
+	if err != nil {
+		return nil, err
+	}
+	f.Close()
+	previewable := size <= MaxFileSize && (strings.HasPrefix(ctype, "image/") || strings.HasPrefix(ctype, "text/"))
+	return &Info{Path: p, Name: filepath.Base(f.Name()), Size: size, ContentType: ctype, Previewable: previewable}, nil
 }

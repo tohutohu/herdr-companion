@@ -32,7 +32,8 @@
       },
       {
         "type": "file",
-        "path": "src/auth.go"
+        "path": "src/auth.go",
+        "size": 49
       }
     ]
   },
@@ -59,7 +60,8 @@
       {
         "type": "file",
         "path": "src/auth.go",
-        "line": 3
+        "line": 3,
+        "size": 49
       }
     ]
   },

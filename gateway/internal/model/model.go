@@ -77,6 +77,7 @@ type Block struct {
 	URL         string       `json:"url,omitempty"` // image: gateway-relative URL
 	Path        string       `json:"path,omitempty"`
 	Line        int          `json:"line,omitempty"`
+	Size        int64        `json:"size,omitempty"` // file: bytes
 	Interaction *Interaction `json:"interaction,omitempty"`
 }
 

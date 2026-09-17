@@ -30,16 +30,16 @@ func ExtractFileRefs(text, root string) []Block {
 			continue
 		}
 		line, _ := strconv.Atoi(m[2])
-		rel, ok := RelativeExisting(root, p)
+		b, ok := FileRef(root, p, line)
 		if !ok {
 			continue
 		}
-		key := rel + ":" + m[2]
+		key := b.Path + ":" + m[2]
 		if seen[key] {
 			continue
 		}
 		seen[key] = true
-		out = append(out, Block{Type: BlockFile, Path: rel, Line: line})
+		out = append(out, b)
 		if len(out) >= maxFileRefs {
 			break
 		}
@@ -47,10 +47,11 @@ func ExtractFileRefs(text, root string) []Block {
 	return out
 }
 
-// RelativeExisting resolves p against root and returns the root-relative path
-// when it names an existing regular file inside root. This is only a hint for
-// link generation; access control happens in the files package.
-func RelativeExisting(root, p string) (string, bool) {
+// FileRef resolves p against root and returns a file block with the
+// root-relative path when p names an existing regular file inside root. This
+// is only a hint for link generation; access control happens in the files
+// package.
+func FileRef(root, p string, line int) (Block, bool) {
 	abs := p
 	if !filepath.IsAbs(p) {
 		abs = filepath.Join(root, p)
@@ -58,13 +59,13 @@ func RelativeExisting(root, p string) (string, bool) {
 	abs = filepath.Clean(abs)
 	rel, err := filepath.Rel(root, abs)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, "../") {
-		return "", false
+		return Block{}, false
 	}
 	st, err := os.Stat(abs)
 	if err != nil || !st.Mode().IsRegular() {
-		return "", false
+		return Block{}, false
 	}
-	return rel, true
+	return Block{Type: BlockFile, Path: rel, Line: line, Size: st.Size()}, true
 }
 
 // Truncate shortens s to at most n runes, marking the cut.

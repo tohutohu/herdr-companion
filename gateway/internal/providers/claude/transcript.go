@@ -566,12 +566,12 @@ func (t *Transcript) toolUseBlocks(b contentBlock, res toolResult, answered, pen
 			p = str("notebook_path")
 		}
 		blocks = append(blocks, model.TextBlock(b.Name+" "+model.DisplayPath(opt.Root, p)))
-		if rel, ok := model.RelativeExisting(opt.Root, p); ok {
-			line := 0
-			if off, ok := in["offset"].(float64); ok {
-				line = int(off)
-			}
-			blocks = append(blocks, model.Block{Type: model.BlockFile, Path: rel, Line: line})
+		line := 0
+		if off, ok := in["offset"].(float64); ok {
+			line = int(off)
+		}
+		if fb, ok := model.FileRef(opt.Root, p, line); ok {
+			blocks = append(blocks, fb)
 		}
 	case "Glob", "Grep":
 		blocks = append(blocks, model.TextBlock(b.Name+" "+str("pattern")))

@@ -212,8 +212,8 @@ func convertItem(raw json.RawMessage, ts time.Time, opt convertOptions) (model.M
 		blocks := []model.Block{model.TextBlock(text)}
 		for _, a := range it.CommandActions {
 			if a.Type == "read" && a.Path != "" {
-				if rel, ok := model.RelativeExisting(opt.Root, a.Path); ok {
-					blocks = append(blocks, model.Block{Type: model.BlockFile, Path: rel})
+				if fb, ok := model.FileRef(opt.Root, a.Path, 0); ok {
+					blocks = append(blocks, fb)
 				}
 			}
 		}
@@ -223,8 +223,8 @@ func convertItem(raw json.RawMessage, ts time.Time, opt convertOptions) (model.M
 		var files []model.Block
 		for _, ch := range it.Changes {
 			parts = append(parts, fmt.Sprintf("%s %s\n%s", changeKind(ch.Kind), model.DisplayPath(opt.Root, ch.Path), strings.TrimRight(ch.Diff, "\n")))
-			if rel, ok := model.RelativeExisting(opt.Root, ch.Path); ok {
-				files = append(files, model.Block{Type: model.BlockFile, Path: rel})
+			if fb, ok := model.FileRef(opt.Root, ch.Path, 0); ok {
+				files = append(files, fb)
 			}
 		}
 		text := model.Truncate(strings.Join(parts, "\n"), maxToolOutput)

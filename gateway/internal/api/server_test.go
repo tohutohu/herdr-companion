@@ -15,6 +15,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/archive"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/config"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/files"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/launcher"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
@@ -308,6 +309,37 @@ func Testファイル取得はワークスペース外を拒否する(t *testing
 	resp, body = do(t, ts, tok, "GET", "/v1/sessions/fake:s1/files", nil, "")
 	if resp.StatusCode != 200 || !strings.Contains(string(body), `"main.go"`) {
 		t.Errorf("list status %d body %s", resp.StatusCode, body)
+	}
+}
+
+func Test大きなファイルはプレビュー不可でダウンロード指定なら上限なしで取得できる(t *testing.T) {
+	ts, fp, _, tok := newTestServer(t)
+	big := bytes.Repeat([]byte{0}, files.MaxFileSize+1)
+	os.WriteFile(filepath.Join(fp.root, "app.apk"), big, 0o644)
+
+	resp, body := do(t, ts, tok, "GET", "/v1/sessions/fake:s1/files/stat?path=app.apk", nil, "")
+	var info files.Info
+	json.Unmarshal(body, &info)
+	if resp.StatusCode != 200 || info.Size != int64(len(big)) || info.Name != "app.apk" || info.Previewable {
+		t.Errorf("stat status %d info %+v", resp.StatusCode, info)
+	}
+	resp, body = do(t, ts, tok, "GET", "/v1/sessions/fake:s1/files/stat?path=main.go", nil, "")
+	json.Unmarshal(body, &info)
+	if resp.StatusCode != 200 || !info.Previewable {
+		t.Errorf("text stat status %d info %+v", resp.StatusCode, info)
+	}
+
+	resp, _ = do(t, ts, tok, "GET", "/v1/sessions/fake:s1/files/content?path=app.apk", nil, "")
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Errorf("preview status = %d", resp.StatusCode)
+	}
+	resp, body = do(t, ts, tok, "GET", "/v1/sessions/fake:s1/files/content?path=app.apk&download=1", nil, "")
+	if resp.StatusCode != 200 || len(body) != len(big) || !strings.Contains(resp.Header.Get("Content-Disposition"), `filename=app.apk`) {
+		t.Errorf("download status %d len %d disposition %q", resp.StatusCode, len(body), resp.Header.Get("Content-Disposition"))
+	}
+	resp, _ = do(t, ts, tok, "GET", "/v1/sessions/fake:s1/files/content?path=/etc/hosts&download=1", nil, "")
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("outside download status = %d", resp.StatusCode)
 	}
 }
 

@@ -10,15 +10,15 @@ func Testテキスト中の存在するファイル参照だけをリンクに�
 	root := t.TempDir()
 	os.MkdirAll(filepath.Join(root, "src", "auth"), 0o755)
 	os.WriteFile(filepath.Join(root, "src", "auth", "middleware.go"), []byte("x"), 0o644)
-	os.WriteFile(filepath.Join(root, "README.md"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(root, "README.md"), []byte("# readme"), 0o644)
 
 	text := "修正しました。src/auth/middleware.go:42 と `README.md` を参照。" +
 		"存在しない nope.go や v1.2.3、https://example.com/a.go、../outside.go は無視。" +
 		"絶対パス " + filepath.Join(root, "README.md") + " も可。src/auth/middleware.go:42 は重複。"
 	got := ExtractFileRefs(text, root)
 	want := []Block{
-		{Type: BlockFile, Path: "src/auth/middleware.go", Line: 42},
-		{Type: BlockFile, Path: "README.md"},
+		{Type: BlockFile, Path: "src/auth/middleware.go", Line: 42, Size: 1},
+		{Type: BlockFile, Path: "README.md", Size: 8},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %+v, want %+v", got, want)
