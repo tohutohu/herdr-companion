@@ -43,14 +43,18 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -65,6 +69,7 @@ import com.tohutohu.herdrmobile.ui.agentSettingsLabel
 import com.tohutohu.herdrmobile.ui.sessions.SessionRef
 import com.tohutohu.herdrmobile.ui.sessions.rememberSessionActions
 import com.tohutohu.herdrmobile.ui.statusStyle
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -106,6 +111,18 @@ fun SessionDetailScreen(
         val nearBottom = listState.layoutInfo.visibleItemsInfo.any { it.key == prev || it.key == lastId }
         if (nearBottom) listState.animateScrollToItem(0)
     }
+
+    // Messages hidden above the viewport or under the pinned panel feed the panel.
+    var panelHeight by remember { mutableIntStateOf(0) }
+    val stack by remember(messages) {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            val bottomEdge = info.viewportEndOffset + info.afterContentPadding
+            val top = info.visibleItemsInfo.filter { bottomEdge - it.offset > panelHeight }.maxOfOrNull { it.index }
+            if (top == null) FlowStack.EMPTY else flowStack(messages, messages.lastIndex - top)
+        }
+    }
+    val scope = rememberCoroutineScope()
 
     Scaffold(
         topBar = {
@@ -177,24 +194,36 @@ fun SessionDetailScreen(
             if (messages.isEmpty()) {
                 Text("Loading…", modifier = Modifier.padding(16.dp))
             }
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(vertical = 8.dp),
-                reverseLayout = true,
-            ) {
-                itemsIndexed(messages.asReversed(), key = { _, m -> m.id }) { r, m ->
-                    val i = messages.lastIndex - r
-                    MessageItem(
-                        message = m,
-                        showRole = i == 0 || messages[i - 1].role != m.role,
+            Box(Modifier.fillMaxSize()) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(vertical = 8.dp),
+                    reverseLayout = true,
+                ) {
+                    itemsIndexed(messages.asReversed(), key = { _, m -> m.id }) { r, m ->
+                        val i = messages.lastIndex - r
+                        MessageItem(
+                            message = m,
+                            showRole = i == 0 || messages[i - 1].role != m.role,
+                            providerName = session?.providerName ?: "Agent",
+                            resolveUrl = api::absolute,
+                            onOpenFile = onOpenFile,
+                            onOpenImage = { onOpenImage(api.absolute(it)) },
+                            onOpenTerminal = onOpenTerminal,
+                            interactionsEnabled = !sending,
+                            onRespond = vm::respond,
+                        )
+                    }
+                }
+                Box(Modifier.align(Alignment.TopCenter).onSizeChanged { panelHeight = it.height }) {
+                    FlowStackPanel(
+                        stack = stack,
                         providerName = session?.providerName ?: "Agent",
-                        resolveUrl = api::absolute,
-                        onOpenFile = onOpenFile,
-                        onOpenImage = { onOpenImage(api.absolute(it)) },
-                        onOpenTerminal = onOpenTerminal,
-                        interactionsEnabled = !sending,
-                        onRespond = vm::respond,
+                        onJump = { id ->
+                            val i = messages.indexOfFirst { it.id == id }
+                            if (i >= 0) scope.launch { listState.animateScrollToItem(messages.lastIndex - i) }
+                        },
                     )
                 }
             }
