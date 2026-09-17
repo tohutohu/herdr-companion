@@ -102,6 +102,59 @@ func TestClaudeのAskUserQuestionを構造化して回答結果も表示でき�
 	}
 }
 
+func TestClaudeの作業中に送ったメッセージも会話に表示される(t *testing.T) {
+	tr, rec, ws := loadFixture(t, "queued_message.jsonl")
+	working := &providers.Live{PaneID: "w1:p1", HerdrStatus: herdr.StatusWorking}
+	msgs := tr.Messages(ParseOptions{SessionID: "claude:test", Root: ws, Live: working, Sink: rec})
+	assertGolden(t, "queued_message.golden.json", msgs)
+	if len(rec.Entries) != 0 {
+		t.Errorf("dead letters = %+v, want none", rec.Entries)
+	}
+
+	texts := func(ms []model.Message) []string {
+		var out []string
+		for _, m := range ms {
+			for _, b := range m.Blocks {
+				if b.Type == model.BlockText {
+					out = append(out, string(m.Role)+":"+b.Text)
+				}
+			}
+		}
+		return out
+	}
+	count := func(ms []model.Message, want string) int {
+		n := 0
+		for _, s := range texts(ms) {
+			if s == want {
+				n++
+			}
+		}
+		return n
+	}
+	// ターンに取り込まれた分は attachment からのみ、キュー経由で
+	// 通常のプロンプトになった分は user エントリからのみ表示する
+	if n := count(msgs, "user:ごめん、テストも直して"); n != 1 {
+		t.Errorf("取り込まれたメッセージ = %d 件, want 1 (%v)", n, texts(msgs))
+	}
+	if n := count(msgs, "user:CIも直して"); n != 1 {
+		t.Errorf("キューから実行されたメッセージ = %d 件, want 1 (%v)", n, texts(msgs))
+	}
+	// まだ待機中の分は末尾に出す
+	last := msgs[len(msgs)-1]
+	if last.Role != model.RoleUser || last.Blocks[0].Text != "ついでに README も更新して" {
+		t.Errorf("待機中のメッセージが末尾にない: %+v", last)
+	}
+
+	// 動いていないセッションでは、送られないまま残ったキューは表示しない
+	offline := tr.Messages(ParseOptions{SessionID: "claude:test", Root: ws, Sink: rec})
+	if n := count(offline, "user:ついでに README も更新して"); n != 0 {
+		t.Errorf("停止中に待機中メッセージを表示した: %v", texts(offline))
+	}
+	if n := count(offline, "user:ごめん、テストも直して"); n != 1 {
+		t.Errorf("停止中の取り込み済みメッセージ = %d 件, want 1", n)
+	}
+}
+
 func TestClaudeの承認待ちツールはブロック中のみ承認インタラクションになる(t *testing.T) {
 	tr, _, _ := loadFixture(t, "pending_approval.jsonl")
 

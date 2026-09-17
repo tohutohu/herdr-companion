@@ -28,7 +28,9 @@ type entry struct {
 	IsAPIErrorMessage bool            `json:"isApiErrorMessage"`
 	Message           *apiMessage     `json:"message"`
 	Subtype           string          `json:"subtype"`
-	Content           json.RawMessage `json:"content"`        // system entries
+	Content           json.RawMessage `json:"content"`   // system and queue-operation entries
+	Operation         string          `json:"operation"` // queue-operation entries
+	Attachment        *attachment     `json:"attachment"`
 	Effort            string          `json:"effort"`         // assistant entries
 	PermissionMode    string          `json:"permissionMode"` // user prompts and permission-mode entries
 	AITitle           string          `json:"aiTitle"`
@@ -39,6 +41,13 @@ type apiMessage struct {
 	Role    string          `json:"role"`
 	Model   string          `json:"model"`
 	Content json.RawMessage `json:"content"`
+}
+
+// attachment is the payload of an "attachment" entry. Only queued_command
+// carries conversation content.
+type attachment struct {
+	Type   string `json:"type"`
+	Prompt string `json:"prompt"`
 }
 
 type contentBlock struct {
@@ -62,7 +71,7 @@ type imageSource struct {
 
 // Metadata-only entry types that never carry conversation content.
 var ignoredTypes = map[string]bool{
-	"attachment": true, "last-prompt": true, "mode": true, "atis-latch": true,
+	"last-prompt": true, "mode": true, "atis-latch": true,
 	"permission-mode": true, "queue-operation": true, "pr-link": true,
 	"file-history-snapshot": true, "file-history-delta": true, "cost-state": true,
 	"summary": true, "ai-title": true, "custom-title": true, "agent-name": true,
@@ -76,6 +85,9 @@ var ignoredSystemSubtypes = map[string]bool{
 const (
 	toolAskUserQuestion = "AskUserQuestion"
 	maxToolOutput       = 1500
+	// attachmentQueuedCommand marks a prompt the user sent while the agent was
+	// working, once it is taken into the running turn.
+	attachmentQueuedCommand = "queued_command"
 )
 
 // ParseOptions carries context needed while converting.
@@ -212,6 +224,11 @@ func (t *Transcript) Messages(opt ParseOptions) []model.Message {
 		msgs := t.convert(e, t.raws[i], results, pending, opt)
 		out = append(out, msgs...)
 	}
+	// Only a running session can still pick up what is queued; in an ended
+	// transcript leftovers are prompts the user never sent.
+	if opt.Live != nil {
+		out = append(out, queuedPrompts(t.entries)...)
+	}
 	return out
 }
 
@@ -228,6 +245,8 @@ func (t *Transcript) convert(e *entry, raw []byte, results map[string]toolResult
 		return t.convertAssistant(e, raw, results, pending, opt)
 	case e.Type == "system":
 		return convertSystem(e, raw, opt)
+	case e.Type == "attachment":
+		return absorbedPrompt(e)
 	case ignoredTypes[e.Type]:
 		return nil
 	default:
@@ -405,11 +424,94 @@ func toolResultBlocks(b contentBlock, sessionID, messageID string, imageIndex in
 	return out, used
 }
 
-func convertSystem(e *entry, raw []byte, opt ParseOptions) []model.Message {
-	text := ""
-	if len(e.Content) > 0 && e.Content[0] == '"' {
-		json.Unmarshal(e.Content, &text)
+// absorbedPrompt renders a message the user sent while the agent was working.
+// Claude Code queues such a prompt and, when it takes it into the running turn,
+// records it as a queued_command attachment: it never becomes a user entry, so
+// without this the message is missing from the conversation.
+func absorbedPrompt(e *entry) []model.Message {
+	if e.Attachment == nil || e.Attachment.Type != attachmentQueuedCommand {
+		return nil // hooks, reminders and the other attachment kinds: metadata
 	}
+	role, text := userText(e.Attachment.Prompt)
+	if text == "" {
+		return nil
+	}
+	return []model.Message{{ID: e.UUID, Role: role, Timestamp: e.Timestamp, Blocks: []model.Block{model.TextBlock(text)}}}
+}
+
+// queuedPrompts returns the prompts still waiting in Claude Code's queue: sent
+// while the agent was busy and not picked up yet. They are shown at the end of
+// the conversation so a message sent from the app is visible right away; each
+// is replaced by the real entry once the agent takes it.
+func queuedPrompts(entries []*entry) []model.Message {
+	absorbed := map[time.Time]bool{}
+	for _, e := range entries {
+		if e.Type == "attachment" && e.Attachment != nil && e.Attachment.Type == attachmentQueuedCommand {
+			absorbed[e.Timestamp] = true
+		}
+	}
+	var queue []*entry
+	for _, e := range entries {
+		if e.Type != "queue-operation" {
+			continue
+		}
+		switch e.Operation {
+		case "enqueue":
+			queue = append(queue, e)
+		case "dequeue", "remove":
+			if i := queueIndex(queue, e.contentText()); i >= 0 {
+				queue = append(queue[:i:i], queue[i+1:]...)
+			}
+		}
+	}
+	var out []model.Message
+	for _, e := range queue {
+		if absorbed[e.Timestamp] {
+			continue // already shown from its attachment
+		}
+		role, text := userText(e.contentText())
+		if text == "" {
+			continue
+		}
+		out = append(out, model.Message{
+			ID:        "queued:" + e.Timestamp.UTC().Format(time.RFC3339Nano),
+			Role:      role,
+			Timestamp: e.Timestamp,
+			Blocks:    []model.Block{model.TextBlock(text)},
+		})
+	}
+	return out
+}
+
+// queueIndex locates the entry a dequeue or remove refers to. The queue is
+// FIFO and a dequeue carries no content, so it takes the head.
+func queueIndex(queue []*entry, content string) int {
+	if len(queue) == 0 {
+		return -1
+	}
+	if content == "" {
+		return 0
+	}
+	for i, e := range queue {
+		if e.contentText() == content {
+			return i
+		}
+	}
+	return -1
+}
+
+// contentText decodes the plain string carried by system and queue-operation
+// entries.
+func (e *entry) contentText() string {
+	var s string
+	if len(e.Content) > 0 && e.Content[0] == '"' {
+		json.Unmarshal(e.Content, &s)
+	}
+	return s
+}
+
+func convertSystem(e *entry, raw []byte, opt ParseOptions) []model.Message {
+	text := e.contentText()
 	switch {
 	case e.Subtype == "local_command":
 		_, t := userText(text)

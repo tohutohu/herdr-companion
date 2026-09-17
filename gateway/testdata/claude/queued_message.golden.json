@@ -1,0 +1,95 @@
+[
+  {
+    "id": "u1",
+    "role": "user",
+    "timestamp": "2026-09-01T00:00:00Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "ログイン処理を直して"
+      }
+    ]
+  },
+  {
+    "id": "a1",
+    "role": "assistant",
+    "timestamp": "2026-09-01T00:00:05Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "Read src/auth.go"
+      },
+      {
+        "type": "file",
+        "path": "src/auth.go",
+        "size": 49
+      }
+    ]
+  },
+  {
+    "id": "u2",
+    "role": "tool",
+    "timestamp": "2026-09-01T00:00:08Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "package auth"
+      }
+    ]
+  },
+  {
+    "id": "at1",
+    "role": "user",
+    "timestamp": "2026-09-01T00:00:07Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "ごめん、テストも直して"
+      }
+    ]
+  },
+  {
+    "id": "a2",
+    "role": "assistant",
+    "timestamp": "2026-09-01T00:00:12Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "直しました"
+      }
+    ]
+  },
+  {
+    "id": "u3",
+    "role": "user",
+    "timestamp": "2026-09-01T00:00:21Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "CIも直して"
+      }
+    ]
+  },
+  {
+    "id": "a3",
+    "role": "assistant",
+    "timestamp": "2026-09-01T00:00:25Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "テストを実行\n$ go test ./..."
+      }
+    ]
+  },
+  {
+    "id": "queued:2026-09-01T00:00:30Z",
+    "role": "user",
+    "timestamp": "2026-09-01T00:00:30Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "ついでに README も更新して"
+      }
+    ]
+  }
+]
