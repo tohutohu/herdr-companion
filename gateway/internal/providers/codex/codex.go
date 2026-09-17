@@ -220,8 +220,9 @@ func (p *Provider) Summary(ctx context.Context, nativeID string, live *providers
 }
 
 func summaryFromThread(th *Thread) providers.Summary {
+	info := infoFromRollout(th.Path)
 	s := providers.Summary{NativeID: th.ID, Cwd: th.Cwd, Model: th.Model, LastMessage: providers.OneLine(th.Preview, 160),
-		Context: contextFromRollout(th.Path)}
+		Context: info.context(), Cost: info.cost(th.Model)}
 	if th.Name != nil {
 		s.Title = *th.Name
 	}

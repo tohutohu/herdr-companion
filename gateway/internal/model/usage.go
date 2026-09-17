@@ -50,6 +50,16 @@ type ContextUsage struct {
 	UsedPercent  int   `json:"usedPercent"`
 }
 
+// Cost is what a session's tokens are worth at the providers' list API
+// rates. Agents running on a subscription are not billed this money, so it
+// reads as "what this conversation would have cost through the API".
+type Cost struct {
+	USD float64 `json:"usd"`
+	// Estimated marks a total the gateway priced from token counts. False
+	// means the agent reported the figure itself.
+	Estimated bool `json:"estimated"`
+}
+
 // NewContextUsage returns nil unless both numbers are known, so clients can
 // tell "not reported" from "context is empty".
 func NewContextUsage(used, window int64) *ContextUsage {

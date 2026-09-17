@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -548,5 +549,52 @@ func Test使用量の記録がないセッションはコンテキスト不明�
 	}
 	if c := tr.summary(ParseOptions{}).Context; c != nil {
 		t.Errorf("context = %+v, want nil", c)
+	}
+}
+
+func TestClaudeのコストは応答ごとのトークン数から見積もる(t *testing.T) {
+	// 同じ応答がブロックごとに複数行書かれるので、message.idで一度だけ数える。
+	usage := `"usage":{"input_tokens":1000,"cache_read_input_tokens":1000000,"output_tokens":10000,` +
+		`"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":20000}}`
+	lines := []string{
+		`{"type":"user","uuid":"u1","timestamp":"2026-09-01T00:00:00Z","message":{"role":"user","content":"hi"}}`,
+		`{"type":"assistant","uuid":"a1","timestamp":"2026-09-01T00:00:01Z","message":{"id":"msg_1","role":"assistant","model":"claude-opus-5","content":[{"type":"text","text":"hello"}],` + usage + `}}`,
+		`{"type":"assistant","uuid":"a2","timestamp":"2026-09-01T00:00:01Z","message":{"id":"msg_1","role":"assistant","model":"claude-opus-5","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{}}],` + usage + `}}`,
+	}
+	decode := func(ls []string) *Transcript {
+		tr, err := Decode(strings.NewReader(strings.Join(ls, "\n")), "claude:test", deadletter.Nop{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tr
+	}
+	// 入力1000*$5 + 1時間キャッシュ書き込み20000*$10 + 読み出し1000000*$0.5 + 出力10000*$25 ($/Mトークン)
+	want := 0.005 + 0.2 + 0.5 + 0.25
+	c := decode(lines).summary(ParseOptions{}).Cost
+	if c == nil || math.Abs(c.USD-want) > 1e-9 || !c.Estimated {
+		t.Errorf("cost = %+v, want %v(見積もり)", c, want)
+	}
+	// サブエージェント(sidechain)も同じセッションの支払いなので足す。
+	lines = append(lines,
+		`{"type":"assistant","uuid":"s1","isSidechain":true,"timestamp":"2026-09-01T00:00:02Z","message":{"id":"msg_2","role":"assistant","model":"claude-haiku-4-5","content":[{"type":"text","text":"sub"}],"usage":{"input_tokens":1000000,"output_tokens":0}}}`)
+	if c := decode(lines).summary(ParseOptions{}).Cost; c == nil || math.Abs(c.USD-(want+1)) > 1e-9 {
+		t.Errorf("cost with sidechain = %+v, want %v", c, want+1)
+	}
+	// 終了したセッションはClaude Code自身が記録した正確な金額を使う。
+	lines = append(lines, `{"type":"cost-state","sessionId":"test","totalCostUSD":2.5}`)
+	if c := decode(lines).summary(ParseOptions{}).Cost; c == nil || c.USD != 2.5 || c.Estimated {
+		t.Errorf("cost from cost-state = %+v, want 2.5(実績)", c)
+	}
+}
+
+func Test応答のないセッションはコストを表示しない(t *testing.T) {
+	tr, err := Decode(strings.NewReader(
+		`{"type":"user","uuid":"u1","timestamp":"2026-09-01T00:00:00Z","message":{"role":"user","content":"hi"}}`,
+	), "claude:test", deadletter.Nop{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := tr.summary(ParseOptions{}).Cost; c != nil {
+		t.Errorf("cost = %+v, want nil", c)
 	}
 }

@@ -43,6 +43,8 @@ type Session struct {
 	Archived     bool      `json:"archived,omitempty"`
 	// Context is how full the model's context window is; nil when unknown.
 	Context *ContextUsage `json:"context,omitempty"`
+	// Cost is what the session's tokens are worth; nil when nothing is known.
+	Cost *Cost `json:"cost,omitempty"`
 }
 
 type Role string

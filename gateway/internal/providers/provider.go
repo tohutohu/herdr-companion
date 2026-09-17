@@ -59,6 +59,8 @@ type Summary struct {
 	// Context is how full the session's context window is, when the provider
 	// reports it.
 	Context *model.ContextUsage
+	// Cost is what the session spent, priced from its token counts.
+	Cost *model.Cost
 }
 
 type Provider interface {

@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -582,14 +583,14 @@ func TestCodexのコンテキスト使用量をrolloutファイルの末尾か�
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	c := contextFromRollout(path)
+	c := infoFromRollout(path).context()
 	if c == nil || c.UsedTokens != 64_600 || c.WindowTokens != 258_400 || c.UsedPercent != 25 {
 		t.Errorf("context = %+v", c)
 	}
-	if c := contextFromRollout(filepath.Join(t.TempDir(), "missing.jsonl")); c != nil {
+	if c := infoFromRollout(filepath.Join(t.TempDir(), "missing.jsonl")).context(); c != nil {
 		t.Errorf("missing rollout = %+v, want nil", c)
 	}
-	if c := contextFromRollout(""); c != nil {
+	if c := infoFromRollout("").context(); c != nil {
 		t.Errorf("empty path = %+v, want nil", c)
 	}
 }
@@ -605,7 +606,34 @@ func TestCodexのrolloutが大きくても末尾だけ読んで使用量を求�
 	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if c := contextFromRollout(path); c == nil || c.UsedPercent != 50 {
+	if c := infoFromRollout(path).context(); c == nil || c.UsedPercent != 50 {
 		t.Errorf("context = %+v", c)
+	}
+}
+
+func TestCodexのコストはスレッドの累計トークンから見積もる(t *testing.T) {
+	lines := []string{
+		`{"type":"session_meta","payload":{"id":"thread-1"}}`,
+		`{"type":"event_msg","payload":{"type":"token_count","info":{` +
+			`"total_token_usage":{"input_tokens":1000000,"cached_input_tokens":900000,"output_tokens":100000},` +
+			`"last_token_usage":{"total_tokens":64600},"model_context_window":258400}}}`,
+	}
+	path := filepath.Join(t.TempDir(), "rollout.jsonl")
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info := infoFromRollout(path)
+	// gpt-5.6-luna: 非キャッシュ入力100000*$0.2 + キャッシュ読み出し900000*$0.02 + 出力100000*$1.2
+	want := 0.02 + 0.018 + 0.12
+	c := info.cost("gpt-5.6-luna")
+	if c == nil || math.Abs(c.USD-want) > 1e-9 || !c.Estimated {
+		t.Errorf("cost = %+v, want %v(見積もり)", c, want)
+	}
+	// 単価の分からないモデルとロールアウトのないスレッドは金額なし。
+	if c := info.cost("codex-auto-review"); c != nil {
+		t.Errorf("unknown model cost = %+v, want nil", c)
+	}
+	if c := infoFromRollout("").cost("gpt-5.6-luna"); c != nil {
+		t.Errorf("missing rollout cost = %+v, want nil", c)
 	}
 }

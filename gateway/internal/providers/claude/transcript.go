@@ -12,6 +12,7 @@ import (
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/pricing"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 )
 
@@ -35,9 +36,15 @@ type entry struct {
 	PermissionMode    string          `json:"permissionMode"` // user prompts and permission-mode entries
 	AITitle           string          `json:"aiTitle"`
 	CustomTitle       string          `json:"customTitle"`
+	// TotalCostUSD is on cost-state entries, which Claude Code writes when
+	// the session ends.
+	TotalCostUSD float64 `json:"totalCostUSD"`
 }
 
 type apiMessage struct {
+	// ID identifies one reply. Claude Code writes an entry per content
+	// block, so several entries can share it.
+	ID      string          `json:"id"`
 	Role    string          `json:"role"`
 	Model   string          `json:"model"`
 	Content json.RawMessage `json:"content"`
@@ -52,6 +59,12 @@ type apiUsage struct {
 	CacheCreationTokens int64 `json:"cache_creation_input_tokens"`
 	CacheReadTokens     int64 `json:"cache_read_input_tokens"`
 	OutputTokens        int64 `json:"output_tokens"`
+	// CacheCreation splits the cached tokens by TTL, which have different
+	// prices. Absent on older transcripts.
+	CacheCreation *struct {
+		Ephemeral5m int64 `json:"ephemeral_5m_input_tokens"`
+		Ephemeral1h int64 `json:"ephemeral_1h_input_tokens"`
+	} `json:"cache_creation"`
 }
 
 func (u *apiUsage) total() int64 {
@@ -163,11 +176,20 @@ type Transcript struct {
 	ModelID string
 	// ContextTokens is the context the newest main-chain reply consumed.
 	ContextTokens int64
+	// ReportedCostUSD is the total Claude Code itself recorded; it writes one
+	// only when the session ends, so a running session has none.
+	ReportedCostUSD float64
+	// tokens is every reply's usage, per model id. Subagents bill to the
+	// session that started them, so sidechains count too.
+	tokens map[string]pricing.Tokens
+	// counted guards against counting a reply once per content block.
+	counted map[string]bool
 }
 
 // Decode reads JSONL. Broken lines are dead-lettered and skipped.
 func Decode(r io.Reader, sessionID string, sink deadletter.Sink) (*Transcript, error) {
-	t := &Transcript{toolNames: map[string]string{}}
+	t := &Transcript{toolNames: map[string]string{},
+		tokens: map[string]pricing.Tokens{}, counted: map[string]bool{}}
 	br := bufio.NewReaderSize(r, 1<<20)
 	for {
 		line, err := br.ReadBytes('\n')
@@ -222,6 +244,9 @@ func (t *Transcript) add(e *entry, raw []byte) {
 			}
 		}
 	}
+	if e.Type == "cost-state" && e.TotalCostUSD > 0 {
+		t.ReportedCostUSD = e.TotalCostUSD
+	}
 	if e.Type == "attachment" && e.Attachment != nil && e.Attachment.Type == attachmentModel && e.Attachment.Identity != nil {
 		t.ModelID = e.Attachment.Identity.ModelID
 	}
@@ -238,6 +263,7 @@ func (t *Transcript) add(e *entry, raw []byte) {
 		if e.Effort != "" {
 			t.Effort = e.Effort
 		}
+		t.addUsage(e)
 		blocks, _ := decodeBlocks(e.Message.Content)
 		for _, b := range blocks {
 			if b.Type == "tool_use" {
@@ -245,6 +271,39 @@ func (t *Transcript) add(e *entry, raw []byte) {
 			}
 		}
 	}
+}
+
+// addUsage adds one reply's tokens to the session total. All the entries of
+// one reply repeat the same usage, so each reply is counted once.
+func (t *Transcript) addUsage(e *entry) {
+	u := e.Message.Usage
+	if u == nil || e.Message.ID == "" || t.counted[e.Message.ID] {
+		return
+	}
+	t.counted[e.Message.ID] = true
+	tk := t.tokens[e.Message.Model]
+	tk.Input += u.InputTokens
+	tk.Output += u.OutputTokens
+	tk.CacheRead += u.CacheReadTokens
+	if u.CacheCreation != nil {
+		tk.CacheWrite5m += u.CacheCreation.Ephemeral5m
+		tk.CacheWrite1h += u.CacheCreation.Ephemeral1h
+	} else {
+		tk.CacheWrite5m += u.CacheCreationTokens
+	}
+	t.tokens[e.Message.Model] = tk
+}
+
+// cost is what the session spent. Claude Code's own total is exact but only
+// arrives when the session ends, so until then the token counts are priced.
+func (t *Transcript) cost() *model.Cost {
+	if t.ReportedCostUSD > 0 {
+		return &model.Cost{USD: t.ReportedCostUSD}
+	}
+	if usd, ok := pricing.Total(t.tokens); ok {
+		return &model.Cost{USD: usd, Estimated: true}
+	}
+	return nil
 }
 
 // Messages converts the transcript into provider-neutral messages.
@@ -914,7 +973,8 @@ func (t *Transcript) imageAt(messageID string, index int) (*imageSource, bool) {
 func (t *Transcript) summary(opt ParseOptions) providers.Summary {
 	s := providers.Summary{Cwd: t.Cwd, Title: t.Title, UpdatedAt: t.Updated,
 		Model: t.Model, Effort: t.Effort, Mode: modeLabel(t.PermissionMode),
-		Context: model.NewContextUsage(t.ContextTokens, contextWindow(t.ModelID, t.Model))}
+		Context: model.NewContextUsage(t.ContextTokens, contextWindow(t.ModelID, t.Model)),
+		Cost:    t.cost()}
 	msgs := t.Messages(ParseOptions{SessionID: opt.SessionID, Live: opt.Live, Sink: deadletter.Nop{}})
 	for i := len(msgs) - 1; i >= 0; i-- {
 		m := msgs[i]
