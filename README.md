@@ -140,6 +140,16 @@ launchctl bootout gui/$(id -u)/com.herdr-mobile.gateway
    herdr-mobile-gateway notify-test
    ```
 
+CLI で行う場合（firebase CLI と gcloud にログイン済みのとき）:
+
+```bash
+PROJECT=herdr-client-android
+firebase apps:create android "Herdr Mobile" --package-name com.tohutohu.herdrmobile --project $PROJECT
+firebase apps:sdkconfig ANDROID <表示された App ID> --project $PROJECT --out android/app/google-services.json
+gcloud iam service-accounts keys create ~/.config/herdr-mobile/firebase-service-account.json \
+  --iam-account firebase-adminsdk-fbsvc@$PROJECT.iam.gserviceaccount.com --project $PROJECT
+```
+
 Gateway は FCM HTTP v1 API に data-only / priority HIGH のメッセージを送り、アプリが通知表示とログ先読み（WorkManager）を行います。
 `google-services.json` なしでもアプリはビルド・動作しますが、通知は無効になります。
 

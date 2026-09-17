@@ -17,6 +17,7 @@ import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import com.tohutohu.herdrmobile.R
 import com.tohutohu.herdrmobile.container
+import com.tohutohu.herdrmobile.data.api.GatewayException
 import java.util.concurrent.TimeUnit
 import android.util.Log
 
@@ -54,6 +55,10 @@ class PrefetchWorker(context: Context, params: WorkerParameters) : CoroutineWork
             repo.refreshMessages(sessionId)
             runCatching { repo.refreshSessions() }
             Result.success()
+        } catch (e: GatewayException) {
+            Log.w(TAG, "prefetch failed for $sessionId: ${e.code} ${e.message}")
+            // Client errors (unknown session, bad token) will not fix themselves.
+            if (e.code in 400..499 || runAttemptCount >= 3) Result.failure() else Result.retry()
         } catch (e: Exception) {
             Log.w(TAG, "prefetch failed for $sessionId", e)
             if (runAttemptCount < 3) Result.retry() else Result.failure()
