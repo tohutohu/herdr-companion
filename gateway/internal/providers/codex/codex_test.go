@@ -288,7 +288,8 @@ func (f *fakeServer) serve(p *pipeTransport, send func(any)) {
 		case "thread/loaded/list":
 			result = map[string]any{"data": []string{"thread-000001"}}
 		case "thread/resume":
-			result = map[string]any{"thread": map[string]any{"id": "thread-000001", "status": map[string]any{"type": "active", "activeFlags": []string{"waitingOnApproval"}}}}
+			result = map[string]any{"approvalPolicy": "on-request", "sandbox": map[string]any{"type": "readOnly"},
+				"thread": map[string]any{"id": "thread-000001", "status": map[string]any{"type": "active", "activeFlags": []string{"waitingOnApproval"}}}}
 			send(map[string]any{"id": 0, "method": "item/commandExecution/requestApproval", "params": map[string]any{"threadId": "thread-000001", "turnId": "t1", "itemId": "i1", "startedAtMs": 1, "command": "rm -rf build"}})
 		case "thread/read":
 			result = map[string]any{"thread": f.thread}
@@ -361,7 +362,8 @@ func TestDaemon接続時は構造化APIで送信と承認を行う(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sum.Status != model.StatusWaitingApproval || sum.LastMessage != "build" {
+	// 購読時の approvalPolicy / sandbox からモードが分かる
+	if sum.Status != model.StatusWaitingApproval || sum.LastMessage != "build" || sum.Mode != "Read only" {
 		t.Errorf("summary = %+v", sum)
 	}
 	msgs, err := p.Messages(ctx, "thread-000001", nil)
@@ -421,8 +423,8 @@ func TestDaemonがなければペインへ入力しブロック中は端末フ�
 
 func Testスレッドのモデルをサマリーに含める(t *testing.T) {
 	th, _ := loadThread(t, "normal.json")
-	if s := summaryFromThread(th); s.Model != "gpt-6-astra" {
-		t.Errorf("model = %q", s.Model)
+	if s := summaryFromThread(th); s.Model != "gpt-6-astra" || s.Effort != "medium" {
+		t.Errorf("model = %q effort = %q", s.Model, s.Effort)
 	}
 }
 
@@ -464,5 +466,41 @@ func Test起動引数にdaemon接続とモデル指定を含める(t *testing.T)
 	}
 	if got := strings.Join(p.LaunchArgs("gpt-6-mini"), " "); got != "--remote unix://"+sock+" --model gpt-6-mini" {
 		t.Errorf("with daemon = %q", got)
+	}
+}
+
+func Testスレッド設定からモードの表示名を決める(t *testing.T) {
+	cases := map[string]string{
+		`{"approvalPolicy":"on-request","sandboxPolicy":{"type":"workspaceWrite"},"collaborationMode":{"mode":"plan","settings":{}}}`:    "Plan",
+		`{"approvalPolicy":"on-request","sandboxPolicy":{"type":"workspaceWrite"},"collaborationMode":{"mode":"default","settings":{}}}`: "Default",
+		`{"approvalPolicy":"on-request","sandboxPolicy":{"type":"readOnly"}}`:                                                            "Read only",
+		`{"approvalPolicy":"never","sandboxPolicy":{"type":"dangerFullAccess"}}`:                                                         "Full access",
+		`{"approvalPolicy":"untrusted","sandboxPolicy":{"type":"workspaceWrite"}}`:                                                       "workspaceWrite · untrusted",
+		`{"approvalPolicy":{"granular":{"rules":true}},"sandboxPolicy":{"type":"readOnly"}}`:                                             "readOnly · custom approvals",
+		`{}`: "",
+	}
+	for in, want := range cases {
+		var s threadSettings
+		if err := json.Unmarshal([]byte(in), &s); err != nil {
+			t.Fatal(err)
+		}
+		if got := s.label(); got != want {
+			t.Errorf("%s: got %q want %q", in, got, want)
+		}
+	}
+}
+
+func Test設定変更通知でスレッドのモードを更新する(t *testing.T) {
+	d := newDaemonConn(deadletter.Nop{})
+	if m := d.mode("th1"); m != "" {
+		t.Errorf("unknown thread mode = %q", m)
+	}
+	d.Notification("thread/settings/updated", json.RawMessage(`{"threadId":"th1","threadSettings":{"model":"gpt-6-astra","approvalPolicy":"on-request","sandboxPolicy":{"type":"workspaceWrite"},"collaborationMode":{"mode":"plan","settings":{}}}}`))
+	if m := d.mode("th1"); m != "Plan" {
+		t.Errorf("mode = %q", m)
+	}
+	d.Notification("thread/closed", json.RawMessage(`{"threadId":"th1"}`))
+	if m := d.mode("th1"); m != "" {
+		t.Errorf("closed thread mode = %q", m)
 	}
 }

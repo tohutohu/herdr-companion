@@ -214,6 +214,7 @@ func (p *Provider) Summary(ctx context.Context, nativeID string, live *providers
 	}
 	if d := p.currentDaemon(); d != nil {
 		s.Pending, s.Status = d.state(nativeID, live)
+		s.Mode = d.mode(nativeID)
 	}
 	return &s, nil
 }
@@ -222,6 +223,9 @@ func summaryFromThread(th *Thread) providers.Summary {
 	s := providers.Summary{NativeID: th.ID, Cwd: th.Cwd, Model: th.Model, LastMessage: providers.OneLine(th.Preview, 160)}
 	if th.Name != nil {
 		s.Title = *th.Name
+	}
+	if th.Effort != nil {
+		s.Effort = *th.Effort
 	}
 	if th.UpdatedAt > 0 {
 		s.UpdatedAt = time.Unix(th.UpdatedAt, 0).UTC()
@@ -253,6 +257,7 @@ func (p *Provider) Recent(ctx context.Context, since time.Time) ([]providers.Sum
 		s := summaryFromThread(th)
 		if d != nil {
 			s.Pending, s.Status = d.state(th.ID, nil)
+			s.Mode = d.mode(th.ID)
 		}
 		out = append(out, s)
 	}
@@ -384,6 +389,44 @@ type daemonConn struct {
 	subscribed map[string]bool
 	status     map[string]ThreadStatus
 	pending    map[string]map[string]pendingRequest // thread -> request id -> request
+	settings   map[string]threadSettings
+}
+
+// threadSettings is the part of a loaded thread's settings shown as its mode.
+type threadSettings struct {
+	ApprovalPolicy    json.RawMessage `json:"approvalPolicy"`
+	SandboxPolicy     *sandboxPolicy  `json:"sandboxPolicy"`
+	CollaborationMode *struct {
+		Mode string `json:"mode"`
+	} `json:"collaborationMode"`
+}
+
+type sandboxPolicy struct {
+	Type string `json:"type"`
+}
+
+// label follows the Codex TUI: Plan mode, else the permission preset.
+func (s threadSettings) label() string {
+	if s.CollaborationMode != nil && s.CollaborationMode.Mode == "plan" {
+		return "Plan"
+	}
+	if s.SandboxPolicy == nil {
+		return ""
+	}
+	var approval string
+	if json.Unmarshal(s.ApprovalPolicy, &approval) != nil {
+		approval = "custom approvals"
+	}
+	switch sb := s.SandboxPolicy.Type; {
+	case sb == "dangerFullAccess" && approval == "never":
+		return "Full access"
+	case sb == "readOnly" && approval == "on-request":
+		return "Read only"
+	case sb == "workspaceWrite" && approval == "on-request":
+		return "Default"
+	default:
+		return sb + " · " + approval
+	}
 }
 
 func newDaemonConn(sink deadletter.Sink) *daemonConn {
@@ -392,6 +435,7 @@ func newDaemonConn(sink deadletter.Sink) *daemonConn {
 		subscribed: map[string]bool{},
 		status:     map[string]ThreadStatus{},
 		pending:    map[string]map[string]pendingRequest{},
+		settings:   map[string]threadSettings{},
 	}
 }
 
@@ -417,7 +461,9 @@ func (d *daemonConn) sync(ctx context.Context) error {
 			continue
 		}
 		var r struct {
-			Thread Thread `json:"thread"`
+			Thread         Thread          `json:"thread"`
+			ApprovalPolicy json.RawMessage `json:"approvalPolicy"`
+			Sandbox        *sandboxPolicy  `json:"sandbox"`
 		}
 		if err := d.c.call(cctx, "thread/resume", map[string]any{"threadId": id}, &r); err != nil {
 			slog.Warn("codex thread subscribe failed", "provider", providerName, "session_id", gatewayID(id), "operation", "thread/resume", "error", err)
@@ -425,6 +471,11 @@ func (d *daemonConn) sync(ctx context.Context) error {
 		}
 		d.mu.Lock()
 		d.subscribed[id] = true
+		if r.Sandbox != nil {
+			if _, known := d.settings[id]; !known {
+				d.settings[id] = threadSettings{ApprovalPolicy: r.ApprovalPolicy, SandboxPolicy: r.Sandbox}
+			}
+		}
 		if r.Thread.Status.Type != "" {
 			d.status[id] = r.Thread.Status
 		}
@@ -436,6 +487,7 @@ func (d *daemonConn) sync(ctx context.Context) error {
 			delete(d.subscribed, id)
 			delete(d.status, id)
 			delete(d.pending, id)
+			delete(d.settings, id)
 		}
 	}
 	d.mu.Unlock()
@@ -486,11 +538,17 @@ func (d *daemonConn) Notification(method string, params json.RawMessage) {
 		ThreadID  string          `json:"threadId"`
 		RequestID json.RawMessage `json:"requestId"`
 		Status    ThreadStatus    `json:"status"`
+		Settings  threadSettings  `json:"threadSettings"`
 	}
 	switch method {
 	case "serverRequest/resolved":
 		json.Unmarshal(params, &p)
 		d.resolve(p.ThreadID, string(p.RequestID))
+	case "thread/settings/updated":
+		json.Unmarshal(params, &p)
+		d.mu.Lock()
+		d.settings[p.ThreadID] = p.Settings
+		d.mu.Unlock()
 	case "thread/status/changed":
 		json.Unmarshal(params, &p)
 		d.mu.Lock()
@@ -507,11 +565,23 @@ func (d *daemonConn) Notification(method string, params json.RawMessage) {
 		delete(d.subscribed, p.ThreadID)
 		delete(d.status, p.ThreadID)
 		delete(d.pending, p.ThreadID)
+		delete(d.settings, p.ThreadID)
 		d.mu.Unlock()
 	}
 }
 
 func (d *daemonConn) Closed(error) {}
+
+// mode is the display label of a loaded thread's mode, or "" when unknown.
+func (d *daemonConn) mode(thread string) string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	s, ok := d.settings[thread]
+	if !ok {
+		return ""
+	}
+	return s.label()
+}
 
 func (d *daemonConn) resolve(thread, reqID string) {
 	d.mu.Lock()

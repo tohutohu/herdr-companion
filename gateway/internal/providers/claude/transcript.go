@@ -28,7 +28,9 @@ type entry struct {
 	IsAPIErrorMessage bool            `json:"isApiErrorMessage"`
 	Message           *apiMessage     `json:"message"`
 	Subtype           string          `json:"subtype"`
-	Content           json.RawMessage `json:"content"` // system entries
+	Content           json.RawMessage `json:"content"`        // system entries
+	Effort            string          `json:"effort"`         // assistant entries
+	PermissionMode    string          `json:"permissionMode"` // user prompts and permission-mode entries
 	AITitle           string          `json:"aiTitle"`
 	CustomTitle       string          `json:"customTitle"`
 }
@@ -100,7 +102,9 @@ type Transcript struct {
 	Updated   time.Time
 	// Model is the latest model: from assistant replies, or a `/model`
 	// change made after them.
-	Model string
+	Model          string
+	Effort         string
+	PermissionMode string
 }
 
 // Decode reads JSONL. Broken lines are dead-lettered and skipped.
@@ -134,6 +138,11 @@ func (t *Transcript) add(e *entry, raw []byte) {
 	if e.Cwd != "" {
 		t.Cwd = e.Cwd
 	}
+	// A mode change is recorded on the next prompt; permission-mode entries
+	// are re-appended later with the current mode.
+	if e.PermissionMode != "" {
+		t.PermissionMode = e.PermissionMode
+	}
 	switch e.Type {
 	case "custom-title":
 		if e.CustomTitle != "" {
@@ -158,6 +167,9 @@ func (t *Transcript) add(e *entry, raw []byte) {
 	if e.Type == "assistant" && e.Message != nil {
 		if m := e.Message.Model; m != "" && m != "<synthetic>" {
 			t.Model = m
+		}
+		if e.Effort != "" {
+			t.Effort = e.Effort
 		}
 		blocks, _ := decodeBlocks(e.Message.Content)
 		for _, b := range blocks {
@@ -720,7 +732,8 @@ func (t *Transcript) imageAt(messageID string, index int) (*imageSource, bool) {
 
 // summary extracts list information.
 func (t *Transcript) summary(opt ParseOptions) providers.Summary {
-	s := providers.Summary{Cwd: t.Cwd, Title: t.Title, UpdatedAt: t.Updated, Model: t.Model}
+	s := providers.Summary{Cwd: t.Cwd, Title: t.Title, UpdatedAt: t.Updated,
+		Model: t.Model, Effort: t.Effort, Mode: modeLabel(t.PermissionMode)}
 	msgs := t.Messages(ParseOptions{SessionID: opt.SessionID, Live: opt.Live, Sink: deadletter.Nop{}})
 	for i := len(msgs) - 1; i >= 0; i-- {
 		m := msgs[i]
@@ -772,4 +785,25 @@ func Replay(raw []byte) ([]model.Message, []deadletter.Entry) {
 	t, _ := Decode(bytes.NewReader(raw), "claude:replay", rec)
 	msgs := t.Messages(ParseOptions{SessionID: "claude:replay", Sink: rec})
 	return msgs, rec.Entries
+}
+
+// modeLabel names Claude Code permission modes like its status line does.
+func modeLabel(mode string) string {
+	switch mode {
+	case "":
+		return ""
+	case "default", "manual":
+		return "Default"
+	case "acceptEdits":
+		return "Accept edits"
+	case "plan":
+		return "Plan"
+	case "auto":
+		return "Auto"
+	case "bypassPermissions":
+		return "Bypass permissions"
+	case "dontAsk":
+		return "Don't ask"
+	}
+	return mode
 }

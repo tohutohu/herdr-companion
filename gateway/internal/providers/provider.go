@@ -51,6 +51,10 @@ type Summary struct {
 	Status model.Status
 	// Model is the model the session last used, as the provider names it.
 	Model string
+	// Effort is the reasoning effort (low, medium, high, ...), if known.
+	Effort string
+	// Mode is a display label for the permission / collaboration mode.
+	Mode string
 }
 
 type Provider interface {

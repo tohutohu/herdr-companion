@@ -37,6 +37,8 @@ type Session struct {
 	LastMessage  string    `json:"lastMessage,omitempty"`
 	PaneID       string    `json:"paneId,omitempty"` // where it currently runs; not an identity
 	Model        string    `json:"model,omitempty"`  // last used model, provider naming
+	Effort       string    `json:"effort,omitempty"` // reasoning effort: low, medium, high, ...
+	Mode         string    `json:"mode,omitempty"`   // display label, e.g. "Plan", "Accept edits"
 	CanSend      bool      `json:"canSend"`
 }
 

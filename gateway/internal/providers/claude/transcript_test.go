@@ -294,9 +294,9 @@ func TestProviderはtranscriptを探して承認をペインへ送る(t *testing
 func Test信頼ダイアログの2種類の文言に対応するキーを返す(t *testing.T) {
 	p := New(t.TempDir(), &fakeTerminal{}, deadletter.Nop{})
 	cases := map[string]string{
-		"Quick safety check\n ❯ No, exit\n   Yes, I trust this folder": "down,enter",
+		"Quick safety check\n ❯ No, exit\n   Yes, I trust this folder":               "down,enter",
 		"Do you trust the files in this folder?\n ❯ 1. Yes, proceed\n   2. No, exit": "enter",
-		"❯ Try \"fix lint errors\"": "",
+		"❯ Try \"fix lint errors\"":                                                  "",
 	}
 	for screen, want := range cases {
 		if got := strings.Join(p.StartupKeys(screen), ","); got != want {
@@ -305,10 +305,11 @@ func Test信頼ダイアログの2種類の文言に対応するキーを返す(
 	}
 }
 
-func TestClaudeのモデルは最新の応答と_modelコマンドから決まる(t *testing.T) {
+func TestClaudeのモデルとエフォートとモードは最新の記録から決まる(t *testing.T) {
 	lines := []string{
 		`{"type":"user","uuid":"u1","timestamp":"2026-09-01T00:00:00Z","message":{"role":"user","content":"hi"}}`,
-		`{"type":"assistant","uuid":"a1","timestamp":"2026-09-01T00:00:01Z","message":{"role":"assistant","model":"claude-opus-5","content":[{"type":"text","text":"hello"}]}}`,
+		`{"type":"permission-mode","permissionMode":"acceptEdits","sessionId":"s"}`,
+		`{"type":"assistant","uuid":"a1","timestamp":"2026-09-01T00:00:01Z","effort":"high","message":{"role":"assistant","model":"claude-opus-5","content":[{"type":"text","text":"hello"}]}}`,
 		`{"type":"assistant","uuid":"a2","timestamp":"2026-09-01T00:00:02Z","message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"No response requested."}]}}`,
 	}
 	decode := func(ls []string) *Transcript {
@@ -318,8 +319,8 @@ func TestClaudeのモデルは最新の応答と_modelコマンドから決ま�
 		}
 		return tr
 	}
-	if s := decode(lines).summary(ParseOptions{}); s.Model != "claude-opus-5" {
-		t.Errorf("model = %q", s.Model)
+	if s := decode(lines).summary(ParseOptions{}); s.Model != "claude-opus-5" || s.Effort != "high" || s.Mode != "Accept edits" {
+		t.Errorf("summary = %+v", s)
 	}
 	lines = append(lines,
 		`{"type":"user","uuid":"u2","timestamp":"2026-09-01T00:00:03Z","message":{"role":"user","content":"<local-command-stdout>Set model to `+"`Sonnet 5`"+` and saved as your default for new sessions</local-command-stdout>"}}`)
@@ -327,9 +328,10 @@ func TestClaudeのモデルは最新の応答と_modelコマンドから決ま�
 		t.Errorf("model after /model = %q", s.Model)
 	}
 	lines = append(lines,
-		`{"type":"assistant","uuid":"a3","timestamp":"2026-09-01T00:00:04Z","message":{"role":"assistant","model":"claude-sonnet-5","content":[{"type":"text","text":"ok"}]}}`)
-	if s := decode(lines).summary(ParseOptions{}); s.Model != "claude-sonnet-5" {
-		t.Errorf("model after reply = %q", s.Model)
+		`{"type":"user","uuid":"u3","permissionMode":"plan","timestamp":"2026-09-01T00:00:03Z","message":{"role":"user","content":"plan it"}}`,
+		`{"type":"assistant","uuid":"a3","timestamp":"2026-09-01T00:00:04Z","effort":"max","message":{"role":"assistant","model":"claude-sonnet-5","content":[{"type":"text","text":"ok"}]}}`)
+	if s := decode(lines).summary(ParseOptions{}); s.Model != "claude-sonnet-5" || s.Effort != "max" || s.Mode != "Plan" {
+		t.Errorf("summary after changes = %+v", s)
 	}
 }
 

@@ -141,9 +141,16 @@ catalog API, so its list is the CLI aliases (`fable`, `opus`, `sonnet`,
 Claude session is not offered because `/model` also changes the user's
 default for new sessions.
 
-Sessions report the model they last used (`model`): for Claude the `model`
-of the newest assistant reply, or the display name from a later `/model`
-change; for Codex the thread's `model`.
+Sessions report the model they last used (`model`), the reasoning effort
+(`effort`) and a display label for the mode (`mode`):
+
+- Claude: `model` / `effort` of the newest assistant reply (or the display
+  name from a later `/model`); `permissionMode` of the latest entry that has
+  one. A Shift+Tab change is recorded with the next prompt, and
+  `permission-mode` entries are re-appended later with the current mode.
+- Codex: the thread's `model` / `reasoningEffort`. The mode is only known for
+  threads loaded on the shared daemon: `thread/resume` gives the approval
+  policy and sandbox, `thread/settings/updated` also gives Plan mode.
 
 Directories are restricted to `workspaceRoots` with the same checks as file
 access; new folder names must be a single, non-hidden path segment.
