@@ -282,6 +282,9 @@ var (
 	answerPairRe     = regexp.MustCompile(`"([^"]*)"="([^"]*)"`)
 	modelChangeRe    = regexp.MustCompile("^<local-command-stdout>Set model to `([^`]+)`")
 	systemReminderRe = regexp.MustCompile(`(?s)<system-reminder>.*?</system-reminder>`)
+	taskSummaryRe    = regexp.MustCompile(`(?s)<summary>(.*?)</summary>`)
+	taskEventRe      = regexp.MustCompile(`(?s)<event>(.*?)</event>`)
+	anyTagRe         = regexp.MustCompile(`</?[a-z-]+>`)
 )
 
 // userText normalises the special XML-ish wrappers Claude Code writes for
@@ -314,9 +317,29 @@ func userText(s string) (model.Role, string) {
 	case strings.HasPrefix(s, "<bash-input>"):
 		return model.RoleUser, "! " + strings.TrimSpace(tagPattern.ReplaceAllString(s, "$2"))
 	case strings.HasPrefix(s, "<task-notification>"):
-		return model.RoleSystem, model.Truncate(strings.TrimSpace(tagPattern.ReplaceAllString(s, "$2")), 500)
+		return model.RoleSystem, model.Truncate(taskNotification(s), 500)
 	}
 	return model.RoleUser, s
+}
+
+// taskNotification keeps the human-readable part of a <task-notification>: the
+// summary and, for Monitor notifications, the event lines. The task and tool
+// ids, the output file path and the trailing instruction addressed to the agent
+// are metadata and are dropped. tagPattern cannot be used here: it is
+// non-greedy, so on a multi-tag payload it leaves the ids and a dangling
+// </task-notification> in the text.
+func taskNotification(s string) string {
+	var parts []string
+	if m := taskSummaryRe.FindStringSubmatch(s); m != nil {
+		parts = append(parts, strings.TrimSpace(m[1]))
+	}
+	for _, m := range taskEventRe.FindAllStringSubmatch(s, -1) {
+		parts = append(parts, strings.TrimSpace(m[1]))
+	}
+	if len(parts) == 0 {
+		return strings.TrimSpace(anyTagRe.ReplaceAllString(s, ""))
+	}
+	return strings.Join(parts, "\n")
 }
 
 func (t *Transcript) convertUser(e *entry, raw []byte, results map[string]toolResult, opt ParseOptions) []model.Message {

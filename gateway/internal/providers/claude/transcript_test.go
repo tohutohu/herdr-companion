@@ -463,3 +463,47 @@ func Test起動時のモデルとエフォート指定をCLI引数にする(t *t
 		}
 	}
 }
+
+func Testタスク通知は要約とイベントだけをシステムメッセージにする(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "バックグラウンドコマンドの完了通知",
+			in: "<task-notification>\n<task-id>bi5dkt941</task-id>\n" +
+				"<tool-use-id>toolu_013xbZk4Ba1RWRpdEbGQQc1f</tool-use-id>\n" +
+				"<output-file>/private/tmp/claude-501/x/tasks/bi5dkt941.output</output-file>\n" +
+				"<status>completed</status>\n" +
+				"<summary>Background command \"Wait for emulator boot\" completed (exit code 0)</summary>\n" +
+				"</task-notification>",
+			want: `Background command "Wait for emulator boot" completed (exit code 0)`,
+		},
+		{
+			name: "Monitorのイベント通知",
+			in: "<task-notification>\n<task-id>bdoll59l8</task-id>\n" +
+				"<summary>Monitor event: \"CI の完了状況\"</summary>\n" +
+				"<event>[17:40:54] 01-get-user-resource: OK rc=0 1539s</event>\n" +
+				"If this event is something the user would act on now, send a PushNotification.\n" +
+				"</task-notification>",
+			want: "Monitor event: \"CI の完了状況\"\n[17:40:54] 01-get-user-resource: OK rc=0 1539s",
+		},
+		{
+			name: "要約がなければタグを落として本文だけ残す",
+			in:   "<task-notification>\n<task-id>abc</task-id>\n</task-notification>",
+			want: "abc",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			role, got := userText(tt.in)
+			if role != model.RoleSystem {
+				t.Errorf("role = %q, want %q", role, model.RoleSystem)
+			}
+			if got != tt.want {
+				t.Errorf("text = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
