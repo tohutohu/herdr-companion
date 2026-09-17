@@ -5,10 +5,24 @@ import com.tohutohu.herdrmobile.data.api.UsageWindowDto
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import java.time.Instant
+import java.time.ZoneOffset
 
 class UsageFormatTest {
-    private fun window(label: String, used: Int, scope: String? = null, resetsAt: String? = null) =
-        UsageWindowDto(key = label, label = label, scope = scope, usedPercent = used, resetsAt = resetsAt)
+    private fun window(
+        label: String,
+        used: Int,
+        scope: String? = null,
+        resetsAt: String? = null,
+        windowMinutes: Int = 0,
+    ) = UsageWindowDto(
+        key = label,
+        label = label,
+        scope = scope,
+        usedPercent = used,
+        windowMinutes = windowMinutes,
+        resetsAt = resetsAt,
+    )
 
     private val claude = UsageProviderDto(
         provider = "claude",
@@ -43,23 +57,38 @@ class UsageFormatTest {
     @Test
     fun `折りたたみ見出しにリセットまでの時間を併記する`() {
         val providers = listOf(
-            claude.copy(windows = listOf(window("5h", 23, resetsAt = "2026-09-18T02:30:00Z"))),
-            codex.copy(windows = listOf(window("7d", 53, resetsAt = "2026-09-24T04:00:00Z"))),
+            claude.copy(windows = listOf(window("5h", 23, resetsAt = "2026-09-18T02:30:00Z", windowMinutes = 300))),
+            codex.copy(windows = listOf(window("7d", 53, resetsAt = "2026-09-24T04:00:00Z", windowMinutes = 10080))),
         )
-        val now = java.time.Instant.parse("2026-09-18T00:15:00Z").toEpochMilli()
+        val now = Instant.parse("2026-09-18T00:15:00Z").toEpochMilli()
 
-        assertEquals("Claude 23% (in 2h 15m) · Codex 53% (in 6d 3h)", usageHeadlineWithReset(providers, now))
+        assertEquals(
+            "Claude 23% (in 2h 15m) · Codex 53% (9/24 04:00)",
+            usageHeadlineWithReset(providers, now, ZoneOffset.UTC),
+        )
     }
 
     @Test
     fun `リセットまでの時間を分と時と日に丸めて表示する`() {
-        val now = java.time.Instant.parse("2026-09-18T00:00:00Z").toEpochMilli()
+        val now = Instant.parse("2026-09-18T00:00:00Z").toEpochMilli()
 
         assertEquals("in 45m", resetCountdown("2026-09-18T00:45:00Z", now))
         assertEquals("in 2h 15m", resetCountdown("2026-09-18T02:15:00Z", now))
         assertEquals("in 2d 3h", resetCountdown("2026-09-20T03:15:00Z", now))
         assertEquals("now", resetCountdown("2026-09-17T23:59:00Z", now))
         assertEquals(null, resetCountdown("not a timestamp", now))
+    }
+
+    @Test
+    fun `週間ウィンドウはリセット日時を表示する`() {
+        val window = window(
+            label = "7d",
+            used = 53,
+            resetsAt = "2026-09-24T04:00:00Z",
+            windowMinutes = 10080,
+        )
+
+        assertEquals("9/24 13:00", resetText(window, 0, ZoneOffset.ofHours(9)))
     }
 
     @Test

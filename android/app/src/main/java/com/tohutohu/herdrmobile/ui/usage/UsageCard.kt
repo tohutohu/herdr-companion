@@ -75,7 +75,7 @@ fun UsageCard(modifier: Modifier = Modifier) {
         }
     }
 
-    // Reset countdowns should continue moving while the card is visible even
+    // Reset labels should continue updating while the card is visible even
     // when the gateway returns the same cached usage snapshot.
     LaunchedEffect(lifecycle) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -187,7 +187,7 @@ private fun WindowRow(window: UsageWindowDto, nowMillis: Long) {
             modifier = Modifier.width(44.dp),
         )
         Text(
-            resetCountdown(window.resetsAt, nowMillis).orEmpty(),
+            resetText(window, nowMillis).orEmpty(),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
