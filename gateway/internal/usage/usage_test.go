@@ -61,7 +61,11 @@ func Testレート制限の出力をウィンドウに変換する(t *testing.T)
 	if len(providers) != 2 {
 		t.Fatalf("providers = %d", len(providers))
 	}
-	codex := providers[0]
+	// The reporter lists Codex first; the gateway pins Claude to the front.
+	claude, codex := providers[0], providers[1]
+	if claude.Provider != "claude" || claude.DisplayName != "Claude" {
+		t.Errorf("claude = %+v", claude)
+	}
 	if codex.Provider != "codex" || codex.DisplayName != "Codex" {
 		t.Errorf("codex = %+v", codex)
 	}
@@ -78,7 +82,6 @@ func Testレート制限の出力をウィンドウに変換する(t *testing.T)
 		t.Errorf("resetsAt = %v", codex.Windows[0].ResetsAt)
 	}
 
-	claude := providers[1]
 	if len(claude.Windows) != 3 {
 		t.Fatalf("claude windows = %+v", claude.Windows)
 	}

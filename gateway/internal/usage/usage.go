@@ -17,6 +17,7 @@ import (
 	"log/slog"
 	"math"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -193,6 +194,9 @@ type cbWindow struct {
 
 var displayNames = map[string]string{"claude": "Claude", "codex": "Codex"}
 
+// providerOrder keeps the list stable; the reporter's own order is not.
+var providerOrder = []string{"claude", "codex"}
+
 func parse(b []byte) ([]model.UsageProvider, error) {
 	var entries []cbEntry
 	if err := json.Unmarshal(b, &entries); err != nil {
@@ -238,7 +242,21 @@ func parse(b []byte) ([]model.UsageProvider, error) {
 		}
 		out = append(out, p)
 	}
+	slices.SortStableFunc(out, func(a, b model.UsageProvider) int {
+		ra, rb := rank(a.Provider), rank(b.Provider)
+		if ra != rb {
+			return ra - rb
+		}
+		return strings.Compare(a.Provider, b.Provider)
+	})
 	return out, nil
+}
+
+func rank(provider string) int {
+	if i := slices.Index(providerOrder, provider); i >= 0 {
+		return i
+	}
+	return len(providerOrder)
 }
 
 func convert(key, scope string, w *cbWindow) (model.UsageWindow, bool) {
