@@ -19,3 +19,6 @@ data class ImageRoute(val url: String)
 
 @Serializable
 data class TerminalRoute(val sessionId: String)
+
+@Serializable
+object NewSessionRoute

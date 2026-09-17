@@ -290,3 +290,17 @@ func TestProviderはtranscriptを探して承認をペインへ送る(t *testing
 		t.Errorf("offline send err = %v", err)
 	}
 }
+
+func Test信頼ダイアログの2種類の文言に対応するキーを返す(t *testing.T) {
+	p := New(t.TempDir(), &fakeTerminal{}, deadletter.Nop{})
+	cases := map[string]string{
+		"Quick safety check\n ❯ No, exit\n   Yes, I trust this folder": "down,enter",
+		"Do you trust the files in this folder?\n ❯ 1. Yes, proceed\n   2. No, exit": "enter",
+		"❯ Try \"fix lint errors\"": "",
+	}
+	for screen, want := range cases {
+		if got := strings.Join(p.StartupKeys(screen), ","); got != want {
+			t.Errorf("%q -> %q, want %q", screen, got, want)
+		}
+	}
+}

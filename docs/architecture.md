@@ -127,6 +127,17 @@ On Android, `PushService` shows the notification (channels *Completed*,
 fetches the session into Room, so tapping the notification opens a populated
 conversation. Foreground screens poll every 3 s (detail) / 5 s (list).
 
+## Starting sessions
+
+`internal/launcher` creates a Herdr workspace in the chosen directory and runs
+`agent.start`. Providers implement `providers.Launchable`: extra CLI arguments
+(Codex attaches to the shared daemon when present) and the keys that accept
+their folder-trust dialog. The dialog is answered only when the request says
+`trust: true`. The native session id is then read from the pane's
+`agent_session`, which the Herdr integration hook reports at startup.
+Directories are restricted to `workspaceRoots` with the same checks as file
+access; new folder names must be a single, non-hidden path segment.
+
 ## Files
 
 `GET /v1/sessions/{id}/files[/content]?path=` serves files under the
@@ -140,6 +151,9 @@ Paths are cleaned, symlink-resolved and must stay inside an allowed root;
 |---|---|---|
 | GET | `/healthz` | no auth |
 | GET | `/v1/sessions` | live + recent offline sessions |
+| POST | `/v1/sessions` | start `{provider, cwd, prompt, trust}` in a new Herdr workspace → `{sessionId?, paneId, warning?}` |
+| GET | `/v1/directories?path=` | workspace roots, or subfolders of `path` |
+| POST | `/v1/directories` | create `{parent, name}` under a root |
 | GET | `/v1/sessions/{id}` | one session |
 | GET | `/v1/sessions/{id}/messages?after=` | `{session, messages}` |
 | POST | `/v1/sessions/{id}/messages` | `{text, uploads[]}` |

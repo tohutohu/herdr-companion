@@ -8,6 +8,7 @@ Mac 上の [Herdr](https://herdr.dev) で動いている Claude Code / Codex の
 - 会話中の画像のインライン表示、Android からの画像送信
 - メッセージ内のファイル参照をタップしてファイルを表示
 - 非対応のダイアログは簡易ターミナル（`pane.read` + キー入力）で操作
+- アプリから新しいセッションを起動（Claude Code / Codex、フォルダの選択・新規作成）
 
 ```text
 Android ──(Tailscale, HTTP + Bearer)──▶ herdr-mobile-gateway (Mac) ──▶ Herdr / Claude Code / Codex
@@ -75,7 +76,18 @@ herdr-mobile-gateway token          # 初回実行で ~/.config/herdr-mobile/con
 }
 ```
 
-任意項目: `fcmCredentialsFile`, `herdrSocket`, `claudeConfigDir`, `codexBinary`, `codexDaemonSocket`, `uploadDir`。
+任意項目: `fcmCredentialsFile`, `herdrSocket`, `claudeConfigDir`, `codexBinary`, `codexDaemonSocket`, `uploadDir`, `workspaceRoots`。
+
+`workspaceRoots`（既定: `~/workspace`、なければホーム）は、アプリからフォルダを選択・作成してセッションを起動できる範囲です。
+
+### アプリからのセッション起動
+
+一覧画面の「New session」で、Claude Code / Codex、作業フォルダ（`workspaceRoots` 配下で選択または新規作成）、最初のプロンプトを指定して起動します。
+Gateway は Herdr に新しいワークスペースを作り、`agent.start` でエージェントを起動します。
+「Trust this folder」をオンにすると、エージェントのフォルダ信頼確認ダイアログに Gateway が「信頼する」と回答します。
+Codex の共有 daemon が動いていれば `codex --remote unix://…` で起動します。
+
+Codex では、Herdr インテグレーションのフックを一度「信頼」する必要があります（Codex 起動時に表示される Hooks の確認画面で `t`）。
 
 ### 認証トークン
 
@@ -107,15 +119,26 @@ herdr-mobile-gateway serve --listen 100.101.102.103:8765
 
 ### launchd で常駐させる
 
+Herdr サーバー（ヘッドレス）と Gateway をそれぞれ LaunchAgent にします。`herdr` TUI は起動中のサーバーにアタッチします。
+
 ```bash
 mkdir -p ~/Library/LaunchAgents ~/.local/state/herdr-mobile
-sed "s#__HOME__#$HOME#g" gateway/deploy/com.herdr-mobile.gateway.plist > ~/Library/LaunchAgents/com.herdr-mobile.gateway.plist
+LISTEN=$(tailscale ip -4):8765
+sed -e "s#__HOME__#$HOME#g" -e "s#__HERDR__#$(which herdr)#g" \
+  gateway/deploy/com.herdr-mobile.herdr-server.plist > ~/Library/LaunchAgents/com.herdr-mobile.herdr-server.plist
+sed -e "s#__HOME__#$HOME#g" -e "s#__LISTEN__#$LISTEN#g" \
+  gateway/deploy/com.herdr-mobile.gateway.plist > ~/Library/LaunchAgents/com.herdr-mobile.gateway.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.herdr-mobile.herdr-server.plist
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.herdr-mobile.gateway.plist
 
-# 再起動 / 停止
+# 状態 / 再起動 / 停止
+launchctl list | grep herdr-mobile
 launchctl kickstart -k gui/$(id -u)/com.herdr-mobile.gateway
 launchctl bootout gui/$(id -u)/com.herdr-mobile.gateway
 ```
+
+Herdr サーバーの plist は PATH を最小にしています。ペインのログインシェルが普段のターミナルと同じ順序で PATH を組み立てるためです（長い PATH を渡すと、古い Homebrew 版 `claude` などが先に見つかることがあります）。
+Herdr サーバーはクラッシュ時のみ自動再起動し、`herdr server stop` による停止は尊重します。
 
 ログ: `~/.local/state/herdr-mobile/gateway.log`（JSON、10MB × 3 世代でローテーション）
 

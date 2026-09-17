@@ -13,6 +13,7 @@ import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 
 class GatewayException(val code: Int, message: String) : IOException(message)
 
@@ -111,6 +112,23 @@ class GatewayApi(
             }
             (resp.header("Content-Type") ?: "application/octet-stream") to resp.body.bytes()
         }
+    }
+
+    suspend fun directories(path: String?): DirListingDto =
+        get(url("v1", "directories", query = mapOf("path" to path)))
+
+    suspend fun createDirectory(parent: String, name: String): String {
+        val body = post(url("v1", "directories"), json.encodeToString(MkdirRequest(parent, name)).toRequestBody(jsonType))
+        return json.decodeFromString<MkdirResponse>(body).path
+    }
+
+    /** Starting an agent can take up to a minute (startup dialogs, session id). */
+    suspend fun startSession(body: StartSessionRequest): StartSessionResponse = withContext(Dispatchers.IO) {
+        val req = request(url("v1", "sessions"))
+            .post(json.encodeToString(body).toRequestBody(jsonType))
+            .build()
+        val slow = http.newBuilder().readTimeout(150, TimeUnit.SECONDS).callTimeout(160, TimeUnit.SECONDS).build()
+        slow.newCall(req).execute().use { resp -> json.decodeFromString(bodyOrThrow(resp)) }
     }
 
     suspend fun registerDevice(name: String, token: String) {

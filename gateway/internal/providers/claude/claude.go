@@ -354,11 +354,15 @@ func singleLine(s string) string {
 
 func (p *Provider) LaunchArgs() []string { return nil }
 
-// StartupKeys accepts Claude Code's workspace trust dialog
-// ("❯ No, exit" / "Yes, I trust this folder").
+// StartupKeys accepts Claude Code's workspace trust dialog. Two variants exist:
+//   - "❯ No, exit" / "Yes, I trust this folder" (No is focused)
+//   - "Do you trust the files in this folder?" "❯ 1. Yes, proceed" (Yes is focused)
 func (p *Provider) StartupKeys(screen string) []string {
-	if strings.Contains(screen, "Yes, I trust this folder") {
+	switch {
+	case strings.Contains(screen, "Yes, I trust this folder"):
 		return []string{"down", "enter"}
+	case strings.Contains(screen, "Do you trust the files in this folder") && strings.Contains(screen, "Yes, proceed"):
+		return []string{"enter"}
 	}
 	return nil
 }

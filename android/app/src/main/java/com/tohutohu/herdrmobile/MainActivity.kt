@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -20,6 +21,8 @@ import com.tohutohu.herdrmobile.ui.DetailRoute
 import com.tohutohu.herdrmobile.ui.FileRoute
 import com.tohutohu.herdrmobile.ui.HerdrTheme
 import com.tohutohu.herdrmobile.ui.ImageRoute
+import com.tohutohu.herdrmobile.ui.NewSessionRoute
+import com.tohutohu.herdrmobile.ui.newsession.NewSessionScreen
 import com.tohutohu.herdrmobile.ui.SessionsRoute
 import com.tohutohu.herdrmobile.ui.SettingsRoute
 import com.tohutohu.herdrmobile.ui.TerminalRoute
@@ -64,6 +67,20 @@ class MainActivity : ComponentActivity() {
                         SessionListScreen(
                             onOpen = { nav.navigate(DetailRoute(it)) },
                             onSettings = { nav.navigate(SettingsRoute) },
+                            onNew = { nav.navigate(NewSessionRoute) },
+                        )
+                    }
+                    composable<NewSessionRoute> {
+                        NewSessionScreen(
+                            onBack = { nav.popBackStack() },
+                            onStarted = { sessionId, warning ->
+                                warning?.let { Toast.makeText(this@MainActivity, it, Toast.LENGTH_LONG).show() }
+                                if (sessionId != null) {
+                                    nav.navigate(DetailRoute(sessionId)) { popUpTo(SessionsRoute) }
+                                } else {
+                                    nav.popBackStack()
+                                }
+                            },
                         )
                     }
                     composable<SettingsRoute> {

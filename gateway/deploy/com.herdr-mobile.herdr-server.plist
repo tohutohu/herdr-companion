@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Keeps a headless Herdr server running so the gateway (and `herdr` TUI
+  clients, which attach to it) always find a session.
+  Replace __HOME__ / __HERDR__ (see README).
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.herdr-mobile.herdr-server</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HERDR__</string>
+        <string>server</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- Keep PATH minimal, like a fresh Terminal: pane login shells build
+             their own PATH from it. A pre-filled PATH changes the resulting
+             order (e.g. an older Homebrew `claude` can win). -->
+        <key>PATH</key>
+        <string>/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>SHELL</key>
+        <string>/bin/zsh</string>
+        <key>LANG</key>
+        <string>ja_JP.UTF-8</string>
+        <key>TERM</key>
+        <string>xterm-256color</string>
+    </dict>
+
+    <key>WorkingDirectory</key>
+    <string>__HOME__</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <!-- Restart after crashes, but respect `herdr server stop`. -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/.local/state/herdr-mobile/herdr-server.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.local/state/herdr-mobile/herdr-server.err.log</string>
+</dict>
+</plist>

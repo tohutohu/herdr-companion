@@ -237,28 +237,35 @@ func (l *Launcher) Start(ctx context.Context, req StartRequest) (*StartResult, e
 }
 
 // passStartupDialog answers a folder-trust dialog when allowed and waits
-// until the agent is no longer blocked.
+// until the agent is ready. Dialogs can appear a moment after Herdr reports
+// the agent, so readiness must be observed on consecutive polls.
 func (l *Launcher) passStartupDialog(ctx context.Context, lp providers.Launchable, pane string, trust bool) bool {
 	deadline := time.Now().Add(l.startTimeout())
-	answered := false
+	readyPolls := 0
 	for time.Now().Before(deadline) {
-		pi, err := l.Herdr.Pane(ctx, pane)
-		if err == nil && pi.AgentStatus != herdr.StatusBlocked && pi.AgentStatus != herdr.StatusUnknown && pi.AgentName() != "" {
-			return true
-		}
-		if !answered {
-			screen, err := l.Herdr.ReadVisible(ctx, pane)
-			if err == nil {
-				if keys := lp.StartupKeys(screen); keys != nil {
-					if !trust {
-						return false
-					}
-					if err := l.Herdr.SendKeys(ctx, pane, keys...); err != nil {
-						return false
-					}
-					answered = true
+		if screen, err := l.Herdr.ReadVisible(ctx, pane); err == nil {
+			if keys := lp.StartupKeys(screen); keys != nil {
+				if !trust {
+					return false
 				}
+				if err := l.Herdr.SendKeys(ctx, pane, keys...); err != nil {
+					return false
+				}
+				readyPolls = 0
+				if !sleep(ctx, l.pollInterval()) {
+					return false
+				}
+				continue
 			}
+		}
+		pi, err := l.Herdr.Pane(ctx, pane)
+		if err == nil && pi.AgentName() != "" && (pi.AgentStatus == herdr.StatusIdle || pi.AgentStatus == herdr.StatusDone || pi.AgentStatus == herdr.StatusWorking) {
+			readyPolls++
+			if readyPolls >= 2 {
+				return true
+			}
+		} else {
+			readyPolls = 0
 		}
 		if !sleep(ctx, l.pollInterval()) {
 			return false

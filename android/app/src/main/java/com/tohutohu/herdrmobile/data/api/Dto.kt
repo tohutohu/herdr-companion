@@ -114,3 +114,21 @@ object Status {
     const val FAILED = "failed"
     const val OFFLINE = "offline"
 }
+
+@Serializable
+data class DirEntryDto(val name: String, val path: String)
+
+@Serializable
+data class DirListingDto(val path: String = "", val parent: String? = null, val entries: List<DirEntryDto> = emptyList())
+
+@Serializable
+data class MkdirRequest(val parent: String, val name: String)
+
+@Serializable
+data class MkdirResponse(val path: String)
+
+@Serializable
+data class StartSessionRequest(val provider: String, val cwd: String, val prompt: String, val trust: Boolean)
+
+@Serializable
+data class StartSessionResponse(val sessionId: String? = null, val paneId: String, val warning: String? = null)

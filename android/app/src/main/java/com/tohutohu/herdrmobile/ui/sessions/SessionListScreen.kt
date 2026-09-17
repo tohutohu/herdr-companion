@@ -11,7 +11,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -48,7 +50,7 @@ private const val LIST_POLL_MS = 5_000L
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SessionListScreen(onOpen: (String) -> Unit, onSettings: () -> Unit) {
+fun SessionListScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onNew: () -> Unit) {
     val repo = LocalContext.current.container.repository
     val sessionsFlow = remember(repo) { repo.observeSessions() }
     val sessions by sessionsFlow.collectAsState(initial = emptyList())
@@ -83,6 +85,13 @@ fun SessionListScreen(onOpen: (String) -> Unit, onSettings: () -> Unit) {
                 actions = {
                     IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, contentDescription = "Settings") }
                 },
+            )
+        },
+        floatingActionButton = {
+            ExtendedFloatingActionButton(
+                onClick = onNew,
+                icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                text = { Text("New session") },
             )
         },
     ) { padding ->
