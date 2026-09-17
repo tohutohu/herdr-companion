@@ -70,6 +70,7 @@ import com.tohutohu.herdrmobile.data.api.Status
 import com.tohutohu.herdrmobile.data.db.SessionEntity
 import com.tohutohu.herdrmobile.ui.ContextBar
 import com.tohutohu.herdrmobile.ui.agentSettingsLabel
+import com.tohutohu.herdrmobile.ui.costLabel
 import com.tohutohu.herdrmobile.ui.sessions.SessionRef
 import com.tohutohu.herdrmobile.ui.sessions.rememberSessionActions
 import com.tohutohu.herdrmobile.ui.statusStyle
@@ -159,11 +160,15 @@ fun SessionDetailScreen(
                         )
                         session?.let {
                             val st = statusStyle(it.status)
+                            val details = listOfNotNull(
+                                agentSettingsLabel(it.model, it.effort, it.mode),
+                                costLabel(it.costUsd, it.costEstimated),
+                            ).joinToString(" · ")
                             Row {
                                 Text("${st.symbol} ${st.label}", color = st.color, style = MaterialTheme.typography.labelMedium)
-                                agentSettingsLabel(it.model, it.effort, it.mode)?.let { label ->
+                                if (details.isNotEmpty()) {
                                     Text(
-                                        " · $label",
+                                        " · $details",
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         style = MaterialTheme.typography.labelMedium,
                                         maxLines = 1,

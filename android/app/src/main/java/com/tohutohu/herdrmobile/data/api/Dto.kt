@@ -25,6 +25,8 @@ data class SessionDto(
     val mode: String? = null,
     /** How full the context window is; null when the agent has not reported it. */
     val context: ContextUsageDto? = null,
+    /** What the session's tokens are worth; null when nothing is known. */
+    val cost: CostDto? = null,
     val archived: Boolean = false,
 ) {
     val isLive get() = status != Status.OFFLINE
@@ -37,6 +39,13 @@ data class ContextUsageDto(
     val windowTokens: Long = 0,
     val usedPercent: Int = 0,
 )
+
+/**
+ * What a session cost at list API rates. [estimated] means the gateway priced
+ * the token counts itself, because the agent reports no total while it runs.
+ */
+@Serializable
+data class CostDto(val usd: Double = 0.0, val estimated: Boolean = false)
 
 @Serializable
 data class SessionsResponse(val sessions: List<SessionDto>)

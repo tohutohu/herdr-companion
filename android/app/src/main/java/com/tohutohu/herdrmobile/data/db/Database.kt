@@ -34,6 +34,9 @@ data class SessionEntity(
     val contextUsedTokens: Long? = null,
     val contextWindowTokens: Long? = null,
     val contextUsedPercent: Int? = null,
+    /** Session cost in USD; null until a turn has run on a priced model. */
+    val costUsd: Double? = null,
+    val costEstimated: Boolean? = null,
     @ColumnInfo(defaultValue = "0")
     val archived: Boolean = false,
     /** Whether the gateway still lists it; stale rows are kept for deep links. */
@@ -109,13 +112,14 @@ interface MessageDao {
 
 @Database(
     entities = [SessionEntity::class, MessageEntity::class],
-    version = 5,
+    version = 6,
     exportSchema = true,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
         AutoMigration(from = 3, to = 4),
         AutoMigration(from = 4, to = 5),
+        AutoMigration(from = 5, to = 6),
     ],
 )
 abstract class AppDatabase : RoomDatabase() {
