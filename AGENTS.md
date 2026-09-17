@@ -85,6 +85,9 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.herdr-mobile.<name>.
 
 - Test names are in Japanese. Parser tests use fixtures in `gateway/testdata/{claude,codex}` (anonymized real data) with golden JSON.
 - New agent output formats: add the raw payload from dead letters as a fixture, then update the adapter.
+- Session costs are priced by `gateway/internal/pricing` from list rates as of
+  2026-09; add a row when an agent starts using a new model (an unknown model
+  is left unpriced, so the app then shows no cost).
 - Subscription limits come from the CodexBar CLI (`brew install --cask codexbar`); neither agent reports them itself. `herdr-mobile-gateway usage` prints one read.
 - Claude dialog key sequences and trust-dialog texts were verified against Claude Code 2.1.274 and Codex 0.154. Re-verify with a test session when those versions change.
 - Commit at each logical step. Commit messages end with the Co-Authored-By trailer; no "Generated with Claude Code" line.
