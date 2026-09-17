@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"os"
 	"path/filepath"
@@ -280,14 +281,55 @@ func TestProviderはtranscriptを探して承認をペインへ送る(t *testing
 		t.Errorf("invalid id err = %v", err)
 	}
 
-	if err := p.Send(context.Background(), id, live, model.Input{Text: "見て", Images: []string{"/tmp/x.png"}}); err != nil {
-		t.Fatal(err)
-	}
-	if last := term.calls[len(term.calls)-1]; last != "prompt:見て\n\n[Attached image: /tmp/x.png]" {
-		t.Errorf("prompt = %q", last)
-	}
 	if err := p.Send(context.Background(), id, nil, model.Input{Text: "x"}); err != providers.ErrNotLive {
 		t.Errorf("offline send err = %v", err)
+	}
+}
+
+func Test画像はパスを個別にブラケットペーストしてから本文を送信する(t *testing.T) {
+	term := &fakeTerminal{}
+	p := New(t.TempDir(), term, deadletter.Nop{})
+	p.keyDelay = 0
+	live := &providers.Live{PaneID: "w1:p1", HerdrStatus: herdr.StatusIdle}
+
+	if err := p.Send(context.Background(), "x", live, model.Input{Text: " 見て ", Images: []string{"/tmp/a.png", "/tmp/b.jpg"}}); err != nil {
+		t.Fatal(err)
+	}
+	want := "text:\x1b[200~/tmp/a.png\x1b[201~|text:\x1b[200~/tmp/b.jpg\x1b[201~|prompt:見て"
+	if got := strings.Join(term.calls, "|"); got != want {
+		t.Errorf("calls = %q, want %q", got, want)
+	}
+}
+
+func Test本文なしの画像だけならペースト後にEnterで送信する(t *testing.T) {
+	term := &fakeTerminal{}
+	p := New(t.TempDir(), term, deadletter.Nop{})
+	p.keyDelay = 0
+	live := &providers.Live{PaneID: "w1:p1", HerdrStatus: herdr.StatusIdle}
+
+	if err := p.Send(context.Background(), "x", live, model.Input{Images: []string{"/tmp/a.png"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(term.calls, "|"); got != "text:\x1b[200~/tmp/a.png\x1b[201~|keys:enter" {
+		t.Errorf("calls = %q", got)
+	}
+	if err := p.Send(context.Background(), "x", live, model.Input{Text: "  "}); err == nil {
+		t.Error("empty message should fail")
+	}
+}
+
+func Testダイアログ表示中は画像をペーストせずagent_blockedを返す(t *testing.T) {
+	term := &fakeTerminal{}
+	p := New(t.TempDir(), term, deadletter.Nop{})
+	live := &providers.Live{PaneID: "w1:p1", HerdrStatus: herdr.StatusBlocked}
+
+	err := p.Send(context.Background(), "x", live, model.Input{Text: "見て", Images: []string{"/tmp/a.png"}})
+	var herr *herdr.Error
+	if !errors.As(err, &herr) || herr.Code != "agent_blocked" {
+		t.Errorf("err = %v, want agent_blocked", err)
+	}
+	if len(term.calls) != 0 {
+		t.Errorf("calls = %v, want none", term.calls)
 	}
 }
 

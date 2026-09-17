@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 )
@@ -184,21 +185,43 @@ func (p *Provider) Image(ctx context.Context, nativeID, messageID string, index 
 	return src.MediaType, data, nil
 }
 
-// Send types the prompt into the Claude Code TUI. Images are passed as file
-// paths, which Claude Code reads with its Read tool.
+// Send types the prompt into the Claude Code TUI. Each image path is pasted
+// on its own (bracketed paste), which Claude Code turns into an [Image #N]
+// attachment, before the text is submitted.
 func (p *Provider) Send(ctx context.Context, nativeID string, live *providers.Live, in model.Input) error {
 	if live == nil {
 		return providers.ErrNotLive
 	}
 	text := strings.TrimSpace(in.Text)
-	for _, img := range in.Images {
-		text += "\n\n[Attached image: " + img + "]"
-	}
-	text = strings.TrimSpace(text)
-	if text == "" {
+	if text == "" && len(in.Images) == 0 {
 		return fmt.Errorf("empty message")
 	}
+	if len(in.Images) > 0 && live.Blocked() {
+		// agent.prompt checks this too, but only after the pastes were typed.
+		return &herdr.Error{Code: "agent_blocked", Message: "agent is waiting at a dialog"}
+	}
+	for _, img := range in.Images {
+		if err := p.term.SendText(ctx, live.PaneID, "\x1b[200~"+img+"\x1b[201~"); err != nil {
+			return err
+		}
+		// Claude Code reads the file asynchronously after each paste.
+		if err := p.wait(ctx); err != nil {
+			return err
+		}
+	}
+	if text == "" {
+		return p.term.SendKeys(ctx, live.PaneID, "enter")
+	}
 	return p.term.Prompt(ctx, live.PaneID, text)
+}
+
+func (p *Provider) wait(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(p.keyDelay):
+		return nil
+	}
 }
 
 func (p *Provider) Respond(ctx context.Context, nativeID string, live *providers.Live, r model.InteractionResponse) error {
@@ -219,10 +242,8 @@ func (p *Provider) Respond(ctx context.Context, nativeID string, live *providers
 	}
 	for i, st := range steps {
 		if i > 0 {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(p.keyDelay):
+			if err := p.wait(ctx); err != nil {
+				return err
 			}
 		}
 		if st.text != "" {
