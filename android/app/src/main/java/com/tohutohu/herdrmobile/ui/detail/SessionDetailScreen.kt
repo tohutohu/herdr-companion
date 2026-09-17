@@ -33,6 +33,8 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -59,6 +61,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -69,6 +72,7 @@ import com.tohutohu.herdrmobile.container
 import com.tohutohu.herdrmobile.data.api.Status
 import com.tohutohu.herdrmobile.data.db.SessionEntity
 import com.tohutohu.herdrmobile.ui.ContextBar
+import com.tohutohu.herdrmobile.ui.ContextGauge
 import com.tohutohu.herdrmobile.ui.agentSettingsLabel
 import com.tohutohu.herdrmobile.ui.costLabel
 import com.tohutohu.herdrmobile.ui.sessions.SessionRef
@@ -95,6 +99,8 @@ fun SessionDetailScreen(
     val actions = rememberSessionActions(onChanged = { vm.refresh() })
     actions.Dialogs()
     var menu by remember { mutableStateOf(false) }
+    // The header only carries the context ring; the full bar opens under it on tap.
+    var contextOpen by rememberSaveable(sessionId) { mutableStateOf(false) }
     val messages by vm.messages.collectAsState()
     val error by vm.error.collectAsState()
     val sending by vm.sending.collectAsState()
@@ -147,6 +153,7 @@ fun SessionDetailScreen(
     Scaffold(
         topBar = {
             TopAppBar(
+                expandedHeight = 52.dp,
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                 },
@@ -155,8 +162,9 @@ fun SessionDetailScreen(
                         Text(
                             listOfNotNull(session?.providerName, session?.project?.takeIf { it.isNotBlank() }).joinToString(" / ")
                                 .ifBlank { sessionId },
-                            style = MaterialTheme.typography.titleMedium,
+                            style = MaterialTheme.typography.titleSmall,
                             maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                         session?.let {
                             val st = statusStyle(it.status)
@@ -165,13 +173,14 @@ fun SessionDetailScreen(
                                 costLabel(it.costUsd, it.costEstimated),
                             ).joinToString(" · ")
                             Row {
-                                Text("${st.symbol} ${st.label}", color = st.color, style = MaterialTheme.typography.labelMedium)
+                                Text("${st.symbol} ${st.label}", color = st.color, style = MaterialTheme.typography.labelSmall)
                                 if (details.isNotEmpty()) {
                                     Text(
                                         " · $details",
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        style = MaterialTheme.typography.labelMedium,
+                                        style = MaterialTheme.typography.labelSmall,
                                         maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
                                     )
                                 }
                             }
@@ -179,15 +188,24 @@ fun SessionDetailScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = onOpenTerminal, enabled = session?.paneId != null) {
-                        Icon(Icons.Default.Terminal, contentDescription = "Terminal")
-                    }
+                    ContextGauge(session?.contextUsedPercent, onClick = { contextOpen = !contextOpen })
                     session?.let { s ->
                         Box {
                             IconButton(onClick = { menu = true }) {
                                 Icon(Icons.Default.MoreVert, contentDescription = "Session actions")
                             }
-                            actions.Menu(s.ref(), menu) { menu = false }
+                            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                                DropdownMenuItem(
+                                    text = { Text("Terminal") },
+                                    leadingIcon = { Icon(Icons.Default.Terminal, contentDescription = null) },
+                                    enabled = s.paneId != null,
+                                    onClick = {
+                                        menu = false
+                                        onOpenTerminal()
+                                    },
+                                )
+                                actions.MenuItems(s.ref()) { menu = false }
+                            }
                         }
                     }
                 },
@@ -207,7 +225,7 @@ fun SessionDetailScreen(
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
-            session?.let {
+            session?.takeIf { contextOpen }?.let {
                 ContextBar(it.contextUsedTokens, it.contextWindowTokens, it.contextUsedPercent)
             }
             error?.let {
