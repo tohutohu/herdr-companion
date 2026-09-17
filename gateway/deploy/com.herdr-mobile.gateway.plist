@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LaunchAgent for herdr-mobile-gateway.
+  Replace __HOME__ with your home directory (see README), then:
+    cp com.herdr-mobile.gateway.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.herdr-mobile.gateway.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.herdr-mobile.gateway</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOME__/.local/bin/herdr-mobile-gateway</string>
+        <string>serve</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- codex / herdr are looked up on PATH -->
+        <key>PATH</key>
+        <string>__HOME__/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HERDR_MOBILE_FCM_CREDENTIALS</key>
+        <string>__HOME__/.config/herdr-mobile/firebase-service-account.json</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <!-- Runtime logs also go to ~/.local/state/herdr-mobile/gateway.log (rotated). -->
+    <key>StandardOutPath</key>
+    <string>/dev/null</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.local/state/herdr-mobile/launchd.err.log</string>
+</dict>
+</plist>
