@@ -1,0 +1,28 @@
+# Secrets — never commit
+google-services.json
+*service-account*.json
+*-firebase-adminsdk-*.json
+.env
+*.keystore
+*.jks
+
+# Go
+/gateway/bin/
+/gateway/herdr-mobile-gateway
+
+# Android / Gradle
+.gradle/
+build/
+/android/local.properties
+/android/app/release/
+*.apk
+*.aab
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+.kotlin/
+
+# OS
+.DS_Store
