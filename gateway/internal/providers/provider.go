@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
@@ -90,12 +91,57 @@ type ModelOption struct {
 	Description string `json:"description,omitempty"`
 	// Default marks the model used when none is given.
 	Default bool `json:"default,omitempty"`
+	// Efforts are the reasoning efforts this model offers; empty means the
+	// catalog's efforts apply.
+	Efforts []EffortOption `json:"efforts,omitempty"`
+}
+
+// EffortOption is a reasoning effort the user can pick when starting a session.
+type EffortOption struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	// Default marks the effort used when none is given.
+	Default bool `json:"default,omitempty"`
+}
+
+// ModelCatalog is what a provider offers when starting a session.
+type ModelCatalog struct {
+	Models []ModelOption `json:"models"`
+	// Efforts apply when no model is picked, and to models listing none.
+	Efforts []EffortOption `json:"efforts,omitempty"`
 }
 
 var modelIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/\[\]-]{0,99}$`)
 
 // ValidModelID reports whether id is safe to pass as a CLI argument.
 func ValidModelID(id string) bool { return modelIDPattern.MatchString(id) }
+
+var effortIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
+
+// ValidEffortID reports whether id is safe to pass as a CLI argument.
+func ValidEffortID(id string) bool { return effortIDPattern.MatchString(id) }
+
+// effortNames are the labels for the efforts both agents share.
+var effortNames = map[string]string{
+	"low":    "Low",
+	"medium": "Medium",
+	"high":   "High",
+	"xhigh":  "Extra high",
+	"max":    "Max",
+	"ultra":  "Ultra",
+}
+
+// EffortName is the label shown for an effort id.
+func EffortName(id string) string {
+	if n, ok := effortNames[id]; ok {
+		return n
+	}
+	if id == "" {
+		return ""
+	}
+	return strings.ToUpper(id[:1]) + id[1:]
+}
 
 // SessionLocator is implemented by providers whose integration hook cannot
 // always report the session to Herdr (Codex TUIs on the shared daemon run
@@ -106,16 +152,23 @@ type SessionLocator interface {
 	LocateLaunched(ctx context.Context, cwd string, since time.Time) string
 }
 
+// LaunchOptions are the user's choices for a new session. Model and Effort
+// are empty for the provider's own defaults; Cwd is the pane's working
+// directory.
+type LaunchOptions struct {
+	Model  string
+	Effort string
+	Cwd    string
+}
+
 // Launchable providers can be started in a new Herdr pane.
 type Launchable interface {
 	// LaunchArgs are native CLI arguments passed after Herdr's agent kind.
-	// modelID is empty for the provider's default model; cwd is the pane's
-	// working directory.
-	LaunchArgs(modelID, cwd string) []string
+	LaunchArgs(opts LaunchOptions) []string
 	// ResumeArgs are native CLI arguments that reopen an existing session.
 	ResumeArgs(nativeID, cwd string) []string
-	// Models lists the models offered when starting a session.
-	Models(ctx context.Context) ([]ModelOption, error)
+	// Models lists the models and efforts offered when starting a session.
+	Models(ctx context.Context) (ModelCatalog, error)
 	// StartupKeys returns the keys that accept a folder-trust dialog shown on
 	// screen, or nil when the screen is not a known trust dialog.
 	StartupKeys(screen string) []string

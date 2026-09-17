@@ -573,15 +573,15 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {
 	provider := r.URL.Query().Get("provider")
-	models, err := s.Launcher.Models(r.Context(), provider)
+	cat, err := s.Launcher.Models(r.Context(), provider)
 	if err != nil {
 		s.fail(w, r, "", "list_models", err)
 		return
 	}
-	if models == nil {
-		models = []providers.ModelOption{}
+	if cat.Models == nil {
+		cat.Models = []providers.ModelOption{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"models": models})
+	writeJSON(w, http.StatusOK, cat)
 }
 
 func (s *Server) listDirectories(w http.ResponseWriter, r *http.Request) {

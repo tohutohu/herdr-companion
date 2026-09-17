@@ -377,18 +377,36 @@ func TestClaudeのモデルとエフォートとモードは最新の記録か�
 	}
 }
 
-func Test起動時のモデル指定をCLI引数にする(t *testing.T) {
+func Test起動時のモデルとエフォート指定をCLI引数にする(t *testing.T) {
 	p := New(t.TempDir(), nil, deadletter.Nop{})
-	if args := p.LaunchArgs("", "/w"); args != nil {
-		t.Errorf("default = %v", args)
+	args := func(model, effort string) []string {
+		return p.LaunchArgs(providers.LaunchOptions{Model: model, Effort: effort, Cwd: "/w"})
 	}
-	if got := strings.Join(p.LaunchArgs("sonnet", "/w"), " "); got != "--model sonnet" {
+	if a := args("", ""); a != nil {
+		t.Errorf("default = %v", a)
+	}
+	if got := strings.Join(args("sonnet", ""), " "); got != "--model sonnet" {
 		t.Errorf("args = %q", got)
 	}
-	models, _ := p.Models(context.Background())
-	for _, m := range models {
+	if got := strings.Join(args("opus", "xhigh"), " "); got != "--model opus --effort xhigh" {
+		t.Errorf("args with effort = %q", got)
+	}
+	// エフォートだけの指定も通す
+	if got := strings.Join(args("", "max"), " "); got != "--effort max" {
+		t.Errorf("effort only = %q", got)
+	}
+	cat, _ := p.Models(context.Background())
+	for _, m := range cat.Models {
 		if !providers.ValidModelID(m.ID) {
 			t.Errorf("invalid id %q", m.ID)
+		}
+	}
+	if len(cat.Efforts) == 0 {
+		t.Error("efforts are missing")
+	}
+	for _, e := range cat.Efforts {
+		if !providers.ValidEffortID(e.ID) || e.Name == "" {
+			t.Errorf("invalid effort %+v", e)
 		}
 	}
 }

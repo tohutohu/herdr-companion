@@ -122,11 +122,14 @@ func (p *fakeProvider) Send(_ context.Context, id string, live *providers.Live, 
 	p.sent = append(p.sent, in)
 	return nil
 }
-func (p *fakeProvider) LaunchArgs(_, _ string) []string  { return nil }
-func (p *fakeProvider) ResumeArgs(id, _ string) []string { return []string{"resume", id} }
-func (p *fakeProvider) StartupKeys(string) []string      { return nil }
-func (p *fakeProvider) Models(context.Context) ([]providers.ModelOption, error) {
-	return []providers.ModelOption{{ID: "fake-large", Name: "Large", Default: true}}, nil
+func (p *fakeProvider) LaunchArgs(providers.LaunchOptions) []string { return nil }
+func (p *fakeProvider) ResumeArgs(id, _ string) []string            { return []string{"resume", id} }
+func (p *fakeProvider) StartupKeys(string) []string                 { return nil }
+func (p *fakeProvider) Models(context.Context) (providers.ModelCatalog, error) {
+	return providers.ModelCatalog{
+		Models:  []providers.ModelOption{{ID: "fake-large", Name: "Large", Default: true}},
+		Efforts: []providers.EffortOption{{ID: "high", Name: "High", Default: true}},
+	}, nil
 }
 func (p *fakeProvider) Respond(_ context.Context, id string, live *providers.Live, r model.InteractionResponse) error {
 	p.resp = append(p.resp, r)
@@ -378,7 +381,8 @@ func Test端末登録でFCMトークンが設定に保存される(t *testing.T)
 func Testプロバイダーごとのモデル一覧を返す(t *testing.T) {
 	ts, _, _, tok := newTestServer(t)
 	resp, body := do(t, ts, tok, "GET", "/v1/models?provider=fake", nil, "")
-	if resp.StatusCode != 200 || string(bytes.TrimSpace(body)) != `{"models":[{"id":"fake-large","name":"Large","default":true}]}` {
+	want := `{"models":[{"id":"fake-large","name":"Large","default":true}],"efforts":[{"id":"high","name":"High","default":true}]}`
+	if resp.StatusCode != 200 || string(bytes.TrimSpace(body)) != want {
 		t.Errorf("status %d: %s", resp.StatusCode, body)
 	}
 	resp, _ = do(t, ts, tok, "GET", "/v1/models?provider=nope", nil, "")

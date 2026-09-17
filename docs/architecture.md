@@ -142,6 +142,13 @@ catalog API, so its list is the CLI aliases (`fable`, `opus`, `sonnet`,
 Claude session is not offered because `/model` also changes the user's
 default for new sessions.
 
+An optional reasoning effort goes with it: Claude takes `--effort` (the levels
+its `/effort` command offers, the same for every model), Codex has no flag for
+it, so the TUI is given `-c model_reasoning_effort="…"`, which it forwards to
+the shared daemon. Codex lists the efforts per model in `model/list`, so
+`/v1/models` returns them on each model plus a catalog-level list (Claude's
+levels, or the default model's for Codex) used when no model is picked.
+
 Sessions report the model they last used (`model`), the reasoning effort
 (`effort`) and a display label for the mode (`mode`):
 
@@ -188,8 +195,8 @@ Paths are cleaned, symlink-resolved and must stay inside an allowed root;
 |---|---|---|
 | GET | `/healthz` | no auth |
 | GET | `/v1/sessions` | live + recent offline sessions |
-| POST | `/v1/sessions` | start `{provider, cwd, prompt, model?, trust}` in a new Herdr workspace → `{sessionId?, paneId, warning?}` |
-| GET | `/v1/models?provider=` | models offered for new sessions `{models[{id, name, description?, default?}]}` |
+| POST | `/v1/sessions` | start `{provider, cwd, prompt, model?, effort?, trust}` in a new Herdr workspace → `{sessionId?, paneId, warning?}` |
+| GET | `/v1/models?provider=` | models and efforts offered for new sessions `{models[{id, name, description?, default?, efforts?[]}], efforts?[{id, name, description?, default?}]}` |
 | GET | `/v1/directories?path=` | workspace roots, or subfolders of `path` |
 | POST | `/v1/directories` | create `{parent, name}` under a root |
 | GET | `/v1/sessions?archived=true` | archived sessions |

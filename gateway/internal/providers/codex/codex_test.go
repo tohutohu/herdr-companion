@@ -300,7 +300,12 @@ func (f *fakeServer) serve(p *pipeTransport, send func(any)) {
 			json.Unmarshal(m.Params, &params)
 			if params.Cursor == "" {
 				result = map[string]any{"nextCursor": "p2", "data": []map[string]any{
-					{"id": "gpt-6-astra", "model": "gpt-6-astra", "displayName": "GPT-6 Astra", "description": "Frontier", "isDefault": true},
+					{"id": "gpt-6-astra", "model": "gpt-6-astra", "displayName": "GPT-6 Astra", "description": "Frontier", "isDefault": true,
+						"defaultReasoningEffort": "medium", "supportedReasoningEfforts": []map[string]any{
+							{"reasoningEffort": "medium", "description": "Balanced"},
+							{"reasoningEffort": "xhigh", "description": "Deep"},
+							{"reasoningEffort": "--oops"},
+						}},
 					{"id": "hidden", "model": "gpt-internal", "displayName": "Internal", "hidden": true},
 				}}
 			} else {
@@ -441,34 +446,50 @@ func Testモデル一覧をページングして取得し非表示や不正なID
 	p.reader = newRPCClient(pt, nil)
 	defer p.reader.close()
 
-	models, err := p.Models(context.Background())
+	cat, err := p.Models(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []providers.ModelOption{
-		{ID: "gpt-6-astra", Name: "GPT-6 Astra", Description: "Frontier", Default: true},
-		{ID: "gpt-6-mini", Name: "gpt-6-mini", Description: "Fast"},
+	astraEfforts := []providers.EffortOption{
+		{ID: "medium", Name: "Medium", Description: "Balanced", Default: true},
+		{ID: "xhigh", Name: "Extra high", Description: "Deep"},
 	}
-	got, _ := json.Marshal(models)
+	want := providers.ModelCatalog{
+		Models: []providers.ModelOption{
+			{ID: "gpt-6-astra", Name: "GPT-6 Astra", Description: "Frontier", Default: true, Efforts: astraEfforts},
+			{ID: "gpt-6-mini", Name: "gpt-6-mini", Description: "Fast"},
+		},
+		// モデル未指定時は既定モデルのエフォートを出す
+		Efforts: astraEfforts,
+	}
+	got, _ := json.Marshal(cat)
 	exp, _ := json.Marshal(want)
 	if string(got) != string(exp) {
-		t.Errorf("models = %s", got)
+		t.Errorf("catalog = %s", got)
 	}
 }
 
-func Test起動引数にdaemon接続とモデル指定を含める(t *testing.T) {
+func Test起動引数にdaemon接続とモデルとエフォート指定を含める(t *testing.T) {
 	sock := filepath.Join(t.TempDir(), "cx.sock")
 	p := New("codex", sock, &fakeTerm{}, deadletter.Nop{})
-	if got := strings.Join(p.LaunchArgs("gpt-6-mini", "/w/app"), " "); got != "--model gpt-6-mini" {
+	args := func(model, effort, cwd string) string {
+		return strings.Join(p.LaunchArgs(providers.LaunchOptions{Model: model, Effort: effort, Cwd: cwd}), " ")
+	}
+	if got := args("gpt-6-mini", "", "/w/app"); got != "--model gpt-6-mini" {
 		t.Errorf("without daemon = %q", got)
 	}
 	os.WriteFile(sock, nil, 0o600)
 	// daemon に繋ぐときは作業ディレクトリを明示する
-	if got := strings.Join(p.LaunchArgs("", "/w/app"), " "); got != "--remote unix://"+sock+" --cd /w/app" {
+	if got := args("", "", "/w/app"); got != "--remote unix://"+sock+" --cd /w/app" {
 		t.Errorf("default model = %q", got)
 	}
-	if got := strings.Join(p.LaunchArgs("gpt-6-mini", "/w/app"), " "); got != "--remote unix://"+sock+" --cd /w/app --model gpt-6-mini" {
+	if got := args("gpt-6-mini", "", "/w/app"); got != "--remote unix://"+sock+" --cd /w/app --model gpt-6-mini" {
 		t.Errorf("with daemon = %q", got)
+	}
+	// エフォートは TUI が daemon に渡す設定上書きで指定する
+	want := "--remote unix://" + sock + ` --cd /w/app -c model_reasoning_effort="xhigh"`
+	if got := args("", "xhigh", "/w/app"); got != want {
+		t.Errorf("with effort = %q", got)
 	}
 }
 

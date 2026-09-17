@@ -373,11 +373,15 @@ func singleLine(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
-func (p *Provider) LaunchArgs(modelID, cwd string) []string {
-	if modelID == "" {
-		return nil
+func (p *Provider) LaunchArgs(opts providers.LaunchOptions) []string {
+	var args []string
+	if opts.Model != "" {
+		args = append(args, "--model", opts.Model)
 	}
-	return []string{"--model", modelID}
+	if opts.Effort != "" {
+		args = append(args, "--effort", opts.Effort)
+	}
+	return args
 }
 
 // ResumeArgs continues the transcript under the same session id.
@@ -394,8 +398,18 @@ var models = []providers.ModelOption{
 	{ID: "haiku", Name: "Haiku", Description: "Fastest"},
 }
 
-func (p *Provider) Models(ctx context.Context) ([]providers.ModelOption, error) {
-	return models, nil
+// Claude Code takes --effort for every model; the levels are the same ones
+// its /effort command offers.
+var efforts = []providers.EffortOption{
+	{ID: "low", Name: providers.EffortName("low"), Description: "Quick answers"},
+	{ID: "medium", Name: providers.EffortName("medium"), Description: "Balances speed and thinking"},
+	{ID: "high", Name: providers.EffortName("high"), Description: "More thorough work"},
+	{ID: "xhigh", Name: providers.EffortName("xhigh"), Description: "Extra thinking for hard problems"},
+	{ID: "max", Name: providers.EffortName("max"), Description: "Maximum thinking"},
+}
+
+func (p *Provider) Models(ctx context.Context) (providers.ModelCatalog, error) {
+	return providers.ModelCatalog{Models: models, Efforts: efforts}, nil
 }
 
 // StartupKeys accepts Claude Code's workspace trust dialog. Two variants exist:

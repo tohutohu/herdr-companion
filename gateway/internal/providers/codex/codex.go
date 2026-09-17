@@ -671,10 +671,15 @@ func (d *daemonConn) interactions(thread string, sink deadletter.Sink) []model.M
 // LaunchArgs attaches new Codex TUIs to the shared daemon when it runs, so
 // approvals and questions can be answered from the app. A remote TUI would
 // otherwise start its thread in the daemon's directory, so cwd is explicit.
-func (p *Provider) LaunchArgs(modelID, cwd string) []string {
-	args := p.remoteArgs(cwd)
-	if modelID != "" {
-		args = append(args, "--model", modelID)
+func (p *Provider) LaunchArgs(opts providers.LaunchOptions) []string {
+	args := p.remoteArgs(opts.Cwd)
+	if opts.Model != "" {
+		args = append(args, "--model", opts.Model)
+	}
+	// Codex has no effort flag; the TUI forwards config overrides to the
+	// daemon, so the value is TOML-quoted.
+	if opts.Effort != "" {
+		args = append(args, "-c", `model_reasoning_effort="`+opts.Effort+`"`)
 	}
 	return args
 }
@@ -727,17 +732,25 @@ type catalogModel struct {
 	Description string `json:"description"`
 	Hidden      bool   `json:"hidden"`
 	IsDefault   bool   `json:"isDefault"`
+	// Codex offers reasoning efforts per model.
+	SupportedReasoningEfforts []catalogEffort `json:"supportedReasoningEfforts"`
+	DefaultReasoningEffort    string          `json:"defaultReasoningEffort"`
+}
+
+type catalogEffort struct {
+	ReasoningEffort string `json:"reasoningEffort"`
+	Description     string `json:"description"`
 }
 
 // Models reads Codex's model catalog (model/list).
-func (p *Provider) Models(ctx context.Context) ([]providers.ModelOption, error) {
+func (p *Provider) Models(ctx context.Context) (providers.ModelCatalog, error) {
 	c, err := p.client(ctx)
 	if err != nil {
-		return nil, err
+		return providers.ModelCatalog{}, err
 	}
 	cctx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
-	var out []providers.ModelOption
+	var cat providers.ModelCatalog
 	cursor := ""
 	for range 10 {
 		params := map[string]any{"includeHidden": false}
@@ -749,15 +762,23 @@ func (p *Provider) Models(ctx context.Context) ([]providers.ModelOption, error) 
 			NextCursor *string        `json:"nextCursor"`
 		}
 		if err := c.call(cctx, "model/list", params, &r); err != nil {
-			return nil, err
+			return providers.ModelCatalog{}, err
 		}
-		out = append(out, modelOptions(r.Data)...)
+		cat.Models = append(cat.Models, modelOptions(r.Data)...)
 		if r.NextCursor == nil || *r.NextCursor == "" {
 			break
 		}
 		cursor = *r.NextCursor
 	}
-	return out, nil
+	// Without a model the session runs the default one, so its efforts are
+	// the ones on offer.
+	for _, m := range cat.Models {
+		if m.Default {
+			cat.Efforts = m.Efforts
+			break
+		}
+	}
+	return cat, nil
 }
 
 func modelOptions(ms []catalogModel) []providers.ModelOption {
@@ -774,7 +795,26 @@ func modelOptions(ms []catalogModel) []providers.ModelOption {
 		if name == "" {
 			name = id
 		}
-		out = append(out, providers.ModelOption{ID: id, Name: name, Description: m.Description, Default: m.IsDefault})
+		out = append(out, providers.ModelOption{
+			ID: id, Name: name, Description: m.Description, Default: m.IsDefault,
+			Efforts: effortOptions(m),
+		})
+	}
+	return out
+}
+
+func effortOptions(m catalogModel) []providers.EffortOption {
+	var out []providers.EffortOption
+	for _, e := range m.SupportedReasoningEfforts {
+		if !providers.ValidEffortID(e.ReasoningEffort) {
+			continue
+		}
+		out = append(out, providers.EffortOption{
+			ID:          e.ReasoningEffort,
+			Name:        providers.EffortName(e.ReasoningEffort),
+			Description: e.Description,
+			Default:     e.ReasoningEffort == m.DefaultReasoningEffort,
+		})
 	}
 	return out
 }

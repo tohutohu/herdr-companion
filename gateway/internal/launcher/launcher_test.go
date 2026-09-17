@@ -161,15 +161,25 @@ type fakeProvider struct{ providers.Provider }
 
 func (fakeProvider) Name() string       { return "claude" }
 func (fakeProvider) HerdrAgent() string { return "claude" }
-func (fakeProvider) LaunchArgs(m, _ string) []string {
-	if m == "" {
+func (fakeProvider) LaunchArgs(o providers.LaunchOptions) []string {
+	if o.Model == "" && o.Effort == "" {
 		return []string{"--default"}
 	}
-	return []string{"--model", m}
+	var args []string
+	if o.Model != "" {
+		args = append(args, "--model", o.Model)
+	}
+	if o.Effort != "" {
+		args = append(args, "--effort", o.Effort)
+	}
+	return args
 }
 func (fakeProvider) ResumeArgs(id, _ string) []string { return []string{"--resume", id} }
-func (fakeProvider) Models(context.Context) ([]providers.ModelOption, error) {
-	return []providers.ModelOption{{ID: "haiku", Name: "Haiku"}}, nil
+func (fakeProvider) Models(context.Context) (providers.ModelCatalog, error) {
+	return providers.ModelCatalog{
+		Models:  []providers.ModelOption{{ID: "haiku", Name: "Haiku"}},
+		Efforts: []providers.EffortOption{{ID: "high", Name: "High"}},
+	}, nil
 }
 func (fakeProvider) StartupKeys(s string) []string {
 	if strings.Contains(s, "trust this folder") {
@@ -189,14 +199,14 @@ func newLauncher(t *testing.T, fh *fakeHerdr) (*Launcher, string) {
 func Test信頼ダイアログを承認して起動しプロンプトを送る(t *testing.T) {
 	fh := &fakeHerdr{status: herdr.StatusBlocked, screen: "Yes, I trust this folder", startErr: &herdr.Error{Code: "agent_not_ready"}}
 	l, root := newLauncher(t, fh)
-	res, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: filepath.Join(root, "app-b"), Prompt: "hello", Model: "haiku", Trust: true})
+	res, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: filepath.Join(root, "app-b"), Prompt: "hello", Model: "haiku", Effort: "high", Trust: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if res.SessionID != "claude:abc-123" || res.PaneID != "w9:p1" || res.Warning != "" {
 		t.Errorf("result = %+v", res)
 	}
-	want := "create app-b|start claude --model haiku|keys down,enter|prompt hello"
+	want := "create app-b|start claude --model haiku --effort high|keys down,enter|prompt hello"
 	if strings.Join(fh.calls, "|") != want {
 		t.Errorf("calls = %v", fh.calls)
 	}
@@ -231,6 +241,11 @@ func Test不正な起動リクエストは拒否する(t *testing.T) {
 	for _, m := range []string{"--dangerously-skip-permissions", "a b", "x;rm"} {
 		if _, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: root, Model: m}); !errors.Is(err, ErrInvalidModel) {
 			t.Errorf("model %q err = %v", m, err)
+		}
+	}
+	for _, e := range []string{"--print", "a b", "High"} {
+		if _, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: root, Effort: e}); !errors.Is(err, ErrInvalidEffort) {
+			t.Errorf("effort %q err = %v", e, err)
 		}
 	}
 	if len(fh.calls) != 0 {

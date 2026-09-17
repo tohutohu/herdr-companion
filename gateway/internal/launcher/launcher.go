@@ -24,6 +24,7 @@ var (
 	ErrInvalidName     = errors.New("invalid directory name")
 	ErrUnknownProvider = errors.New("unknown provider")
 	ErrInvalidModel    = errors.New("invalid model")
+	ErrInvalidEffort   = errors.New("invalid effort")
 	ErrNoCwd           = errors.New("session has no known working directory")
 )
 
@@ -167,6 +168,8 @@ type StartRequest struct {
 	Prompt   string `json:"prompt"`
 	// Model is a model id from Models; empty uses the agent's default.
 	Model string `json:"model,omitempty"`
+	// Effort is an effort id from Models; empty uses the agent's default.
+	Effort string `json:"effort,omitempty"`
 	// Trust accepts the agent's folder-trust dialog on the user's behalf.
 	Trust bool `json:"trust"`
 }
@@ -189,11 +192,11 @@ func (l *Launcher) provider(name string) (providers.Provider, providers.Launchab
 	return nil, nil, ErrUnknownProvider
 }
 
-// Models lists the models a provider offers for new sessions.
-func (l *Launcher) Models(ctx context.Context, provider string) ([]providers.ModelOption, error) {
+// Models lists the models and efforts a provider offers for new sessions.
+func (l *Launcher) Models(ctx context.Context, provider string) (providers.ModelCatalog, error) {
 	_, lp, err := l.provider(provider)
 	if err != nil {
-		return nil, err
+		return providers.ModelCatalog{}, err
 	}
 	return lp.Models(ctx)
 }
@@ -213,11 +216,15 @@ func (l *Launcher) Start(ctx context.Context, req StartRequest) (*StartResult, e
 	if req.Model != "" && !providers.ValidModelID(req.Model) {
 		return nil, ErrInvalidModel
 	}
+	if req.Effort != "" && !providers.ValidEffortID(req.Effort) {
+		return nil, ErrInvalidEffort
+	}
 	cwd, err := l.resolveDir(req.Cwd)
 	if err != nil {
 		return nil, err
 	}
-	return l.launch(ctx, p, lp, cwd, lp.LaunchArgs(req.Model, cwd), req.Trust, req.Prompt, "", "model", req.Model)
+	args := lp.LaunchArgs(providers.LaunchOptions{Model: req.Model, Effort: req.Effort, Cwd: cwd})
+	return l.launch(ctx, p, lp, cwd, args, req.Trust, req.Prompt, "", "model", req.Model, "effort", req.Effort)
 }
 
 // Resume reopens an existing session (not currently in Herdr) in a new
