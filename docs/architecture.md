@@ -169,6 +169,19 @@ Sessions report the model they last used (`model`), the reasoning effort
   threads loaded on the shared daemon: `thread/resume` gives the approval
   policy and sandbox, `thread/settings/updated` also gives Plan mode.
 
+They also report how full the context window is (`context`: used tokens,
+window size, percent), omitted until an agent has accounted for a turn:
+
+- Claude: the `usage` of the newest main-chain assistant reply, whose input
+  side is everything the model saw. Sidechains (subagents) fill their own
+  window and are skipped. Only `attachment` entries of type `model` name the
+  exact model, so they decide whether the window is the 1M variant (`[1m]`)
+  or the usual 200k.
+- Codex: the app-server reports token counts only to the client owning the
+  turn, but writes them to the thread's rollout file, whose path `thread/list`
+  and `thread/read` both return. The last `token_count` record there gives
+  `last_token_usage.total_tokens` and `model_context_window`.
+
 A new pane's shell may still be running its startup files; Herdr then
 answers `agent.start` with `agent_pane_busy`, which is retried until the
 start timeout. A workspace whose agent fails to start is closed again.
