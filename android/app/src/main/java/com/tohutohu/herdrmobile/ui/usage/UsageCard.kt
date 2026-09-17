@@ -60,6 +60,7 @@ fun UsageCard(modifier: Modifier = Modifier) {
     var usage by remember { mutableStateOf<UsageDto?>(null) }
     var refreshing by remember { mutableStateOf(false) }
     var expanded by rememberSaveable { mutableStateOf(false) }
+    var nowMillis by remember { mutableStateOf(System.currentTimeMillis()) }
     val scope = rememberCoroutineScope()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
 
@@ -69,6 +70,17 @@ fun UsageCard(modifier: Modifier = Modifier) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (true) {
                 runCatching { api.usage() }.onSuccess { usage = it }
+                delay(USAGE_POLL_MS)
+            }
+        }
+    }
+
+    // Reset countdowns should continue moving while the card is visible even
+    // when the gateway returns the same cached usage snapshot.
+    LaunchedEffect(lifecycle) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                nowMillis = System.currentTimeMillis()
                 delay(USAGE_POLL_MS)
             }
         }
@@ -87,7 +99,7 @@ fun UsageCard(modifier: Modifier = Modifier) {
         ) {
             Text("Limits", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
             Text(
-                "  " + usageHeadline(current.providers).ifEmpty { "unavailable" },
+                "  " + usageHeadlineWithReset(current.providers, nowMillis).ifEmpty { "unavailable" },
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -124,7 +136,7 @@ fun UsageCard(modifier: Modifier = Modifier) {
                 Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                current.providers.forEach { ProviderUsage(it) }
+                current.providers.forEach { ProviderUsage(it, nowMillis) }
                 current.error?.let {
                     Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
                 }
@@ -142,7 +154,7 @@ fun UsageCard(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun ProviderUsage(provider: UsageProviderDto) {
+private fun ProviderUsage(provider: UsageProviderDto, nowMillis: Long) {
     Text(
         provider.displayName + (provider.plan?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""),
         style = MaterialTheme.typography.labelMedium,
@@ -151,11 +163,11 @@ private fun ProviderUsage(provider: UsageProviderDto) {
     provider.error?.takeIf { it.isNotBlank() }?.let {
         Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
     }
-    provider.windows.forEach { WindowRow(it) }
+    provider.windows.forEach { WindowRow(it, nowMillis) }
 }
 
 @Composable
-private fun WindowRow(window: UsageWindowDto) {
+private fun WindowRow(window: UsageWindowDto, nowMillis: Long) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
             windowTitle(window),
@@ -175,8 +187,7 @@ private fun WindowRow(window: UsageWindowDto) {
             modifier = Modifier.width(44.dp),
         )
         Text(
-            window.resetsAt?.let { DateUtils.getRelativeTimeSpanString(SessionRepository.parseTime(it)).toString() }
-                .orEmpty(),
+            resetCountdown(window.resetsAt, nowMillis).orEmpty(),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
