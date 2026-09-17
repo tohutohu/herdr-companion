@@ -1,7 +1,9 @@
 package com.tohutohu.herdrmobile.ui.sessions
 
 import android.text.format.DateUtils
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
@@ -10,12 +12,15 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -38,6 +43,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -74,12 +80,17 @@ fun SessionListScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onNew: (
             e.message ?: e.toString()
         }
     }
+    val selection = rememberSessionSelection()
+    val refs = remember(sessions) { sessions.map { it.ref() } }
+    LaunchedEffect(refs) { selection.keepOnly(refs.map { it.id }) }
+    BackHandler(selection.active) { selection.clear() }
+
     // Keyed items keep the scroll anchor, which would hide sessions that
     // appear above the first row; stay at the top when the user is there.
     val listState = rememberLazyListState()
     val firstId = sessions.firstOrNull()?.id
     LaunchedEffect(firstId) {
-        if (listState.firstVisibleItemIndex <= 1) listState.scrollToItem(0)
+        if (!selection.active && listState.firstVisibleItemIndex <= 1) listState.scrollToItem(0)
     }
     val actions = rememberSessionActions(onChanged = { refresh() })
     actions.Dialogs()
@@ -96,20 +107,26 @@ fun SessionListScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onNew: (
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Sessions") },
-                actions = {
-                    IconButton(onClick = onArchived) { Icon(Icons.Default.Inventory2, contentDescription = "Archived sessions") }
-                    IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, contentDescription = "Settings") }
-                },
-            )
+            if (selection.active) {
+                SelectionTopBar(selection, refs, actions)
+            } else {
+                TopAppBar(
+                    title = { Text("Sessions") },
+                    actions = {
+                        IconButton(onClick = onArchived) { Icon(Icons.Default.Inventory2, contentDescription = "Archived sessions") }
+                        IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, contentDescription = "Settings") }
+                    },
+                )
+            }
         },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = onNew,
-                icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                text = { Text("New session") },
-            )
+            if (!selection.active) {
+                ExtendedFloatingActionButton(
+                    onClick = onNew,
+                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                    text = { Text("New session") },
+                )
+            }
         },
     ) { padding ->
         PullToRefreshBox(
@@ -143,7 +160,14 @@ fun SessionListScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onNew: (
                     }
                 }
                 items(sessions, key = { it.id }) { s ->
-                    SessionRow(s, actions, busy = actions.busyId == s.id, onClick = { onOpen(s.id) })
+                    SessionRow(
+                        s,
+                        busy = actions.busy(s.id),
+                        selected = selection.contains(s.id),
+                        selecting = selection.active,
+                        onClick = { if (selection.active) selection.toggle(s.id) else onOpen(s.id) },
+                        onLongClick = { selection.toggle(s.id) },
+                    )
                     HorizontalDivider()
                 }
             }
@@ -151,21 +175,38 @@ fun SessionListScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onNew: (
     }
 }
 
-/** A session; long press opens archive / resume actions. */
+internal fun SessionEntity.ref() = SessionRef(id, live = status != Status.OFFLINE, archived = archived)
+
+/** A session; long press starts a selection for the batch actions. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun SessionRow(s: SessionEntity, actions: SessionActions, busy: Boolean, onClick: () -> Unit) {
+internal fun SessionRow(
+    s: SessionEntity,
+    busy: Boolean,
+    selected: Boolean,
+    selecting: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
     val style = statusStyle(s.status)
-    var menu by remember { mutableStateOf(false) }
     Box {
         Column(
             Modifier
                 .fillMaxWidth()
-                .combinedClickable(onClick = onClick, onLongClick = { menu = true }, onLongClickLabel = "Session actions")
+                .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+                .combinedClickable(onClick = onClick, onLongClick = onLongClick, onLongClickLabel = "Select session")
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                if (selecting) {
+                    Icon(
+                        if (selected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                        contentDescription = null,
+                        tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                        modifier = Modifier.padding(end = 6.dp).size(16.dp),
+                    )
+                }
                 Text(s.providerName, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                 agentSettingsLabel(s.model, s.effort, s.mode)?.let {
                     Text(
@@ -198,6 +239,5 @@ internal fun SessionRow(s: SessionEntity, actions: SessionActions, busy: Boolean
             }
         }
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.BottomCenter))
-        actions.Menu(SessionRef(s.id, live = s.status != Status.OFFLINE, archived = s.archived), menu) { menu = false }
     }
 }

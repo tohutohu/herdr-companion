@@ -1,5 +1,6 @@
 package com.tohutohu.herdrmobile.ui.sessions
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -32,7 +33,7 @@ import kotlinx.coroutines.launch
 
 /**
  * Archived sessions, read directly from the gateway (not cached). Long press
- * a session to unarchive or resume it.
+ * a session to select it, then unarchive or resume from the selection bar.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -56,14 +57,27 @@ fun ArchivedSessionsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
     actions.Dialogs()
     LaunchedEffect(Unit) { load() }
 
+    val rows = remember(sessions) {
+        val now = System.currentTimeMillis()
+        sessions.orEmpty().map { it.toEntity(now, listed = false) }
+    }
+    val selection = rememberSessionSelection()
+    val refs = remember(rows) { rows.map { it.ref() } }
+    LaunchedEffect(refs) { selection.keepOnly(refs.map { it.id }) }
+    BackHandler(selection.active) { selection.clear() }
+
     Scaffold(
         topBar = {
-            TopAppBar(
-                navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
-                },
-                title = { Text("Archived") },
-            )
+            if (selection.active) {
+                SelectionTopBar(selection, refs, actions)
+            } else {
+                TopAppBar(
+                    navigationIcon = {
+                        IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+                    },
+                    title = { Text("Archived") },
+                )
+            }
         },
     ) { padding ->
         PullToRefreshBox(
@@ -83,13 +97,18 @@ fun ArchivedSessionsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
                         Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp))
                     }
                 }
-                val list = sessions
-                if (list != null && list.isEmpty()) {
+                if (sessions?.isEmpty() == true) {
                     item { Text("No archived sessions. Long press a session to archive it.", modifier = Modifier.padding(16.dp)) }
                 }
-                items(list.orEmpty(), key = { it.id }) { s ->
-                    val now = remember(s) { System.currentTimeMillis() }
-                    SessionRow(s.toEntity(now, listed = false), actions, busy = actions.busyId == s.id, onClick = { onOpen(s.id) })
+                items(rows, key = { it.id }) { s ->
+                    SessionRow(
+                        s,
+                        busy = actions.busy(s.id),
+                        selected = selection.contains(s.id),
+                        selecting = selection.active,
+                        onClick = { if (selection.active) selection.toggle(s.id) else onOpen(s.id) },
+                        onLongClick = { selection.toggle(s.id) },
+                    )
                     HorizontalDivider()
                 }
             }

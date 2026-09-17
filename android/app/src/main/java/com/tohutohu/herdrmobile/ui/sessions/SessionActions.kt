@@ -27,59 +27,98 @@ data class SessionRef(val id: String, val live: Boolean, val archived: Boolean)
 
 /**
  * Archive, unarchive and resume, shared by the list, archive and detail
- * screens. Call [Dialogs] once in the screen.
+ * screens. Every action takes a list so the lists can act on a multi-select;
+ * the gateway has no batch endpoint, so they run one session at a time.
+ * Call [Dialogs] once in the screen.
  */
 class SessionActions internal constructor(
     private val scope: CoroutineScope,
     private val context: android.content.Context,
     private val onChanged: suspend () -> Unit,
 ) {
-    /** Id of the session currently being changed, for progress UI. */
-    var busyId by mutableStateOf<String?>(null)
+    /** Sessions currently being changed, for progress UI. */
+    var busyIds by mutableStateOf<Set<String>>(emptySet())
         private set
-    private var confirmArchive by mutableStateOf<SessionRef?>(null)
+    private var confirmArchive by mutableStateOf<List<SessionRef>>(emptyList())
 
     private val repo get() = context.container.repository
 
-    fun archive(s: SessionRef) {
+    fun busy(id: String) = id in busyIds
+
+    fun archive(targets: List<SessionRef>) {
+        if (targets.isEmpty()) return
         // Archiving a running session kills the agent: ask first.
-        if (s.live) confirmArchive = s else run(s.id, "Archived") { repo.archive(s.id); null }
+        if (targets.any { it.live }) confirmArchive = targets else runArchive(targets)
     }
 
-    fun unarchive(s: SessionRef) = run(s.id, "Restored to the session list") { repo.unarchive(s.id); null }
+    fun archive(s: SessionRef) = archive(listOf(s))
 
-    fun resume(s: SessionRef) = run(s.id, "Resumed in Herdr") { repo.resume(s.id) }
+    fun unarchive(targets: List<SessionRef>) =
+        run(targets, "Restored to the session list", "restored") { repo.unarchive(it.id); null }
 
-    private fun run(id: String, done: String, block: suspend () -> String?) {
-        if (busyId != null) return
-        busyId = id
+    fun unarchive(s: SessionRef) = unarchive(listOf(s))
+
+    fun resume(s: SessionRef) = run(listOf(s), "Resumed in Herdr", "resumed") { repo.resume(it.id) }
+
+    private fun runArchive(targets: List<SessionRef>) {
+        val done = if (targets.any { it.live }) "Stopped and archived" else "Archived"
+        run(targets, done, "archived") { repo.archive(it.id); null }
+    }
+
+    /** Runs [block] for each target, then reports once. */
+    private fun run(targets: List<SessionRef>, done: String, verb: String, block: suspend (SessionRef) -> String?) {
+        if (busyIds.isNotEmpty() || targets.isEmpty()) return
+        busyIds = targets.map { it.id }.toSet()
         scope.launch {
-            val msg = try {
-                block() ?: done
-            } catch (e: Exception) {
-                "Failed: ${e.message}"
-            } finally {
-                busyId = null
+            var warning: String? = null
+            var failure: String? = null
+            var failed = 0
+            for (t in targets) {
+                try {
+                    block(t)?.let { warning = it }
+                } catch (e: Exception) {
+                    failed++
+                    failure = e.message ?: e.toString()
+                } finally {
+                    busyIds = busyIds - t.id
+                }
             }
             runCatching { onChanged() }
+            val msg = when {
+                targets.size == 1 -> failure?.let { "Failed: $it" } ?: warning ?: done
+                failed == 0 -> "${targets.size} sessions $verb"
+                failed == targets.size -> "Failed: $failure"
+                else -> "${targets.size - failed} $verb, $failed failed: $failure"
+            }
             Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
         }
     }
 
     @Composable
     fun Dialogs() {
-        val s = confirmArchive ?: return
+        val targets = confirmArchive
+        if (targets.isEmpty()) return
+        val live = targets.count { it.live }
         AlertDialog(
-            onDismissRequest = { confirmArchive = null },
-            title = { Text("Stop and archive?") },
-            text = { Text("The agent is running. Its Herdr pane will be closed. You can resume the session later.") },
+            onDismissRequest = { confirmArchive = emptyList() },
+            title = { Text(if (targets.size == 1) "Stop and archive?" else "Stop and archive ${targets.size} sessions?") },
+            text = {
+                Text(
+                    if (targets.size == 1) {
+                        "The agent is running. Its Herdr pane will be closed. You can resume the session later."
+                    } else {
+                        "$live of them are running. Their Herdr panes will be closed. " +
+                            "You can resume the sessions later."
+                    },
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
-                    confirmArchive = null
-                    run(s.id, "Stopped and archived") { repo.archive(s.id); null }
+                    confirmArchive = emptyList()
+                    runArchive(targets)
                 }) { Text("Stop and archive") }
             },
-            dismissButton = { TextButton(onClick = { confirmArchive = null }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { confirmArchive = emptyList() }) { Text("Cancel") } },
         )
     }
 

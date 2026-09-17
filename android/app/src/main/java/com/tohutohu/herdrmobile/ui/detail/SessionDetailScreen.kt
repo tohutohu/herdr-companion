@@ -155,7 +155,7 @@ fun SessionDetailScreen(
         bottomBar = {
             val s = session
             if (s != null && s.status == Status.OFFLINE) {
-                ResumeBar(busy = actions.busyId == s.id, onResume = { actions.resume(s.ref()) })
+                ResumeBar(busy = actions.busy(s.id), onResume = { actions.resume(s.ref()) })
             } else {
                 Composer(
                     enabled = s?.canSend == true && !sending,
