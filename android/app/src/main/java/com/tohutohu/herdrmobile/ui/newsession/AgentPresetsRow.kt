@@ -1,6 +1,8 @@
 package com.tohutohu.herdrmobile.ui.newsession
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
@@ -8,21 +10,22 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.tohutohu.herdrmobile.data.AgentPreset
 
 /**
- * Favorite agent / model / effort combinations as a chip row, followed by the
- * way out to the full pickers. A [current] combination that is not saved gets
- * a chip of its own, so the row always shows what will be started.
+ * Favorite agent / model / effort combinations as a chip row, with the way
+ * out to the full pickers pinned next to it: the favorites scroll, that
+ * button does not. A [current] combination that is not saved leads the row
+ * with a chip of its own, so the row always shows what will be started.
  */
 @Composable
 fun AgentPresetsRow(
@@ -35,38 +38,40 @@ fun AgentPresetsRow(
     @Composable
     fun Selected() = Icon(Icons.Default.Check, contentDescription = "Selected", Modifier.size(FilterChipDefaults.IconSize))
 
-    LazyRow(
+    Row(
         modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        items(presets, key = { "preset:${it.key}" }) { preset ->
-            val selected = preset.key == current.key
-            FilterChip(
-                selected = selected,
-                onClick = { onSelect(preset) },
-                label = { Text(presetLabel(preset)) },
-                leadingIcon = if (selected) ({ Selected() }) else null,
-            )
-        }
-        if (presets.none { it.key == current.key }) {
-            // Not a favorite: tapping it reopens the pickers it was made in.
-            item(key = "current") {
+        LazyRow(
+            modifier = Modifier.weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            // Room for the chips to scroll out from under the button.
+            contentPadding = PaddingValues(end = 4.dp),
+        ) {
+            if (presets.none { it.key == current.key }) {
+                // Not a favorite: tapping it reopens the pickers it came from.
+                item(key = "current") {
+                    FilterChip(
+                        selected = true,
+                        onClick = onCustomize,
+                        label = { Text(presetLabel(current)) },
+                        leadingIcon = { Selected() },
+                    )
+                }
+            }
+            items(presets, key = { "preset:${it.key}" }) { preset ->
+                val selected = preset.key == current.key
                 FilterChip(
-                    selected = true,
-                    onClick = onCustomize,
-                    label = { Text(presetLabel(current)) },
-                    leadingIcon = { Selected() },
+                    selected = selected,
+                    onClick = { onSelect(preset) },
+                    label = { Text(presetLabel(preset)) },
+                    leadingIcon = if (selected) ({ Selected() }) else null,
                 )
             }
         }
-        item(key = "customize") {
-            AssistChip(
-                onClick = onCustomize,
-                label = { Text("Other…") },
-                leadingIcon = {
-                    Icon(Icons.Default.Tune, contentDescription = null, Modifier.size(AssistChipDefaults.IconSize))
-                },
-            )
+        FilledTonalIconButton(onClick = onCustomize) {
+            Icon(Icons.Default.Tune, contentDescription = "Other agent, model or effort")
         }
     }
 }
