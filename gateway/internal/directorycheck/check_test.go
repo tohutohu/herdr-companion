@@ -56,8 +56,11 @@ func Test同じ実ディレクトリの最新履歴と安全な資料だけ送�
 			t.Error("missing auth")
 		}
 		var req struct {
-			State evidence `json:"state"`
-			Model string   `json:"model"`
+			State     evidence `json:"state"`
+			Model     string   `json:"model"`
+			Questions map[string]struct {
+				Type string `json:"type"`
+			} `json:"questions"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Error(err)
@@ -69,10 +72,13 @@ func Test同じ実ディレクトリの最新履歴と安全な資料だけ送�
 		if req.Model != "jev-latest" || req.State.Files["README.md"] != "Android通知アプリ" || len(req.State.History) != 3 {
 			t.Errorf("bad state: %+v", req)
 		}
+		if len(req.Questions) != 2 || req.Questions["related"].Type != "noul" || req.Questions["other"].Type != "noul" {
+			t.Errorf("bad questions: %+v", req.Questions)
+		}
 		if req.State.History[0].Instructions[0] != "通知を直して three" || req.State.History[0].LastReport != "通知を修正した three" {
 			t.Errorf("wrong history: %+v", req.State.History)
 		}
-		w.Write([]byte(`{"answers":{"fit":{"type":"choice","choice":"mismatch","probabilities":{"match":0.01,"mismatch":0.98,"unknown":0.01},"confidence":0.9}}}`))
+		w.Write([]byte(`{"answers":{"related":{"type":"noul","noul":0.2},"other":{"type":"noul","noul":0.9}}}`))
 	}))
 	defer srv.Close()
 	c := Checker{APIKey: "test-key", Endpoint: srv.URL, Providers: []History{h}}
@@ -85,18 +91,26 @@ func Test同じ実ディレクトリの最新履歴と安全な資料だけ送�
 	}
 }
 
-func Test明確な不一致だけ警告し障害や不正な応答は判定不能(t *testing.T) {
+func Test別の対象を指す依頼だけ警告し障害や不正な応答は判定不能(t *testing.T) {
 	dir := root(t)
 	os.WriteFile(filepath.Join(dir, "README.md"), []byte("app"), 0600)
+	answers := func(related, other string) string {
+		return `{"answers":{"related":{"type":"noul","noul":` + related + `},"other":{"type":"noul","noul":` + other + `}}}`
+	}
 	for _, tc := range []struct {
 		name, body, want string
 		status           int
 	}{
-		{"一致", `{"answers":{"fit":{"type":"choice","choice":"match","probabilities":{"match":0.96,"mismatch":0.01,"unknown":0.03},"confidence":0.9}}}`, "match", 200},
-		{"弱い不一致", `{"answers":{"fit":{"type":"choice","choice":"mismatch","probabilities":{"match":0.1,"mismatch":0.8,"unknown":0.1},"confidence":0.8}}}`, "unknown", 200},
-		{"確信不足", `{"answers":{"fit":{"type":"choice","choice":"mismatch","probabilities":{"match":0.01,"mismatch":0.98,"unknown":0.01},"confidence":0.5}}}`, "unknown", 200},
-		{"項目欠落", `{"answers":{}}`, "unavailable", 200},
-		{"確率範囲外", `{"answers":{"fit":{"type":"choice","choice":"mismatch","probabilities":{"match":0,"mismatch":2,"unknown":0},"confidence":1}}}`, "unavailable", 200},
+		{"同じプロジェクトの作業", answers("0.96", "0.05"), "match", 200},
+		// 実プロジェクトで「コンテストの戦いについて記事書いて」がこの程度だった。
+		{"無関係な依頼", answers("0.25", "0.73"), "mismatch", 200},
+		{"別の対象を指すが関係もありそう", answers("0.8", "0.7"), "unknown", 200},
+		{"どちらとも言えない", answers("0.4", "0.3"), "unknown", 200},
+		{"新機能は別対象の気配が弱ければ一致", answers("0.81", "0.43"), "match", 200},
+		{"項目欠落", `{"answers":{"related":{"type":"noul","noul":0.1}}}`, "unavailable", 200},
+		{"確率なし", `{"answers":{"related":{"type":"noul"},"other":{"type":"noul","noul":0.9}}}`, "unavailable", 200},
+		{"確率範囲外", answers("0", "2"), "unavailable", 200},
+		{"型違い", `{"answers":{"related":{"type":"choice","noul":0.1},"other":{"type":"noul","noul":0.9}}}`, "unavailable", 200},
 		{"壊れたJSON", `{`, "unavailable", 200},
 		{"レート制限", `rate limited`, "unavailable", 429},
 	} {

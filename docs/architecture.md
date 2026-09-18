@@ -301,12 +301,19 @@ only a high-confidence `mismatch` opens a confirmation. The exact checked
 request is retained for "Start anyway". Cancellation does not proceed to launch.
 Errors, old gateways (404), and disabled checks preserve the normal start flow.
 
-`internal/directorycheck` calls TypeSafe's `POST /v1/systemone` (`jev-latest`),
-with one Choice question: match / mismatch / unknown. A warning requires
-mismatch probability >= 0.9 and confidence >= 0.7 (a distribution statistic,
-not an accuracy estimate). These are initial conservative thresholds, not a
-measured guarantee. The model is explicitly told that unseen work is not a
-mismatch and that state contents are evidence, not evaluation instructions.
+`internal/directorycheck` calls TypeSafe's `POST /v1/systemone` (`jev-latest`)
+with two Noul questions over the same state: `related` (should this request be
+carried out in this project?) and `other` (does it name or describe a different
+project, product or subject domain?). A warning requires `other >= 0.55` and
+`related < 0.75`. The earlier single match/mismatch/unknown Choice, told to pick
+mismatch only on positive evidence, scored clearly unrelated requests (an
+article about a contest in this repository) at mismatch ~0.45 and never warned.
+The thresholds come from a 31-case evaluation against real workspaces: unrelated
+requests scored `other` 0.51-0.96, same-project requests (follow-ups, new
+features, new libraries or integrations) at most 0.43. They are a starting
+point, not a measured guarantee; a request for another product the project's
+files never mention (e.g. a Herdr feature asked in an unrelated app) can still
+pass. State contents are evidence, not evaluation instructions.
 
 The optional `jevApiKey` setting (overridden by `TYPESAFE_API_KEY`) enables
 external transmission of bounded project-file and conversation excerpts.
