@@ -38,6 +38,7 @@ type Terminal interface {
 }
 
 type Server struct {
+	pairing        pairingState
 	DirectoryCheck *directorycheck.Checker
 	Sessions       *sessions.Service
 	Terminal       Terminal
@@ -52,9 +53,12 @@ type Server struct {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /pair", s.redeemPairing)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
 
 	api := http.NewServeMux()
+	api.HandleFunc("POST /v1/pairing", s.createPairing)
+	api.HandleFunc("DELETE /v1/pairing", s.cancelPairing)
 	api.HandleFunc("GET /v1/sessions", s.listSessions)
 	api.HandleFunc("POST /v1/sessions", s.startSession)
 	api.HandleFunc("GET /v1/models", s.listModels)

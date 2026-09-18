@@ -21,6 +21,7 @@ type Device struct {
 }
 
 type Config struct {
+	FirebaseAndroid *FirebaseAndroid `json:"firebaseAndroid,omitempty"`
 	// Optional TypeSafe key for advisory directory checks; TYPESAFE_API_KEY overrides it.
 	JevAPIKey string `json:"jevApiKey,omitempty"`
 
@@ -45,6 +46,14 @@ type Config struct {
 	UsageCommand string `json:"usageCommand,omitempty"`
 	// How often the limits are re-read in the background (default 5).
 	UsageRefreshMinutes int `json:"usageRefreshMinutes,omitempty"`
+}
+
+// FirebaseAndroid is client configuration, never a service-account private key.
+type FirebaseAndroid struct {
+	APIKey        string `json:"apiKey"`
+	ApplicationID string `json:"applicationId"`
+	ProjectID     string `json:"projectId"`
+	SenderID      string `json:"senderId"`
 }
 
 // Store serialises access to the config file.

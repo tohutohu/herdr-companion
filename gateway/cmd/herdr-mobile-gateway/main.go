@@ -40,6 +40,8 @@ Usage:
   herdr-mobile-gateway devices             list registered FCM devices
   herdr-mobile-gateway usage               print the current subscription limits
   herdr-mobile-gateway notify-test         send a test push to every registered device
+  herdr-mobile-gateway import-firebase --service-account FILE --android-config FILE
+                                          import Firebase files while gateway is stopped
   herdr-mobile-gateway debug replay FILE   re-parse dead-letter entries with the current adapters
 
 Environment:
@@ -56,6 +58,8 @@ func main() {
 	}
 	var err error
 	switch cmd {
+	case "import-firebase":
+		err = importFirebaseCmd(args)
 	case "serve":
 		err = serve(args)
 	case "token":
