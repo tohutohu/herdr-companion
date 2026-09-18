@@ -21,9 +21,11 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -39,15 +41,22 @@ import com.tohutohu.herdrmobile.data.api.QuestionDto
 private const val OTHER = "__herdr_other__"
 
 /**
- * Colors inside the card are derived from the card's own content color, not from
- * the surface roles: the pending card sits on [tertiaryContainer] and picking
- * `onSurfaceVariant` there made the secondary text unreadable.
+ * Colors inside the card come only from the card's container/content pair. With
+ * dynamic color the pending card's tertiaryContainer can be light even in dark
+ * theme, so other roles (primary, tertiary, onSurfaceVariant) may not contrast
+ * with it. The content color is used as the accent and the container color as
+ * the color drawn on top of the accent.
  */
+private val LocalCardContainer = staticCompositionLocalOf { Color.Unspecified }
+
 private val Muted: Color
     @Composable @ReadOnlyComposable get() = LocalContentColor.current.copy(alpha = 0.75f)
 
 private val Accent: Color
-    @Composable @ReadOnlyComposable get() = MaterialTheme.colorScheme.tertiary
+    @Composable @ReadOnlyComposable get() = LocalContentColor.current
+
+private val OnAccent: Color
+    @Composable @ReadOnlyComposable get() = LocalCardContainer.current
 
 @Composable
 fun InteractionCard(
@@ -57,21 +66,24 @@ fun InteractionCard(
     onOpenTerminal: () -> Unit,
 ) {
     val pending = interaction.isPending
+    val container = if (pending) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.surfaceVariant
     Card(
         colors = CardDefaults.cardColors(
-            containerColor = if (pending) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+            containerColor = container,
             contentColor = if (pending) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
         ),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            interaction.title?.let { Text(it, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold) }
-            when {
-                !pending -> AnsweredSummary(interaction)
-                !interaction.supported -> Unsupported(onOpenTerminal)
-                interaction.type == "approval" -> Approval(interaction, enabled, onRespond)
-                interaction.type == "questions" -> Questions(interaction, enabled, onRespond)
-                else -> Unsupported(onOpenTerminal)
+        CompositionLocalProvider(LocalCardContainer provides container) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                interaction.title?.let { Text(it, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold) }
+                when {
+                    !pending -> AnsweredSummary(interaction)
+                    !interaction.supported -> Unsupported(onOpenTerminal)
+                    interaction.type == "approval" -> Approval(interaction, enabled, onRespond)
+                    interaction.type == "questions" -> Questions(interaction, enabled, onRespond)
+                    else -> Unsupported(onOpenTerminal)
+                }
             }
         }
     }
@@ -97,7 +109,7 @@ private fun Unsupported(onOpenTerminal: () -> Unit) {
 @Composable
 private fun filledButtonColors() = ButtonDefaults.buttonColors(
     containerColor = Accent,
-    contentColor = MaterialTheme.colorScheme.onTertiary,
+    contentColor = OnAccent,
     disabledContainerColor = LocalContentColor.current.copy(alpha = 0.12f),
     disabledContentColor = LocalContentColor.current.copy(alpha = 0.38f),
 )
@@ -217,7 +229,7 @@ private fun QuestionView(
                         onCheckedChange = { toggle(key) },
                         colors = CheckboxDefaults.colors(
                             checkedColor = Accent,
-                            checkmarkColor = MaterialTheme.colorScheme.onTertiary,
+                            checkmarkColor = OnAccent,
                             uncheckedColor = LocalContentColor.current.copy(alpha = 0.6f),
                         ),
                     )
