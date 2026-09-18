@@ -1085,20 +1085,18 @@ func (t *Transcript) summary(opt ParseOptions) providers.Summary {
 		Context: model.NewContextUsage(t.ContextTokens, contextWindow(t.ModelID, t.Model)),
 		Cost:    t.cost()}
 	msgs := t.Messages(ParseOptions{SessionID: opt.SessionID, Live: opt.Live, Sink: deadletter.Nop{}})
+	s.LastMessage = lastReport(msgs)
 	for i := len(msgs) - 1; i >= 0; i-- {
 		m := msgs[i]
 		if m.Role != model.RoleAssistant && m.Role != model.RoleUser {
 			continue
 		}
 		for _, b := range m.Blocks {
-			if b.Type == model.BlockText && s.LastMessage == "" {
-				s.LastMessage = providers.OneLine(b.Text, 160)
-			}
 			if b.Type == model.BlockInteraction && b.Interaction.State == model.InteractionPending && s.Pending == "" {
 				s.Pending = b.Interaction.Type
 			}
 		}
-		if s.LastMessage != "" {
+		if hasText(m) {
 			break
 		}
 	}
@@ -1126,6 +1124,38 @@ func (t *Transcript) summary(opt ParseOptions) providers.Summary {
 		}
 	}
 	return s
+}
+
+// lastReport is the list preview: the agent's newest text, so slash commands
+// and prompts sent after it don't replace the report. A session the agent
+// hasn't answered yet shows its newest prompt.
+func lastReport(msgs []model.Message) string {
+	prompt := ""
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m := msgs[i]
+		for j := len(m.Blocks) - 1; j >= 0; j-- {
+			b := m.Blocks[j]
+			if b.Type != model.BlockText {
+				continue
+			}
+			switch {
+			case m.Role == model.RoleAssistant:
+				return providers.OneLine(b.Text, 160)
+			case m.Role == model.RoleUser && prompt == "":
+				prompt = b.Text
+			}
+		}
+	}
+	return providers.OneLine(prompt, 160)
+}
+
+func hasText(m model.Message) bool {
+	for _, b := range m.Blocks {
+		if b.Type == model.BlockText {
+			return true
+		}
+	}
+	return false
 }
 
 // Replay re-parses one raw transcript line with the current parser. Used by

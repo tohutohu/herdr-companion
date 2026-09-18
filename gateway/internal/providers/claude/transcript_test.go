@@ -213,8 +213,33 @@ func TestClaudeのAPIエラーで終わったターンは失敗扱いになる(t
 	if !s.LastTurnFailed {
 		t.Error("LastTurnFailed = false, want true")
 	}
-	if s.LastMessage != "API Error: 529 overloaded" && s.LastMessage != "この画像を見て" {
+	// 一覧にはエラー文ではなくエージェントの最新の報告を出す
+	if s.LastMessage != "修正しました。src/auth.go:3 を確認してください。" {
 		t.Errorf("last message = %q", s.LastMessage)
+	}
+}
+
+func Test一覧のプレビューはコマンドやプロンプトより最新の報告を優先する(t *testing.T) {
+	decode := func(lines ...string) *Transcript {
+		t.Helper()
+		tr, err := Decode(strings.NewReader(strings.Join(lines, "\n")), "claude:test", &deadletter.Recorder{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tr
+	}
+	prompt := `{"type":"user","message":{"role":"user","content":"直して"},"uuid":"u1","timestamp":"2026-09-17T10:00:00.000Z"}`
+	report := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"直しました。"}]},"uuid":"a1","timestamp":"2026-09-17T10:00:01.000Z"}`
+	command := `{"type":"user","message":{"role":"user","content":"<command-name>/model</command-name>\n<command-args>opus</command-args>"},"uuid":"u2","timestamp":"2026-09-17T10:00:02.000Z"}`
+	output := `{"type":"user","message":{"role":"user","content":"<local-command-stdout>Set model to ` + "`opus`" + `</local-command-stdout>"},"uuid":"u3","timestamp":"2026-09-17T10:00:03.000Z"}`
+	next := `{"type":"user","message":{"role":"user","content":"次はテストも"},"uuid":"u4","timestamp":"2026-09-17T10:00:04.000Z"}`
+
+	if got := decode(prompt, report, command, output, next).summary(ParseOptions{}).LastMessage; got != "直しました。" {
+		t.Errorf("after a command and a new prompt: last message = %q", got)
+	}
+	// 返答がまだないセッションは最新のプロンプトを出す
+	if got := decode(prompt).summary(ParseOptions{}).LastMessage; got != "直して" {
+		t.Errorf("before any reply: last message = %q", got)
 	}
 }
 
