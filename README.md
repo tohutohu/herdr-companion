@@ -240,11 +240,12 @@ JDK 17 を使ってください（例: `export JAVA_HOME=$(/usr/libexec/java_hom
 初回起動時は「Scan Mac QR」でMacのQRを読み取るか、Gateway URLと認証トークンを入力し「Test connection」→「Save」。
 スマホで MagicDNS 名が引けない場合は Tailscale IP（`http://100.x.y.z:8765`）を使ってください。
 
-デバッグビルドは adb から設定を渡せます（日本語 IME で `adb shell input text` が変換されるのを避けるため）:
+デバッグビルドは adb から設定を渡せます（日本語 IME で `adb shell input text` が変換されるのを避けるため）。受け口は adb にしか送れない receiver です:
 
 ```bash
-adb shell am start -n com.tohutohu.herdrmobile/.MainActivity \
+adb shell am broadcast -n com.tohutohu.herdrmobile/.DebugConfigReceiver \
   --es gateway_url "http://100.x.y.z:8765" --es token "$(herdr-mobile-gateway token)"
+adb shell am start -n com.tohutohu.herdrmobile/.MainActivity
 ```
 Android 13 以降は通知の許可を求められます。
 

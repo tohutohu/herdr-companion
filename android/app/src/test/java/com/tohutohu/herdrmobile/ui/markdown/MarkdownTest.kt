@@ -140,6 +140,13 @@ class MarkdownTest {
     }
 
     @Test
+    fun `http以外のスキームのリンクはラベルだけを表示して開かない`() {
+        val spans = parseInline("[設定](intent://x#Intent;scheme=foo;end) と [電話](tel:123)")
+        assertTrue(spans.none { it.link != null })
+        assertEquals("設定 と 電話", text(spans))
+    }
+
+    @Test
     fun `裸のURLもリンクにする`() {
         val spans = parseInline("見て: https://example.com/x 。")
         val link = spans.first { it.link != null }

@@ -88,9 +88,10 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.herdr-mobile.<name>.
 - Emulator: `emulator -avd Pixel_9_Pro -no-window -no-audio -no-snapshot-save`. It reaches host loopback services at `10.0.2.2` (a throwaway gateway on `127.0.0.1:18765` is `http://10.0.2.2:18765`), but the real gateway listens on the Tailscale IP only, so use `http://100.99.15.34:8765` for it. Stop the emulator with `adb emu kill`.
 - `adb shell screenrecord` dies with the shell that started it; start it, drive the UI and `adb pull` within one command.
 - Real phone: Pixel 7a over USB. It reaches the gateway via Tailscale IP `100.99.15.34`; the MagicDNS name doesn't resolve on the phone.
-- `adb shell input text` goes through the phone's Japanese IME and gets converted. Configure debug builds with:
+- `adb shell input text` goes through the phone's Japanese IME and gets converted. Configure debug builds with the DUMP-guarded receiver (only adb can send it), then launch the app:
   ```bash
-  adb shell am start -n com.tohutohu.herdrmobile/.MainActivity --es gateway_url http://100.99.15.34:8765 --es token "$(herdr-mobile-gateway token)"
+  adb shell am broadcast -n com.tohutohu.herdrmobile/.DebugConfigReceiver --es gateway_url http://100.99.15.34:8765 --es token "$(herdr-mobile-gateway token)"
+  adb shell am start -n com.tohutohu.herdrmobile/.MainActivity
   ```
 - Automating the user's phone is risky: taps landed in Developer options once and toggled "Pointer location". Before tapping, check `adb shell dumpsys window | grep mCurrentFocus` is the app, and find coordinates with `uiautomator dump`.
 - FCM is not delivered to force-stopped apps. For push tests, background the app with HOME instead.

@@ -37,9 +37,7 @@ import com.tohutohu.herdrmobile.ui.sessions.ArchivedSessionsScreen
 import com.tohutohu.herdrmobile.ui.sessions.SessionListScreen
 import com.tohutohu.herdrmobile.ui.settings.SettingsScreen
 import com.tohutohu.herdrmobile.ui.terminal.TerminalScreen
-import com.tohutohu.herdrmobile.data.Settings
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.runBlocking
 
 class MainActivity : ComponentActivity() {
     /** Session to open, set from notification taps. */
@@ -51,7 +49,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        handleIntent(intent)
+        // After a restore the saved back stack already reflects the launching
+        // intent; the system hands it over again, but it must not re-navigate.
+        if (savedInstanceState == null) handleIntent(intent)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
@@ -146,29 +146,15 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
         handleIntent(intent)
     }
 
     private fun handleIntent(intent: Intent?) {
-        applyDebugSettings(intent)
         if (intent?.getStringExtra("connection_id").orEmpty() != container.settings.current.connectionId) return
         val id = intent?.getStringExtra(Notifications.EXTRA_SESSION_ID) ?: return
         intent.removeExtra(Notifications.EXTRA_SESSION_ID)
         Notifications.cancel(this, id)
         pendingSession.value = id
-    }
-
-    /**
-     * Debug builds only: `adb shell am start -n com.tohutohu.herdrmobile/.MainActivity
-     * --es gateway_url http://host:8765 --es token XXX` configures the app
-     * without typing (release builds ignore these extras).
-     */
-    private fun applyDebugSettings(intent: Intent?) {
-        if (!BuildConfig.DEBUG || intent == null) return
-        val url = intent.getStringExtra("gateway_url") ?: return
-        val token = intent.getStringExtra("token") ?: return
-        intent.removeExtra("token")
-        runBlocking { container.settings.save(Settings(url, token)) }
-        container.pushRegistration.registerIfPossible()
     }
 }

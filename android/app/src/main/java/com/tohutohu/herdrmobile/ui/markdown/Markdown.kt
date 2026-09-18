@@ -192,7 +192,9 @@ private fun parseInline(text: String, base: MdSpan): List<MdSpan> {
                     i++
                 } else {
                     flush()
-                    out += parseInline(link.label, base.copy(link = link.url))
+                    // Agent output is untrusted: other schemes (intent:, tel:,
+                    // another app's deep link) keep their label but open nothing.
+                    out += parseInline(link.label, base.copy(link = link.url.takeIf { AUTOLINK.matchesAt(it, 0) }))
                     i = link.end
                 }
             }
