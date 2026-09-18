@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -25,8 +24,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * How full the session's context window is. Renders nothing until the agent
- * has reported a token count, which it does once a turn has run.
+ * How full the session's context window is, as the panel behind [ContextGauge]
+ * shows it. Renders nothing until the agent has reported a token count, which
+ * it does once a turn has run.
  */
 @Composable
 fun ContextBar(usedTokens: Long?, windowTokens: Long?, usedPercent: Int?, modifier: Modifier = Modifier) {
@@ -54,7 +54,6 @@ fun ContextBar(usedTokens: Long?, windowTokens: Long?, usedPercent: Int?, modifi
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
-    HorizontalDivider()
 }
 
 /**

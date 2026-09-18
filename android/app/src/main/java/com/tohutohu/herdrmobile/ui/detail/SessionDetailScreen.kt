@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -36,6 +37,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -61,6 +63,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -99,8 +102,9 @@ fun SessionDetailScreen(
     val actions = rememberSessionActions(onChanged = { vm.refresh() })
     actions.Dialogs()
     var menu by remember { mutableStateOf(false) }
-    // The header only carries the context ring; the full bar opens under it on tap.
-    var contextOpen by rememberSaveable(sessionId) { mutableStateOf(false) }
+    // The header carries only what changes; the directory and the context bar
+    // open under it when the title or the context ring is tapped.
+    var detailsOpen by rememberSaveable(sessionId) { mutableStateOf(false) }
     val messages by vm.messages.collectAsState()
     val error by vm.error.collectAsState()
     val sending by vm.sending.collectAsState()
@@ -158,10 +162,9 @@ fun SessionDetailScreen(
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                 },
                 title = {
-                    Column {
+                    Column(Modifier.clickable { detailsOpen = !detailsOpen }) {
                         Text(
-                            listOfNotNull(session?.providerName, session?.project?.takeIf { it.isNotBlank() }).joinToString(" / ")
-                                .ifBlank { sessionId },
+                            session?.headline() ?: sessionId,
                             style = MaterialTheme.typography.titleSmall,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -188,7 +191,7 @@ fun SessionDetailScreen(
                     }
                 },
                 actions = {
-                    ContextGauge(session?.contextUsedPercent, onClick = { contextOpen = !contextOpen })
+                    ContextGauge(session?.contextUsedPercent, onClick = { detailsOpen = !detailsOpen })
                     session?.let { s ->
                         Box {
                             IconButton(onClick = { menu = true }) {
@@ -225,8 +228,22 @@ fun SessionDetailScreen(
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
-            session?.takeIf { contextOpen }?.let {
-                ContextBar(it.contextUsedTokens, it.contextWindowTokens, it.contextUsedPercent)
+            session?.takeIf { detailsOpen }?.let {
+                Column {
+                    (it.cwd?.takeIf { p -> p.isNotBlank() } ?: it.project).takeIf { p -> p.isNotBlank() }?.let { dir ->
+                        Text(
+                            dir,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.StartEllipsis,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                        )
+                    }
+                    ContextBar(it.contextUsedTokens, it.contextWindowTokens, it.contextUsedPercent)
+                    HorizontalDivider()
+                }
             }
             error?.let {
                 Text(
@@ -366,6 +383,15 @@ private fun Composer(
 }
 
 private fun SessionEntity.ref() = SessionRef(id, live = status != Status.OFFLINE, archived = archived)
+
+/**
+ * The header's first line: the session's own name, which says more than the
+ * agent and the folder do. Both of those are still reachable - the model name
+ * sits right below it and the directory is one tap away - so they only stand
+ * in when the agent has not named the session yet.
+ */
+private fun SessionEntity.headline(): String =
+    title?.takeIf { it.isNotBlank() } ?: project.takeIf { it.isNotBlank() } ?: cwd?.takeIf { it.isNotBlank() } ?: id
 
 /** Shown instead of the composer while the session is not running. */
 @Composable
