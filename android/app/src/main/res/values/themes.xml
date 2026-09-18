@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.HerdrMobile" parent="android:Theme.Material.NoActionBar">
-        <item name="android:statusBarColor">@android:color/transparent</item>
-        <item name="android:navigationBarColor">@android:color/transparent</item>
-    </style>
+    <!-- Light by default so the window behind Compose (at launch and between
+         screens) matches the light colour scheme; values-night overrides it.
+         System bars are handled by enableEdgeToEdge(). -->
+    <style name="Theme.HerdrMobile" parent="android:Theme.Material.Light.NoActionBar" />
 </resources>

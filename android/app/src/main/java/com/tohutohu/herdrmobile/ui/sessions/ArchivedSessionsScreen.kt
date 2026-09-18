@@ -36,6 +36,9 @@ import kotlinx.coroutines.launch
 import androidx.navigationevent.NavigationEventInfo
 import androidx.navigationevent.compose.NavigationBackHandler
 import androidx.navigationevent.compose.rememberNavigationEventState
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.PaddingValues
+import com.tohutohu.herdrmobile.ui.exceptBottom
 
 /**
  * Archived sessions, read directly from the gateway (not cached). Swipe a
@@ -100,10 +103,10 @@ fun ArchivedSessionsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
                     refreshing = false
                 }
             },
-            modifier = Modifier.padding(padding).fillMaxSize(),
+            modifier = Modifier.padding(padding.exceptBottom()).consumeWindowInsets(padding).fillMaxSize(),
         ) {
             Box(Modifier.fillMaxSize()) {
-                LazyColumn(Modifier.fillMaxSize()) {
+                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = padding.calculateBottomPadding())) {
                     error?.let {
                         item(key = "error") {
                             Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.animateItem().padding(16.dp))

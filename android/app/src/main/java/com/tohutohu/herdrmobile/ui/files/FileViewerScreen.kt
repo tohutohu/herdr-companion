@@ -56,6 +56,10 @@ import com.tohutohu.herdrmobile.data.DownloadState
 import com.tohutohu.herdrmobile.data.FileDownloads
 import com.tohutohu.herdrmobile.data.api.FileInfoDto
 import com.tohutohu.herdrmobile.ui.ExpandingContent
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.ui.unit.Dp
+import com.tohutohu.herdrmobile.ui.exceptBottom
 
 private sealed interface FileState {
     data object Loading : FileState
@@ -112,17 +116,18 @@ fun FileViewerScreen(sessionId: String, path: String, line: Int, onBack: () -> U
             targetState = state,
             contentKey = { it::class },
             transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(150)) },
-            modifier = Modifier.padding(padding).fillMaxSize(),
+            modifier = Modifier.padding(padding.exceptBottom()).consumeWindowInsets(padding).fillMaxSize(),
             label = "file",
         ) { s ->
+            val bottom = padding.calculateBottomPadding()
             Box(Modifier.fillMaxSize()) {
                 when (s) {
                     FileState.Loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
                     is FileState.Error -> Text(s.message, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp))
-                    is FileState.Image -> AsyncImage(model = s.bytes, contentDescription = path, modifier = Modifier.fillMaxSize())
-                    is FileState.Text -> CodeView(path, s.lines, line)
-                    is FileState.Media -> MediaFileView(sessionId, s.info) { state = FileState.Download(s.info) }
-                    is FileState.Download -> DownloadView(sessionId, s.info)
+                    is FileState.Image -> AsyncImage(model = s.bytes, contentDescription = path, modifier = Modifier.padding(bottom = bottom).fillMaxSize())
+                    is FileState.Text -> CodeView(path, s.lines, line, bottom)
+                    is FileState.Media -> Box(Modifier.padding(bottom = bottom)) { MediaFileView(sessionId, s.info) { state = FileState.Download(s.info) } }
+                    is FileState.Download -> Box(Modifier.padding(bottom = bottom)) { DownloadView(sessionId, s.info) }
                 }
             }
         }
@@ -196,7 +201,7 @@ private fun displayType(info: FileInfoDto): String =
         ?: info.contentType.substringBefore(';')
 
 @Composable
-private fun CodeView(path: String, lines: List<String>, target: Int) {
+private fun CodeView(path: String, lines: List<String>, target: Int, bottom: Dp) {
     val listState = rememberLazyListState()
     LaunchedEffect(target, lines.size) {
         if (target > 0) listState.scrollToItem((target - 1 - 5).coerceIn(0, (lines.size - 1).coerceAtLeast(0)))
@@ -205,7 +210,7 @@ private fun CodeView(path: String, lines: List<String>, target: Int) {
     val highlight = MaterialTheme.colorScheme.tertiaryContainer
     Box(Modifier.fillMaxSize().horizontalScroll(rememberScrollState())) {
         SelectionContainer {
-            LazyColumn(state = listState, modifier = Modifier.width(2000.dp)) {
+            LazyColumn(state = listState, modifier = Modifier.width(2000.dp), contentPadding = PaddingValues(bottom = bottom)) {
                 item { Text(path, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(8.dp)) }
                 itemsIndexed(lines) { i, text ->
                     val n = i + 1

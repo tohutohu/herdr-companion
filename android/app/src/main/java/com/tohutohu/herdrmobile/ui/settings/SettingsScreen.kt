@@ -48,6 +48,8 @@ import android.app.Activity
 import kotlin.system.exitProcess
 import com.tohutohu.herdrmobile.ui.ExpandingContent
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.imePadding
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -101,6 +103,10 @@ fun SettingsScreen(onDone: () -> Unit) {
         Column(
             Modifier
                 .padding(padding)
+                // Scaffold leaves the keyboard out; pad for it so the fields
+                // and Save scroll clear of it.
+                .consumeWindowInsets(padding)
+                .imePadding()
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),

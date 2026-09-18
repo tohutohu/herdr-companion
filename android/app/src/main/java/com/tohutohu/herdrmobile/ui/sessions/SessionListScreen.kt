@@ -77,8 +77,14 @@ import kotlinx.coroutines.launch
 import androidx.navigationevent.NavigationEventInfo
 import androidx.navigationevent.compose.NavigationBackHandler
 import androidx.navigationevent.compose.rememberNavigationEventState
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.PaddingValues
+import com.tohutohu.herdrmobile.ui.exceptBottom
 
 private const val LIST_POLL_MS = 5_000L
+
+/** An extended FAB (56dp) and the margin Scaffold puts around it. */
+private val FAB_CLEARANCE = 88.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -175,11 +181,16 @@ fun SessionListScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onNew: (
                     refreshing = false
                 }
             },
-            modifier = Modifier.padding(padding).fillMaxSize(),
+            modifier = Modifier.padding(padding.exceptBottom()).consumeWindowInsets(padding).fillMaxSize(),
         ) {
             Column(Modifier.fillMaxSize()) {
                 UsageCard()
-                LazyColumn(Modifier.fillMaxSize(), state = listState) {
+                LazyColumn(
+                    Modifier.fillMaxSize(),
+                    state = listState,
+                    // Room to scroll the last row out from under the FAB.
+                    contentPadding = PaddingValues(bottom = padding.calculateBottomPadding() + FAB_CLEARANCE),
+                ) {
                     error?.let {
                         item(key = "error") {
                             Text(

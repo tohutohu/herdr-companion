@@ -27,6 +27,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // The input bars draw their own surface down to the screen edge; the
+        // translucent scrim three-button navigation would add cuts across it.
+        window.isNavigationBarContrastEnforced = false
         // After a restore the saved back stack already reflects the launching
         // intent; the system hands it over again, but it must not re-navigate.
         if (savedInstanceState == null) handleIntent(intent)
