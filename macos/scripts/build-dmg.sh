@@ -4,6 +4,10 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUTPUT="$ROOT/macos/build"
 APP="$OUTPUT/Herdr Mobile.app"
 ARCH="$(uname -m)"
+if pgrep -f "$APP/Contents/MacOS/HerdrMenu" >/dev/null; then
+  echo 'Quit the app in macos/build before rebuilding; replacing a running signed executable invalidates its code signature.' >&2
+  exit 1
+fi
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 swift build --package-path "$ROOT/macos" -c release
 cp "$ROOT/macos/.build/release/HerdrMenu" "$APP/Contents/MacOS/HerdrMenu"
