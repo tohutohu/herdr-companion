@@ -71,6 +71,15 @@ Adding OpenCode means one more package implementing it and one line in
 - `AskUserQuestion`: an `interaction` block built from the tool input. It is
   `pending` only while the pane is `blocked` and the tool has no result.
 - Approvals: any other unanswered tool call while `blocked`.
+- `ExitPlanMode`: the plan text, a file block linking the saved plan
+  (`planFilePath` under `~/.claude/plans`, which the file API also serves for
+  Claude sessions) and a `questions` interaction with `kind: "plan"` that
+  counts as an approval for the session status. Its options are the rows of
+  the plan dialog read from the visible screen while it is pending ("Yes,
+  auto-accept edits", "Yes, manually approve edits", …) plus "No, keep
+  planning" (Esc); free text is the "Tell Claude what to change" row
+  (`otherLabel`). The answer summary comes from the tool result (approved,
+  rejected, or the feedback).
 - Answers are translated to key presses in the adapter
   (verified against Claude Code 2.1.x): approve = Enter, deny = Esc;
   single-select = Down×n + Enter; free text = move to "Type something",
@@ -99,6 +108,15 @@ Adding OpenCode means one more package implementing it and one line in
   the TUI. Existing drafts are not overwritten. This also works after the
   originating turn completes. Multi-question queues and other unsupported
   dialogs retain the terminal fallback. Keys were checked against Codex 0.154.0.
+- After a Plan mode turn ends with a `plan` item the TUI asks "Implement this
+  plan?" on its own; the app-server never sees it. While it is on the visible
+  screen of the session's pane it is a `questions` interaction with
+  `kind: "plan"` (rows read from the screen) and the session waits for
+  approval. The answer is Down×n + Enter after checking the screen again;
+  row 1 switches the TUI to Default and sends "Implement the plan.".
+- Answered `requestUserInput` prompts are not in thread items. They are
+  rebuilt from the rollout's `request_user_input` call and its output and
+  shown as answered cards before the agent message that followed the answer.
 - Herdr's `api schema` (protocol 22) defines the `pane.read` visible source
   and the key/text request shapes used here; scrollback is not dialog state.
 
@@ -189,9 +207,13 @@ Sessions report the model they last used (`model`), the reasoning effort
   name from a later `/model`); `permissionMode` of the latest entry that has
   one. A Shift+Tab change is recorded with the next prompt, and
   `permission-mode` entries are re-appended later with the current mode.
-- Codex: the thread's `model` / `reasoningEffort`. The mode is only known for
-  threads loaded on the shared daemon: `thread/resume` gives the approval
-  policy and sandbox, `thread/settings/updated` also gives Plan mode.
+- Codex: the thread's `model` / `reasoningEffort`. The permission preset is
+  only known for threads loaded on the shared daemon: `thread/resume` gives
+  the approval policy and sandbox, `thread/settings/updated` also gives the
+  collaboration mode. A thread that starts in Plan mode sends that
+  notification before the gateway subscribes, so Plan mode also comes from
+  the newest `collaboration_mode` in the rollout (`turn_context`, or
+  `thread_settings_applied` when the TUI switches mode).
 
 They also report how full the context window is (`context`: used tokens,
 window size, percent), omitted until an agent has accounted for a turn:
@@ -249,7 +271,9 @@ access; new folder names must be a single, non-hidden path segment.
 ## Files
 
 `GET /v1/sessions/{id}/files[/content]?path=` serves files under the
-session's working directory (and the upload directory, for sent attachments).
+session's working directory, the upload directory (for sent attachments) and
+any directory the provider links files from (`providers.FileRooter`: Claude's
+`plans` directory, for saved plans).
 Paths are cleaned, symlink-resolved and must stay inside an allowed root;
 `.ssh`, `.gnupg`, `.aws` are always refused. Text is served as `text/plain`.
 
