@@ -247,7 +247,16 @@ data class ModelsResponse(
 )
 
 @Serializable
-data class StartSessionResponse(val sessionId: String? = null, val paneId: String, val warning: String? = null)
+data class StartSessionResponse(
+    val sessionId: String? = null,
+    val paneId: String,
+    val warning: String? = null,
+    /** The agent is asking whether to trust the folder; answer with [GatewayApi.answerTrust]. */
+    val trustRequired: Boolean = false,
+)
+
+@Serializable
+data class TrustAnswer(val trust: Boolean)
 
 @Serializable
 data class DirectoryCheckRequest(val cwd: String, val prompt: String)

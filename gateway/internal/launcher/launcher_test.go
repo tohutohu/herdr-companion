@@ -212,20 +212,51 @@ func Test信頼ダイアログを承認して起動しプロンプトを送る(t
 	}
 }
 
-func Test信頼しない場合はダイアログに触れず警告を返す(t *testing.T) {
+func Test信頼しない場合はダイアログで止めて回答を待つ(t *testing.T) {
 	fh := &fakeHerdr{status: herdr.StatusBlocked, screen: "Yes, I trust this folder", startErr: &herdr.Error{Code: "agent_not_ready"}}
 	l, root := newLauncher(t, fh)
-	res, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: root, Trust: false})
+	res, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: filepath.Join(root, "app-b"), Prompt: "hello"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Warning == "" || res.SessionID != "" {
+	if !res.TrustRequired || res.PaneID != "w9:p1" || res.Warning != "" || res.SessionID != "" {
 		t.Errorf("result = %+v", res)
 	}
-	for _, c := range fh.calls {
-		if strings.HasPrefix(c, "keys") {
-			t.Errorf("must not answer the dialog: %v", fh.calls)
-		}
+	if got := strings.Join(fh.calls, "|"); got != "create app-b|start claude --default" {
+		t.Errorf("must not answer the dialog yet: %s", got)
+	}
+
+	res, err = l.AnswerTrust(context.Background(), "w9:p1", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.SessionID != "claude:abc-123" || res.TrustRequired || res.Warning != "" {
+		t.Errorf("answered result = %+v", res)
+	}
+	want := "create app-b|start claude --default|keys down,enter|prompt hello"
+	if got := strings.Join(fh.calls, "|"); got != want {
+		t.Errorf("calls = %s", got)
+	}
+	// 回答は一度きり
+	if _, err := l.AnswerTrust(context.Background(), "w9:p1", true); !errors.Is(err, ErrNoPendingTrust) {
+		t.Errorf("second answer err = %v", err)
+	}
+}
+
+func Test信頼を断るとワークスペースを閉じる(t *testing.T) {
+	fh := &fakeHerdr{status: herdr.StatusBlocked, screen: "Yes, I trust this folder", startErr: &herdr.Error{Code: "agent_not_ready"}}
+	l, root := newLauncher(t, fh)
+	if res, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: root, Prompt: "hello"}); err != nil || !res.TrustRequired {
+		t.Fatalf("res = %+v err = %v", res, err)
+	}
+	if _, err := l.AnswerTrust(context.Background(), "w9:p1", false); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(fh.calls, "|"); got != "create workspace|start claude --default|close workspace w9" {
+		t.Errorf("calls = %s", got)
+	}
+	if _, err := l.AnswerTrust(context.Background(), "w9:p2", true); !errors.Is(err, ErrNoPendingTrust) {
+		t.Errorf("unknown pane err = %v", err)
 	}
 }
 

@@ -96,7 +96,7 @@ Gateway は既定で 5 分ごとに読み直してキャッシュし、アプリ
 
 一覧画面の「New session」で、Claude Code / Codex、作業フォルダ（`workspaceRoots` 配下で選択または新規作成）、最初のプロンプトを指定して起動します。
 Gateway は Herdr に新しいワークスペースを作り、`agent.start` でエージェントを起動します。
-「Trust this folder」をオンにすると、エージェントのフォルダ信頼確認ダイアログに Gateway が「信頼する」と回答します。
+エージェントがフォルダ信頼確認ダイアログを出したときだけ、アプリが信頼するか確認します。「Trust」を選ぶと Gateway がダイアログに回答して起動を続け、「Cancel」を選ぶと作成したワークスペースを閉じます。
 Codex の共有 daemon が動いていれば `codex --remote unix://…` で起動します。
 
 Codex では、Herdr インテグレーションのフックを一度「信頼」する必要があります（Codex 起動時に表示される Hooks の確認画面で `t`）。

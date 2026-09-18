@@ -61,6 +61,7 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("DELETE /v1/pairing", s.cancelPairing)
 	api.HandleFunc("GET /v1/sessions", s.listSessions)
 	api.HandleFunc("POST /v1/sessions", s.startSession)
+	api.HandleFunc("POST /v1/launches/{pane}/trust", s.answerTrust)
 	api.HandleFunc("GET /v1/models", s.listModels)
 	api.HandleFunc("GET /v1/directories", s.listDirectories)
 	api.HandleFunc("POST /v1/directories", s.createDirectory)
@@ -139,7 +140,8 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, sessionID, op stri
 	status := http.StatusInternalServerError
 	var herr *herdr.Error
 	switch {
-	case errors.Is(err, providers.ErrNotFound), errors.Is(err, files.ErrNotFound), errors.Is(err, uploads.ErrNotFound):
+	case errors.Is(err, providers.ErrNotFound), errors.Is(err, files.ErrNotFound), errors.Is(err, uploads.ErrNotFound),
+		errors.Is(err, launcher.ErrNoPendingTrust):
 		status = http.StatusNotFound
 	case errors.Is(err, providers.ErrNotLive), errors.Is(err, providers.ErrInteractionGone),
 		errors.Is(err, errAlreadyLive), errors.Is(err, launcher.ErrNoCwd):
@@ -593,6 +595,24 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, res)
+}
+
+// answerTrust continues (or, when declined, cancels) a new session that
+// stopped at the agent's folder-trust dialog.
+func (s *Server) answerTrust(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Trust bool `json:"trust"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+		s.fail(w, r, "", "answer_trust", badRequest("invalid json"))
+		return
+	}
+	res, err := s.Launcher.AnswerTrust(r.Context(), r.PathValue("pane"), req.Trust)
+	if err != nil {
+		s.fail(w, r, "", "answer_trust", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {

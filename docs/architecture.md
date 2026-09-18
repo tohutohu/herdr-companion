@@ -153,7 +153,10 @@ send as pending, done, or failed.
 `agent.start`. Providers implement `providers.Launchable`: extra CLI arguments
 (Codex attaches to the shared daemon when present) and the keys that accept
 their folder-trust dialog. The dialog is answered only when the request says
-`trust: true`. The native session id is then read from the pane's
+`trust: true`; otherwise the launch stops there, is kept in memory for 15
+minutes, and returns `trustRequired: true`. The app then asks the user and
+answers with `POST /v1/launches/{pane}/trust`, which continues the launch
+(first prompt, session id) or closes the workspace. The native session id is then read from the pane's
 `agent_session`, which the Herdr integration hook reports at startup.
 An optional model id is passed as the CLI's `--model`. Claude Code has no
 catalog API, so its list is the CLI aliases (`fable`, `opus`, `sonnet`,
@@ -271,7 +274,8 @@ whole thing off, and `herdr-mobile-gateway usage` prints one read.
 |---|---|---|
 | GET | `/healthz` | no auth |
 | GET | `/v1/sessions` | live + recent offline sessions |
-| POST | `/v1/sessions` | start `{provider, cwd, prompt, model?, effort?, trust}` in a new Herdr workspace → `{sessionId?, paneId, warning?}` |
+| POST | `/v1/sessions` | start `{provider, cwd, prompt, model?, effort?, trust}` in a new Herdr workspace → `{sessionId?, paneId, warning?, trustRequired?}` |
+| POST | `/v1/launches/{pane}/trust` | `{trust}` answer a start that returned `trustRequired`: continue it or close its workspace → `{sessionId?, paneId, warning?}` |
 | GET | `/v1/models?provider=` | models and efforts offered for new sessions `{models[{id, name, description?, default?, efforts?[]}], efforts?[{id, name, description?, default?}]}` |
 | GET | `/v1/directories?path=` | workspace roots, or subfolders of `path` |
 | POST | `/v1/directories` | create `{parent, name}` under a root |

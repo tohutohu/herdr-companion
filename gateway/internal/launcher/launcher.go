@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/files"
@@ -26,7 +27,11 @@ var (
 	ErrInvalidModel    = errors.New("invalid model")
 	ErrInvalidEffort   = errors.New("invalid effort")
 	ErrNoCwd           = errors.New("session has no known working directory")
+	ErrNoPendingTrust  = errors.New("no launch is waiting on a trust answer for this pane")
 )
+
+// pendingTrustTTL bounds how long a launch waits for the app's trust answer.
+const pendingTrustTTL = 15 * time.Minute
 
 // Herdr is the subset of the Herdr client used to launch agents.
 type Herdr interface {
@@ -51,6 +56,21 @@ type Launcher struct {
 	StartTimeout time.Duration
 	PollInterval time.Duration
 	IdentityWait time.Duration
+
+	mu      sync.Mutex
+	pending map[string]*pendingLaunch // pane id -> launch waiting on a trust answer
+}
+
+// pendingLaunch is a launch stopped at the agent's folder-trust dialog.
+type pendingLaunch struct {
+	p       providers.Provider
+	lp      providers.Launchable
+	ws, cwd string
+	prompt  string
+	knownID string
+	started time.Time
+	asked   time.Time
+	logKV   []any
 }
 
 // DefaultRoots returns ~/workspace when it exists, else the home directory.
@@ -174,6 +194,7 @@ type StartRequest struct {
 	// Effort is an effort id from Models; empty uses the agent's default.
 	Effort string `json:"effort,omitempty"`
 	// Trust accepts the agent's folder-trust dialog on the user's behalf.
+	// Without it the launch stops at the dialog and reports TrustRequired.
 	Trust bool `json:"trust"`
 }
 
@@ -182,6 +203,9 @@ type StartResult struct {
 	PaneID    string `json:"paneId"`
 	// Warning explains a partial start (e.g. waiting on a dialog, no identity yet).
 	Warning string `json:"warning,omitempty"`
+	// TrustRequired means the agent is showing its folder-trust dialog; the
+	// launch continues when the app answers with AnswerTrust.
+	TrustRequired bool `json:"trustRequired,omitempty"`
 }
 
 func (l *Launcher) provider(name string) (providers.Provider, providers.Launchable, error) {
@@ -265,27 +289,82 @@ func (l *Launcher) launch(ctx context.Context, p providers.Provider, lp provider
 		}
 		return nil, fmt.Errorf("start agent: %w", err)
 	}
-	if !l.passStartupDialog(ctx, lp, pane, trust) {
+	pl := &pendingLaunch{p: p, lp: lp, ws: ws, cwd: cwd, prompt: prompt, knownID: knownID, started: started, logKV: logKV}
+	switch l.passStartupDialog(ctx, lp, pane, trust) {
+	case startupTrust:
+		pl.asked = time.Now()
+		l.putPending(pane, pl)
+		res.TrustRequired = true
+		log.Info("launch waiting on folder trust", "cwd", cwd)
+		return res, nil
+	case startupStuck:
 		res.Warning = "The agent is waiting on a startup dialog. Open the terminal to continue."
 		return res, nil
 	}
+	return l.finish(ctx, pane, pl), nil
+}
 
-	if strings.TrimSpace(prompt) != "" {
+// AnswerTrust resumes a launch stopped at the folder-trust dialog. Declining
+// closes the workspace that was opened for it.
+func (l *Launcher) AnswerTrust(ctx context.Context, pane string, accept bool) (*StartResult, error) {
+	pl := l.takePending(pane)
+	if pl == nil {
+		return nil, ErrNoPendingTrust
+	}
+	if !accept {
+		slog.Info("folder trust declined", "provider", pl.p.Name(), "pane", pane, "cwd", pl.cwd)
+		return &StartResult{PaneID: pane}, l.Herdr.CloseWorkspace(ctx, pl.ws)
+	}
+	if l.passStartupDialog(ctx, pl.lp, pane, true) != startupReady {
+		return &StartResult{PaneID: pane, Warning: "The agent is waiting on a startup dialog. Open the terminal to continue."}, nil
+	}
+	return l.finish(ctx, pane, pl), nil
+}
+
+func (l *Launcher) putPending(pane string, pl *pendingLaunch) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.pending == nil {
+		l.pending = map[string]*pendingLaunch{}
+	}
+	for k, v := range l.pending {
+		if time.Since(v.asked) > pendingTrustTTL {
+			delete(l.pending, k)
+		}
+	}
+	l.pending[pane] = pl
+}
+
+func (l *Launcher) takePending(pane string) *pendingLaunch {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	pl := l.pending[pane]
+	delete(l.pending, pane)
+	if pl == nil || time.Since(pl.asked) > pendingTrustTTL {
+		return nil
+	}
+	return pl
+}
+
+// finish sends the first prompt to a ready agent and waits for its identity.
+func (l *Launcher) finish(ctx context.Context, pane string, pl *pendingLaunch) *StartResult {
+	res := &StartResult{PaneID: pane}
+	if strings.TrimSpace(pl.prompt) != "" {
 		if err := l.waitReady(ctx, pane); err != nil {
 			res.Warning = "The agent did not become ready; the prompt was not sent."
-			return res, nil
+			return res
 		}
-		if err := l.Herdr.Prompt(ctx, pane, prompt); err != nil {
+		if err := l.Herdr.Prompt(ctx, pane, pl.prompt); err != nil {
 			res.Warning = "Prompt could not be sent: " + err.Error()
 		}
 	}
 
-	res.SessionID = l.waitIdentity(ctx, pane, p, cwd, started, knownID)
+	res.SessionID = l.waitIdentity(ctx, pane, pl.p, pl.cwd, pl.started, pl.knownID)
 	if res.SessionID == "" && res.Warning == "" {
-		res.Warning = "Started, but Herdr has not reported the session id yet (is `herdr integration install " + p.HerdrAgent() + "` done?)."
+		res.Warning = "Started, but Herdr has not reported the session id yet (is `herdr integration install " + pl.p.HerdrAgent() + "` done?)."
 	}
-	log.Info("session launched", append([]any{"session_id", res.SessionID, "cwd", cwd}, logKV...)...)
-	return res, nil
+	slog.Info("session launched", append([]any{"provider", pl.p.Name(), "operation", "launch", "pane", pane, "session_id", res.SessionID, "cwd", pl.cwd}, pl.logKV...)...)
+	return res
 }
 
 // startAgent runs agent.start. A new pane's shell may still be running its
@@ -338,24 +417,32 @@ func (l *Launcher) Stop(ctx context.Context, paneID string) error {
 	return l.Herdr.ClosePane(ctx, paneID)
 }
 
+type startupOutcome int
+
+const (
+	startupReady startupOutcome = iota
+	startupTrust                // a folder-trust dialog awaits the user's answer
+	startupStuck
+)
+
 // passStartupDialog answers a folder-trust dialog when allowed and waits
 // until the agent is ready. Dialogs can appear a moment after Herdr reports
 // the agent, so readiness must be observed on consecutive polls.
-func (l *Launcher) passStartupDialog(ctx context.Context, lp providers.Launchable, pane string, trust bool) bool {
+func (l *Launcher) passStartupDialog(ctx context.Context, lp providers.Launchable, pane string, trust bool) startupOutcome {
 	deadline := time.Now().Add(l.startTimeout())
 	readyPolls := 0
 	for time.Now().Before(deadline) {
 		if screen, err := l.Herdr.ReadVisible(ctx, pane); err == nil {
 			if keys := lp.StartupKeys(screen); keys != nil {
 				if !trust {
-					return false
+					return startupTrust
 				}
 				if err := l.Herdr.SendKeys(ctx, pane, keys...); err != nil {
-					return false
+					return startupStuck
 				}
 				readyPolls = 0
 				if !sleep(ctx, l.pollInterval()) {
-					return false
+					return startupStuck
 				}
 				continue
 			}
@@ -364,16 +451,16 @@ func (l *Launcher) passStartupDialog(ctx context.Context, lp providers.Launchabl
 		if err == nil && pi.AgentName() != "" && (pi.AgentStatus == herdr.StatusIdle || pi.AgentStatus == herdr.StatusDone || pi.AgentStatus == herdr.StatusWorking) {
 			readyPolls++
 			if readyPolls >= 2 {
-				return true
+				return startupReady
 			}
 		} else {
 			readyPolls = 0
 		}
 		if !sleep(ctx, l.pollInterval()) {
-			return false
+			return startupStuck
 		}
 	}
-	return false
+	return startupStuck
 }
 
 func (l *Launcher) waitReady(ctx context.Context, pane string) error {

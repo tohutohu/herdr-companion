@@ -127,6 +127,15 @@ class GatewayApiTest {
         api.startSession(StartSessionRequest("codex", "/w/app", "", true))
         val plain = server.takeRequest().body!!.utf8()
         assertTrue(!plain.contains("model") && !plain.contains("effort"))
+
+        server.enqueue(MockResponse.Builder().code(201).body("""{"paneId":"w1:p3","trustRequired":true}""").build())
+        assertTrue(api.startSession(StartSessionRequest("codex", "/w/app", "", false)).trustRequired)
+        server.takeRequest()
+        server.enqueue(MockResponse.Builder().code(200).body("""{"sessionId":"codex:t3","paneId":"w1:p3"}""").build())
+        assertEquals("codex:t3", api.answerTrust("w1:p3", trust = true).sessionId)
+        val answer = server.takeRequest()
+        assertEquals("/v1/launches/w1:p3/trust", answer.target)
+        assertEquals("""{"trust":true}""", answer.body!!.utf8())
     }
 
     @Test

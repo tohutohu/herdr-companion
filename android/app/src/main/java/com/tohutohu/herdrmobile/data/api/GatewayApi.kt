@@ -180,6 +180,10 @@ class GatewayApi(
     suspend fun startSession(body: StartSessionRequest): StartSessionResponse =
         slowPost(url("v1", "sessions"), json.encodeToString(body))
 
+    /** Continues (or, declined, cancels) a start that stopped at the folder-trust dialog. */
+    suspend fun answerTrust(paneId: String, trust: Boolean): StartSessionResponse =
+        slowPost(url("v1", "launches", paneId, "trust"), json.encodeToString(TrustAnswer(trust)))
+
     /** Starting an agent can take up to a minute (startup dialogs, session id). */
     private suspend inline fun <reified T> slowPost(url: HttpUrl, body: String): T = withContext(Dispatchers.IO) {
         val req = request(url).post(body.toRequestBody(jsonType)).build()
