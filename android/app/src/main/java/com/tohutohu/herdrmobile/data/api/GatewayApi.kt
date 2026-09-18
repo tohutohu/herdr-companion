@@ -15,6 +15,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
 import java.io.OutputStream
+import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 class GatewayException(val code: Int, message: String) : IOException(message)
@@ -101,9 +102,14 @@ class GatewayApi(
         post(url("v1", "sessions", id, "respond"), json.encodeToString(response).toRequestBody(jsonType))
     }
 
-    suspend fun upload(bytes: ByteArray, contentType: String): String {
-        val body = post(url("v1", "uploads"), bytes.toRequestBody(contentType.toMediaType()))
-        return json.decodeFromString<UploadResponse>(body).id
+    /** Uploads one attachment and returns its upload id. */
+    suspend fun upload(bytes: ByteArray, contentType: String, filename: String): String {
+        val req = request(url("v1", "uploads"))
+            .post(bytes.toRequestBody(contentType.toMediaType()))
+            // RFC 5987, because OkHttp only accepts ASCII header values.
+            .header("Content-Disposition", "attachment; filename*=UTF-8''" + encodeFilename(filename))
+            .build()
+        return json.decodeFromString<UploadResponse>(execute(req)).id
     }
 
     suspend fun terminal(id: String, lines: Int = 300): TerminalResponse =
@@ -192,6 +198,13 @@ class GatewayApi(
     }
 
     companion object {
+        /**
+         * Percent-encodes a file name for the ext-value of Content-Disposition.
+         * URLEncoder is form encoding, so its "+" has to become "%20".
+         */
+        internal fun encodeFilename(name: String): String =
+            URLEncoder.encode(name, "UTF-8").replace("+", "%20")
+
         val json = Json {
             ignoreUnknownKeys = true
             explicitNulls = false

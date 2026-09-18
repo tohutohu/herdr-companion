@@ -76,8 +76,9 @@ Adding OpenCode means one more package implementing it and one line in
   single-select = Down×n + Enter; free text = move to "Type something",
   type, Enter; multi-select = Space/Down per option, then "Submit";
   multiple questions end with the "Submit answers" review tab.
-- Sending: `agent.prompt` (bracketed paste + Enter). Images are passed as file
-  paths that Claude reads.
+- Sending: `agent.prompt` (bracketed paste + Enter). Images are pasted one by
+  one as file paths, which Claude Code turns into `[Image #N]`; other
+  attachments are appended to the prompt text as paths for Claude to read.
 
 ### Codex
 
@@ -89,6 +90,8 @@ Adding OpenCode means one more package implementing it and one line in
   file-change / permission approvals) are kept in memory and shown as
   interactions; answers are sent as JSON-RPC responses. Messages are sent with
   `turn/start` (or `turn/steer` during an active turn) including `localImage`.
+  Non-image attachments have no structured form, so their paths are appended to
+  the text item.
 - Without the daemon, messages go through the pane. A single queued async
   question (`agentMessage` with `delivery: "async"` and `questions`) is shown
   as a question card after checking the current visible terminal screen.
@@ -241,7 +244,7 @@ access; new folder names must be a single, non-hidden path segment.
 ## Files
 
 `GET /v1/sessions/{id}/files[/content]?path=` serves files under the
-session's working directory (and the upload directory, for sent images).
+session's working directory (and the upload directory, for sent attachments).
 Paths are cleaned, symlink-resolved and must stay inside an allowed root;
 `.ssh`, `.gnupg`, `.aws` are always refused. Text is served as `text/plain`.
 
@@ -284,7 +287,7 @@ whole thing off, and `herdr-mobile-gateway usage` prints one read.
 | GET | `/v1/sessions/{id}/files/content?path=` | file bytes |
 | GET | `/v1/sessions/{id}/terminal?lines=` | recent pane text |
 | POST | `/v1/sessions/{id}/terminal` | `{text, keys[]}` (allow-listed keys) |
-| POST | `/v1/uploads` | raw image body → `{id}` (deleted after 24 h) |
+| POST | `/v1/uploads` | raw file body, optional `Content-Disposition` file name → `{id, name}` (deleted after 24 h) |
 | GET | `/v1/usage` | cached subscription limits `{providers[{provider, displayName, plan?, account?, windows[{key, label, scope?, usedPercent, windowMinutes?, resetsAt?}], updatedAt?, error?}], fetchedAt?, error?}` |
 | POST | `/v1/usage/refresh` | re-read the limits now (takes ~10 s) → same shape |
 | POST / DELETE | `/v1/devices` | FCM token registration |

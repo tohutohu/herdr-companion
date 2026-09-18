@@ -14,24 +14,27 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -81,7 +84,9 @@ import com.tohutohu.herdrmobile.ui.costLabel
 import com.tohutohu.herdrmobile.ui.sessions.SessionRef
 import com.tohutohu.herdrmobile.ui.sessions.rememberSessionActions
 import com.tohutohu.herdrmobile.ui.statusStyle
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -222,7 +227,7 @@ fun SessionDetailScreen(
                 Composer(
                     enabled = s?.canSend == true && !sending,
                     sending = sending,
-                    onSend = { text, images, clear -> vm.send(text, images, clear) },
+                    onSend = vm::send,
                 )
             }
         },
@@ -330,21 +335,37 @@ private suspend fun LazyListState.showNewestFromStart(panelHeight: () -> Int) {
 private fun Composer(
     enabled: Boolean,
     sending: Boolean,
-    onSend: (String, List<Uri>, () -> Unit) -> Unit,
+    onSend: (String, List<Attachment>, () -> Unit) -> Unit,
 ) {
     var text by rememberSaveable { mutableStateOf("") }
-    val images = remember { mutableStateListOf<Uri>() }
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(4)) { uris ->
-        images.addAll(uris.filterNot { it in images })
+    val attachments = remember { mutableStateListOf<Attachment>() }
+    val resolver = LocalContext.current.contentResolver
+    val scope = rememberCoroutineScope()
+    val add: (List<Uri>) -> Unit = { uris ->
+        val fresh = uris.filterNot { uri -> attachments.any { it.uri == uri } }
+        if (fresh.isNotEmpty()) {
+            scope.launch {
+                attachments.addAll(withContext(Dispatchers.IO) { fresh.map { readAttachment(resolver, it) } })
+            }
+        }
     }
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(4), add)
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments(), add)
     Surface(tonalElevation = 3.dp) {
         Column(Modifier.navigationBarsPadding().imePadding().padding(8.dp)) {
-            if (images.isNotEmpty()) {
+            if (attachments.isNotEmpty()) {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 8.dp)) {
-                    items(images, key = { it.toString() }) { uri ->
+                    items(attachments, key = { it.uri.toString() }) { attachment ->
                         Box {
-                            AsyncImage(model = uri, contentDescription = null, modifier = Modifier.size(64.dp))
-                            IconButton(onClick = { images.remove(uri) }, modifier = Modifier.size(24.dp).align(Alignment.TopEnd)) {
+                            if (attachment.isImage) {
+                                AsyncImage(model = attachment.uri, contentDescription = null, modifier = Modifier.size(64.dp))
+                            } else {
+                                FileChip(attachment.name)
+                            }
+                            IconButton(
+                                onClick = { attachments.remove(attachment) },
+                                modifier = Modifier.size(24.dp).align(Alignment.TopEnd),
+                            ) {
                                 Icon(Icons.Default.Close, contentDescription = "Remove")
                             }
                         }
@@ -354,8 +375,12 @@ private fun Composer(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(
                     enabled = enabled,
-                    onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                    onClick = { imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                 ) { Icon(Icons.Default.Image, contentDescription = "Attach image") }
+                IconButton(
+                    enabled = enabled,
+                    onClick = { filePicker.launch(arrayOf("*/*")) },
+                ) { Icon(Icons.Default.AttachFile, contentDescription = "Attach file") }
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it },
@@ -368,16 +393,40 @@ private fun Composer(
                     CircularProgressIndicator(Modifier.padding(12.dp).size(24.dp))
                 } else {
                     IconButton(
-                        enabled = enabled && (text.isNotBlank() || images.isNotEmpty()),
+                        enabled = enabled && (text.isNotBlank() || attachments.isNotEmpty()),
                         onClick = {
-                            onSend(text, images.toList()) {
+                            onSend(text, attachments.toList()) {
                                 text = ""
-                                images.clear()
+                                attachments.clear()
                             }
                         },
                     ) { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send") }
                 }
             }
+        }
+    }
+}
+
+/** Stands in for the thumbnail of an attachment that has nothing to show. */
+@Composable
+private fun FileChip(name: String) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = MaterialTheme.shapes.small,
+        modifier = Modifier.height(64.dp).widthIn(max = 160.dp),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Icon(Icons.Default.AttachFile, contentDescription = null, modifier = Modifier.size(16.dp))
+            Text(
+                name,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

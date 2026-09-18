@@ -1,7 +1,6 @@
 package com.tohutohu.herdrmobile.ui.detail
 
 import android.app.Application
-import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.tohutohu.herdrmobile.container
@@ -21,6 +20,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private const val POLL_MS = 3_000L
+private const val MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
 class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidViewModel(app) {
     private val repo = app.container.repository
@@ -61,11 +61,11 @@ class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidV
         }
     }
 
-    fun send(text: String, images: List<Uri>, onSent: () -> Unit) {
+    fun send(text: String, attachments: List<Attachment>, onSent: () -> Unit) {
         viewModelScope.launch {
             _sending.value = true
             try {
-                val ids = images.map { uri -> upload(uri) }
+                val ids = attachments.map { upload(it) }
                 repo.send(sessionId, text, ids)
                 onSent()
                 delay(500)
@@ -78,15 +78,17 @@ class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidV
         }
     }
 
-    private suspend fun upload(uri: Uri): String {
+    private suspend fun upload(attachment: Attachment): String {
         val resolver = getApplication<Application>().contentResolver
-        val (type, bytes) = withContext(Dispatchers.IO) {
-            val type = resolver.getType(uri) ?: "image/jpeg"
-            val bytes = resolver.openInputStream(uri)?.use { it.readBytes() }
-                ?: error("cannot read image")
-            type to bytes
+        val bytes = withContext(Dispatchers.IO) {
+            resolver.openInputStream(attachment.uri)?.use { it.readBytes() }
+                ?: error("cannot read ${attachment.name}")
         }
-        return api.upload(bytes, type)
+        // The gateway rejects anything larger, with a much vaguer message.
+        if (bytes.size > MAX_UPLOAD_BYTES) {
+            error("${attachment.name} is larger than ${MAX_UPLOAD_BYTES / (1024 * 1024)} MB")
+        }
+        return api.upload(bytes, attachment.mime, attachment.name)
     }
 
     fun respond(response: InteractionResponseDto) {

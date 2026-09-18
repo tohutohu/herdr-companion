@@ -5,7 +5,7 @@ Mac 上の [Herdr](https://herdr.dev) で動いている Claude Code / Codex の
 - 完了・質問・承認待ちで Android に通知（タップで該当セッションへ）
 - 通知受信時にログを先読みして Room に保存（開いた瞬間に読める）
 - AskUserQuestion / Codex requestUserInput / 承認をネイティブ UI で回答
-- 会話中の画像のインライン表示、Android からの画像送信
+- 会話中の画像のインライン表示、Android からの画像・ファイル送信
 - メッセージ内のファイル参照をタップしてファイルを表示
 - 非対応のダイアログは簡易ターミナル（`pane.read` + キー入力）で操作
 - アプリから新しいセッションを起動（Claude Code / Codex、フォルダの選択・新規作成）
