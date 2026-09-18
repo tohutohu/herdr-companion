@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"mime"
 	"net/http"
-	"net/url"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -89,6 +89,8 @@ type fakeProvider struct {
 	fileRoots []string
 	sent      []model.Input
 	resp      []model.InteractionResponse
+	// sendHook, when set, runs inside Send before the input is recorded.
+	sendHook func(ctx context.Context)
 }
 
 func (p *fakeProvider) FileRoots() []string { return p.fileRoots }
@@ -121,9 +123,12 @@ func (p *fakeProvider) Messages(_ context.Context, id string, _ *providers.Live)
 func (p *fakeProvider) Image(context.Context, string, string, int) (string, []byte, error) {
 	return "image/png", []byte("PNG"), nil
 }
-func (p *fakeProvider) Send(_ context.Context, id string, live *providers.Live, in model.Input) error {
+func (p *fakeProvider) Send(ctx context.Context, id string, live *providers.Live, in model.Input) error {
 	if live == nil {
 		return providers.ErrNotLive
+	}
+	if p.sendHook != nil {
+		p.sendHook(ctx)
 	}
 	p.sent = append(p.sent, in)
 	return nil
@@ -308,6 +313,42 @@ func Test画像をアップロードしてメッセージに添付できる(t *t
 	resp, _ = do(t, ts, tok, "POST", "/v1/sessions/fake:old/messages", []byte(`{"text":"x"}`), "application/json")
 	if resp.StatusCode != http.StatusConflict {
 		t.Errorf("offline send status = %d", resp.StatusCode)
+	}
+}
+
+func Test送信中にアプリが切断してもエージェントへの送信は最後まで続く(t *testing.T) {
+	ts, fp, _, tok := newTestServer(t)
+	started := make(chan struct{})
+	hungUp := make(chan struct{})
+	done := make(chan error, 1)
+	fp.sendHook = func(ctx context.Context) {
+		close(started)
+		<-hungUp
+		// サーバーが切断に気づくまで待ってから、送信の context を確かめる
+		time.Sleep(100 * time.Millisecond)
+		done <- ctx.Err()
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req, _ := http.NewRequestWithContext(ctx, "POST", ts.URL+"/v1/sessions/fake:s1/messages", strings.NewReader(`{"text":"続けて"}`))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	go func() {
+		<-started
+		cancel()
+		close(hungUp)
+	}()
+	if resp, err := http.DefaultClient.Do(req); err == nil {
+		resp.Body.Close()
+		t.Fatal("request finished before the client hung up")
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("send context = %v, want still active", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("send did not finish")
 	}
 }
 

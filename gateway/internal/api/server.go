@@ -247,6 +247,10 @@ type sendRequest struct {
 	Uploads []string `json:"uploads"`
 }
 
+// sendTimeout bounds a send that no longer has a client waiting on it. Claude
+// needs a pause after each pasted image, so a message with several is slow.
+const sendTimeout = 2 * time.Minute
+
 func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var req sendRequest
@@ -276,7 +280,12 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, id, "send_message", err)
 		return
 	}
-	if err := res.Provider.Send(r.Context(), res.NativeID, res.Live, in); err != nil {
+	// Once the message is here it goes to the agent even if the phone hangs up
+	// (leaves the screen, loses the network): typing half a prompt into the
+	// pane would be worse than finishing it.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), sendTimeout)
+	defer cancel()
+	if err := res.Provider.Send(ctx, res.NativeID, res.Live, in); err != nil {
 		s.recordSendError(id, "send message: "+err.Error(), req, err)
 		s.fail(w, r, id, "send_message", err)
 		return

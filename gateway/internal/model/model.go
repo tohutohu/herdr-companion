@@ -61,6 +61,10 @@ type Message struct {
 	Role      Role      `json:"role"`
 	Timestamp time.Time `json:"timestamp"`
 	Blocks    []Block   `json:"blocks"`
+	// Queued marks a prompt the agent has received but not taken into the
+	// conversation yet (Claude Code's queue while it works). It is replaced by
+	// the real entry once the agent picks it up.
+	Queued bool `json:"queued,omitempty"`
 }
 
 type BlockType string

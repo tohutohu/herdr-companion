@@ -90,6 +90,7 @@
         "type": "text",
         "text": "ついでに README も更新して"
       }
-    ]
+    ],
+    "queued": true
   }
 ]

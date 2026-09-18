@@ -724,6 +724,7 @@ func queuedPrompts(entries []*entry) []model.Message {
 			Role:      role,
 			Timestamp: e.Timestamp,
 			Blocks:    []model.Block{model.TextBlock(text)},
+			Queued:    true,
 		})
 	}
 	return out

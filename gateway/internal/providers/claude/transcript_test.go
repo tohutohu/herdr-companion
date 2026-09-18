@@ -145,6 +145,12 @@ func TestClaudeの作業中に送ったメッセージも会話に表示され�
 	if last.Role != model.RoleUser || last.Blocks[0].Text != "ついでに README も更新して" {
 		t.Errorf("待機中のメッセージが末尾にない: %+v", last)
 	}
+	// 待機中の分だけがキュー待ちとして印を付けられる
+	for _, m := range msgs {
+		if want := m.ID == last.ID; m.Queued != want {
+			t.Errorf("%s の queued = %v, want %v", m.ID, m.Queued, want)
+		}
+	}
 
 	// 動いていないセッションでは、送られないまま残ったキューは表示しない
 	offline := tr.Messages(ParseOptions{SessionID: "claude:test", Root: ws, Sink: rec})
