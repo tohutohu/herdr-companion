@@ -67,6 +67,8 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.herdr-mobile.<name>.
   HERDR_SESSION=hmtest herdr ...             # CLI against it
   ```
 - Run a throwaway gateway with its own config/state (`HERDR_MOBILE_CONFIG=…`, `HERDR_MOBILE_STATE_DIR=…`, `HERDR_SESSION=hmtest`, `serve --listen 127.0.0.1:18765 --log-file ""`). Point `workspaceRoots` / `codexDaemonSocket` at scratch paths.
+- Inside a Herdr pane `HERDR_SOCKET_PATH` is already set and wins over `HERDR_SESSION`, so the gateway would silently attach to the user's default session. Pass `HERDR_SOCKET_PATH=~/.config/herdr/sessions/hmtest/herdr.sock` explicitly and check the `herdr_socket` field in the startup log. The CLI needs `herdr --session hmtest …` for the same reason.
+- Another session may already be using port 18765 or the `hmtest` name; pick your own when they are taken.
 - Use `claude --model haiku` for cheap runs.
 - Codex structured features need a shared app-server. For tests run `codex app-server --listen unix:///private/tmp/<dir>/cx.sock` and start the TUI with `codex --remote unix://…`. The socket's parent must be a real directory, not `/tmp` (a symlink). `-a untrusted` isn't accepted with `--remote`; use `-a on-request -s read-only` to force approvals. `request_user_input` only appears in Plan mode (`shift+tab` in the TUI).
 - Pane state inspection: `herdr pane read <pane> --source visible`, `herdr pane send-keys <pane> <keys>`.
@@ -79,7 +81,8 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.herdr-mobile.<name>.
 
 ## Android device / emulator
 
-- Emulator: `emulator -avd Pixel_9_Pro -no-window -no-audio -no-snapshot-save`. It reaches the host at `10.0.2.2`. Stop it with `adb emu kill`.
+- Emulator: `emulator -avd Pixel_9_Pro -no-window -no-audio -no-snapshot-save`. It reaches host loopback services at `10.0.2.2` (a throwaway gateway on `127.0.0.1:18765` is `http://10.0.2.2:18765`), but the real gateway listens on the Tailscale IP only, so use `http://100.99.15.34:8765` for it. Stop the emulator with `adb emu kill`.
+- `adb shell screenrecord` dies with the shell that started it; start it, drive the UI and `adb pull` within one command.
 - Real phone: Pixel 7a over USB. It reaches the gateway via Tailscale IP `100.99.15.34`; the MagicDNS name doesn't resolve on the phone.
 - `adb shell input text` goes through the phone's Japanese IME and gets converted. Configure debug builds with:
   ```bash
