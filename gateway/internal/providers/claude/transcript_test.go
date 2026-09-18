@@ -230,12 +230,17 @@ func Test一覧のプレビューはコマンドやプロンプトより最新�
 	}
 	prompt := `{"type":"user","message":{"role":"user","content":"直して"},"uuid":"u1","timestamp":"2026-09-17T10:00:00.000Z"}`
 	report := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"直しました。"}]},"uuid":"a1","timestamp":"2026-09-17T10:00:01.000Z"}`
+	work := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"テストします。"},{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"go test ./...","description":"Run tests"}}]},"uuid":"a2","timestamp":"2026-09-17T10:00:01.500Z"}`
 	command := `{"type":"user","message":{"role":"user","content":"<command-name>/model</command-name>\n<command-args>opus</command-args>"},"uuid":"u2","timestamp":"2026-09-17T10:00:02.000Z"}`
 	output := `{"type":"user","message":{"role":"user","content":"<local-command-stdout>Set model to ` + "`opus`" + `</local-command-stdout>"},"uuid":"u3","timestamp":"2026-09-17T10:00:03.000Z"}`
 	next := `{"type":"user","message":{"role":"user","content":"次はテストも"},"uuid":"u4","timestamp":"2026-09-17T10:00:04.000Z"}`
 
 	if got := decode(prompt, report, command, output, next).summary(ParseOptions{}).LastMessage; got != "直しました。" {
 		t.Errorf("after a command and a new prompt: last message = %q", got)
+	}
+	// ツール呼び出しは報告として扱わない
+	if got := decode(prompt, report, work).summary(ParseOptions{}).LastMessage; got != "テストします。" {
+		t.Errorf("after a tool call: last message = %q", got)
 	}
 	// 返答がまだないセッションは最新のプロンプトを出す
 	if got := decode(prompt).summary(ParseOptions{}).LastMessage; got != "直して" {

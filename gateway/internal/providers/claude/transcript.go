@@ -1085,7 +1085,7 @@ func (t *Transcript) summary(opt ParseOptions) providers.Summary {
 		Context: model.NewContextUsage(t.ContextTokens, contextWindow(t.ModelID, t.Model)),
 		Cost:    t.cost()}
 	msgs := t.Messages(ParseOptions{SessionID: opt.SessionID, Live: opt.Live, Sink: deadletter.Nop{}})
-	s.LastMessage = lastReport(msgs)
+	s.LastMessage = t.lastReport(msgs)
 	for i := len(msgs) - 1; i >= 0; i-- {
 		m := msgs[i]
 		if m.Role != model.RoleAssistant && m.Role != model.RoleUser {
@@ -1126,27 +1126,39 @@ func (t *Transcript) summary(opt ParseOptions) providers.Summary {
 	return s
 }
 
-// lastReport is the list preview: the agent's newest text, so slash commands
-// and prompts sent after it don't replace the report. A session the agent
-// hasn't answered yet shows its newest prompt.
-func lastReport(msgs []model.Message) string {
-	prompt := ""
-	for i := len(msgs) - 1; i >= 0; i-- {
-		m := msgs[i]
-		for j := len(m.Blocks) - 1; j >= 0; j-- {
-			b := m.Blocks[j]
-			if b.Type != model.BlockText {
-				continue
+// lastReport is the list preview: the agent's newest prose, so tool calls,
+// slash commands and prompts sent after it don't replace the report. A session
+// the agent hasn't answered yet shows its newest prompt.
+func (t *Transcript) lastReport(msgs []model.Message) string {
+	for i := len(t.entries) - 1; i >= 0; i-- {
+		e := t.entries[i]
+		if e.Type != "assistant" || e.IsSidechain || e.IsAPIErrorMessage || e.Message == nil {
+			continue
+		}
+		blocks, ok := decodeBlocks(e.Message.Content)
+		if !ok {
+			var text string
+			if json.Unmarshal(e.Message.Content, &text) == nil && strings.TrimSpace(text) != "" {
+				return providers.OneLine(text, 160)
 			}
-			switch {
-			case m.Role == model.RoleAssistant:
+			continue
+		}
+		for j := len(blocks) - 1; j >= 0; j-- {
+			if b := blocks[j]; b.Type == "text" && strings.TrimSpace(b.Text) != "" {
 				return providers.OneLine(b.Text, 160)
-			case m.Role == model.RoleUser && prompt == "":
-				prompt = b.Text
 			}
 		}
 	}
-	return providers.OneLine(prompt, 160)
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if m := msgs[i]; m.Role == model.RoleUser && hasText(m) {
+			for _, b := range m.Blocks {
+				if b.Type == model.BlockText {
+					return providers.OneLine(b.Text, 160)
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func hasText(m model.Message) bool {
