@@ -107,6 +107,14 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.herdr-mobile.<name>.
 - Claude dialog key sequences and trust-dialog texts were verified against Claude Code 2.1.274 and Codex 0.154. Re-verify with a test session when those versions change.
 - Commit at each logical step. Commit messages end with the Co-Authored-By trailer; no "Generated with Claude Code" line.
 
+## Android skills
+
+- Official Android skills live in `.agents/skills/` (Codex) and `.claude/skills/` (Claude Code):
+  android-cli, navigation-3, navigation-event, edge-to-edge, testing-setup, r8-analyzer,
+  android-profiler, android-intent-security.
+- They come from the Android CLI (`/opt/homebrew/bin/android`). List with `android skills list --long`;
+  install or update with `android skills add --skill=<name> --project=. --agent=codex,claude-code`.
+
 ## TypeSafe / Jev
 
 - For Jev integration, prompt design, or evaluation work, read and use
