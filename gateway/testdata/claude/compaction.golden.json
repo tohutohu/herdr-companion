@@ -1,0 +1,90 @@
+[
+  {
+    "id": "u1",
+    "role": "user",
+    "timestamp": "2026-09-01T00:00:00Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "ログイン処理を調べて直して"
+      }
+    ]
+  },
+  {
+    "id": "a1",
+    "role": "assistant",
+    "timestamp": "2026-09-01T00:00:05Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "サブエージェントに調査を任せます。"
+      }
+    ]
+  },
+  {
+    "id": "at1",
+    "role": "tool",
+    "timestamp": "2026-09-01T00:01:00Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "Subagent report\n## 調査結果\n\n`src/auth.go` のトークン検証が期限切れを見ていません。\n\n- 修正案: `exp` を確認する"
+      }
+    ]
+  },
+  {
+    "id": "at2",
+    "role": "system",
+    "timestamp": "2026-09-01T00:01:01Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "Agent \"ログイン処理の調査\" completed"
+      }
+    ]
+  },
+  {
+    "id": "a2",
+    "role": "assistant",
+    "timestamp": "2026-09-01T00:01:10Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "報告を受けて修正します。"
+      }
+    ]
+  },
+  {
+    "id": "c1",
+    "role": "system",
+    "timestamp": "2026-09-01T00:02:00Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "Conversation compacted"
+      }
+    ]
+  },
+  {
+    "id": "u2",
+    "role": "tool",
+    "timestamp": "2026-09-01T00:02:00Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "Compaction summary\nSummary:\n1. Primary Request and Intent:\n   ログイン処理の修正を依頼された。\n\n2. Pending Tasks:\n   - `exp` の検証を追加する"
+      }
+    ]
+  },
+  {
+    "id": "a3",
+    "role": "assistant",
+    "timestamp": "2026-09-01T00:03:00Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "`exp` の検証を追加しました。"
+      }
+    ]
+  }
+]

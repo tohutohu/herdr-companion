@@ -39,6 +39,16 @@ type entry struct {
 	// TotalCostUSD is on cost-state entries, which Claude Code writes when
 	// the session ends.
 	TotalCostUSD float64 `json:"totalCostUSD"`
+	// IsCompactSummary marks the user entry holding the summary a compaction
+	// wrote; it follows the compact_boundary system entry.
+	IsCompactSummary bool             `json:"isCompactSummary"`
+	CompactMetadata  *compactMetadata `json:"compactMetadata"` // compact_boundary entries
+}
+
+// compactMetadata describes one compaction.
+type compactMetadata struct {
+	// PostTokens is the size of the context the compaction left behind.
+	PostTokens int64 `json:"postTokens"`
 }
 
 type apiMessage struct {
@@ -115,6 +125,8 @@ var ignoredTypes = map[string]bool{
 
 var ignoredSystemSubtypes = map[string]bool{
 	"stop_hook_summary": true, "turn_duration": true, "away_summary": true,
+	// Claude Code clears old tool outputs in place and hides the marker too.
+	"microcompact_boundary": true,
 }
 
 const (
@@ -277,6 +289,10 @@ func (t *Transcript) add(e *entry, raw []byte) {
 			}
 		}
 	}
+	// A compaction shrinks the context before the next reply reports it.
+	if e.Type == "system" && e.Subtype == "compact_boundary" && e.CompactMetadata != nil && e.CompactMetadata.PostTokens > 0 {
+		t.ContextTokens = e.CompactMetadata.PostTokens
+	}
 	if e.Type == "cost-state" && e.TotalCostUSD > 0 {
 		t.ReportedCostUSD = e.TotalCostUSD
 	}
@@ -432,6 +448,17 @@ var (
 	taskSummaryRe    = regexp.MustCompile(`(?s)<summary>(.*?)</summary>`)
 	taskEventRe      = regexp.MustCompile(`(?s)<event>(.*?)</event>`)
 	anyTagRe         = regexp.MustCompile(`</?[a-z-]+>`)
+	agentMessageRe   = regexp.MustCompile(`^<agent-message[^>]*>`)
+)
+
+const (
+	// handBackFrame opens the notice Claude Code puts in front of a subagent's
+	// final report. It is addressed to the model.
+	handBackFrame = "[Subagent hand-back]"
+	// compactSummaryPreamble opens the summary a compaction writes. It is
+	// addressed to the model.
+	compactSummaryPreamble = "This session is being continued from a previous conversation that ran out of context. " +
+		"The summary below covers the earlier portion of the conversation."
 )
 
 // userText normalises the special XML-ish wrappers Claude Code writes for
@@ -465,6 +492,8 @@ func userText(s string) (model.Role, string) {
 		return model.RoleUser, "! " + strings.TrimSpace(tagPattern.ReplaceAllString(s, "$2"))
 	case strings.HasPrefix(s, "<task-notification>"):
 		return model.RoleSystem, model.Truncate(taskNotification(s), 500)
+	case strings.HasPrefix(s, "<agent-message"):
+		return model.RoleTool, agentMessage(s)
 	}
 	return model.RoleUser, s
 }
@@ -489,9 +518,56 @@ func taskNotification(s string) string {
 	return strings.Join(parts, "\n")
 }
 
+// agentMessage renders what another agent sent this session: most often a
+// subagent handing back its final report, which Claude Code frames with a
+// notice to the model and indents line by line. The result is shown as a tool
+// block, so a long report starts collapsed instead of reading as something
+// the user typed.
+func agentMessage(s string) string {
+	body := strings.TrimSuffix(strings.TrimSpace(s), "</agent-message>")
+	body = strings.TrimLeft(agentMessageRe.ReplaceAllString(body, ""), "\n")
+	title := "Agent message"
+	if strings.HasPrefix(body, handBackFrame) {
+		title = "Subagent report"
+		_, body, _ = strings.Cut(body, "\n")
+		lines := strings.Split(body, "\n")
+		for i, l := range lines {
+			lines[i] = strings.TrimPrefix(l, "  ")
+		}
+		body = strings.Join(lines, "\n")
+	}
+	return strings.TrimSpace(title + "\n" + strings.TrimSpace(body))
+}
+
+// compactSummary renders the summary a compaction left in place of the
+// conversation before it. It is shown as a tool block: the model wrote it for
+// itself, and it starts collapsed like Claude Code shows it.
+func compactSummary(e *entry) []model.Message {
+	var text string
+	if json.Unmarshal(e.Message.Content, &text) != nil {
+		blocks, _ := decodeBlocks(e.Message.Content)
+		var parts []string
+		for _, b := range blocks {
+			if b.Type == "text" {
+				parts = append(parts, b.Text)
+			}
+		}
+		text = strings.Join(parts, "\n")
+	}
+	text = strings.TrimSpace(strings.Replace(text, compactSummaryPreamble, "", 1))
+	if text == "" {
+		return nil
+	}
+	return []model.Message{{ID: e.UUID, Role: model.RoleTool, Timestamp: e.Timestamp,
+		Blocks: []model.Block{model.TextBlock("Compaction summary\n" + text)}}}
+}
+
 func (t *Transcript) convertUser(e *entry, raw []byte, results map[string]toolResult, opt ParseOptions) []model.Message {
 	if e.IsMeta {
 		return nil
+	}
+	if e.IsCompactSummary {
+		return compactSummary(e)
 	}
 	c := e.Message.Content
 	var str string
