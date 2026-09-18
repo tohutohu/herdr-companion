@@ -1,6 +1,5 @@
 package com.tohutohu.herdrmobile.ui.sessions
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -34,6 +33,9 @@ import com.tohutohu.herdrmobile.container
 import com.tohutohu.herdrmobile.data.api.SessionDto
 import com.tohutohu.herdrmobile.data.toEntity
 import kotlinx.coroutines.launch
+import androidx.navigationevent.NavigationEventInfo
+import androidx.navigationevent.compose.NavigationBackHandler
+import androidx.navigationevent.compose.rememberNavigationEventState
 
 /**
  * Archived sessions, read directly from the gateway (not cached). Swipe a
@@ -70,7 +72,11 @@ fun ArchivedSessionsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
     val selection = rememberSessionSelection()
     val refs = remember(rows) { rows.map { it.ref() } }
     LaunchedEffect(refs) { selection.keepOnly(refs.map { it.id }) }
-    BackHandler(selection.active) { selection.clear() }
+    NavigationBackHandler(
+        state = rememberNavigationEventState(currentInfo = NavigationEventInfo.None),
+        isBackEnabled = selection.active,
+        onBackCompleted = { selection.clear() },
+    )
 
     Scaffold(
         topBar = {

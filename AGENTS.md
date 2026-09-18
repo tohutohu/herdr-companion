@@ -31,7 +31,9 @@ bash macos/scripts/build-dmg.sh                 # native-architecture DMG, ad-ho
 - Before reporting completion, confirm the release build succeeded and link `android/app/build/outputs/apk/release/app-release.apk`.
 - Release currently uses the debug signing key so it is installable; this does not disable R8 or resource shrinking.
 
-`compileSdk` is 37 because Navigation 2.10 / Coil 3.6 require it (targetSdk stays 36).
+`compileSdk` is 37 because Coil 3.6 requires it (targetSdk stays 36).
+
+Screens are shown with Navigation 3 (`ui/AppNavigation.kt`): the back stack is a list of `Route` keys, and screen motion, including the predictive back animation, lives in `ui/Motion.kt`. Use `NavigationBackHandler` (navigationevent) rather than `BackHandler` for in-screen back handling.
 
 ## What runs on this Mac (persistent)
 

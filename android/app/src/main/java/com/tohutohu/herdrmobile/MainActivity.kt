@@ -4,39 +4,17 @@ import android.Manifest
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
-import androidx.compose.ui.platform.LocalDensity
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.rememberNavController
-import androidx.navigation.toRoute
 import com.tohutohu.herdrmobile.push.Notifications
-import com.tohutohu.herdrmobile.ui.ArchivedRoute
-import com.tohutohu.herdrmobile.ui.DetailRoute
-import com.tohutohu.herdrmobile.ui.FileRoute
+import com.tohutohu.herdrmobile.ui.AppNavigation
 import com.tohutohu.herdrmobile.ui.HerdrTheme
-import com.tohutohu.herdrmobile.ui.ImageRoute
-import com.tohutohu.herdrmobile.ui.NewSessionRoute
-import com.tohutohu.herdrmobile.ui.ScreenMotion
-import com.tohutohu.herdrmobile.ui.newsession.NewSessionScreen
 import com.tohutohu.herdrmobile.ui.SessionsRoute
 import com.tohutohu.herdrmobile.ui.SettingsRoute
-import com.tohutohu.herdrmobile.ui.TerminalRoute
-import com.tohutohu.herdrmobile.ui.detail.SessionDetailScreen
-import com.tohutohu.herdrmobile.ui.files.FileViewerScreen
-import com.tohutohu.herdrmobile.ui.files.ImageViewerScreen
-import com.tohutohu.herdrmobile.ui.sessions.ArchivedSessionsScreen
-import com.tohutohu.herdrmobile.ui.sessions.SessionListScreen
-import com.tohutohu.herdrmobile.ui.settings.SettingsScreen
-import com.tohutohu.herdrmobile.ui.terminal.TerminalScreen
 import kotlinx.coroutines.flow.MutableStateFlow
 
 class MainActivity : ComponentActivity() {
@@ -59,87 +37,12 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             HerdrTheme {
-                val nav = rememberNavController()
                 val open by pendingSession.collectAsState()
-                LaunchedEffect(open) {
-                    val id = open ?: return@LaunchedEffect
-                    // Replace any detail already on the stack: notification taps
-                    // should not pile up screens behind the one being opened.
-                    nav.navigate(DetailRoute(id, focusLatest = true)) {
-                        launchSingleTop = true
-                        popUpTo<DetailRoute> { inclusive = true }
-                    }
-                    pendingSession.value = null
-                }
-                val start: Any = if (settings.current.isConfigured) SessionsRoute else SettingsRoute
-                val density = LocalDensity.current
-                val motion = remember(density) { ScreenMotion(density) }
-                NavHost(
-                    navController = nav,
-                    startDestination = start,
-                    enterTransition = { motion.enter },
-                    exitTransition = { motion.exit },
-                    popEnterTransition = { motion.popEnter },
-                    popExitTransition = { motion.popExit },
-                ) {
-                    composable<SessionsRoute> {
-                        SessionListScreen(
-                            onOpen = { nav.navigate(DetailRoute(it)) },
-                            onSettings = { nav.navigate(SettingsRoute) },
-                            onNew = { nav.navigate(NewSessionRoute) },
-                            onArchived = { nav.navigate(ArchivedRoute) },
-                        )
-                    }
-                    composable<ArchivedRoute> {
-                        ArchivedSessionsScreen(
-                            onBack = { nav.popBackStack() },
-                            onOpen = { nav.navigate(DetailRoute(it)) },
-                        )
-                    }
-                    composable<NewSessionRoute> {
-                        NewSessionScreen(
-                            onBack = { nav.popBackStack() },
-                            onStarted = { sessionId, warning ->
-                                warning?.let { Toast.makeText(this@MainActivity, it, Toast.LENGTH_LONG).show() }
-                                if (sessionId != null) {
-                                    nav.navigate(DetailRoute(sessionId)) { popUpTo(SessionsRoute) }
-                                } else {
-                                    nav.popBackStack()
-                                }
-                            },
-                        )
-                    }
-                    composable<SettingsRoute> {
-                        SettingsScreen(onDone = {
-                            if (!nav.popBackStack()) {
-                                nav.navigate(SessionsRoute) { popUpTo(SettingsRoute) { inclusive = true } }
-                            }
-                        })
-                    }
-                    composable<DetailRoute> { entry ->
-                        val route = entry.toRoute<DetailRoute>()
-                        SessionDetailScreen(
-                            sessionId = route.sessionId,
-                            focusLatest = route.focusLatest,
-                            onBack = {
-                                if (!nav.popBackStack()) nav.navigate(SessionsRoute)
-                            },
-                            onOpenFile = { path, line -> nav.navigate(FileRoute(route.sessionId, path, line)) },
-                            onOpenImage = { url -> nav.navigate(ImageRoute(url)) },
-                            onOpenTerminal = { nav.navigate(TerminalRoute(route.sessionId)) },
-                        )
-                    }
-                    composable<FileRoute> { entry ->
-                        val route = entry.toRoute<FileRoute>()
-                        FileViewerScreen(route.sessionId, route.path, route.line, onBack = { nav.popBackStack() })
-                    }
-                    composable<ImageRoute> { entry ->
-                        ImageViewerScreen(entry.toRoute<ImageRoute>().url, onBack = { nav.popBackStack() })
-                    }
-                    composable<TerminalRoute> { entry ->
-                        TerminalScreen(entry.toRoute<TerminalRoute>().sessionId, onBack = { nav.popBackStack() })
-                    }
-                }
+                AppNavigation(
+                    start = if (settings.current.isConfigured) SessionsRoute else SettingsRoute,
+                    openSession = open,
+                    onSessionOpened = { pendingSession.value = null },
+                )
             }
         }
     }

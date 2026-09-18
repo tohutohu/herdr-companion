@@ -1,7 +1,6 @@
 package com.tohutohu.herdrmobile.ui.sessions
 
 import android.text.format.DateUtils
-import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -75,6 +74,9 @@ import com.tohutohu.herdrmobile.ui.usage.UsageCard
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
+import androidx.navigationevent.NavigationEventInfo
+import androidx.navigationevent.compose.NavigationBackHandler
+import androidx.navigationevent.compose.rememberNavigationEventState
 
 private const val LIST_POLL_MS = 5_000L
 
@@ -103,7 +105,11 @@ fun SessionListScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onNew: (
     val selection = rememberSessionSelection()
     val refs = remember(sessions) { sessions.map { it.ref() } }
     LaunchedEffect(refs) { selection.keepOnly(refs.map { it.id }) }
-    BackHandler(selection.active) { selection.clear() }
+    NavigationBackHandler(
+        state = rememberNavigationEventState(currentInfo = NavigationEventInfo.None),
+        isBackEnabled = selection.active,
+        onBackCompleted = { selection.clear() },
+    )
 
     // Keyed items keep the scroll anchor, which would hide sessions that
     // appear above the first row; stay at the top while the user is there.
