@@ -5,9 +5,15 @@ import ServiceManagement
 import UniformTypeIdentifiers
 
 @main
+@MainActor
 struct HerdrMenuApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
-    @StateObject private var model = GatewayModel()
+    @StateObject private var model: GatewayModel
+    init() {
+        // Start the owner at login even if the menu popover has never been opened.
+        let owner = GatewayModel()
+        _model = StateObject(wrappedValue: owner)
+    }
     var body: some Scene {
         MenuBarExtra("Herdr Mobile", systemImage: "terminal") {
             Panel(model: model)
@@ -315,7 +321,7 @@ struct Panel: View {
                             .font(.caption).foregroundStyle(.secondary)
                         Button("ペアリングQRを表示") { model.perform { try await model.createQR() } }.disabled(!model.running)
                         if let qr = model.qr, let expires = model.expires {
-                            HStack { Spacer(); Image(nsImage: qr).interpolation(.none).resizable().scaledToFit().frame(width: 230, height: 230).padding(12).background(.white); Spacer() }
+                            HStack { Spacer(); Image(nsImage: qr).interpolation(.none).resizable().scaledToFit().frame(width: 230, height: 230).padding(24).background(.white); Spacer() }
                             Text("有効期限 \(expires.formatted(date: .omitted, time: .shortened)) · 1回限り").font(.caption)
                             Text("読み取った端末から、このMacのセッションを閲覧・操作できます。").font(.caption)
                             Button("QRを無効化") { model.perform { try await model.cancelQR() } }
