@@ -27,6 +27,17 @@ class GatewayApiTest {
     fun tearDown() = server.close()
 
     @Test
+    fun `メディアURLは特殊文字を保持し認証情報をURLに含めない`() {
+        val path = "/workspace/動画 #1 & test.mp4"
+        val request = api.mediaRequest("claude:s/1", path)
+        assertEquals(path, request.url.queryParameter("path"))
+        assertEquals("1", request.url.queryParameter("download"))
+        assertEquals("claude:s/1", request.url.pathSegments[2])
+        assertEquals("Bearer secret", request.header("Authorization"))
+        assertTrue(!request.url.toString().contains("secret"))
+    }
+
+    @Test
     fun `フォルダ判定は指示とパスを認証付きで送り起動しない`() = runBlocking {
         server.enqueue(MockResponse.Builder().body("""{"verdict":"mismatch","historyCount":3}""").build())
         val result = api.checkDirectory("/workspace/app", "通知を直して")

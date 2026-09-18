@@ -139,6 +139,10 @@ class GatewayApi(
     suspend fun fileStat(id: String, path: String): FileInfoDto =
         get(url("v1", "sessions", id, "files", "stat", query = mapOf("path" to path)))
 
+    /** Authenticated, range-capable endpoint for progressive media playback. */
+    fun mediaRequest(id: String, path: String): Request =
+        request(url("v1", "sessions", id, "files", "content", query = mapOf("path" to path, "download" to "1"))).get().build()
+
     /** Streams a file of any size into [out], reporting bytes written so far. */
     suspend fun downloadFile(id: String, path: String, out: OutputStream, onProgress: (Long) -> Unit) = withContext(Dispatchers.IO) {
         val req = request(url("v1", "sessions", id, "files", "content", query = mapOf("path" to path, "download" to "1"))).get().build()

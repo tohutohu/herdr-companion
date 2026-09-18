@@ -61,6 +61,7 @@ private sealed interface FileState {
     data object Loading : FileState
     data class Text(val lines: List<String>) : FileState
     data class Image(val bytes: ByteArray) : FileState
+    data class Media(val info: FileInfoDto) : FileState
     data class Download(val info: FileInfoDto) : FileState
     data class Error(val message: String) : FileState
 }
@@ -71,11 +72,13 @@ private const val MAX_LINES = 20_000
 @Composable
 fun FileViewerScreen(sessionId: String, path: String, line: Int, onBack: () -> Unit) {
     val api = LocalContext.current.container.api
-    var state by remember { mutableStateOf<FileState>(FileState.Loading) }
+    var state by remember(sessionId, path) { mutableStateOf<FileState>(FileState.Loading) }
     LaunchedEffect(sessionId, path) {
         state = try {
             val info = api.fileStat(sessionId, path)
-            if (!info.previewable) {
+            if (displayType(info).let { it.startsWith("video/") || it.startsWith("audio/") || it == "application/ogg" }) {
+                FileState.Media(info)
+            } else if (!info.previewable) {
                 FileState.Download(info)
             } else {
                 val (type, bytes) = api.fileContent(sessionId, path)
@@ -85,6 +88,8 @@ fun FileViewerScreen(sessionId: String, path: String, line: Int, onBack: () -> U
                     else -> FileState.Download(info)
                 }
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             FileState.Error(e.message ?: e.toString())
         }
@@ -116,6 +121,7 @@ fun FileViewerScreen(sessionId: String, path: String, line: Int, onBack: () -> U
                     is FileState.Error -> Text(s.message, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp))
                     is FileState.Image -> AsyncImage(model = s.bytes, contentDescription = path, modifier = Modifier.fillMaxSize())
                     is FileState.Text -> CodeView(path, s.lines, line)
+                    is FileState.Media -> MediaFileView(sessionId, s.info) { state = FileState.Download(s.info) }
                     is FileState.Download -> DownloadView(sessionId, s.info)
                 }
             }
