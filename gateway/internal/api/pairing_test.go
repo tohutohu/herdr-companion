@@ -89,3 +89,34 @@ func Testペアリングは認証付き発行と一度だけの交換(t *testing
 		t.Fatal("cancelled invitation accepted")
 	}
 }
+
+func Test秘密鍵もJevキーもない状態でペアリングできる(t *testing.T) {
+	store, err := config.Load(filepath.Join(t.TempDir(), "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{Config: store}
+	h := s.Handler()
+	issue := func() string {
+		req := httptest.NewRequest("POST", "/v1/pairing", nil)
+		req.Header.Set("Authorization", "Bearer "+store.Get().AuthToken)
+		res := httptest.NewRecorder()
+		h.ServeHTTP(res, req)
+		var invitation struct{ Code string }
+		if err := json.Unmarshal(res.Body.Bytes(), &invitation); err != nil {
+			t.Fatal(err)
+		}
+		return invitation.Code
+	}
+	old, current := issue(), issue()
+	for code, status := range map[string]int{old: 401, current: 200} {
+		res := httptest.NewRecorder()
+		h.ServeHTTP(res, httptest.NewRequest("POST", "/pair", strings.NewReader(`{"code":"`+code+`"}`)))
+		if res.Code != status {
+			t.Fatal("unexpected pairing result", res.Code)
+		}
+		if strings.Contains(res.Body.String(), "firebase") || strings.Contains(res.Body.String(), "jev") {
+			t.Fatal("optional settings appeared in response")
+		}
+	}
+}

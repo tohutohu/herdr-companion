@@ -4,6 +4,7 @@ package config
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -54,6 +55,12 @@ type FirebaseAndroid struct {
 	ApplicationID string `json:"applicationId"`
 	ProjectID     string `json:"projectId"`
 	SenderID      string `json:"senderId"`
+}
+
+// GatewayID identifies notification provenance without revealing the bearer token.
+func GatewayID(token string) string {
+	hash := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(hash[:])
 }
 
 // Store serialises access to the config file.

@@ -42,6 +42,7 @@ Usage:
   herdr-mobile-gateway notify-test         send a test push to every registered device
   herdr-mobile-gateway import-firebase --service-account FILE --android-config FILE
                                           import Firebase files while gateway is stopped
+  herdr-mobile-gateway set-jev-key         read optional Jev key from stdin (empty removes it)
   herdr-mobile-gateway debug replay FILE   re-parse dead-letter entries with the current adapters
 
 Environment:
@@ -58,6 +59,8 @@ func main() {
 	}
 	var err error
 	switch cmd {
+	case "set-jev-key":
+		err = setJevKeyCmd()
 	case "import-firebase":
 		err = importFirebaseCmd(args)
 	case "serve":
@@ -88,6 +91,7 @@ func serve(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	listen := fs.String("listen", "", "listen address (overrides config), e.g. 100.x.y.z:8765")
 	debug := fs.Bool("debug", false, "debug logging")
+	parentPID := fs.Int("parent-pid", 0, "exit when the owning desktop process exits")
 	logFile := fs.String("log-file", filepath.Join(config.StateDir(), "gateway.log"), "log file (empty: stdout only)")
 	fs.Parse(args)
 
@@ -108,6 +112,23 @@ func serve(args []string) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if *parentPID > 0 {
+		go func() {
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if os.Getppid() != *parentPID {
+						stop()
+						return
+					}
+				}
+			}
+		}()
+	}
 
 	sink := deadletter.NewWriter(filepath.Join(config.StateDir(), "errors"))
 	hc := herdr.New(cfg.HerdrSocket)
@@ -247,6 +268,7 @@ func notifyTestCmd() error {
 		return errors.New("no devices registered; open the app and save the gateway settings first")
 	}
 	data := map[string]string{
+		"gatewayId": config.GatewayID(store.Get().AuthToken),
 		"sessionId": "test:notification",
 		"status":    "completed",
 		"title":     "Herdr Mobile test",

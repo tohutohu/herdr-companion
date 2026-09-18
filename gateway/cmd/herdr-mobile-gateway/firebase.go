@@ -5,12 +5,30 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/config"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/notifications"
 )
+
+// Read through stdin so a key never appears in process arguments or shell history.
+func setJevKeyCmd() error {
+	data, err := io.ReadAll(io.LimitReader(os.Stdin, 4097))
+	if err != nil {
+		return err
+	}
+	if len(data) > 4096 {
+		return errors.New("API key is too long")
+	}
+	store, err := config.Load(config.DefaultPath())
+	if err != nil {
+		return err
+	}
+	return store.Update(func(c *config.Config) { c.JevAPIKey = strings.TrimSpace(string(data)) })
+}
 
 // Run only while the gateway using this config is stopped.
 func importFirebaseCmd(args []string) error {

@@ -229,6 +229,7 @@ func (w *Watcher) push(ctx context.Context, s model.Session, kind model.Status) 
 		return
 	}
 	data := Payload(s, kind)
+	data["gatewayId"] = config.GatewayID(w.Config.Get().AuthToken)
 	for _, d := range w.Config.Get().Devices {
 		err := w.Sender.Send(ctx, d.FCMToken, data)
 		switch {

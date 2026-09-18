@@ -56,7 +56,8 @@ func (s *Server) redeemPairing(w http.ResponseWriter, r *http.Request) {
 	s.pairing.code = ""
 	// Explicit allowlist: no config serialization, credentials path or private key.
 	writeJSON(w, http.StatusOK, struct {
-		Token    string                  `json:"token"`
-		Firebase *config.FirebaseAndroid `json:"firebase,omitempty"`
-	}{cfg.AuthToken, cfg.FirebaseAndroid})
+		Token     string                  `json:"token"`
+		GatewayID string                  `json:"gatewayId"`
+		Firebase  *config.FirebaseAndroid `json:"firebase,omitempty"`
+	}{cfg.AuthToken, config.GatewayID(cfg.AuthToken), cfg.FirebaseAndroid})
 }
