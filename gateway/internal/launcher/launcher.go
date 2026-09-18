@@ -30,9 +30,6 @@ var (
 	ErrNoPendingTrust  = errors.New("no launch is waiting on a trust answer for this pane")
 )
 
-// pendingTrustTTL bounds how long a launch waits for the app's trust answer.
-const pendingTrustTTL = 15 * time.Minute
-
 // Herdr is the subset of the Herdr client used to launch agents.
 type Herdr interface {
 	CreateWorkspace(ctx context.Context, cwd, label string) (workspaceID, paneID string, err error)
@@ -57,8 +54,11 @@ type Launcher struct {
 	PollInterval time.Duration
 	IdentityWait time.Duration
 
-	mu      sync.Mutex
-	pending map[string]*pendingLaunch // pane id -> launch waiting on a trust answer
+	mu sync.Mutex
+	// pending holds launches waiting on a trust answer, by pane id, until the
+	// app answers or the gateway restarts. Entries are small, so unanswered
+	// ones are simply kept.
+	pending map[string]*pendingLaunch
 }
 
 // pendingLaunch is a launch stopped at the agent's folder-trust dialog.
@@ -69,7 +69,6 @@ type pendingLaunch struct {
 	prompt  string
 	knownID string
 	started time.Time
-	asked   time.Time
 	logKV   []any
 }
 
@@ -292,7 +291,6 @@ func (l *Launcher) launch(ctx context.Context, p providers.Provider, lp provider
 	pl := &pendingLaunch{p: p, lp: lp, ws: ws, cwd: cwd, prompt: prompt, knownID: knownID, started: started, logKV: logKV}
 	switch l.passStartupDialog(ctx, lp, pane, trust) {
 	case startupTrust:
-		pl.asked = time.Now()
 		l.putPending(pane, pl)
 		res.TrustRequired = true
 		log.Info("launch waiting on folder trust", "cwd", cwd)
@@ -327,11 +325,6 @@ func (l *Launcher) putPending(pane string, pl *pendingLaunch) {
 	if l.pending == nil {
 		l.pending = map[string]*pendingLaunch{}
 	}
-	for k, v := range l.pending {
-		if time.Since(v.asked) > pendingTrustTTL {
-			delete(l.pending, k)
-		}
-	}
 	l.pending[pane] = pl
 }
 
@@ -340,9 +333,6 @@ func (l *Launcher) takePending(pane string) *pendingLaunch {
 	defer l.mu.Unlock()
 	pl := l.pending[pane]
 	delete(l.pending, pane)
-	if pl == nil || time.Since(pl.asked) > pendingTrustTTL {
-		return nil
-	}
 	return pl
 }
 

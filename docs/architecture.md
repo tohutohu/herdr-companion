@@ -153,8 +153,8 @@ send as pending, done, or failed.
 `agent.start`. Providers implement `providers.Launchable`: extra CLI arguments
 (Codex attaches to the shared daemon when present) and the keys that accept
 their folder-trust dialog. The dialog is answered only when the request says
-`trust: true`; otherwise the launch stops there, is kept in memory for 15
-minutes, and returns `trustRequired: true`. The app then asks the user and
+`trust: true`; otherwise the launch stops there, is kept in memory until
+answered (or the gateway restarts), and returns `trustRequired: true`. The app then asks the user and
 answers with `POST /v1/launches/{pane}/trust`, which continues the launch
 (first prompt, session id) or closes the workspace. The native session id is then read from the pane's
 `agent_session`, which the Herdr integration hook reports at startup.
