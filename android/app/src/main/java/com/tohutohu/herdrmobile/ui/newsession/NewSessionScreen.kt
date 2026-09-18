@@ -340,6 +340,7 @@ fun NewSessionScreen(
                             model = it.model
                             effort = it.effort
                         },
+                        onReorder = { order -> scope.launch { presetStore.setOrder(order) } },
                         onCustomize = { showPicker = true },
                     )
                     OutlinedTextField(
@@ -405,6 +406,7 @@ fun NewSessionScreen(
                 currentPath = path,
                 enabled = !loading && !checking && !starting,
                 onOpen = { scope.launch { load(it) } },
+                onReorderFavorites = { order -> scope.launch { shortcutStore.setFavoriteOrder(order) } },
                 modifier = Modifier.padding(top = 8.dp),
             )
             Row(

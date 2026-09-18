@@ -20,9 +20,15 @@ fun lastUsedDirectory(shortcuts: DirectoryShortcuts): String = shortcuts.recents
 fun pushRecent(recents: List<String>, path: String, max: Int = MAX_RECENT_DIRECTORIES): List<String> =
     (listOf(path) + recents.filter { it != path }).take(max)
 
-/** Adds [path] (kept sorted) or removes it if already present. */
+/** Adds [path] at the end or removes it if already present. */
 fun toggleFavorite(favorites: List<String>, path: String): List<String> =
-    if (path in favorites) favorites - path else (favorites + path).sorted()
+    if (path in favorites) favorites - path else favorites + path
+
+/** Moves one favorite while preserving the order of every other favorite. */
+fun moveFavorite(favorites: List<String>, fromIndex: Int, toIndex: Int): List<String> {
+    if (fromIndex !in favorites.indices || toIndex !in favorites.indices || fromIndex == toIndex) return favorites
+    return favorites.toMutableList().apply { add(toIndex, removeAt(fromIndex)) }
+}
 
 private val Context.shortcutStore by preferencesDataStore("directory_shortcuts")
 
@@ -37,6 +43,8 @@ class DirectoryShortcutsStore(private val context: Context) {
     suspend fun recordUsed(path: String) = update(recentsKey) { pushRecent(it, path) }
 
     suspend fun toggleFavorite(path: String) = update(favoritesKey) { toggleFavorite(it, path) }
+
+    suspend fun setFavoriteOrder(favorites: List<String>) = update(favoritesKey) { favorites }
 
     suspend fun removeRecent(path: String) = update(recentsKey) { it - path }
 

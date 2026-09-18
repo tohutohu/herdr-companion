@@ -43,6 +43,12 @@ fun togglePreset(presets: List<AgentPreset>, preset: AgentPreset): List<AgentPre
         presets + preset
     }
 
+/** Moves one saved preset while preserving the order of every other preset. */
+fun movePreset(presets: List<AgentPreset>, fromIndex: Int, toIndex: Int): List<AgentPreset> {
+    if (fromIndex !in presets.indices || toIndex !in presets.indices || fromIndex == toIndex) return presets
+    return presets.toMutableList().apply { add(toIndex, removeAt(fromIndex)) }
+}
+
 private val Context.agentPresetStore by preferencesDataStore("agent_presets")
 
 class AgentPresetsStore(private val context: Context) {
@@ -52,6 +58,8 @@ class AgentPresetsStore(private val context: Context) {
     val presets: Flow<AgentPresets> = context.agentPresetStore.data.map { it.presets() }
 
     suspend fun toggle(preset: AgentPreset) = update { it.copy(presets = togglePreset(it.presets, preset)) }
+
+    suspend fun setOrder(presets: List<AgentPreset>) = update { it.copy(presets = presets) }
 
     /** Remembered so that the next session starts from the same combination. */
     suspend fun recordUsed(preset: AgentPreset) = update { it.copy(lastUsed = preset) }

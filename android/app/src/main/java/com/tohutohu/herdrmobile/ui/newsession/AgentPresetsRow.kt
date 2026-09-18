@@ -6,8 +6,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Tune
@@ -33,6 +31,7 @@ fun AgentPresetsRow(
     presets: List<AgentPreset>,
     current: AgentPreset,
     onSelect: (AgentPreset) -> Unit,
+    onReorder: (List<AgentPreset>) -> Unit,
     onCustomize: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -44,25 +43,29 @@ fun AgentPresetsRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        LazyRow(
+        ReorderableChipRow(
+            rowItems = presets,
+            itemKey = { "preset:${it.key}" },
+            onMove = onReorder,
             modifier = Modifier.weight(1f),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             // Room for the chips to scroll out from under the button.
             contentPadding = PaddingValues(end = 4.dp),
-        ) {
-            if (presets.none { it.key == current.key }) {
-                // Not a favorite: tapping it reopens the pickers it came from.
-                item(key = "current") {
-                    FilterChip(
-                        selected = true,
-                        onClick = onCustomize,
-                        label = { Text(presetLabel(current)) },
-                        leadingIcon = { Selected() },
-                        modifier = Modifier.animateItem(),
-                    )
+            beforeItems = {
+                if (presets.none { it.key == current.key }) {
+                    // Not a favorite: tapping it reopens the pickers it came from.
+                    item(key = "current") {
+                        FilterChip(
+                            selected = true,
+                            onClick = onCustomize,
+                            label = { Text(presetLabel(current)) },
+                            leadingIcon = { Selected() },
+                            modifier = Modifier.animateItem().animateContentSize(),
+                        )
+                    }
                 }
-            }
-            items(presets, key = { "preset:${it.key}" }) { preset ->
+            },
+            itemContent = { preset, reorderModifier ->
                 val selected = preset.key == current.key
                 FilterChip(
                     selected = selected,
@@ -70,10 +73,10 @@ fun AgentPresetsRow(
                     label = { Text(presetLabel(preset)) },
                     leadingIcon = if (selected) ({ Selected() }) else null,
                     // The check mark comes and goes; let the chip grow around it.
-                    modifier = Modifier.animateItem().animateContentSize(),
+                    modifier = reorderModifier.animateItem().animateContentSize(),
                 )
-            }
-        }
+            },
+        )
         FilledTonalIconButton(onClick = onCustomize) {
             Icon(Icons.Default.Tune, contentDescription = "Other agent, model or effort")
         }

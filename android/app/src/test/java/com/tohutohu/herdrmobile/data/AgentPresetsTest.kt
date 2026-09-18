@@ -27,4 +27,9 @@ class AgentPresetsTest {
         val low = opus.copy(effort = "low", effortName = "Low")
         assertEquals(listOf(opus, low), togglePreset(listOf(opus), low))
     }
+
+    @Test
+    fun `お気に入りモデルは指定位置へ移動できる`() {
+        assertEquals(listOf(astra, opus), movePreset(listOf(opus, astra), 0, 1))
+    }
 }

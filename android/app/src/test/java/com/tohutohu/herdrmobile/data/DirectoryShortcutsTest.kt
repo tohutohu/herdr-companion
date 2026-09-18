@@ -25,12 +25,17 @@ class DirectoryShortcutsTest {
     }
 
     @Test
-    fun `お気に入りは未登録なら追加されパス順に並ぶ`() {
-        assertEquals(listOf("/a", "/b", "/c"), toggleFavorite(listOf("/a", "/c"), "/b"))
+    fun `お気に入りは未登録なら末尾に追加される`() {
+        assertEquals(listOf("/a", "/c", "/b"), toggleFavorite(listOf("/a", "/c"), "/b"))
     }
 
     @Test
     fun `お気に入りは登録済みなら外れる`() {
         assertEquals(listOf("/a"), toggleFavorite(listOf("/a", "/b"), "/b"))
+    }
+
+    @Test
+    fun `お気に入りは指定位置へ移動できる`() {
+        assertEquals(listOf("/a", "/c", "/b"), moveFavorite(listOf("/a", "/b", "/c"), 1, 2))
     }
 }
