@@ -193,9 +193,9 @@ window size, percent), omitted until an agent has accounted for a turn:
 
 - Claude: the `usage` of the newest main-chain assistant reply, whose input
   side is everything the model saw. Sidechains (subagents) fill their own
-  window and are skipped. Only `attachment` entries of type `model` name the
-  exact model, so they decide whether the window is the 1M variant (`[1m]`)
-  or the usual 200k.
+  window and are skipped. Current Fable, Opus, and Sonnet models use a 1M
+  window by default; older or other models use 200k unless an `attachment`
+  entry of type `model` identifies an explicit 1M variant (`[1m]`).
 - Codex: the app-server reports token counts only to the client owning the
   turn, but writes them to the thread's rollout file, whose path `thread/list`
   and `thread/read` both return. The last `token_count` record there gives

@@ -538,8 +538,8 @@ func TestClaudeのコンテキスト使用量は最新の本流の応答から�
 		}
 		return tr
 	}
-	// 60000 / 200000 = 30%
-	if c := decode(lines).summary(ParseOptions{}).Context; c == nil || c.UsedTokens != 61000 || c.WindowTokens != 200_000 || c.UsedPercent != 31 {
+	// 61000 / 1000000 = 6%; current Opus defaults to the 1M window.
+	if c := decode(lines).summary(ParseOptions{}).Context; c == nil || c.UsedTokens != 61000 || c.WindowTokens != 1_000_000 || c.UsedPercent != 6 {
 		t.Errorf("context = %+v", c)
 	}
 	// サブエージェント(sidechain)は自分の窓を使うので本流の値を上書きしない。
@@ -553,6 +553,28 @@ func TestClaudeのコンテキスト使用量は最新の本流の応答から�
 		`{"type":"attachment","uuid":"m1","timestamp":"2026-09-01T00:00:03Z","attachment":{"type":"model","identity":{"modelId":"claude-opus-5[1m]"}}}`)
 	if c := decode(lines).summary(ParseOptions{}).Context; c == nil || c.WindowTokens != 1_000_000 || c.UsedPercent != 6 {
 		t.Errorf("context with 1M model = %+v", c)
+	}
+}
+
+func TestClaudeのモデルごとのコンテキスト窓を判定する(t *testing.T) {
+	cases := map[string]int64{
+		"fable":                         1_000_000,
+		"claude-fable-5-1":              1_000_000,
+		"opus":                          1_000_000,
+		"claude-opus-5":                 1_000_000,
+		"claude-opus-4-8":               1_000_000,
+		"sonnet":                        1_000_000,
+		"claude-sonnet-5":               1_000_000,
+		"claude-sonnet-4-6":             1_000_000,
+		"claude-haiku-4-5-20251001":     200_000,
+		"claude-sonnet-4-5-20250929":    200_000,
+		"claude-opus-5[1m]":             1_000_000,
+		"claude-haiku-4-5-20251001[1m]": 1_000_000,
+	}
+	for id, want := range cases {
+		if got := contextWindow(id); got != want {
+			t.Errorf("%s = %d, want %d", id, got, want)
+		}
 	}
 }
 

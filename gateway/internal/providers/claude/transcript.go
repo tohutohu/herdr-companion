@@ -126,18 +126,51 @@ const (
 	// attachmentModel records the model a session runs on.
 	attachmentModel = "model"
 
-	// defaultContextWindow is what every Claude model offers unless its id
-	// asks for the long-context variant.
+	// defaultContextWindow is what Claude models use unless they are one of
+	// the current 1M models or their id asks for the long-context variant.
 	defaultContextWindow = 200_000
 	longContextWindow    = 1_000_000
 	longContextSuffix    = "[1m]"
 )
 
+// defaultLongContextModel reports the Claude models whose current defaults
+// have a 1M-token window. The aliases are included because they are what the
+// launcher accepts; the versioned ids are what the transcript usually records.
+func defaultLongContextModel(id string) bool {
+	id = strings.ToLower(strings.TrimSpace(id))
+	if id == "" || strings.Contains(id, longContextSuffix) {
+		return id != ""
+	}
+	if id == "fable" || id == "opus" || id == "sonnet" {
+		return true
+	}
+	id = strings.TrimPrefix(id, "claude-")
+	switch {
+	case id == "fable-5" || strings.HasPrefix(id, "fable-5-"):
+		return true
+	case id == "opus-5" || strings.HasPrefix(id, "opus-5-"):
+		return true
+	case id == "opus-4-6" || strings.HasPrefix(id, "opus-4-6-"):
+		return true
+	case id == "opus-4-7" || strings.HasPrefix(id, "opus-4-7-"):
+		return true
+	case id == "opus-4-8" || strings.HasPrefix(id, "opus-4-8-"):
+		return true
+	case id == "sonnet-5" || strings.HasPrefix(id, "sonnet-5-"):
+		return true
+	case id == "sonnet-4-6" || strings.HasPrefix(id, "sonnet-4-6-"):
+		return true
+	default:
+		return false
+	}
+}
+
 // contextWindow is how many tokens the model fits. Claude Code appends
-// "[1m]" to the ids of the 1M-token variants.
+// "[1m]" to the ids of some 1M-token variants, while current Fable, Opus,
+// and Sonnet models use the 1M window without a suffix.
 func contextWindow(modelIDs ...string) int64 {
 	for _, id := range modelIDs {
-		if strings.Contains(id, longContextSuffix) {
+		if defaultLongContextModel(id) {
 			return longContextWindow
 		}
 	}
