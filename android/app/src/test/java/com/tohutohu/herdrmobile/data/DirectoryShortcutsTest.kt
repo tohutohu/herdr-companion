@@ -16,6 +16,15 @@ class DirectoryShortcutsTest {
     }
 
     @Test
+    fun `最後に使ったディレクトリはお気に入りでも先頭から復元する`() {
+        val shortcuts = DirectoryShortcuts(
+            favorites = listOf("/workspace/app"),
+            recents = listOf("/workspace/app", "/workspace/other"),
+        )
+        assertEquals("/workspace/app", lastUsedDirectory(shortcuts))
+    }
+
+    @Test
     fun `お気に入りは未登録なら追加されパス順に並ぶ`() {
         assertEquals(listOf("/a", "/b", "/c"), toggleFavorite(listOf("/a", "/c"), "/b"))
     }

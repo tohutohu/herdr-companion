@@ -13,6 +13,9 @@ data class DirectoryShortcuts(val favorites: List<String> = emptyList(), val rec
 
 const val MAX_RECENT_DIRECTORIES = 8
 
+/** The directory used by the most recently started session, if any. */
+fun lastUsedDirectory(shortcuts: DirectoryShortcuts): String = shortcuts.recents.firstOrNull().orEmpty()
+
 /** Moves [path] to the front, dropping duplicates and anything past [max]. */
 fun pushRecent(recents: List<String>, path: String, max: Int = MAX_RECENT_DIRECTORIES): List<String> =
     (listOf(path) + recents.filter { it != path }).take(max)

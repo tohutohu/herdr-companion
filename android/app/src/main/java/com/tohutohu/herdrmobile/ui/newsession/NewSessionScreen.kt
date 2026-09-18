@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import com.tohutohu.herdrmobile.container
 import com.tohutohu.herdrmobile.data.AgentPreset
 import com.tohutohu.herdrmobile.data.DirectoryShortcuts
+import com.tohutohu.herdrmobile.data.lastUsedDirectory
 import com.tohutohu.herdrmobile.data.api.DirListingDto
 import com.tohutohu.herdrmobile.data.api.ModelsResponse
 import com.tohutohu.herdrmobile.data.api.StartSessionRequest
@@ -87,7 +88,8 @@ fun NewSessionScreen(
     val repo = context.container.repository
     val shortcutStore = context.container.directoryShortcuts
     val presetStore = context.container.agentPresets
-    val shortcuts by shortcutStore.shortcuts.collectAsState(initial = DirectoryShortcuts())
+    // Null until the store has been read; restoring waits for it.
+    val shortcuts by shortcutStore.shortcuts.collectAsState(initial = null)
     // Null until the store has been read; restoring waits for it.
     val presets by presetStore.presets.collectAsState(initial = null)
     val scope = rememberCoroutineScope()
@@ -111,7 +113,11 @@ fun NewSessionScreen(
     var catalog by remember { mutableStateOf(ModelsResponse()) }
     var modelsError by remember { mutableStateOf<String?>(null) }
     var restored by rememberSaveable { mutableStateOf(false) }
+    // This is deliberately not saveable: after rotation, listing is lost but
+    // path is restored, so the current directory must be loaded again.
+    var directoryRestored by remember { mutableStateOf(false) }
 
+    val loadedShortcuts = shortcuts ?: DirectoryShortcuts()
     val saved = presets?.presets.orEmpty()
     val current = withKnownNames(
         agentPreset(provider, model, effort, catalog),
@@ -225,7 +231,14 @@ fun NewSessionScreen(
         }
     }
 
-    LaunchedEffect(Unit) { load(path) }
+    LaunchedEffect(shortcuts) {
+        val loaded = shortcuts ?: return@LaunchedEffect
+        if (directoryRestored) return@LaunchedEffect
+        directoryRestored = true
+        // Keep a path restored by rememberSaveable after rotation; otherwise
+        // start in the directory used by the most recent session.
+        load(path.ifEmpty { lastUsedDirectory(loaded) })
+    }
 
     // Start where the last session left off, once.
     LaunchedEffect(presets) {
@@ -388,7 +401,7 @@ fun NewSessionScreen(
         Column(Modifier.padding(padding).fillMaxSize()) {
             UsageCard()
             DirectoryShortcutsRow(
-                shortcuts = shortcuts,
+                shortcuts = loadedShortcuts,
                 currentPath = path,
                 enabled = !loading && !checking && !starting,
                 onOpen = { scope.launch { load(it) } },
@@ -418,7 +431,7 @@ fun NewSessionScreen(
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
-                val favoriteDir = path in shortcuts.favorites
+                val favoriteDir = path in loadedShortcuts.favorites
                 IconButton(
                     enabled = path.isNotEmpty(),
                     onClick = { scope.launch { shortcutStore.toggleFavorite(path) } },

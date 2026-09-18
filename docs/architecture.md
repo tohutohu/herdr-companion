@@ -178,7 +178,9 @@ so a favorite of the other agent can be labelled without loading its catalog)
 in the `agent_presets` DataStore, and offered as one-tap chips. Anything else
 is picked in the full pickers behind *Other…*, which is also where a
 combination is starred or unstarred. The combination a session was started
-with is remembered and preselected next time.
+with is remembered and preselected next time. The working directory used by
+the last session is restored too; if that directory is a favorite, its
+favorite chip is selected.
 
 Sessions report the model they last used (`model`), the reasoning effort
 (`effort`) and a display label for the mode (`mode`):
