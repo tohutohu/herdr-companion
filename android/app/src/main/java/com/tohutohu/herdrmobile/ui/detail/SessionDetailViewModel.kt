@@ -39,12 +39,21 @@ class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidV
 
     private var fullSyncDone = false
 
-    /** Called in a loop while the screen is started (foreground only). */
+    /**
+     * Called in a loop while the screen is started (foreground only). The
+     * session's notification is cleared on entering and on leaving, but not
+     * the moment one arrives while the user is reading, so it can still be
+     * noticed.
+     */
     suspend fun pollWhileVisible() {
         Notifications.cancel(getApplication(), sessionId)
-        while (true) {
-            refresh()
-            delay(POLL_MS)
+        try {
+            while (true) {
+                refresh()
+                delay(POLL_MS)
+            }
+        } finally {
+            Notifications.cancel(getApplication(), sessionId)
         }
     }
 
