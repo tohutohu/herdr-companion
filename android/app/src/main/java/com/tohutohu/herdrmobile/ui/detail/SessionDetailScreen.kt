@@ -5,10 +5,21 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -79,6 +90,8 @@ import com.tohutohu.herdrmobile.data.api.Status
 import com.tohutohu.herdrmobile.data.db.SessionEntity
 import com.tohutohu.herdrmobile.ui.ContextBar
 import com.tohutohu.herdrmobile.ui.ContextGauge
+import com.tohutohu.herdrmobile.ui.ExpandingContent
+import com.tohutohu.herdrmobile.ui.SwapContent
 import com.tohutohu.herdrmobile.ui.agentSettingsLabel
 import com.tohutohu.herdrmobile.ui.costLabel
 import com.tohutohu.herdrmobile.ui.sessions.SessionRef
@@ -180,8 +193,9 @@ fun SessionDetailScreen(
                                 agentSettingsLabel(it.model, it.effort, it.mode),
                                 costLabel(it.costUsd, it.costEstimated),
                             ).joinToString(" · ")
+                            val statusColor by animateColorAsState(st.color, label = "status")
                             Row {
-                                Text("${st.symbol} ${st.label}", color = st.color, style = MaterialTheme.typography.labelSmall)
+                                Text("${st.symbol} ${st.label}", color = statusColor, style = MaterialTheme.typography.labelSmall)
                                 if (details.isNotEmpty()) {
                                     Text(
                                         " · $details",
@@ -221,19 +235,31 @@ fun SessionDetailScreen(
         },
         bottomBar = {
             val s = session
-            if (s != null && s.status == Status.OFFLINE) {
-                ResumeBar(busy = actions.busy(s.id), onResume = { actions.resume(s.ref()) })
-            } else {
-                Composer(
-                    enabled = s?.canSend == true && !sending,
-                    sending = sending,
-                    onSend = vm::send,
-                )
+            // The composer gives way to the resume bar when the agent stops,
+            // and comes back when it runs again: slide the newcomer up.
+            AnimatedContent(
+                targetState = s != null && s.status == Status.OFFLINE,
+                transitionSpec = {
+                    (fadeIn(tween(200, delayMillis = 60)) + slideInVertically(tween(260)) { it / 3 })
+                        .togetherWith(fadeOut(tween(120)))
+                        .using(SizeTransform(clip = false))
+                },
+                label = "bottomBar",
+            ) { offline ->
+                if (offline) {
+                    ResumeBar(busy = s != null && actions.busy(s.id), onResume = { s?.let { actions.resume(it.ref()) } })
+                } else {
+                    Composer(
+                        enabled = s?.canSend == true && !sending,
+                        sending = sending,
+                        onSend = vm::send,
+                    )
+                }
             }
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
-            session?.takeIf { detailsOpen }?.let {
+            ExpandingContent(value = session?.takeIf { detailsOpen }) {
                 Column {
                     (it.cwd?.takeIf { p -> p.isNotBlank() } ?: it.project).takeIf { p -> p.isNotBlank() }?.let { dir ->
                         Text(
@@ -250,7 +276,7 @@ fun SessionDetailScreen(
                     HorizontalDivider()
                 }
             }
-            error?.let {
+            ExpandingContent(value = error) {
                 Text(
                     it,
                     color = MaterialTheme.colorScheme.error,
@@ -258,8 +284,8 @@ fun SessionDetailScreen(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                 )
             }
-            if (messages.isEmpty()) {
-                Text("Loading…", modifier = Modifier.padding(16.dp))
+            ExpandingContent(value = "Loading…".takeIf { messages.isEmpty() }) {
+                Text(it, modifier = Modifier.padding(16.dp))
             }
             Box(Modifier.fillMaxSize()) {
                 LazyColumn(
@@ -271,6 +297,7 @@ fun SessionDetailScreen(
                     itemsIndexed(messages.asReversed(), key = { _, m -> m.id }) { r, m ->
                         val i = messages.lastIndex - r
                         MessageItem(
+                            modifier = Modifier.animateItem(),
                             message = m,
                             showRole = i == 0 || messages[i - 1].role != m.role,
                             providerName = session?.providerName ?: "Agent",
@@ -283,21 +310,41 @@ fun SessionDetailScreen(
                         )
                     }
                 }
-                Box(Modifier.align(Alignment.TopCenter).onSizeChanged { panelHeight = it.height }) {
-                    FlowStackPanel(
-                        stack = stack,
-                        providerName = session?.providerName ?: "Agent",
-                        onJump = { id ->
-                            val i = messages.indexOfFirst { it.id == id }
-                            if (i >= 0) {
-                                readFromStart = false
-                                scope.launch { listState.animateScrollToItem(messages.lastIndex - i) }
-                            }
-                        },
-                    )
-                }
+                PinnedFlowStack(
+                    stack = stack,
+                    providerName = session?.providerName ?: "Agent",
+                    onHeight = { panelHeight = it },
+                    onJump = { id ->
+                        val i = messages.indexOfFirst { it.id == id }
+                        if (i >= 0) {
+                            readFromStart = false
+                            scope.launch { listState.animateScrollToItem(messages.lastIndex - i) }
+                        }
+                    },
+                )
             }
         }
+    }
+}
+
+/** The flow-stack panel, slid in over the top of the list while it has content. */
+@Composable
+private fun BoxScope.PinnedFlowStack(
+    stack: FlowStack,
+    providerName: String,
+    onHeight: (Int) -> Unit,
+    onJump: (String) -> Unit,
+) {
+    // Keep the last stack while the panel slides away empty.
+    var shownStack by remember { mutableStateOf(stack) }
+    if (!stack.isEmpty) shownStack = stack
+    AnimatedVisibility(
+        visible = !stack.isEmpty,
+        enter = slideInVertically { -it } + fadeIn(),
+        exit = slideOutVertically { -it } + fadeOut(),
+        modifier = Modifier.align(Alignment.TopCenter).onSizeChanged { onHeight(it.height) },
+    ) {
+        FlowStackPanel(stack = shownStack, providerName = providerName, onJump = onJump)
     }
 }
 
@@ -353,10 +400,11 @@ private fun Composer(
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments(), add)
     Surface(tonalElevation = 3.dp) {
         Column(Modifier.navigationBarsPadding().imePadding().padding(8.dp)) {
-            if (attachments.isNotEmpty()) {
+            // A copy, so the row still has its thumbnails while it shrinks away.
+            ExpandingContent(value = attachments.toList().takeIf { it.isNotEmpty() }) { shown ->
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 8.dp)) {
-                    items(attachments, key = { it.uri.toString() }) { attachment ->
-                        Box {
+                    items(shown, key = { it.uri.toString() }) { attachment ->
+                        Box(Modifier.animateItem()) {
                             if (attachment.isImage) {
                                 AsyncImage(model = attachment.uri, contentDescription = null, modifier = Modifier.size(64.dp))
                             } else {
@@ -389,18 +437,20 @@ private fun Composer(
                     maxLines = 6,
                     modifier = Modifier.weight(1f),
                 )
-                if (sending) {
-                    CircularProgressIndicator(Modifier.padding(12.dp).size(24.dp))
-                } else {
-                    IconButton(
-                        enabled = enabled && (text.isNotBlank() || attachments.isNotEmpty()),
-                        onClick = {
-                            onSend(text, attachments.toList()) {
-                                text = ""
-                                attachments.clear()
-                            }
-                        },
-                    ) { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send") }
+                SwapContent(sending) { busy ->
+                    if (busy) {
+                        CircularProgressIndicator(Modifier.padding(12.dp).size(24.dp))
+                    } else {
+                        IconButton(
+                            enabled = enabled && (text.isNotBlank() || attachments.isNotEmpty()),
+                            onClick = {
+                                onSend(text, attachments.toList()) {
+                                    text = ""
+                                    attachments.clear()
+                                }
+                            },
+                        ) { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send") }
+                    }
                 }
             }
         }
@@ -457,10 +507,12 @@ private fun ResumeBar(busy: Boolean, onResume: () -> Unit) {
                 modifier = Modifier.weight(1f),
             )
             Button(onClick = onResume, enabled = !busy) {
-                if (busy) {
-                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                } else {
-                    Icon(Icons.Default.PlayArrow, contentDescription = null)
+                SwapContent(busy) { spinning ->
+                    if (spinning) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Default.PlayArrow, contentDescription = null)
+                    }
                 }
                 Text("  Resume")
             }

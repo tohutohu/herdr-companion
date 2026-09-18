@@ -1,6 +1,11 @@
 package com.tohutohu.herdrmobile.ui.detail
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,10 +16,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -30,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.tohutohu.herdrmobile.ui.ExpandChevron
 
 /**
  * Pinned over the top of the message list. Tapping an entry scrolls to its
@@ -52,14 +54,18 @@ fun FlowStackPanel(
                 }
                 if (stack.reports.isNotEmpty()) {
                     IconButton(onClick = { expanded = !expanded }, modifier = Modifier.size(36.dp)) {
-                        Icon(
-                            if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        ExpandChevron(
+                            expanded = expanded,
                             contentDescription = if (expanded) "Hide reports" else "Show ${stack.reports.size} reports",
                         )
                     }
                 }
             }
-            if (expanded && stack.reports.isNotEmpty()) {
+            AnimatedVisibility(
+                visible = expanded && stack.reports.isNotEmpty(),
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut(),
+            ) {
                 val scroll = rememberScrollState()
                 // Keep the newest report in view; older ones scroll inside the panel.
                 LaunchedEffect(stack.reports.size) { scroll.scrollTo(Int.MAX_VALUE) }

@@ -1,6 +1,13 @@
 package com.tohutohu.herdrmobile.ui.files
 
 import android.text.format.Formatter
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -48,6 +55,7 @@ import com.tohutohu.herdrmobile.container
 import com.tohutohu.herdrmobile.data.DownloadState
 import com.tohutohu.herdrmobile.data.FileDownloads
 import com.tohutohu.herdrmobile.data.api.FileInfoDto
+import com.tohutohu.herdrmobile.ui.ExpandingContent
 
 private sealed interface FileState {
     data object Loading : FileState
@@ -94,13 +102,22 @@ fun FileViewerScreen(sessionId: String, path: String, line: Int, onBack: () -> U
             )
         },
     ) { padding ->
-        Box(Modifier.padding(padding).fillMaxSize()) {
-            when (val s = state) {
-                FileState.Loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
-                is FileState.Error -> Text(s.message, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp))
-                is FileState.Image -> AsyncImage(model = s.bytes, contentDescription = path, modifier = Modifier.fillMaxSize())
-                is FileState.Text -> CodeView(path, s.lines, line)
-                is FileState.Download -> DownloadView(sessionId, s.info)
+        // The spinner fades into whatever the file turns out to be.
+        AnimatedContent(
+            targetState = state,
+            contentKey = { it::class },
+            transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(150)) },
+            modifier = Modifier.padding(padding).fillMaxSize(),
+            label = "file",
+        ) { s ->
+            Box(Modifier.fillMaxSize()) {
+                when (s) {
+                    FileState.Loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
+                    is FileState.Error -> Text(s.message, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp))
+                    is FileState.Image -> AsyncImage(model = s.bytes, contentDescription = path, modifier = Modifier.fillMaxSize())
+                    is FileState.Text -> CodeView(path, s.lines, line)
+                    is FileState.Download -> DownloadView(sessionId, s.info)
+                }
             }
         }
     }
@@ -125,29 +142,43 @@ private fun DownloadView(sessionId: String, info: FileInfoDto) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text(info.path, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, textAlign = TextAlign.Center)
-        when (val s = state) {
-            DownloadState.Idle -> Button(onClick = { downloads.start(sessionId, info.path, info.name, info.size) }) {
-                Text("Download")
-            }
-            is DownloadState.Running -> {
-                if (s.total > 0) {
-                    LinearProgressIndicator(progress = { s.bytes.toFloat() / s.total }, modifier = Modifier.fillMaxWidth())
-                } else {
-                    LinearProgressIndicator(Modifier.fillMaxWidth())
+        // Each stage of the download fades into the next; progress catches up smoothly.
+        AnimatedContent(
+            targetState = state,
+            contentKey = { it::class },
+            transitionSpec = { fadeIn() togetherWith fadeOut() using SizeTransform(clip = false) },
+            contentAlignment = Alignment.Center,
+            label = "download",
+        ) { s ->
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                when (s) {
+                    DownloadState.Idle -> Button(onClick = { downloads.start(sessionId, info.path, info.name, info.size) }) {
+                        Text("Download")
+                    }
+                    is DownloadState.Running -> {
+                        if (s.total > 0) {
+                            val progress by animateFloatAsState(s.bytes.toFloat() / s.total, label = "downloadProgress")
+                            LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
+                        } else {
+                            LinearProgressIndicator(Modifier.fillMaxWidth())
+                        }
+                        Text(
+                            "${Formatter.formatShortFileSize(context, s.bytes)} / ${Formatter.formatShortFileSize(context, s.total)}",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    is DownloadState.Done -> {
+                        Text("Saved to Downloads", style = MaterialTheme.typography.bodyMedium)
+                        Button(onClick = { openFailed = !downloads.open(s) }) { Text("Open") }
+                        ExpandingContent(value = "No app can open this file".takeIf { openFailed }) {
+                            Text(it, color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                    is DownloadState.Failed -> {
+                        Text(s.message, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
+                        Button(onClick = { downloads.start(sessionId, info.path, info.name, info.size) }) { Text("Retry") }
+                    }
                 }
-                Text(
-                    "${Formatter.formatShortFileSize(context, s.bytes)} / ${Formatter.formatShortFileSize(context, s.total)}",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            is DownloadState.Done -> {
-                Text("Saved to Downloads", style = MaterialTheme.typography.bodyMedium)
-                Button(onClick = { openFailed = !downloads.open(s) }) { Text("Open") }
-                if (openFailed) Text("No app can open this file", color = MaterialTheme.colorScheme.error)
-            }
-            is DownloadState.Failed -> {
-                Text(s.message, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
-                Button(onClick = { downloads.start(sessionId, info.path, info.name, info.size) }) { Text("Retry") }
             }
         }
     }

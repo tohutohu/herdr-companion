@@ -1,5 +1,14 @@
 package com.tohutohu.herdrmobile.ui.newsession
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -55,6 +64,8 @@ import com.tohutohu.herdrmobile.data.DirectoryShortcuts
 import com.tohutohu.herdrmobile.data.api.DirListingDto
 import com.tohutohu.herdrmobile.data.api.ModelsResponse
 import com.tohutohu.herdrmobile.data.api.StartSessionRequest
+import com.tohutohu.herdrmobile.ui.ExpandingContent
+import com.tohutohu.herdrmobile.ui.SwapContent
 import com.tohutohu.herdrmobile.ui.usage.UsageCard
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -312,15 +323,22 @@ fun NewSessionScreen(
                             }
                         },
                     ) {
-                        if (starting || checking) {
-                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                            Text(if (starting) "  Starting…" else "  Checking folder…")
-                        } else {
-                            Text(
-                                "Start ${providerName(provider)} in ${path.substringAfterLast('/').ifEmpty { "…" }}",
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                        // The label follows the folder and gives way to the progress text.
+                        val busyLabel = when {
+                            starting -> "Starting…"
+                            checking -> "Checking folder…"
+                            else -> null
+                        }
+                        AnimatedContent(
+                            targetState = busyLabel ?: "Start ${providerName(provider)} in ${path.substringAfterLast('/').ifEmpty { "…" }}",
+                            transitionSpec = { fadeIn(tween(160)) togetherWith fadeOut(tween(100)) using SizeTransform(clip = false) },
+                            contentAlignment = Alignment.Center,
+                            label = "startButton",
+                        ) { label ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (busyLabel != null) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                Text(if (busyLabel != null) "  $label" else label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
                         }
                     }
                 }
@@ -344,50 +362,73 @@ fun NewSessionScreen(
                     enabled = listing?.parent != null && !loading && !checking && !starting,
                     onClick = { scope.launch { load(listing?.parent.orEmpty()) } },
                 ) { Icon(Icons.Default.ArrowUpward, contentDescription = "Parent folder") }
-                Text(
-                    path.ifEmpty { "Workspace roots" },
-                    fontFamily = FontFamily.Monospace,
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 2,
-                    overflow = TextOverflow.StartEllipsis,
+                AnimatedContent(
+                    targetState = path,
+                    transitionSpec = { fadeIn(tween(160)) togetherWith fadeOut(tween(100)) using SizeTransform(clip = false) },
+                    contentAlignment = Alignment.CenterStart,
                     modifier = Modifier.weight(1f),
-                )
+                    label = "path",
+                ) { shown ->
+                    Text(
+                        shown.ifEmpty { "Workspace roots" },
+                        fontFamily = FontFamily.Monospace,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 2,
+                        overflow = TextOverflow.StartEllipsis,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
                 val favoriteDir = path in shortcuts.favorites
                 IconButton(
                     enabled = path.isNotEmpty(),
                     onClick = { scope.launch { shortcutStore.toggleFavorite(path) } },
                 ) {
-                    Icon(
-                        if (favoriteDir) Icons.Default.Star else Icons.Default.StarBorder,
-                        contentDescription = if (favoriteDir) "Remove from favorites" else "Add to favorites",
-                    )
+                    SwapContent(favoriteDir) { starred ->
+                        Icon(
+                            if (starred) Icons.Default.Star else Icons.Default.StarBorder,
+                            contentDescription = if (starred) "Remove from favorites" else "Add to favorites",
+                        )
+                    }
                 }
                 IconButton(enabled = path.isNotEmpty() && !loading && !checking && !starting, onClick = { showMkdir = true }) {
                     Icon(Icons.Default.CreateNewFolder, contentDescription = "New folder")
                 }
             }
-            error?.let {
+            ExpandingContent(value = error) {
                 Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp))
             }
             HorizontalDivider()
-            if (loading && listing == null) {
+            ExpandingContent(value = Unit.takeIf { loading && listing == null }) {
                 CircularProgressIndicator(Modifier.padding(24.dp))
             }
-            LazyColumn(Modifier.fillMaxSize()) {
-                val entries = listing?.entries.orEmpty()
-                if (entries.isEmpty() && !loading) {
-                    item { Text("No subfolders", modifier = Modifier.padding(16.dp)) }
-                }
-                items(entries, key = { it.path }) { dir ->
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable(enabled = !loading && !checking && !starting) { scope.launch { load(dir.path) } }
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                    ) {
-                        Icon(Icons.Default.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                        Text(dir.name, modifier = Modifier.padding(start = 12.dp))
+            // Descending slides the new listing in from the right, going up from the left.
+            val shownPath = listing?.path ?: path
+            AnimatedContent(
+                targetState = shownPath,
+                transitionSpec = {
+                    val deeper = targetState.length >= initialState.length
+                    (slideInHorizontally(tween(260)) { if (deeper) it / 6 else -it / 6 } + fadeIn(tween(200)))
+                        .togetherWith(slideOutHorizontally(tween(260)) { if (deeper) -it / 6 else it / 6 } + fadeOut(tween(120)))
+                },
+                label = "listing",
+            ) { current ->
+                val entries = if (current == shownPath) listing?.entries.orEmpty() else emptyList()
+                LazyColumn(Modifier.fillMaxSize()) {
+                    if (entries.isEmpty() && !loading && current == shownPath) {
+                        item(key = "empty") { Text("No subfolders", modifier = Modifier.animateItem().padding(16.dp)) }
+                    }
+                    items(entries, key = { it.path }) { dir ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .animateItem()
+                                .fillMaxWidth()
+                                .clickable(enabled = !loading && !checking && !starting) { scope.launch { load(dir.path) } }
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                        ) {
+                            Icon(Icons.Default.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Text(dir.name, modifier = Modifier.padding(start = 12.dp))
+                        }
                     }
                 }
             }

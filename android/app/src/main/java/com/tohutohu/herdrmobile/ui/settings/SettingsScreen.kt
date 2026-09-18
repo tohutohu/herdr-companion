@@ -1,5 +1,6 @@
 package com.tohutohu.herdrmobile.ui.settings
 
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -32,6 +33,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.tohutohu.herdrmobile.container
 import com.tohutohu.herdrmobile.data.Settings
+import com.tohutohu.herdrmobile.ui.ExpandingContent
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -101,9 +103,11 @@ fun SettingsScreen(onDone: () -> Unit) {
                     },
                 ) { Text("Save") }
             }
-            testResult?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
-            if (pushStatus.isNotEmpty()) {
-                Text(pushStatus, style = MaterialTheme.typography.bodySmall)
+            ExpandingContent(value = testResult) { result ->
+                Crossfade(result, label = "testResult") { Text(it, style = MaterialTheme.typography.bodyMedium) }
+            }
+            ExpandingContent(value = pushStatus.takeIf { it.isNotEmpty() }) {
+                Text(it, style = MaterialTheme.typography.bodySmall)
             }
         }
     }

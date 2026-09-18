@@ -1,5 +1,6 @@
 package com.tohutohu.herdrmobile.ui.newsession
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -57,6 +58,7 @@ fun AgentPresetsRow(
                         onClick = onCustomize,
                         label = { Text(presetLabel(current)) },
                         leadingIcon = { Selected() },
+                        modifier = Modifier.animateItem(),
                     )
                 }
             }
@@ -67,6 +69,8 @@ fun AgentPresetsRow(
                     onClick = { onSelect(preset) },
                     label = { Text(presetLabel(preset)) },
                     leadingIcon = if (selected) ({ Selected() }) else null,
+                    // The check mark comes and goes; let the chip grow around it.
+                    modifier = Modifier.animateItem().animateContentSize(),
                 )
             }
         }

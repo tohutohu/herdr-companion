@@ -1,14 +1,15 @@
 package com.tohutohu.herdrmobile.ui.detail
 
 import android.text.format.Formatter
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -16,8 +17,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -42,11 +41,13 @@ import coil3.compose.AsyncImage
 import com.tohutohu.herdrmobile.data.Message
 import com.tohutohu.herdrmobile.data.api.BlockDto
 import com.tohutohu.herdrmobile.data.api.InteractionResponseDto
+import com.tohutohu.herdrmobile.ui.ExpandChevron
 import com.tohutohu.herdrmobile.ui.markdown.MarkdownText
 
 @Composable
 fun MessageItem(
     message: Message,
+    modifier: Modifier = Modifier,
     showRole: Boolean,
     providerName: String,
     resolveUrl: (String) -> String,
@@ -58,7 +59,7 @@ fun MessageItem(
 ) {
     val isUser = message.role == "user"
     Column(
-        Modifier
+        modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 2.dp),
         horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
@@ -170,29 +171,31 @@ private fun CollapsibleTool(text: String, output: Boolean) {
             .animateContentSize(),
     ) {
         Row(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.Top) {
-            if (expanded) {
-                SelectionContainer(Modifier.weight(1f)) {
+            // The surface animates its size; this only cross-fades the text.
+            Crossfade(expanded, modifier = Modifier.weight(1f), label = "tool") { open ->
+                if (open) {
+                    SelectionContainer {
+                        Text(
+                            text.trimEnd(),
+                            fontFamily = FontFamily.Monospace,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else {
                     Text(
-                        text.trimEnd(),
+                        toolSummary(text),
                         fontFamily = FontFamily.Monospace,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
-            } else {
-                Text(
-                    toolSummary(text),
-                    fontFamily = FontFamily.Monospace,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
             }
             if (collapsible) {
-                Icon(
-                    if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                ExpandChevron(
+                    expanded = expanded,
                     contentDescription = if (expanded) "Collapse" else "Expand",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 4.dp).size(16.dp),

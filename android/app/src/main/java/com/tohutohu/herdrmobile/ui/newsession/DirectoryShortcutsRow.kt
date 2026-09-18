@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -18,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.tohutohu.herdrmobile.data.DirectoryShortcuts
+import com.tohutohu.herdrmobile.ui.ExpandingContent
 
 /**
  * Favorite folders, then recently used ones, as a horizontal chip row.
@@ -32,26 +34,41 @@ fun DirectoryShortcutsRow(
     modifier: Modifier = Modifier,
 ) {
     val recents = shortcuts.recents.filter { it !in shortcuts.favorites }
-    if (shortcuts.favorites.isEmpty() && recents.isEmpty()) return
-    val labels = shortLabels(shortcuts.favorites + recents)
+    // The row appears with the first shortcut instead of pushing the browser down.
+    ExpandingContent(value = shortcuts.takeIf { it.favorites.isNotEmpty() || recents.isNotEmpty() }, modifier = modifier) {
+        ShortcutChips(favorites = it.favorites, recents = it.recents.filter { r -> r !in it.favorites }, currentPath, enabled, onOpen)
+    }
+}
+
+@Composable
+private fun ShortcutChips(
+    favorites: List<String>,
+    recents: List<String>,
+    currentPath: String,
+    enabled: Boolean,
+    onOpen: (String) -> Unit,
+) {
+    val labels = shortLabels(favorites + recents)
 
     @Composable
-    fun Shortcut(path: String, icon: ImageVector, description: String) {
+    fun LazyItemScope.Shortcut(path: String, icon: ImageVector, description: String) {
         FilterChip(
             selected = path == currentPath,
             enabled = enabled,
             onClick = { onOpen(path) },
             label = { Text(labels.getValue(path)) },
             leadingIcon = { Icon(icon, contentDescription = description, Modifier.size(FilterChipDefaults.IconSize)) },
+            // Starring moves a chip between the groups; let it travel.
+            modifier = Modifier.animateItem(),
         )
     }
 
     LazyRow(
-        modifier = modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth(),
         contentPadding = PaddingValues(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        items(shortcuts.favorites, key = { "fav:$it" }) { Shortcut(it, Icons.Default.Star, "Favorite") }
+        items(favorites, key = { "fav:$it" }) { Shortcut(it, Icons.Default.Star, "Favorite") }
         items(recents, key = { "recent:$it" }) { Shortcut(it, Icons.Default.History, "Recent") }
     }
 }

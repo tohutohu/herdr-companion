@@ -45,6 +45,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.tohutohu.herdrmobile.container
 import com.tohutohu.herdrmobile.data.api.TerminalInput
+import com.tohutohu.herdrmobile.ui.ExpandingContent
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -141,7 +142,7 @@ fun TerminalScreen(sessionId: String, onBack: () -> Unit) {
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize().background(Color(0xFF111111))) {
-            error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(8.dp)) }
+            ExpandingContent(value = error) { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(8.dp)) }
             SelectionContainer {
                 Text(
                     text,

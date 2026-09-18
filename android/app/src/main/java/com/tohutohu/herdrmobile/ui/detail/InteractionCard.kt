@@ -1,5 +1,14 @@
 package com.tohutohu.herdrmobile.ui.detail
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -23,6 +32,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -66,23 +76,37 @@ fun InteractionCard(
     onOpenTerminal: () -> Unit,
 ) {
     val pending = interaction.isPending
-    val container = if (pending) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.surfaceVariant
+    // Answering settles the card: its colours fade and the controls give way
+    // to the summary instead of snapping.
+    val container by animateColorAsState(
+        if (pending) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+        label = "cardContainer",
+    )
+    val content by animateColorAsState(
+        if (pending) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+        label = "cardContent",
+    )
     Card(
-        colors = CardDefaults.cardColors(
-            containerColor = container,
-            contentColor = if (pending) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-        ),
+        colors = CardDefaults.cardColors(containerColor = container, contentColor = content),
         modifier = Modifier.fillMaxWidth(),
     ) {
         CompositionLocalProvider(LocalCardContainer provides container) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 interaction.title?.let { Text(it, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold) }
-                when {
-                    !pending -> AnsweredSummary(interaction)
-                    !interaction.supported -> Unsupported(onOpenTerminal)
-                    interaction.type == "approval" -> Approval(interaction, enabled, onRespond)
-                    interaction.type == "questions" -> Questions(interaction, enabled, onRespond)
-                    else -> Unsupported(onOpenTerminal)
+                AnimatedContent(
+                    targetState = pending,
+                    transitionSpec = { fadeIn() togetherWith fadeOut() using SizeTransform(clip = false) },
+                    label = "interaction",
+                ) { open ->
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        when {
+                            !open -> AnsweredSummary(interaction)
+                            !interaction.supported -> Unsupported(onOpenTerminal)
+                            interaction.type == "approval" -> Approval(interaction, enabled, onRespond)
+                            interaction.type == "questions" -> Questions(interaction, enabled, onRespond)
+                            else -> Unsupported(onOpenTerminal)
+                        }
+                    }
                 }
             }
         }
@@ -251,7 +275,11 @@ private fun QuestionView(
                 }
             }
         }
-        if (OTHER in selected || q.type == "text") {
+        AnimatedVisibility(
+            visible = OTHER in selected || q.type == "text",
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut(),
+        ) {
             OutlinedTextField(
                 value = otherText,
                 onValueChange = onOtherText,

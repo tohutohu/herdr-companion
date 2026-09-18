@@ -1,6 +1,13 @@
 package com.tohutohu.herdrmobile.ui.usage
 
 import android.text.format.DateUtils
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -11,8 +18,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -43,6 +48,9 @@ import com.tohutohu.herdrmobile.data.SessionRepository
 import com.tohutohu.herdrmobile.data.api.UsageDto
 import com.tohutohu.herdrmobile.data.api.UsageProviderDto
 import com.tohutohu.herdrmobile.data.api.UsageWindowDto
+import com.tohutohu.herdrmobile.ui.ExpandChevron
+import com.tohutohu.herdrmobile.ui.ExpandingContent
+import com.tohutohu.herdrmobile.ui.SwapContent
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -86,14 +94,42 @@ fun UsageCard(modifier: Modifier = Modifier) {
         }
     }
 
-    val current = usage ?: return
-    if (current.providers.isEmpty() && current.error == null) return
+    // Grows in with the first reading instead of pushing the list down at once.
+    val shown = usage?.takeIf { it.providers.isNotEmpty() || it.error != null }
+    ExpandingContent(value = shown, modifier = modifier.fillMaxWidth()) { current ->
+        UsageCardContent(
+            current = current,
+            nowMillis = nowMillis,
+            expanded = expanded,
+            refreshing = refreshing,
+            onToggle = { expanded = !expanded },
+            onRefresh = {
+                if (!refreshing) {
+                    scope.launch {
+                        refreshing = true
+                        runCatching { api.refreshUsage() }.onSuccess { usage = it }
+                        refreshing = false
+                    }
+                }
+            },
+        )
+    }
+}
 
-    Column(modifier.fillMaxWidth()) {
+@Composable
+private fun UsageCardContent(
+    current: UsageDto,
+    nowMillis: Long,
+    expanded: Boolean,
+    refreshing: Boolean,
+    onToggle: () -> Unit,
+    onRefresh: () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth()) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .clickable { expanded = !expanded }
+                .clickable(onClick = onToggle)
                 .padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -106,32 +142,27 @@ fun UsageCard(modifier: Modifier = Modifier) {
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            IconButton(
-                onClick = {
-                    if (!refreshing) {
-                        scope.launch {
-                            refreshing = true
-                            runCatching { api.refreshUsage() }.onSuccess { usage = it }
-                            refreshing = false
-                        }
+            IconButton(onClick = onRefresh, modifier = Modifier.size(32.dp)) {
+                SwapContent(refreshing) { busy ->
+                    if (busy) {
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Default.Refresh, contentDescription = "Refresh limits", Modifier.size(18.dp))
                     }
-                },
-                modifier = Modifier.size(32.dp),
-            ) {
-                if (refreshing) {
-                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                } else {
-                    Icon(Icons.Default.Refresh, contentDescription = "Refresh limits", Modifier.size(18.dp))
                 }
             }
-            Icon(
-                if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+            ExpandChevron(
+                expanded = expanded,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(18.dp),
             )
         }
-        if (expanded) {
+        AnimatedVisibility(
+            visible = expanded,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut(),
+        ) {
             Column(
                 Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -176,9 +207,11 @@ private fun WindowRow(window: UsageWindowDto, nowMillis: Long) {
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.width(110.dp),
         )
+        val progress by animateFloatAsState(window.usedPercent / 100f, label = "usage")
+        val color by animateColorAsState(usedColor(window.usedPercent), label = "usageColor")
         LinearProgressIndicator(
-            progress = { window.usedPercent / 100f },
-            color = usedColor(window.usedPercent),
+            progress = { progress },
+            color = color,
             modifier = Modifier.weight(1f).height(6.dp),
         )
         Text(

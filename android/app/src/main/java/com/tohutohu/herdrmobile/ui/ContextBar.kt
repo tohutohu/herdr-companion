@@ -1,5 +1,12 @@
 package com.tohutohu.herdrmobile.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,6 +21,10 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -32,6 +43,8 @@ import androidx.compose.ui.unit.sp
 fun ContextBar(usedTokens: Long?, windowTokens: Long?, usedPercent: Int?, modifier: Modifier = Modifier) {
     val percent = usedPercent ?: return
     val fill = contextFill(usedTokens, windowTokens) ?: return
+    val progress by animateFloatAsState(percent / 100f, label = "contextBar")
+    val color by animateColorAsState(contextColor(percent), label = "contextBarColor")
     Row(
         modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -43,8 +56,8 @@ fun ContextBar(usedTokens: Long?, windowTokens: Long?, usedPercent: Int?, modifi
             modifier = Modifier.width(56.dp),
         )
         LinearProgressIndicator(
-            progress = { percent / 100f },
-            color = contextColor(percent),
+            progress = { progress },
+            color = color,
             modifier = Modifier.weight(1f).height(6.dp),
         )
         Text(" $percent%", style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(44.dp))
@@ -64,15 +77,25 @@ fun ContextBar(usedTokens: Long?, windowTokens: Long?, usedPercent: Int?, modifi
  */
 @Composable
 fun ContextGauge(usedPercent: Int?, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val percent = usedPercent ?: return
-    val color = contextColor(percent)
+    // Pops in with the first reading; the ring then follows the count.
+    var percent by remember { mutableIntStateOf(usedPercent ?: 0) }
+    usedPercent?.let { percent = it }
+    val progress by animateFloatAsState(percent / 100f, label = "contextGauge")
+    val color by animateColorAsState(contextColor(percent), label = "contextGaugeColor")
+    AnimatedVisibility(visible = usedPercent != null, enter = fadeIn() + scaleIn(), exit = fadeOut() + scaleOut()) {
+        ContextRing(percent, progress, color, onClick, modifier)
+    }
+}
+
+@Composable
+private fun ContextRing(percent: Int, progress: Float, color: Color, onClick: () -> Unit, modifier: Modifier) {
     IconButton(
         onClick = onClick,
         modifier = modifier.semantics { contentDescription = "Context $percent%" },
     ) {
         Box(Modifier.size(28.dp), contentAlignment = Alignment.Center) {
             CircularProgressIndicator(
-                progress = { percent / 100f },
+                progress = { progress },
                 color = color,
                 trackColor = MaterialTheme.colorScheme.surfaceVariant,
                 strokeWidth = 3.dp,

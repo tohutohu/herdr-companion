@@ -1,7 +1,14 @@
 package com.tohutohu.herdrmobile.ui.newsession
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
@@ -30,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.tohutohu.herdrmobile.data.api.CatalogOption
 import com.tohutohu.herdrmobile.data.api.ModelsResponse
+import com.tohutohu.herdrmobile.ui.SwapContent
 
 /**
  * The full agent / model / effort pickers, for combinations that are not
@@ -55,7 +63,7 @@ fun AgentPickerDialog(
         onDismissRequest = onDismiss,
         title = { Text("Agent") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.animateContentSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                     PROVIDERS.forEachIndexed { i, info ->
                         SegmentedButton(
@@ -73,7 +81,12 @@ fun AgentPickerDialog(
                     onSelect = onModel,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                if (efforts.isNotEmpty()) {
+                // Only some models take an effort; the picker grows in for them.
+                AnimatedVisibility(
+                    visible = efforts.isNotEmpty(),
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut(),
+                ) {
                     OptionPicker(
                         label = "Effort",
                         options = efforts,
@@ -87,12 +100,16 @@ fun AgentPickerDialog(
         },
         dismissButton = {
             TextButton(onClick = onToggleFavorite) {
-                Icon(
-                    if (favorite) Icons.Default.Star else Icons.Default.StarBorder,
-                    contentDescription = null,
-                    Modifier.size(18.dp),
-                )
-                Text(if (favorite) "  Saved" else "  Save")
+                SwapContent(favorite) { saved ->
+                    Row {
+                        Icon(
+                            if (saved) Icons.Default.Star else Icons.Default.StarBorder,
+                            contentDescription = null,
+                            Modifier.size(18.dp),
+                        )
+                        Text(if (saved) "  Saved" else "  Save")
+                    }
+                }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
