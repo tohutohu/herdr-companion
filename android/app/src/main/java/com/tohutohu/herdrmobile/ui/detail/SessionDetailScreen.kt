@@ -42,6 +42,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
@@ -456,19 +457,42 @@ private fun Composer(
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(
-                    enabled = enabled,
-                    onClick = { imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-                ) { Icon(Icons.Default.Image, contentDescription = "Attach image") }
-                IconButton(
-                    enabled = enabled,
-                    onClick = { filePicker.launch(arrayOf("*/*")) },
-                ) { Icon(Icons.Default.AttachFile, contentDescription = "Attach file") }
+                Box {
+                    var menuOpen by remember { mutableStateOf(false) }
+                    IconButton(enabled = enabled, onClick = { menuOpen = true }) {
+                        Icon(Icons.Default.Add, contentDescription = "Attach")
+                    }
+                    DropdownMenu(expanded = menuOpen && enabled, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Image") },
+                            leadingIcon = { Icon(Icons.Default.Image, contentDescription = null) },
+                            onClick = {
+                                menuOpen = false
+                                imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("File") },
+                            leadingIcon = { Icon(Icons.Default.AttachFile, contentDescription = null) },
+                            onClick = {
+                                menuOpen = false
+                                filePicker.launch(arrayOf("*/*"))
+                            },
+                        )
+                    }
+                }
+                // Same size as the message text, not the larger text-field default.
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it },
                     enabled = enabled,
-                    placeholder = { Text(if (enabled || sending) "Message…" else "Session is not running in Herdr") },
+                    textStyle = MaterialTheme.typography.bodyMedium,
+                    placeholder = {
+                        Text(
+                            if (enabled || sending) "Message…" else "Session is not running in Herdr",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    },
                     maxLines = 6,
                     modifier = Modifier.weight(1f),
                 )
