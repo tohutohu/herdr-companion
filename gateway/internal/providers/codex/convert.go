@@ -109,6 +109,8 @@ type convertOptions struct {
 	SessionID string
 	Root      string
 	Sink      deadletter.Sink
+	// Answered are prompts answered in this thread, read from its rollout.
+	Answered []answeredInput
 }
 
 // ConvertThread flattens turns into messages. Unknown items become text
@@ -123,11 +125,13 @@ func ConvertThread(th *Thread, opt convertOptions) []model.Message {
 		if turn.StartedAt != nil {
 			ts = time.Unix(*turn.StartedAt, 0).UTC()
 		}
+		var msgs []model.Message
 		for _, raw := range turn.Items {
 			if m, ok := convertItem(raw, ts, opt); ok {
-				out = append(out, m)
+				msgs = append(msgs, m)
 			}
 		}
+		out = append(out, withAnswered(turn.ID, ts, msgs, opt.Answered)...)
 		if turn.Status == "failed" {
 			text := "Turn failed"
 			if turn.Error != nil && turn.Error.Message != "" {

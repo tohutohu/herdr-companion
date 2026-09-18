@@ -77,6 +77,12 @@ func (i *tokenInfo) cost(modelID string) *model.Cost {
 // file, or nil when the file is missing or has no usable count (an
 // interrupted turn records one without an info block).
 func infoFromRollout(path string) *tokenInfo {
+	return tokenInfoFrom(rolloutTailLines(path))
+}
+
+// rolloutTailLines returns the whole records in the last rolloutTail bytes of
+// a rollout file, oldest first.
+func rolloutTailLines(path string) [][]byte {
 	if path == "" {
 		return nil
 	}
@@ -98,7 +104,10 @@ func infoFromRollout(path string) *tokenInfo {
 		// The window starts mid-record; drop that partial line.
 		_, buf, _ = bytes.Cut(buf, []byte("\n"))
 	}
-	lines := bytes.Split(buf, []byte("\n"))
+	return bytes.Split(buf, []byte("\n"))
+}
+
+func tokenInfoFrom(lines [][]byte) *tokenInfo {
 	var out *tokenInfo
 	for i := len(lines) - 1; i >= 0; i-- {
 		var l tokenInfo
@@ -122,6 +131,42 @@ func infoFromRollout(path string) *tokenInfo {
 		}
 	}
 	return out
+}
+
+// collaborationModeFrom is the newest collaboration mode ("plan", "default")
+// in rollout records. Codex writes it with every turn and whenever the TUI
+// switches mode, while the app-server only announces it in notifications that
+// a new thread sends before the gateway has subscribed.
+func collaborationModeFrom(lines [][]byte) string {
+	for i := len(lines) - 1; i >= 0; i-- {
+		if !bytes.Contains(lines[i], []byte(`"collaboration_mode"`)) {
+			continue
+		}
+		var l struct {
+			Type    string `json:"type"`
+			Payload struct {
+				Type              string             `json:"type"`
+				CollaborationMode *collaborationMode `json:"collaboration_mode"`
+				ThreadSettings    *struct {
+					CollaborationMode *collaborationMode `json:"collaboration_mode"`
+				} `json:"thread_settings"`
+			} `json:"payload"`
+		}
+		if json.Unmarshal(lines[i], &l) != nil {
+			continue
+		}
+		switch {
+		case l.Type == "turn_context" && l.Payload.CollaborationMode != nil:
+			return l.Payload.CollaborationMode.Mode
+		case l.Payload.Type == "thread_settings_applied" && l.Payload.ThreadSettings != nil && l.Payload.ThreadSettings.CollaborationMode != nil:
+			return l.Payload.ThreadSettings.CollaborationMode.Mode
+		}
+	}
+	return ""
+}
+
+type collaborationMode struct {
+	Mode string `json:"mode"`
 }
 
 func decodeTokenCount(line []byte, info *tokenInfo) bool {

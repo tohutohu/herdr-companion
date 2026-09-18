@@ -534,16 +534,57 @@ func Testスレッド設定からモードの表示名を決める(t *testing.T)
 
 func Test設定変更通知でスレッドのモードを更新する(t *testing.T) {
 	d := newDaemonConn(deadletter.Nop{})
-	if m := d.mode("th1"); m != "" {
+	if m := d.mode("th1", ""); m != "" {
 		t.Errorf("unknown thread mode = %q", m)
 	}
 	d.Notification("thread/settings/updated", json.RawMessage(`{"threadId":"th1","threadSettings":{"model":"gpt-6-astra","approvalPolicy":"on-request","sandboxPolicy":{"type":"workspaceWrite"},"collaborationMode":{"mode":"plan","settings":{}}}}`))
-	if m := d.mode("th1"); m != "Plan" {
+	if m := d.mode("th1", ""); m != "Plan" {
 		t.Errorf("mode = %q", m)
 	}
 	d.Notification("thread/closed", json.RawMessage(`{"threadId":"th1"}`))
-	if m := d.mode("th1"); m != "" {
+	if m := d.mode("th1", ""); m != "" {
 		t.Errorf("closed thread mode = %q", m)
+	}
+}
+
+func Test購読前にPlanモードで始まったスレッドはrolloutの記録でPlanと表示する(t *testing.T) {
+	d := newDaemonConn(deadletter.Nop{})
+	// thread/resume gives only the permission preset.
+	d.settings["th1"] = threadSettings{ApprovalPolicy: json.RawMessage(`"on-request"`), SandboxPolicy: &sandboxPolicy{Type: "readOnly"}}
+	if m := d.mode("th1", "Plan"); m != "Plan" {
+		t.Errorf("mode = %q, want Plan", m)
+	}
+	if m := d.mode("th1", ""); m != "Read only" {
+		t.Errorf("mode without plan = %q", m)
+	}
+	// A later notification knows the mode and wins over the rollout.
+	d.Notification("thread/settings/updated", json.RawMessage(`{"threadId":"th1","threadSettings":{"approvalPolicy":"on-request","sandboxPolicy":{"type":"readOnly"},"collaborationMode":{"mode":"default","settings":{}}}}`))
+	if m := d.mode("th1", "Plan"); m != "Read only" {
+		t.Errorf("mode after notification = %q", m)
+	}
+	if m := d.mode("unknown", "Plan"); m != "Plan" {
+		t.Errorf("unsubscribed thread mode = %q", m)
+	}
+}
+
+func TestRolloutから最新のコラボレーションモードを読む(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rollout.jsonl")
+	lines := []string{
+		`{"type":"turn_context","payload":{"turn_id":"t1","collaboration_mode":{"mode":"plan","settings":{"model":"gpt-6-astra"}}}}`,
+		`{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"collaboration_mode is mentioned here"}]}}`,
+	}
+	os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644)
+	if m := collaborationModeFrom(rolloutTailLines(path)); m != "plan" {
+		t.Errorf("mode = %q", m)
+	}
+	// Switching mode in the TUI records the thread settings without a turn.
+	lines = append(lines, `{"type":"event_msg","payload":{"type":"thread_settings_applied","thread_settings":{"collaboration_mode":{"mode":"default","settings":{"model":"gpt-6-astra"}}}}}`)
+	os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644)
+	if m := collaborationModeFrom(rolloutTailLines(path)); m != "default" {
+		t.Errorf("mode after switch = %q", m)
+	}
+	if m := collaborationModeFrom(rolloutTailLines("")); m != "" {
+		t.Errorf("no rollout = %q", m)
 	}
 }
 

@@ -215,15 +215,27 @@ func (p *Provider) Summary(ctx context.Context, nativeID string, live *providers
 	}
 	if d := p.currentDaemon(); d != nil {
 		s.Pending, s.Status = d.state(nativeID, live)
-		s.Mode = d.mode(nativeID)
+		s.Mode = d.mode(nativeID, s.Mode)
+	}
+	if s.Pending == "" && p.planPrompt(ctx, th, live) != nil {
+		s.Pending, s.Status = model.InteractionApproval, model.StatusWaitingApproval
 	}
 	return &s, nil
 }
 
+// planLabel is the mode label of a thread in Plan mode.
+const planLabel = "Plan"
+
+// summaryFromThread fills Mode only for Plan mode, the one mode the rollout
+// shows on its own; the permission preset comes from the daemon.
 func summaryFromThread(th *Thread) providers.Summary {
-	info := infoFromRollout(th.Path)
+	lines := rolloutTailLines(th.Path)
+	info := tokenInfoFrom(lines)
 	s := providers.Summary{NativeID: th.ID, Cwd: th.Cwd, Model: th.Model, LastMessage: providers.OneLine(th.Preview, 160),
 		Context: info.context(), Cost: info.cost(th.Model)}
+	if collaborationModeFrom(lines) == "plan" {
+		s.Mode = planLabel
+	}
 	if th.Name != nil {
 		s.Title = *th.Name
 	}
@@ -260,7 +272,7 @@ func (p *Provider) Recent(ctx context.Context, since time.Time) ([]providers.Sum
 		s := summaryFromThread(th)
 		if d != nil {
 			s.Pending, s.Status = d.state(th.ID, nil)
-			s.Mode = d.mode(th.ID)
+			s.Mode = d.mode(th.ID, s.Mode)
 		}
 		out = append(out, s)
 	}
@@ -276,7 +288,7 @@ func (p *Provider) Messages(ctx context.Context, nativeID string, live *provider
 	if live != nil && live.Cwd != "" {
 		root = live.Cwd
 	}
-	msgs := ConvertThread(th, convertOptions{SessionID: gatewayID(nativeID), Root: root, Sink: p.sink})
+	msgs := ConvertThread(th, convertOptions{SessionID: gatewayID(nativeID), Root: root, Sink: p.sink, Answered: answeredInputs(th.Path)})
 
 	var pending []model.Message
 	if d := p.currentDaemon(); d != nil {
@@ -285,6 +297,8 @@ func (p *Provider) Messages(ctx context.Context, nativeID string, live *provider
 	if len(pending) == 0 && live != nil {
 		if ia := p.asyncInteraction(ctx, th, live); ia != nil {
 			pending = []model.Message{{ID: ia.ID, Role: model.RoleAssistant, Timestamp: time.Unix(th.UpdatedAt, 0).UTC(), Blocks: []model.Block{{Type: model.BlockInteraction, Interaction: ia}}}}
+		} else if ia := p.planPrompt(ctx, th, live); ia != nil {
+			pending = []model.Message{planPromptMessage(th, ia)}
 		}
 	}
 	if len(pending) == 0 && live.Blocked() {
@@ -360,6 +374,9 @@ func (p *Provider) Respond(ctx context.Context, nativeID string, live *providers
 	if strings.HasPrefix(r.InteractionID, asyncInputPrefix) {
 		return p.respondAsync(ctx, nativeID, live, r)
 	}
+	if strings.HasPrefix(r.InteractionID, planPromptPrefix) {
+		return p.respondPlan(ctx, nativeID, live, r)
+	}
 	if r.InteractionID == blockedPromptID {
 		return providers.ErrUnsupported
 	}
@@ -406,11 +423,9 @@ type daemonConn struct {
 
 // threadSettings is the part of a loaded thread's settings shown as its mode.
 type threadSettings struct {
-	ApprovalPolicy    json.RawMessage `json:"approvalPolicy"`
-	SandboxPolicy     *sandboxPolicy  `json:"sandboxPolicy"`
-	CollaborationMode *struct {
-		Mode string `json:"mode"`
-	} `json:"collaborationMode"`
+	ApprovalPolicy    json.RawMessage    `json:"approvalPolicy"`
+	SandboxPolicy     *sandboxPolicy     `json:"sandboxPolicy"`
+	CollaborationMode *collaborationMode `json:"collaborationMode"`
 }
 
 type sandboxPolicy struct {
@@ -420,7 +435,7 @@ type sandboxPolicy struct {
 // label follows the Codex TUI: Plan mode, else the permission preset.
 func (s threadSettings) label() string {
 	if s.CollaborationMode != nil && s.CollaborationMode.Mode == "plan" {
-		return "Plan"
+		return planLabel
 	}
 	if s.SandboxPolicy == nil {
 		return ""
@@ -584,13 +599,19 @@ func (d *daemonConn) Notification(method string, params json.RawMessage) {
 
 func (d *daemonConn) Closed(error) {}
 
-// mode is the display label of a loaded thread's mode, or "" when unknown.
-func (d *daemonConn) mode(thread string) string {
+// mode is the display label of a loaded thread's mode, or rolloutLabel (the
+// label summaryFromThread read from the rollout) when the daemon has no
+// settings for it. thread/resume leaves out the collaboration mode, so until a
+// settings notification arrives Plan mode comes from the rollout.
+func (d *daemonConn) mode(thread, rolloutLabel string) string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	s, ok := d.settings[thread]
 	if !ok {
-		return ""
+		return rolloutLabel
+	}
+	if s.CollaborationMode == nil && rolloutLabel == planLabel {
+		return planLabel
 	}
 	return s.label()
 }
