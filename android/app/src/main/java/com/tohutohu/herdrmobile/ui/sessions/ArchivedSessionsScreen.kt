@@ -1,12 +1,14 @@
 package com.tohutohu.herdrmobile.ui.sessions
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -24,6 +26,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -93,22 +96,27 @@ fun ArchivedSessionsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
             },
             modifier = Modifier.padding(padding).fillMaxSize(),
         ) {
-            LazyColumn(Modifier.fillMaxSize()) {
-                error?.let {
-                    item(key = "error") {
-                        Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.animateItem().padding(16.dp))
+            Box(Modifier.fillMaxSize()) {
+                LazyColumn(Modifier.fillMaxSize()) {
+                    error?.let {
+                        item(key = "error") {
+                            Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.animateItem().padding(16.dp))
+                        }
+                    }
+                    if (sessions?.isEmpty() == true) {
+                        item(key = "empty") {
+                            Text(
+                                "No archived sessions. Swipe a session sideways or long press it to archive.",
+                                modifier = Modifier.animateItem().padding(16.dp),
+                            )
+                        }
+                    }
+                    items(rows, key = { it.id }) { s ->
+                        SessionItem(s, selection, actions, onOpen)
                     }
                 }
-                if (sessions?.isEmpty() == true) {
-                    item(key = "empty") {
-                        Text(
-                            "No archived sessions. Swipe a session sideways or long press it to archive.",
-                            modifier = Modifier.animateItem().padding(16.dp),
-                        )
-                    }
-                }
-                items(rows, key = { it.id }) { s ->
-                    SessionItem(s, selection, actions, onOpen)
+                if (sessions == null && error == null) {
+                    CircularProgressIndicator(Modifier.align(Alignment.Center))
                 }
             }
         }
