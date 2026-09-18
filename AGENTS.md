@@ -20,6 +20,9 @@ export JAVA_HOME=$HOME/Library/Java/JavaVirtualMachines/jbr-17.0.14/Contents/Hom
 ./gradlew --console=plain assembleRelease          # default for APK build requests (R8 + resource shrinking)
 ./gradlew --console=plain assembleDebug testDebugUnitTest  # development checks
 ANDROID_SERIAL=<serial> ./gradlew installDebug
+
+# Mac menu-bar app (macOS 13+, Swift and Go)
+bash macos/scripts/build-dmg.sh                 # native-architecture DMG, ad-hoc signed by default
 ```
 
 ### APK build requests
@@ -52,7 +55,8 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.herdr-mobile.<name>.
 
 - `~/.config/herdr-mobile/config.json`: auth token, FCM device tokens, optional `workspaceRoots` etc. Mode 600.
 - `~/.config/herdr-mobile/firebase-service-account.json`: FCM key (Firebase project `herdr-client-android`, SA `firebase-adminsdk-fbsvc`).
-- `android/app/google-services.json`: gitignored. Without it the app builds with push disabled.
+- `android/app/google-services.json`: gitignored. Shared APKs use Firebase settings received at QR pairing; only `-PbundleFirebase=true` embeds this file in a personal build.
+- Mac menu-bar app uses separate `~/.config/herdr-mobile/desktop/config.json` and `~/.local/state/herdr-mobile/desktop/`, port 8766 by default. It manages only its own bundled Gateway; never stops Herdr or the existing LaunchAgent. Firebase and Jev keys are optional. See `macos/README.md`.
 - Recreate them with `firebase` / `gcloud`. gcloud's default account is a work account, so always pass `--account tohu.soy@gmail.com --project herdr-client-android`. Don't change the gcloud config.
 - Herdr integrations are installed in `~/.claude/settings.json` and `~/.codex/hooks.json`. Codex needs the Herdr `SessionStart` hook marked trusted (Hooks review screen → `t`) or no session id is reported.
 

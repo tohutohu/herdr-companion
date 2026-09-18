@@ -17,11 +17,19 @@ Android ──(Tailscale, HTTP + Bearer)──▶ herdr-mobile-gateway (Mac) ─
 設計の詳細は [docs/architecture.md](docs/architecture.md) を参照してください。
 Gateway は DB を持たず、Herdr・Claude・Codex 自身のデータを都度読みます。
 
+## Macのメニューバーアプリから始める
+
+[macos/README.md](macos/README.md)にDMGの作成・導入手順があります。メニューバーからGatewayを起動し、Androidの「Scan Mac QR」で接続できます。
+Firebase秘密鍵・Jevキーはどちらも任意です。未設定でも閲覧・送信・承認・セッション起動を利用できます。
+通知を使う場合は、Mac画面でサービスアカウントJSONと`google-services.json`を取り込んでからペアリングしてください。Androidの再ビルドは不要です。
+以下は従来のCLIによるセットアップ手順です。
+
 ## リポジトリ構成
 
 ```text
 gateway/   Go 製 Gateway（cmd/herdr-mobile-gateway, internal/...）
 android/   Android アプリ（Kotlin / Jetpack Compose）
+macos/     メニューバーアプリ（SwiftUI）とDMGビルド
 docs/      設計ドキュメント
 ```
 
@@ -211,7 +219,8 @@ gcloud iam service-accounts keys create ~/.config/herdr-mobile/firebase-service-
 ```
 
 Gateway は FCM HTTP v1 API に data-only / priority HIGH のメッセージを送り、アプリが通知表示とログ先読み（WorkManager）を行います。
-`google-services.json` なしでもアプリはビルド・動作しますが、通知は無効になります。
+共通配布APKはFirebase設定を内蔵せず、MacとのQRペアリングで取り込みます。未設定でも通知以外は動作します。
+上記の従来方式で自分専用APKに設定を内蔵する場合だけ、ビルド時に`-PbundleFirebase=true`を指定してください。
 
 ## 4. Android アプリ
 
@@ -228,7 +237,7 @@ debug版が明示的に必要な場合だけ `assembleDebug` / `installDebug` �
 JDK 17 を使ってください（例: `export JAVA_HOME=$(/usr/libexec/java_home -v 17)`）。
 `local.properties` に `sdk.dir` がない場合は Android Studio で一度開くか手動で作成します。
 
-初回起動時に Gateway URL と認証トークンを入力し、「Test connection」→「Save」。
+初回起動時は「Scan Mac QR」でMacのQRを読み取るか、Gateway URLと認証トークンを入力し「Test connection」→「Save」。
 スマホで MagicDNS 名が引けない場合は Tailscale IP（`http://100.x.y.z:8765`）を使ってください。
 
 デバッグビルドは adb から設定を渡せます（日本語 IME で `adb shell input text` が変換されるのを避けるため）:
