@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 )
@@ -50,23 +49,8 @@ func latestAsyncQuestion(th *Thread) *model.Interaction {
 	return nil
 }
 
-type visibleTerminal interface {
-	ReadVisiblePane(context.Context, string) (*herdr.ReadResult, error)
-}
-
 func (p *Provider) visible(ctx context.Context, pane string) (string, error) {
-	t, ok := p.term.(visibleTerminal)
-	if !ok {
-		return "", providers.ErrUnsupported
-	}
-	r, err := t.ReadVisiblePane(ctx, pane)
-	if err != nil {
-		return "", err
-	}
-	if r == nil {
-		return "", providers.ErrInteractionGone
-	}
-	return r.Text, nil
+	return providers.Screen(ctx, p.term, pane)
 }
 
 func compactSpace(s string) string { return strings.Join(strings.Fields(s), "") }

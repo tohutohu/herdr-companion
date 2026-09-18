@@ -898,6 +898,17 @@ func (t *Transcript) toolUseBlocks(b contentBlock, res toolResult, answered, pen
 			ia.Answer = answerSummary(res)
 		}
 		return []model.Block{{Type: model.BlockInteraction, Interaction: ia}}
+	case toolExitPlanMode:
+		blocks := []model.Block{model.TextBlock("Plan:\n" + str("plan"))}
+		if fb, ok := planFile(str("planFilePath")); ok {
+			blocks = append(blocks, fb)
+		}
+		ia := planInteraction(b.ID)
+		ia.State = state
+		if answered {
+			ia.Answer = planAnswer(res)
+		}
+		return append(blocks, model.Block{Type: model.BlockInteraction, Interaction: ia})
 	}
 
 	var blocks []model.Block
@@ -931,8 +942,6 @@ func (t *Transcript) toolUseBlocks(b contentBlock, res toolResult, answered, pen
 		blocks = append(blocks, model.TextBlock("Agent: "+str("description")))
 	case "TodoWrite":
 		blocks = append(blocks, model.TextBlock(todoText(in)))
-	case "ExitPlanMode":
-		blocks = append(blocks, model.TextBlock("Plan:\n"+str("plan")))
 	case "ToolSearch", "Skill", "SlashCommand", "BashOutput", "KillShell", "KillBash", "TaskOutput", "TaskStop",
 		"Monitor", "SendUserFile", "ListMcpResourcesTool", "ReadMcpResourceTool", "EnterPlanMode", "LSP", "SendMessage":
 		blocks = append(blocks, model.TextBlock("▸ "+b.Name+" "+compactJSON(b.Input, 200)))
@@ -983,14 +992,7 @@ func askUserQuestionInteraction(b contentBlock) (*model.Interaction, error) {
 }
 
 func answerSummary(res toolResult) string {
-	text := ""
-	if len(res.block.Content) > 0 && res.block.Content[0] == '"' {
-		json.Unmarshal(res.block.Content, &text)
-	} else if inner, ok := decodeBlocks(res.block.Content); ok {
-		for _, ib := range inner {
-			text += ib.Text
-		}
-	}
+	text := resultText(res)
 	if res.block.IsError {
 		return "Not answered"
 	}
@@ -1093,7 +1095,7 @@ func (t *Transcript) summary(opt ParseOptions) providers.Summary {
 		}
 		for _, b := range m.Blocks {
 			if b.Type == model.BlockInteraction && b.Interaction.State == model.InteractionPending && s.Pending == "" {
-				s.Pending = b.Interaction.Type
+				s.Pending = b.Interaction.Awaits()
 			}
 		}
 		if hasText(m) {
@@ -1118,7 +1120,7 @@ func (t *Transcript) summary(opt ParseOptions) providers.Summary {
 		for _, m := range msgs {
 			for _, b := range m.Blocks {
 				if b.Type == model.BlockInteraction && b.Interaction.State == model.InteractionPending {
-					s.Pending = b.Interaction.Type
+					s.Pending = b.Interaction.Awaits()
 				}
 			}
 		}

@@ -29,6 +29,35 @@ type Live struct {
 
 func (l *Live) Blocked() bool { return l != nil && l.HerdrStatus == herdr.StatusBlocked }
 
+// visibleTerminal reads what a pane shows right now. Herdr's client has it;
+// test terminals may not, so it is not part of Terminal.
+type visibleTerminal interface {
+	ReadVisiblePane(context.Context, string) (*herdr.ReadResult, error)
+}
+
+// Screen returns the text a pane currently shows, for dialogs that are only
+// on screen and never in a transcript.
+func Screen(ctx context.Context, term Terminal, pane string) (string, error) {
+	t, ok := term.(visibleTerminal)
+	if !ok {
+		return "", ErrUnsupported
+	}
+	r, err := t.ReadVisiblePane(ctx, pane)
+	if err != nil {
+		return "", err
+	}
+	if r == nil {
+		return "", ErrInteractionGone
+	}
+	return r.Text, nil
+}
+
+// FileRooter is implemented by providers that keep files a session links to
+// outside its workspace, such as Claude's saved plans. The app may read them.
+type FileRooter interface {
+	FileRoots() []string
+}
+
 // Terminal is the Herdr subset adapters may use for PTY fallbacks.
 type Terminal interface {
 	SendKeys(ctx context.Context, paneID string, keys ...string) error

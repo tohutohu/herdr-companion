@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"mime"
 	"net/http"
+	"net/url"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -84,10 +85,13 @@ func (f *fakeHerdr) CloseWorkspace(_ context.Context, ws string) error {
 }
 
 type fakeProvider struct {
-	root string
-	sent []model.Input
-	resp []model.InteractionResponse
+	root      string
+	fileRoots []string
+	sent      []model.Input
+	resp      []model.InteractionResponse
 }
+
+func (p *fakeProvider) FileRoots() []string { return p.fileRoots }
 
 func (p *fakeProvider) Name() string        { return "fake" }
 func (p *fakeProvider) DisplayName() string { return "Fake Agent" }
@@ -353,6 +357,23 @@ func Testファイル取得はワークスペース外を拒否する(t *testing
 	resp, body = do(t, ts, tok, "GET", "/v1/sessions/fake:s1/files", nil, "")
 	if resp.StatusCode != 200 || !strings.Contains(string(body), `"main.go"`) {
 		t.Errorf("list status %d body %s", resp.StatusCode, body)
+	}
+}
+
+func Testプロバイダーが示すワークスペース外のフォルダのファイルも取得できる(t *testing.T) {
+	ts, fp, _, tok := newTestServer(t)
+	plans := t.TempDir()
+	plan := filepath.Join(plans, "plan-add-subtract.md")
+	os.WriteFile(plan, []byte("# Add subtract\n"), 0o644)
+	fp.fileRoots = []string{plans}
+
+	resp, body := do(t, ts, tok, "GET", "/v1/sessions/fake:s1/files/content?path="+url.QueryEscape(plan), nil, "")
+	if resp.StatusCode != 200 || string(body) != "# Add subtract\n" {
+		t.Errorf("plan status %d body %q", resp.StatusCode, body)
+	}
+	resp, _ = do(t, ts, tok, "GET", "/v1/sessions/fake:s1/files/content?path=/etc/hosts", nil, "")
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("outside status = %d", resp.StatusCode)
 	}
 }
 

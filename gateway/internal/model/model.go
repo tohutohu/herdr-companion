@@ -104,8 +104,11 @@ const (
 )
 
 type Interaction struct {
-	ID        string           `json:"id"`
-	Type      InteractionType  `json:"type"`
+	ID   string          `json:"id"`
+	Type InteractionType `json:"type"`
+	// Kind refines Type for clients that give it its own look; older clients
+	// ignore it and still get a working Type.
+	Kind      string           `json:"kind,omitempty"`
 	State     InteractionState `json:"state"`
 	Title     string           `json:"title,omitempty"`
 	Detail    string           `json:"detail,omitempty"`
@@ -116,6 +119,19 @@ type Interaction struct {
 	Answer    string `json:"answer,omitempty"`
 	// Decisions available for approvals (subset of approve, approve_session, deny).
 	Decisions []string `json:"decisions,omitempty"`
+}
+
+// KindPlan is a finished plan waiting for the go-ahead. It is sent as
+// questions (one choice per way to proceed) but counts as an approval.
+const KindPlan = "plan"
+
+// Awaits is what a pending interaction is waiting for, as the session status
+// reports it.
+func (ia *Interaction) Awaits() InteractionType {
+	if ia.Kind == KindPlan {
+		return InteractionApproval
+	}
+	return ia.Type
 }
 
 type QuestionType string
@@ -133,6 +149,8 @@ type Question struct {
 	Question   string       `json:"question"`
 	Options    []Option     `json:"options,omitempty"`
 	AllowOther bool         `json:"allowOther"`
+	// OtherLabel names the free-text choice when "Other" would be unclear.
+	OtherLabel string `json:"otherLabel,omitempty"`
 }
 
 type Option struct {

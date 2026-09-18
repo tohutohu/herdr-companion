@@ -344,17 +344,22 @@ func (s *Server) getImage(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
-// roots returns the directories a session may read: its workspace plus the
-// upload directory (so sent images can be displayed).
+// roots returns the directories a session may read: its workspace, the
+// upload directory (so sent images can be displayed) and any directory its
+// provider links files from (Claude's saved plans).
 func (s *Server) roots(ctx context.Context, id string) ([]string, error) {
-	sess, _, err := s.Sessions.Get(ctx, id)
+	sess, res, err := s.Sessions.Get(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	if sess.Cwd == "" {
 		return nil, files.ErrNoRoot
 	}
-	return []string{sess.Cwd, s.Uploads.Dir()}, nil
+	roots := []string{sess.Cwd, s.Uploads.Dir()}
+	if fr, ok := res.Provider.(providers.FileRooter); ok {
+		roots = append(roots, fr.FileRoots()...)
+	}
+	return roots, nil
 }
 
 func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {

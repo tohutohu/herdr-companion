@@ -166,7 +166,9 @@ func (p *Provider) Messages(ctx context.Context, nativeID string, live *provider
 	if err != nil {
 		return nil, err
 	}
-	return t.Messages(ParseOptions{SessionID: gatewayID(nativeID), Root: root(t, live), Live: live, Sink: p.sink}), nil
+	msgs := t.Messages(ParseOptions{SessionID: gatewayID(nativeID), Root: root(t, live), Live: live, Sink: p.sink})
+	p.withScreenPlanRows(ctx, msgs, live)
+	return msgs, nil
 }
 
 func (p *Provider) Image(ctx context.Context, nativeID, messageID string, index int) (string, []byte, error) {
@@ -304,6 +306,9 @@ func dialogKeys(ia *model.Interaction, r model.InteractionResponse) ([]step, err
 		}
 		return nil, fmt.Errorf("unsupported decision %q", r.Decision)
 	case model.InteractionQuestions:
+		if ia.Kind == model.KindPlan {
+			return planKeys(ia, r)
+		}
 	default:
 		return nil, providers.ErrUnsupported
 	}
