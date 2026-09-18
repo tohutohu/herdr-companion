@@ -327,7 +327,7 @@ func (p *Provider) Send(ctx context.Context, nativeID string, live *providers.Li
 	if live == nil {
 		return providers.ErrNotLive
 	}
-	text := strings.TrimSpace(in.Text)
+	text := providers.TextWithFiles(in)
 	for _, img := range in.Images {
 		// The Codex TUI attaches pasted image paths.
 		text += "\n" + img
@@ -337,8 +337,9 @@ func (p *Provider) Send(ctx context.Context, nativeID string, live *providers.Li
 
 func (p *Provider) sendStructured(ctx context.Context, d *daemonConn, id string, in model.Input) error {
 	var input []map[string]any
-	if strings.TrimSpace(in.Text) != "" {
-		input = append(input, map[string]any{"type": "text", "text": in.Text})
+	// Only images have a structured form; other attachments ride along as paths.
+	if text := providers.TextWithFiles(in); text != "" {
+		input = append(input, map[string]any{"type": "text", "text": text})
 	}
 	for _, img := range in.Images {
 		input = append(input, map[string]any{"type": "localImage", "path": img})

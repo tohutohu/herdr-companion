@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -255,28 +256,46 @@ func Testメッセージ取得はafter指定で差分を返す(t *testing.T) {
 	}
 }
 
+// upload posts a body to /v1/uploads and returns the new upload id.
+func upload(t *testing.T, ts *httptest.Server, token string, body []byte, ctype, filename string) (*http.Response, string) {
+	t.Helper()
+	req, _ := http.NewRequest("POST", ts.URL+"/v1/uploads", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", ctype)
+	if filename != "" {
+		req.Header.Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filename}))
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var buf bytes.Buffer
+	buf.ReadFrom(resp.Body)
+	var up struct{ ID string }
+	json.Unmarshal(buf.Bytes(), &up)
+	return resp, up.ID
+}
+
 func Test画像をアップロードしてメッセージに添付できる(t *testing.T) {
 	ts, fp, _, tok := newTestServer(t)
-	resp, body := do(t, ts, tok, "POST", "/v1/uploads", []byte("\x89PNG..."), "image/png")
+	resp, id := upload(t, ts, tok, []byte("\x89PNG..."), "image/png", "")
 	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("upload status %d: %s", resp.StatusCode, body)
+		t.Fatalf("upload status %d", resp.StatusCode)
 	}
-	var up struct{ ID string }
-	json.Unmarshal(body, &up)
 
-	payload, _ := json.Marshal(map[string]any{"text": "見て", "uploads": []string{up.ID}})
-	resp, body = do(t, ts, tok, "POST", "/v1/sessions/fake:s1/messages", payload, "application/json")
+	payload, _ := json.Marshal(map[string]any{"text": "見て", "uploads": []string{id}})
+	resp, body := do(t, ts, tok, "POST", "/v1/sessions/fake:s1/messages", payload, "application/json")
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("send status %d: %s", resp.StatusCode, body)
 	}
-	if len(fp.sent) != 1 || fp.sent[0].Text != "見て" || len(fp.sent[0].Images) != 1 || !strings.HasSuffix(fp.sent[0].Images[0], up.ID+".png") {
+	if len(fp.sent) != 1 || fp.sent[0].Text != "見て" || len(fp.sent[0].Images) != 1 || !strings.HasSuffix(fp.sent[0].Images[0], id+".png") {
 		t.Errorf("sent = %+v", fp.sent)
 	}
-
-	resp, _ = do(t, ts, tok, "POST", "/v1/uploads", []byte("#!/bin/sh"), "text/x-shellscript")
-	if resp.StatusCode != http.StatusUnsupportedMediaType {
-		t.Errorf("non-image upload status = %d", resp.StatusCode)
+	if len(fp.sent[0].Files) != 0 {
+		t.Errorf("image landed in Files: %+v", fp.sent[0])
 	}
+
 	payload, _ = json.Marshal(map[string]any{"text": "x", "uploads": []string{"../../etc/passwd"}})
 	resp, _ = do(t, ts, tok, "POST", "/v1/sessions/fake:s1/messages", payload, "application/json")
 	if resp.StatusCode != http.StatusNotFound {
@@ -285,6 +304,27 @@ func Test画像をアップロードしてメッセージに添付できる(t *t
 	resp, _ = do(t, ts, tok, "POST", "/v1/sessions/fake:old/messages", []byte(`{"text":"x"}`), "application/json")
 	if resp.StatusCode != http.StatusConflict {
 		t.Errorf("offline send status = %d", resp.StatusCode)
+	}
+}
+
+func Test画像以外のファイルは元の名前のパスで添付される(t *testing.T) {
+	ts, fp, _, tok := newTestServer(t)
+	resp, id := upload(t, ts, tok, []byte("col1,col2\n"), "text/csv", "売上 レポート.csv")
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("upload status %d", resp.StatusCode)
+	}
+
+	payload, _ := json.Marshal(map[string]any{"uploads": []string{id}})
+	resp, body := do(t, ts, tok, "POST", "/v1/sessions/fake:s1/messages", payload, "application/json")
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("send status %d: %s", resp.StatusCode, body)
+	}
+	if len(fp.sent) != 1 || len(fp.sent[0].Images) != 0 || len(fp.sent[0].Files) != 1 {
+		t.Fatalf("sent = %+v", fp.sent)
+	}
+	// Spaces become "_" so the path stays one word inside a prompt.
+	if !strings.HasSuffix(fp.sent[0].Files[0], "/"+id+"/売上_レポート.csv") {
+		t.Errorf("file path = %q", fp.sent[0].Files[0])
 	}
 }
 

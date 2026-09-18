@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 )
 
 func itoa(i int) string { return strconv.Itoa(i) }
@@ -35,4 +37,15 @@ func IsImagePath(p string) bool {
 		return true
 	}
 	return false
+}
+
+// TextWithFiles returns the prompt text with every non-image attachment
+// appended as its own line. Agents have no structured form for these, so the
+// path is all they get; they read the file themselves.
+func TextWithFiles(in model.Input) string {
+	text := strings.TrimSpace(in.Text)
+	for _, f := range in.Files {
+		text = strings.TrimSpace(text + "\n" + f)
+	}
+	return text
 }

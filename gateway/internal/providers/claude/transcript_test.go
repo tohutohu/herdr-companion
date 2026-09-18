@@ -372,6 +372,22 @@ func Test本文なしの画像だけならペースト後にEnterで送信する
 	}
 }
 
+func Test画像以外の添付はパスを本文に並べて送信する(t *testing.T) {
+	term := &fakeTerminal{}
+	p := New(t.TempDir(), term, deadletter.Nop{})
+	p.keyDelay = 0
+	live := &providers.Live{PaneID: "w1:p1", HerdrStatus: herdr.StatusIdle}
+
+	in := model.Input{Text: "読んで", Images: []string{"/tmp/a.png"}, Files: []string{"/tmp/up/notes.txt"}}
+	if err := p.Send(context.Background(), "x", live, in); err != nil {
+		t.Fatal(err)
+	}
+	want := "text:\x1b[200~/tmp/a.png\x1b[201~|prompt:読んで\n/tmp/up/notes.txt"
+	if got := strings.Join(term.calls, "|"); got != want {
+		t.Errorf("calls = %q, want %q", got, want)
+	}
+}
+
 func Testダイアログ表示中は画像をペーストせずagent_blockedを返す(t *testing.T) {
 	term := &fakeTerminal{}
 	p := New(t.TempDir(), term, deadletter.Nop{})

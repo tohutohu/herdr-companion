@@ -187,12 +187,13 @@ func (p *Provider) Image(ctx context.Context, nativeID, messageID string, index 
 
 // Send types the prompt into the Claude Code TUI. Each image path is pasted
 // on its own (bracketed paste), which Claude Code turns into an [Image #N]
-// attachment, before the text is submitted.
+// attachment, before the text is submitted. Other attachments are named by
+// path in the prompt text for Claude Code to read with its own tools.
 func (p *Provider) Send(ctx context.Context, nativeID string, live *providers.Live, in model.Input) error {
 	if live == nil {
 		return providers.ErrNotLive
 	}
-	text := strings.TrimSpace(in.Text)
+	text := providers.TextWithFiles(in)
 	if text == "" && len(in.Images) == 0 {
 		return fmt.Errorf("empty message")
 	}

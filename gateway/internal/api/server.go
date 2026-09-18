@@ -146,8 +146,6 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, sessionID, op stri
 		status = http.StatusForbidden
 	case errors.Is(err, files.ErrTooLarge), errors.Is(err, uploads.ErrTooLarge):
 		status = http.StatusRequestEntityTooLarge
-	case errors.Is(err, uploads.ErrUnsupportedType):
-		status = http.StatusUnsupportedMediaType
 	case errors.Is(err, files.ErrNoRoot):
 		status = http.StatusConflict
 	case errors.As(err, &herr):
@@ -252,14 +250,18 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	in := model.Input{Text: req.Text}
 	for _, u := range req.Uploads {
-		p, err := s.Uploads.Path(u)
+		f, err := s.Uploads.Get(u)
 		if err != nil {
 			s.fail(w, r, id, "send_message", err)
 			return
 		}
-		in.Images = append(in.Images, p)
+		if f.IsImage() {
+			in.Images = append(in.Images, f.Path)
+		} else {
+			in.Files = append(in.Files, f.Path)
+		}
 	}
-	if strings.TrimSpace(in.Text) == "" && len(in.Images) == 0 {
+	if strings.TrimSpace(in.Text) == "" && len(in.Images) == 0 && len(in.Files) == 0 {
 		s.fail(w, r, id, "send_message", badRequest("empty message"))
 		return
 	}
@@ -518,15 +520,25 @@ func (s *Server) writeTerminal(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
 }
 
-// upload accepts the raw image body with its Content-Type.
+// upload accepts the raw file body with its Content-Type. The client may name
+// the file with a Content-Disposition header; without one the name is derived
+// from the content type.
 func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, uploads.MaxUploadSize+1)
-	id, err := s.Uploads.Save(r.Body, r.Header.Get("Content-Type"))
+	f, err := s.Uploads.Save(r.Body, r.Header.Get("Content-Type"), uploadName(r))
 	if err != nil {
 		s.fail(w, r, "", "upload", err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]string{"id": id})
+	writeJSON(w, http.StatusCreated, map[string]string{"id": f.ID, "name": f.Name})
+}
+
+func uploadName(r *http.Request) string {
+	_, params, err := mime.ParseMediaType(r.Header.Get("Content-Disposition"))
+	if err != nil {
+		return ""
+	}
+	return params["filename"]
 }
 
 type deviceRequest struct {

@@ -410,6 +410,15 @@ func TestDaemon接続時は構造化APIで送信と承認を行う(t *testing.T)
 	if len(term.prompts) != 0 {
 		t.Errorf("should not use the terminal: %v", term.prompts)
 	}
+
+	// 画像以外の添付は構造化入力にできないので本文へパスを足す
+	if err := p.Send(ctx, "thread-000001", nil, model.Input{Text: "読んで", Files: []string{"/tmp/up/notes.txt"}}); err != nil {
+		t.Fatal(err)
+	}
+	calls = f.callList()
+	if last := calls[len(calls)-1]; !strings.Contains(last, `{"text":"読んで\n/tmp/up/notes.txt","type":"text"}`) {
+		t.Errorf("last call = %s", last)
+	}
 }
 
 func TestDaemonがなければペインへ入力しブロック中は端末フォールバックを出す(t *testing.T) {
@@ -420,6 +429,13 @@ func TestDaemonがなければペインへ入力しブロック中は端末フ�
 		t.Fatal(err)
 	}
 	if strings.Join(term.prompts, "|") != "見て\n/tmp/a.png" {
+		t.Errorf("prompts = %q", term.prompts)
+	}
+	in := model.Input{Text: "読んで", Files: []string{"/tmp/up/notes.txt"}}
+	if err := p.Send(context.Background(), "thread-000001", live, in); err != nil {
+		t.Fatal(err)
+	}
+	if term.prompts[len(term.prompts)-1] != "読んで\n/tmp/up/notes.txt" {
 		t.Errorf("prompts = %q", term.prompts)
 	}
 	if err := p.Send(context.Background(), "thread-000001", nil, model.Input{Text: "x"}); err != providers.ErrNotLive {

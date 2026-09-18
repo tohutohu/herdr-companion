@@ -157,9 +157,11 @@ type InteractionResponse struct {
 	Decision      string            `json:"decision,omitempty"`
 }
 
-// Input is a user message to send to an agent. Images are local file paths
-// already resolved from upload ids.
+// Input is a user message to send to an agent. Images and Files are local file
+// paths already resolved from upload ids: images are attached natively where
+// the agent supports it, other files are named by path in the prompt.
 type Input struct {
 	Text   string
 	Images []string
+	Files  []string
 }
