@@ -12,11 +12,15 @@ import com.tohutohu.herdrmobile.data.SessionRepository
 import com.tohutohu.herdrmobile.data.SettingsStore
 import com.tohutohu.herdrmobile.data.api.GatewayApi
 import com.tohutohu.herdrmobile.data.db.AppDatabase
+import com.tohutohu.herdrmobile.data.db.SessionEntity
 import com.tohutohu.herdrmobile.push.Notifications
 import com.tohutohu.herdrmobile.push.PushRegistration
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
@@ -50,6 +54,13 @@ class AppContainer(app: Application) {
     val api = GatewayApi(baseHttp) { settings.current }
     val db = AppDatabase.create(app)
     val repository = SessionRepository(db, api)
+
+    /**
+     * The session list, kept while the app lives so a screen that comes back
+     * renders the rows on its first frame (null until Room has answered once).
+     */
+    val sessions: StateFlow<List<SessionEntity>?> =
+        repository.observeSessions().stateIn(scope, SharingStarted.WhileSubscribed(5_000), null)
     val pushRegistration = PushRegistration(app, api, scope)
     val downloads = FileDownloads(app, api, scope)
 }

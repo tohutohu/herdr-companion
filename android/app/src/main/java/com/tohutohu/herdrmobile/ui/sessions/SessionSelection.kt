@@ -19,6 +19,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -69,13 +70,16 @@ fun SelectionTopBar(selection: SessionSelection, all: List<SessionRef>, actions:
     val toArchive = selected.filter { !it.archived }
     val toUnarchive = selected.filter { it.archived }
     var menu by remember { mutableStateOf(false) }
+    // Keep the last count while the bar fades out after the selection clears.
+    var shownCount by remember { mutableIntStateOf(selected.size) }
+    if (selected.isNotEmpty()) shownCount = selected.size
     TopAppBar(
         navigationIcon = {
             IconButton(onClick = { selection.clear() }) {
                 Icon(Icons.Default.Close, contentDescription = "Leave selection")
             }
         },
-        title = { Text("${selected.size} selected") },
+        title = { Text("$shownCount selected") },
         actions = {
             if (toArchive.isNotEmpty()) {
                 IconButton(onClick = {

@@ -8,11 +8,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -32,8 +33,9 @@ import com.tohutohu.herdrmobile.data.toEntity
 import kotlinx.coroutines.launch
 
 /**
- * Archived sessions, read directly from the gateway (not cached). Long press
- * a session to select it, then unarchive or resume from the selection bar.
+ * Archived sessions, read directly from the gateway (not cached). Swipe a
+ * session sideways to unarchive it, or long press to select several and
+ * unarchive or resume from the selection bar.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -43,6 +45,7 @@ fun ArchivedSessionsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
     var sessions by remember { mutableStateOf<List<SessionDto>?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var refreshing by remember { mutableStateOf(false) }
+    val snackbar = remember { SnackbarHostState() }
 
     suspend fun load() {
         try {
@@ -53,7 +56,7 @@ fun ArchivedSessionsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
         }
     }
 
-    val actions = rememberSessionActions(onChanged = { load() })
+    val actions = rememberSessionActions(snackbar = snackbar, onChanged = { load() })
     actions.Dialogs()
     LaunchedEffect(Unit) { load() }
 
@@ -68,9 +71,7 @@ fun ArchivedSessionsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
 
     Scaffold(
         topBar = {
-            if (selection.active) {
-                SelectionTopBar(selection, refs, actions)
-            } else {
+            SwitchingTopBar(selecting = selection.active, selectionBar = { SelectionTopBar(selection, refs, actions) }) {
                 TopAppBar(
                     navigationIcon = {
                         IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
@@ -79,6 +80,7 @@ fun ArchivedSessionsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
                 )
             }
         },
+        snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         PullToRefreshBox(
             isRefreshing = refreshing,
@@ -93,23 +95,20 @@ fun ArchivedSessionsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
         ) {
             LazyColumn(Modifier.fillMaxSize()) {
                 error?.let {
-                    item {
-                        Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp))
+                    item(key = "error") {
+                        Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.animateItem().padding(16.dp))
                     }
                 }
                 if (sessions?.isEmpty() == true) {
-                    item { Text("No archived sessions. Long press a session to archive it.", modifier = Modifier.padding(16.dp)) }
+                    item(key = "empty") {
+                        Text(
+                            "No archived sessions. Swipe a session sideways or long press it to archive.",
+                            modifier = Modifier.animateItem().padding(16.dp),
+                        )
+                    }
                 }
                 items(rows, key = { it.id }) { s ->
-                    SessionRow(
-                        s,
-                        busy = actions.busy(s.id),
-                        selected = selection.contains(s.id),
-                        selecting = selection.active,
-                        onClick = { if (selection.active) selection.toggle(s.id) else onOpen(s.id) },
-                        onLongClick = { selection.toggle(s.id) },
-                    )
-                    HorizontalDivider()
+                    SessionItem(s, selection, actions, onOpen)
                 }
             }
         }

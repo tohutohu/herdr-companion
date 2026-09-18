@@ -23,6 +23,7 @@ import com.tohutohu.herdrmobile.ui.FileRoute
 import com.tohutohu.herdrmobile.ui.HerdrTheme
 import com.tohutohu.herdrmobile.ui.ImageRoute
 import com.tohutohu.herdrmobile.ui.NewSessionRoute
+import com.tohutohu.herdrmobile.ui.ScreenMotion
 import com.tohutohu.herdrmobile.ui.newsession.NewSessionScreen
 import com.tohutohu.herdrmobile.ui.SessionsRoute
 import com.tohutohu.herdrmobile.ui.SettingsRoute
@@ -69,7 +70,14 @@ class MainActivity : ComponentActivity() {
                     pendingSession.value = null
                 }
                 val start: Any = if (settings.current.isConfigured) SessionsRoute else SettingsRoute
-                NavHost(navController = nav, startDestination = start) {
+                NavHost(
+                    navController = nav,
+                    startDestination = start,
+                    enterTransition = { ScreenMotion.enter },
+                    exitTransition = { ScreenMotion.exit },
+                    popEnterTransition = { ScreenMotion.popEnter },
+                    popExitTransition = { ScreenMotion.popExit },
+                ) {
                     composable<SessionsRoute> {
                         SessionListScreen(
                             onOpen = { nav.navigate(DetailRoute(it)) },
