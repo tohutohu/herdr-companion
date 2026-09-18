@@ -139,7 +139,8 @@ private fun BlockView(
         "file" -> block.path?.let { path ->
             val context = LocalContext.current
             val label = buildString {
-                append(path)
+                // A file outside the workspace (e.g. a saved plan) is named by the gateway.
+                append(block.text ?: path)
                 if ((block.line ?: 0) > 0) append(":${block.line}")
                 block.size?.let { append(" · ").append(Formatter.formatShortFileSize(context, it)) }
             }

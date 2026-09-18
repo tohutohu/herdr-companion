@@ -268,7 +268,7 @@ private fun QuestionView(
                     )
                 }
                 Column {
-                    Text(if (key == OTHER) "Other…" else key)
+                    Text(if (key == OTHER) q.otherLabel?.let { "$it…" } ?: "Other…" else key)
                     description?.takeIf { it.isNotBlank() }?.let {
                         Text(it, style = MaterialTheme.typography.bodySmall, color = Muted)
                     }
@@ -283,7 +283,7 @@ private fun QuestionView(
             OutlinedTextField(
                 value = otherText,
                 onValueChange = onOtherText,
-                placeholder = { Text("Your answer") },
+                placeholder = { Text(q.otherLabel ?: "Your answer") },
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedTextColor = LocalContentColor.current,
                     unfocusedTextColor = LocalContentColor.current,

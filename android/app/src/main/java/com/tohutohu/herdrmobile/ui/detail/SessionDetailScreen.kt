@@ -75,6 +75,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -150,6 +151,23 @@ fun SessionDetailScreen(
             if (it is DragInteraction.Start) readFromStart = false
         }
     }
+    // Whether changes scroll the newest message into view. Only the reader's
+    // own scrolls decide it: where a drag (and its fling) comes to rest. The
+    // list's position right after a change can't tell, because the list stays
+    // on the item it showed while messages are added or shrink below it.
+    var followNewest by remember { mutableStateOf(true) }
+    LaunchedEffect(listState) {
+        var dragged = false
+        launch {
+            listState.interactionSource.interactions.collect { if (it is DragInteraction.Start) dragged = true }
+        }
+        snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
+            if (!scrolling && dragged) {
+                dragged = false
+                followNewest = listState.firstVisibleItemIndex == 0
+            }
+        }
+    }
     // The session and its messages arrive from the database a few frames after
     // the screen opens, while it is still sliding in. What that first load
     // brings (the messages, the resume bar, the pinned panel) is put in place;
@@ -163,18 +181,18 @@ fun SessionDetailScreen(
     }
     val lastId = messages.lastOrNull()?.id
     var prevLastId by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(lastId) {
+    LaunchedEffect(messages) {
         val prev = prevLastId
         prevLastId = lastId
         if (lastId == null) return@LaunchedEffect
         if (readFromStart) {
-            listState.showNewestFromStart { panelHeight }
+            if (lastId != prev) listState.showNewestFromStart { panelHeight }
             return@LaunchedEffect
         }
         if (prev == null) return@LaunchedEffect
-        // Follow new messages only while the previous newest one is on screen.
-        val nearBottom = listState.layoutInfo.visibleItemsInfo.any { it.key == prev || it.key == lastId }
-        if (nearBottom) listState.animateScrollToItem(0)
+        // New messages, and also an answered card that disappears or settles
+        // without a new message after it.
+        if (followNewest) listState.animateScrollToItem(0)
     }
 
     val stack by remember(messages) {
@@ -336,6 +354,7 @@ fun SessionDetailScreen(
                         val i = messages.indexOfFirst { it.id == id }
                         if (i >= 0) {
                             readFromStart = false
+                            followNewest = i == messages.lastIndex
                             scope.launch { listState.animateScrollToItem(messages.lastIndex - i) }
                         }
                     },

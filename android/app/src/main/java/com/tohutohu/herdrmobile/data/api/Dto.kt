@@ -76,6 +76,8 @@ data class BlockDto(
 data class InteractionDto(
     val id: String,
     val type: String,
+    /** Refines [type]; "plan" is a finished plan waiting for the go-ahead. */
+    val kind: String? = null,
     val state: String,
     val title: String? = null,
     val detail: String? = null,
@@ -95,6 +97,8 @@ data class QuestionDto(
     val question: String,
     val options: List<OptionDto> = emptyList(),
     val allowOther: Boolean = false,
+    /** Names the free-text choice when "Other" would be unclear. */
+    val otherLabel: String? = null,
 )
 
 @Serializable

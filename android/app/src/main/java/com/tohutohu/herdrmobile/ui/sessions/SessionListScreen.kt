@@ -276,37 +276,50 @@ internal fun SessionRow(
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                AnimatedVisibility(
-                    visible = selecting,
-                    enter = expandHorizontally() + fadeIn(),
-                    exit = shrinkHorizontally() + fadeOut(),
-                ) {
-                    Icon(
-                        if (selected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
-                        contentDescription = null,
-                        tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                        modifier = Modifier.padding(end = 6.dp).size(16.dp),
-                    )
-                }
-                Text(s.providerName, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                listOfNotNull(agentSettingsLabel(s.model, s.effort, s.mode), contextLabel(s.contextUsedPercent))
-                    .joinToString(" · ")
-                    .takeIf { it.isNotEmpty() }
-                    ?.let {
-                        Text(
-                            " · $it",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
+                // Everything but the status shares what the status leaves; the
+                // settings label gives way first so the time stays on one line.
+                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                    AnimatedVisibility(
+                        visible = selecting,
+                        enter = expandHorizontally() + fadeIn(),
+                        exit = shrinkHorizontally() + fadeOut(),
+                    ) {
+                        Icon(
+                            if (selected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                            contentDescription = null,
+                            tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                            modifier = Modifier.padding(end = 6.dp).size(16.dp),
                         )
                     }
+                    Text(s.providerName, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, maxLines = 1)
+                    listOfNotNull(agentSettingsLabel(s.model, s.effort, s.mode), contextLabel(s.contextUsedPercent))
+                        .joinToString(" · ")
+                        .takeIf { it.isNotEmpty() }
+                        ?.let {
+                            Text(
+                                " · $it",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
+                        }
+                    Text(
+                        "  " + DateUtils.getRelativeTimeSpanString(s.updatedAt),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
                 Text(
-                    "  " + DateUtils.getRelativeTimeSpanString(s.updatedAt),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
+                    "${style.symbol} ${style.label}",
+                    color = style.color,
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                    modifier = Modifier.padding(start = 8.dp),
                 )
-                Text("${style.symbol} ${style.label}", color = style.color, style = MaterialTheme.typography.labelMedium)
             }
             Text(s.project.ifBlank { s.cwd ?: s.id }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             s.title?.takeIf { it.isNotBlank() }?.let {
