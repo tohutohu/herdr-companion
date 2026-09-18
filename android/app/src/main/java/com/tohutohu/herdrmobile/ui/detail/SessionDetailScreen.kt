@@ -7,6 +7,8 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
@@ -98,6 +100,7 @@ import com.tohutohu.herdrmobile.ui.sessions.SessionRef
 import com.tohutohu.herdrmobile.ui.sessions.rememberSessionActions
 import com.tohutohu.herdrmobile.ui.statusStyle
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -144,6 +147,17 @@ fun SessionDetailScreen(
     LaunchedEffect(listState) {
         listState.interactionSource.interactions.collect {
             if (it is DragInteraction.Start) readFromStart = false
+        }
+    }
+    // The session and its messages arrive from the database a few frames after
+    // the screen opens, while it is still sliding in. What that first load
+    // brings (the messages, the resume bar, the pinned panel) is put in place;
+    // only changes after it are animated.
+    var settled by remember { mutableStateOf(false) }
+    LaunchedEffect(messages.isNotEmpty()) {
+        if (messages.isNotEmpty() && !settled) {
+            delay(SETTLE_MS)
+            settled = true
         }
     }
     val lastId = messages.lastOrNull()?.id
@@ -240,9 +254,13 @@ fun SessionDetailScreen(
             AnimatedContent(
                 targetState = s != null && s.status == Status.OFFLINE,
                 transitionSpec = {
-                    (fadeIn(tween(200, delayMillis = 60)) + slideInVertically(tween(260)) { it / 3 })
-                        .togetherWith(fadeOut(tween(120)))
-                        .using(SizeTransform(clip = false))
+                    if (settled) {
+                        (fadeIn(tween(200, delayMillis = 60)) + slideInVertically(tween(260)) { it / 3 })
+                            .togetherWith(fadeOut(tween(120)))
+                            .using(SizeTransform(clip = false))
+                    } else {
+                        EnterTransition.None togetherWith ExitTransition.None
+                    }
                 },
                 label = "bottomBar",
             ) { offline ->
@@ -284,10 +302,8 @@ fun SessionDetailScreen(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                 )
             }
-            ExpandingContent(value = "Loading…".takeIf { messages.isEmpty() }) {
-                Text(it, modifier = Modifier.padding(16.dp))
-            }
             Box(Modifier.fillMaxSize()) {
+                LoadingHint(visible = messages.isEmpty())
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
@@ -297,7 +313,7 @@ fun SessionDetailScreen(
                     itemsIndexed(messages.asReversed(), key = { _, m -> m.id }) { r, m ->
                         val i = messages.lastIndex - r
                         MessageItem(
-                            modifier = Modifier.animateItem(),
+                            modifier = if (settled) Modifier.animateItem() else Modifier,
                             message = m,
                             showRole = i == 0 || messages[i - 1].role != m.role,
                             providerName = session?.providerName ?: "Agent",
@@ -312,6 +328,7 @@ fun SessionDetailScreen(
                 }
                 PinnedFlowStack(
                     stack = stack,
+                    animate = settled,
                     providerName = session?.providerName ?: "Agent",
                     onHeight = { panelHeight = it },
                     onJump = { id ->
@@ -327,10 +344,28 @@ fun SessionDetailScreen(
     }
 }
 
+/**
+ * How long after the first messages arrive the screen counts as loaded: long
+ * enough for the screen transition and the scroll to the newest message.
+ */
+private const val SETTLE_MS = 400L
+
+/**
+ * Over the list rather than above it, so it never pushes the messages; and
+ * late, so a quick load never shows it at all.
+ */
+@Composable
+private fun LoadingHint(visible: Boolean) {
+    AnimatedVisibility(visible = visible, enter = fadeIn(tween(200, delayMillis = 400)), exit = ExitTransition.None) {
+        Text("Loading…", modifier = Modifier.padding(16.dp))
+    }
+}
+
 /** The flow-stack panel, slid in over the top of the list while it has content. */
 @Composable
 private fun BoxScope.PinnedFlowStack(
     stack: FlowStack,
+    animate: Boolean,
     providerName: String,
     onHeight: (Int) -> Unit,
     onJump: (String) -> Unit,
@@ -340,7 +375,7 @@ private fun BoxScope.PinnedFlowStack(
     if (!stack.isEmpty) shownStack = stack
     AnimatedVisibility(
         visible = !stack.isEmpty,
-        enter = slideInVertically { -it } + fadeIn(),
+        enter = if (animate) slideInVertically { -it } + fadeIn() else EnterTransition.None,
         exit = slideOutVertically { -it } + fadeOut(),
         modifier = Modifier.align(Alignment.TopCenter).onSizeChanged { onHeight(it.height) },
     ) {

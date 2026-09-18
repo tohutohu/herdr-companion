@@ -2,38 +2,41 @@ package com.tohutohu.herdrmobile.ui
 
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
 
 /**
- * Material 3 motion for screen changes: the new screen slides in from the
- * side it belongs to while the old one slides a little the other way, both
- * over a fade (the "shared axis" pattern). Pop transitions mirror it, so a
- * predictive back gesture drags the screen back where it came from.
+ * Material 3 shared-axis motion for screen changes: both screens shift a
+ * short, fixed distance along the axis while the old one fades out and the
+ * new one fades in after it. Pop transitions mirror it, so a predictive back
+ * gesture drags the screen back where it came from.
+ *
+ * The travel is kept small and the easing even, and the incoming screen stays
+ * transparent for the first frames: those are the ones its first composition
+ * may drop, so a late frame shows no jump.
  */
-object ScreenMotion {
-    private const val DURATION_MS = 350
-    private const val TRAVEL_DIVISOR = 5
-    private val emphasizedDecelerate = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
-    private val emphasizedAccelerate = CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)
+class ScreenMotion(density: Density) {
+    private val travel = with(density) { 30.dp.roundToPx() }
+    private val slide = tween<IntOffset>(DURATION_MS, easing = FastOutSlowInEasing)
+    private val fadeInSpec = tween<Float>(DURATION_MS - FADE_OUT_MS, delayMillis = FADE_OUT_MS, easing = LinearOutSlowInEasing)
+    private val fadeOutSpec = tween<Float>(FADE_OUT_MS, easing = FastOutLinearInEasing)
 
-    val enter: EnterTransition =
-        slideInHorizontally(tween(DURATION_MS, easing = emphasizedDecelerate)) { it / TRAVEL_DIVISOR } +
-            fadeIn(tween(DURATION_MS / 2, delayMillis = DURATION_MS / 7))
+    val enter: EnterTransition = slideInHorizontally(slide) { travel } + fadeIn(fadeInSpec)
+    val exit: ExitTransition = slideOutHorizontally(slide) { -travel } + fadeOut(fadeOutSpec)
+    val popEnter: EnterTransition = slideInHorizontally(slide) { -travel } + fadeIn(fadeInSpec)
+    val popExit: ExitTransition = slideOutHorizontally(slide) { travel } + fadeOut(fadeOutSpec)
 
-    val exit: ExitTransition =
-        slideOutHorizontally(tween(DURATION_MS, easing = emphasizedDecelerate)) { -it / TRAVEL_DIVISOR } +
-            fadeOut(tween(DURATION_MS / 3, easing = emphasizedAccelerate))
-
-    val popEnter: EnterTransition =
-        slideInHorizontally(tween(DURATION_MS, easing = emphasizedDecelerate)) { -it / TRAVEL_DIVISOR } +
-            fadeIn(tween(DURATION_MS / 2, delayMillis = DURATION_MS / 7))
-
-    val popExit: ExitTransition =
-        slideOutHorizontally(tween(DURATION_MS, easing = emphasizedDecelerate)) { it / TRAVEL_DIVISOR } +
-            fadeOut(tween(DURATION_MS / 3, easing = emphasizedAccelerate))
+    private companion object {
+        const val DURATION_MS = 300
+        const val FADE_OUT_MS = 90
+    }
 }

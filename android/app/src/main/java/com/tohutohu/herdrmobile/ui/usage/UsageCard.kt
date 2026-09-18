@@ -33,6 +33,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,6 +59,11 @@ import kotlinx.coroutines.launch
 /** The gateway serves a cached reading, so polling it is cheap. */
 private const val USAGE_POLL_MS = 60_000L
 
+/** The last limits reading, kept while the screen showing it is on the back stack. */
+class UsageHolder : ViewModel() {
+    var usage by mutableStateOf<UsageDto?>(null)
+}
+
 /**
  * How much of the Claude / Codex plan limits is used. Collapsed it is a single
  * line; tapping it shows every window with its reset time. The refresh button
@@ -65,7 +72,10 @@ private const val USAGE_POLL_MS = 60_000L
 @Composable
 fun UsageCard(modifier: Modifier = Modifier) {
     val api = LocalContext.current.container.api
-    var usage by remember { mutableStateOf<UsageDto?>(null) }
+    // Held past the composition: coming back to the list shows the last
+    // reading at once instead of growing the card in again.
+    val holder: UsageHolder = viewModel()
+    var usage by holder::usage
     var refreshing by remember { mutableStateOf(false) }
     var expanded by rememberSaveable { mutableStateOf(false) }
     var nowMillis by remember { mutableStateOf(System.currentTimeMillis()) }

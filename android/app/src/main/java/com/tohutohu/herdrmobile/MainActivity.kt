@@ -12,6 +12,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalDensity
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -70,13 +72,15 @@ class MainActivity : ComponentActivity() {
                     pendingSession.value = null
                 }
                 val start: Any = if (settings.current.isConfigured) SessionsRoute else SettingsRoute
+                val density = LocalDensity.current
+                val motion = remember(density) { ScreenMotion(density) }
                 NavHost(
                     navController = nav,
                     startDestination = start,
-                    enterTransition = { ScreenMotion.enter },
-                    exitTransition = { ScreenMotion.exit },
-                    popEnterTransition = { ScreenMotion.popEnter },
-                    popExitTransition = { ScreenMotion.popExit },
+                    enterTransition = { motion.enter },
+                    exitTransition = { motion.exit },
+                    popEnterTransition = { motion.popEnter },
+                    popExitTransition = { motion.popExit },
                 ) {
                     composable<SessionsRoute> {
                         SessionListScreen(

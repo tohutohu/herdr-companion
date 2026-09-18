@@ -5,8 +5,6 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,7 +20,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -77,18 +75,19 @@ fun ContextBar(usedTokens: Long?, windowTokens: Long?, usedPercent: Int?, modifi
  */
 @Composable
 fun ContextGauge(usedPercent: Int?, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    // Pops in with the first reading; the ring then follows the count.
-    var percent by remember { mutableIntStateOf(usedPercent ?: 0) }
+    // Fades in with the first reading, drawn at that reading rather than
+    // filling up from zero; later readings move the ring.
+    var percent by remember { mutableStateOf(usedPercent) }
     usedPercent?.let { percent = it }
-    val progress by animateFloatAsState(percent / 100f, label = "contextGauge")
-    val color by animateColorAsState(contextColor(percent), label = "contextGaugeColor")
-    AnimatedVisibility(visible = usedPercent != null, enter = fadeIn() + scaleIn(), exit = fadeOut() + scaleOut()) {
-        ContextRing(percent, progress, color, onClick, modifier)
+    AnimatedVisibility(visible = usedPercent != null, enter = fadeIn(), exit = fadeOut()) {
+        percent?.let { ContextRing(it, onClick, modifier) }
     }
 }
 
 @Composable
-private fun ContextRing(percent: Int, progress: Float, color: Color, onClick: () -> Unit, modifier: Modifier) {
+private fun ContextRing(percent: Int, onClick: () -> Unit, modifier: Modifier) {
+    val progress by animateFloatAsState(percent / 100f, label = "contextGauge")
+    val color by animateColorAsState(contextColor(percent), label = "contextGaugeColor")
     IconButton(
         onClick = onClick,
         modifier = modifier.semantics { contentDescription = "Context $percent%" },
