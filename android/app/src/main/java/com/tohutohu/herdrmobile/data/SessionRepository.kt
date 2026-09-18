@@ -18,6 +18,8 @@ data class Message(
     val role: String,
     val timestamp: Long,
     val blocks: List<BlockDto>,
+    /** Waiting in the agent's queue; the real entry replaces it. */
+    val queued: Boolean = false,
 )
 
 /**
@@ -39,7 +41,7 @@ class SessionRepository(
             rows.map { row ->
                 val blocks = runCatching { GatewayApi.json.decodeFromString(blocksSerializer, row.blocksJson) }
                     .getOrElse { listOf(BlockDto(type = "text", text = "(unreadable cached message)")) }
-                Message(row.id, row.role, row.timestamp, blocks)
+                Message(row.id, row.role, row.timestamp, blocks, row.queued)
             }
         }
 
@@ -103,6 +105,7 @@ class SessionRepository(
         role = role,
         timestamp = parseTime(timestamp),
         blocksJson = GatewayApi.json.encodeToString(blocksSerializer, blocks),
+        queued = queued,
     )
 
     companion object {

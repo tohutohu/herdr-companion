@@ -1,4 +1,4 @@
-package com.tohutohu.herdrmobile.ui.detail
+package com.tohutohu.herdrmobile.data
 
 import android.content.ContentResolver
 import android.net.Uri

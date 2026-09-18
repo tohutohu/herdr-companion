@@ -56,6 +56,8 @@ data class MessageDto(
     val role: String,
     val timestamp: String,
     val blocks: List<BlockDto> = emptyList(),
+    /** Received by the agent but not taken into the conversation yet. */
+    val queued: Boolean = false,
 )
 
 @Serializable

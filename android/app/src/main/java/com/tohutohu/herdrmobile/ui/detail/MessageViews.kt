@@ -90,6 +90,7 @@ fun MessageItem(
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.widthIn(max = 320.dp),
             ) { Box(Modifier.padding(10.dp)) { content() } }
+            if (message.queued) QueuedLine()
         } else {
             content()
         }

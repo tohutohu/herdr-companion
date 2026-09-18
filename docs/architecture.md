@@ -127,6 +127,25 @@ Message { id, role (user|assistant|tool|system), timestamp, blocks[] }
 Block   { type: text | image | file | interaction, ... }
 ```
 
+A user message the agent has received but not taken into the conversation yet
+carries `queued: true` (Claude Code's queue while it works; the real entry
+replaces it when the agent picks it up).
+
+### Sending from the app
+
+The app shows a message the moment it is sent and follows it until the
+conversation has it: *Sending…* (upload and POST in flight), *Delivered*
+(the gateway answered: the text is typed into the pane or given to the
+daemon), *Queued* (the conversation shows it with `queued`), and finally the
+real message. Sends run in the app's scope in an in-memory `Outbox`, one at a
+time per session, so leaving the screen does not cancel them; the gateway also
+finishes a send whose client hung up (`context.WithoutCancel`, 2 min). A
+pending message is matched to the first user message that was not in the
+conversation when it was sent and contains the start of its text (whitespace
+collapsed; a message of attachments alone takes the next new one). Failed
+sends offer *Retry* / *Discard*; one delivered but never seen is dropped after
+30 min.
+
 Unknown provider data never fails a request: it becomes a
 `Unsupported event: …` text block and is written to the dead-letter log with
 the raw payload. `GET /messages?after=<id>` returns messages from that id on

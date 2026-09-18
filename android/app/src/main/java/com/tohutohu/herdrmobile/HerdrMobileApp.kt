@@ -8,6 +8,7 @@ import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import com.tohutohu.herdrmobile.data.AgentPresetsStore
 import com.tohutohu.herdrmobile.data.DirectoryShortcutsStore
 import com.tohutohu.herdrmobile.data.FileDownloads
+import com.tohutohu.herdrmobile.data.Outbox
 import com.tohutohu.herdrmobile.data.SessionRepository
 import com.tohutohu.herdrmobile.data.SettingsStore
 import com.tohutohu.herdrmobile.data.Settings
@@ -74,6 +75,7 @@ class AppContainer(private val app: Application) {
         FirebaseRuntime.initialize(app, settings.current)
     }
     val repository = SessionRepository(db, api)
+    val outbox = Outbox(app.contentResolver, api, repository, scope)
 
     /**
      * The session list, kept while the app lives so a screen that comes back

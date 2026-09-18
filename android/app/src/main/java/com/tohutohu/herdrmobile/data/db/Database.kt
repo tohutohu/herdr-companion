@@ -53,6 +53,8 @@ data class MessageEntity(
     val role: String,
     val timestamp: Long,
     val blocksJson: String,
+    @ColumnInfo(defaultValue = "0")
+    val queued: Boolean = false,
 )
 
 @Dao
@@ -112,7 +114,7 @@ interface MessageDao {
 
 @Database(
     entities = [SessionEntity::class, MessageEntity::class],
-    version = 6,
+    version = 7,
     exportSchema = true,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
@@ -120,6 +122,7 @@ interface MessageDao {
         AutoMigration(from = 3, to = 4),
         AutoMigration(from = 4, to = 5),
         AutoMigration(from = 5, to = 6),
+        AutoMigration(from = 6, to = 7),
     ],
 )
 abstract class AppDatabase : RoomDatabase() {

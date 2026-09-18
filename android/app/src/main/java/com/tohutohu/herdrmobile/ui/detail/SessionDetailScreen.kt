@@ -90,6 +90,8 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import com.tohutohu.herdrmobile.container
+import com.tohutohu.herdrmobile.data.Attachment
+import com.tohutohu.herdrmobile.data.readAttachment
 import com.tohutohu.herdrmobile.data.api.Status
 import com.tohutohu.herdrmobile.data.db.SessionEntity
 import com.tohutohu.herdrmobile.ui.ContextBar
@@ -130,7 +132,8 @@ fun SessionDetailScreen(
     var detailsOpen by rememberSaveable(sessionId) { mutableStateOf(false) }
     val messages by vm.messages.collectAsState()
     val error by vm.error.collectAsState()
-    val sending by vm.sending.collectAsState()
+    val pending by vm.pending.collectAsState()
+    val answering by vm.answering.collectAsState()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
 
     LaunchedEffect(lifecycle, sessionId) {
@@ -186,7 +189,7 @@ fun SessionDetailScreen(
         prevLastId = lastId
         if (lastId == null) return@LaunchedEffect
         if (readFromStart) {
-            if (lastId != prev) listState.showNewestFromStart { panelHeight }
+            if (lastId != prev) listState.showNewestFromStart(pending.size) { panelHeight }
             return@LaunchedEffect
         }
         if (prev == null) return@LaunchedEffect
@@ -194,13 +197,27 @@ fun SessionDetailScreen(
         // without a new message after it.
         if (followNewest) listState.animateScrollToItem(0)
     }
+    // A message just written goes to the bottom, and so does the reader.
+    val newestPending = pending.lastOrNull()?.localId
+    var prevPending by remember { mutableStateOf(newestPending) }
+    LaunchedEffect(newestPending) {
+        val prev = prevPending
+        prevPending = newestPending
+        if (newestPending == null || newestPending == prev) return@LaunchedEffect
+        readFromStart = false
+        followNewest = true
+        listState.animateScrollToItem(0)
+    }
 
-    val stack by remember(messages) {
+    // Pending messages sit below the conversation, as the first items of the
+    // bottom-up list; message indexes in the list are shifted by them.
+    val tail = pending.size
+    val stack by remember(messages, tail) {
         derivedStateOf {
             val info = listState.layoutInfo
             val bottomEdge = info.viewportEndOffset + info.afterContentPadding
             val top = info.visibleItemsInfo.filter { bottomEdge - it.offset > panelHeight }.maxOfOrNull { it.index }
-            if (top == null) FlowStack.EMPTY else flowStack(messages, messages.lastIndex - top)
+            if (top == null) FlowStack.EMPTY else flowStack(messages, messages.lastIndex - (top - tail))
         }
     }
     val scope = rememberCoroutineScope()
@@ -287,8 +304,8 @@ fun SessionDetailScreen(
                     ResumeBar(busy = s != null && actions.busy(s.id), onResume = { s?.let { actions.resume(it.ref()) } })
                 } else {
                     Composer(
-                        enabled = s?.canSend == true && !sending,
-                        sending = sending,
+                        enabled = s?.canSend == true && !answering,
+                        busy = answering,
                         onSend = vm::send,
                     )
                 }
@@ -329,6 +346,16 @@ fun SessionDetailScreen(
                     contentPadding = PaddingValues(vertical = 8.dp),
                     reverseLayout = true,
                 ) {
+                    itemsIndexed(pending.asReversed(), key = { _, p -> "pending:" + p.localId }) { r, p ->
+                        val i = pending.lastIndex - r
+                        PendingMessageItem(
+                            modifier = Modifier.animateItem(),
+                            message = p,
+                            showRole = i == 0 && messages.lastOrNull()?.role != "user",
+                            onRetry = { vm.retry(p.localId) },
+                            onDiscard = { vm.discard(p.localId) },
+                        )
+                    }
                     itemsIndexed(messages.asReversed(), key = { _, m -> m.id }) { r, m ->
                         val i = messages.lastIndex - r
                         MessageItem(
@@ -340,7 +367,7 @@ fun SessionDetailScreen(
                             onOpenFile = onOpenFile,
                             onOpenImage = { onOpenImage(api.absolute(it)) },
                             onOpenTerminal = onOpenTerminal,
-                            interactionsEnabled = !sending,
+                            interactionsEnabled = !answering,
                             onRespond = vm::respond,
                         )
                     }
@@ -355,7 +382,7 @@ fun SessionDetailScreen(
                         if (i >= 0) {
                             readFromStart = false
                             followNewest = i == messages.lastIndex
-                            scope.launch { listState.animateScrollToItem(messages.lastIndex - i) }
+                            scope.launch { listState.animateScrollToItem(tail + messages.lastIndex - i) }
                         }
                     },
                 )
@@ -415,17 +442,17 @@ internal fun messageStartOffset(messageHeight: Int, viewportHeight: Int, panelHe
  * The panel only appears once the message above is off screen, so its height
  * is read again after every scroll until the target stops moving.
  */
-private suspend fun LazyListState.showNewestFromStart(panelHeight: () -> Int) {
-    scrollToItem(0)
+private suspend fun LazyListState.showNewestFromStart(index: Int, panelHeight: () -> Int) {
+    scrollToItem(index)
     var applied = 0
     repeat(3) {
         val info = layoutInfo
         if (info.viewportSize.height <= 0) return
-        val height = info.visibleItemsInfo.firstOrNull { it.index == 0 }?.size ?: return
+        val height = info.visibleItemsInfo.firstOrNull { it.index == index }?.size ?: return
         val offset = messageStartOffset(height, info.viewportSize.height, panelHeight())
         if (offset == applied) return
         applied = offset
-        scrollToItem(0, offset)
+        scrollToItem(index, offset)
         // One frame for the panel to recompose against the new position,
         // a second one for its measured height to reach panelHeight.
         withFrameNanos {}
@@ -433,11 +460,16 @@ private suspend fun LazyListState.showNewestFromStart(panelHeight: () -> Int) {
     }
 }
 
+/**
+ * Clears as soon as a message is sent: the message itself stays on show above
+ * until the conversation has it, so the next one can be written meanwhile.
+ * [busy] is an answer to a question or approval on its way.
+ */
 @Composable
 private fun Composer(
     enabled: Boolean,
-    sending: Boolean,
-    onSend: (String, List<Attachment>, () -> Unit) -> Unit,
+    busy: Boolean,
+    onSend: (String, List<Attachment>) -> Unit,
 ) {
     var text by rememberSaveable { mutableStateOf("") }
     val attachments = remember { mutableStateListOf<Attachment>() }
@@ -508,24 +540,23 @@ private fun Composer(
                     textStyle = MaterialTheme.typography.bodyMedium,
                     placeholder = {
                         Text(
-                            if (enabled || sending) "Message…" else "Session is not running in Herdr",
+                            if (enabled || busy) "Message…" else "Session is not running in Herdr",
                             style = MaterialTheme.typography.bodyMedium,
                         )
                     },
                     maxLines = 6,
                     modifier = Modifier.weight(1f),
                 )
-                SwapContent(sending) { busy ->
-                    if (busy) {
+                SwapContent(busy) { spinning ->
+                    if (spinning) {
                         CircularProgressIndicator(Modifier.padding(12.dp).size(24.dp))
                     } else {
                         IconButton(
                             enabled = enabled && (text.isNotBlank() || attachments.isNotEmpty()),
                             onClick = {
-                                onSend(text, attachments.toList()) {
-                                    text = ""
-                                    attachments.clear()
-                                }
+                                onSend(text, attachments.toList())
+                                text = ""
+                                attachments.clear()
                             },
                         ) { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send") }
                     }

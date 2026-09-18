@@ -4,38 +4,55 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.tohutohu.herdrmobile.container
+import com.tohutohu.herdrmobile.data.Attachment
 import com.tohutohu.herdrmobile.data.Message
+import com.tohutohu.herdrmobile.data.PendingMessage
+import com.tohutohu.herdrmobile.data.matchPending
 import com.tohutohu.herdrmobile.data.api.GatewayException
 import com.tohutohu.herdrmobile.data.api.InteractionResponseDto
 import com.tohutohu.herdrmobile.data.db.SessionEntity
 import com.tohutohu.herdrmobile.push.Notifications
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 private const val POLL_MS = 3_000L
-private const val MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
 class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidViewModel(app) {
     private val repo = app.container.repository
-    private val api = app.container.api
+    private val outbox = app.container.outbox
 
     val session: StateFlow<SessionEntity?> =
         repo.observeSession(sessionId).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     val messages: StateFlow<List<Message>> =
         repo.observeMessages(sessionId).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /**
+     * Messages sent from the app that the conversation does not show yet,
+     * oldest first. One the agent has queued is shown by the conversation
+     * itself (marked as queued), so it is left out here.
+     */
+    val pending: StateFlow<List<PendingMessage>> =
+        combine(messages, outbox.observe(sessionId)) { m, p ->
+            val found = matchPending(p, m)
+            p.filter { it.localId !in found }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    init {
+        viewModelScope.launch { messages.collect { outbox.settle(sessionId, it) } }
+    }
+
     private val _error = MutableStateFlow<String?>(null)
     val error = _error.asStateFlow()
 
-    private val _sending = MutableStateFlow(false)
-    val sending = _sending.asStateFlow()
+    /** An answer to a question or approval is on its way. */
+    private val _answering = MutableStateFlow(false)
+    val answering = _answering.asStateFlow()
 
     private var fullSyncDone = false
 
@@ -70,39 +87,18 @@ class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidV
         }
     }
 
-    fun send(text: String, attachments: List<Attachment>, onSent: () -> Unit) {
-        viewModelScope.launch {
-            _sending.value = true
-            try {
-                val ids = attachments.map { upload(it) }
-                repo.send(sessionId, text, ids)
-                onSent()
-                delay(500)
-                refresh()
-            } catch (e: Exception) {
-                _error.value = "Send failed: ${e.message}"
-            } finally {
-                _sending.value = false
-            }
-        }
+    /** Shown at once and sent in the background; the screen may be left right away. */
+    fun send(text: String, attachments: List<Attachment>) {
+        outbox.send(sessionId, text, attachments, messages.value.mapTo(HashSet()) { it.id })
     }
 
-    private suspend fun upload(attachment: Attachment): String {
-        val resolver = getApplication<Application>().contentResolver
-        val bytes = withContext(Dispatchers.IO) {
-            resolver.openInputStream(attachment.uri)?.use { it.readBytes() }
-                ?: error("cannot read ${attachment.name}")
-        }
-        // The gateway rejects anything larger, with a much vaguer message.
-        if (bytes.size > MAX_UPLOAD_BYTES) {
-            error("${attachment.name} is larger than ${MAX_UPLOAD_BYTES / (1024 * 1024)} MB")
-        }
-        return api.upload(bytes, attachment.mime, attachment.name)
-    }
+    fun retry(localId: String) = outbox.retry(localId)
+
+    fun discard(localId: String) = outbox.discard(localId)
 
     fun respond(response: InteractionResponseDto) {
         viewModelScope.launch {
-            _sending.value = true
+            _answering.value = true
             try {
                 repo.respond(sessionId, response)
                 delay(800)
@@ -110,7 +106,7 @@ class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidV
             } catch (e: Exception) {
                 _error.value = "Answer failed: ${e.message}"
             } finally {
-                _sending.value = false
+                _answering.value = false
             }
         }
     }
