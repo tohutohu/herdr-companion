@@ -14,6 +14,7 @@ import androidx.core.app.RemoteInput
 import androidx.core.content.ContextCompat
 import com.tohutohu.herdrmobile.MainActivity
 import com.tohutohu.herdrmobile.R
+import com.tohutohu.herdrmobile.container
 import com.tohutohu.herdrmobile.data.api.Status
 
 object Notifications {
@@ -66,6 +67,7 @@ object Notifications {
         val intent = Intent(context, MainActivity::class.java)
             .setAction(Intent.ACTION_VIEW)
             .putExtra(EXTRA_SESSION_ID, sessionId)
+            .putExtra("connection_id", context.container.settings.current.connectionId)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         return PendingIntent.getActivity(
             context,
@@ -81,6 +83,7 @@ object Notifications {
      */
     private fun replyAction(context: Context, sessionId: String, status: String, title: String, body: String): NotificationCompat.Action {
         val intent = Intent(context, ReplyReceiver::class.java)
+            .putExtra("connection_id", context.container.settings.current.connectionId)
             .putExtra(EXTRA_SESSION_ID, sessionId)
             .putExtra(EXTRA_STATUS, status)
             .putExtra(EXTRA_TITLE, title)

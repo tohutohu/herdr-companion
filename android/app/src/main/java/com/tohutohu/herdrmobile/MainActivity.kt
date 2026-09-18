@@ -151,6 +151,7 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIntent(intent: Intent?) {
         applyDebugSettings(intent)
+        if (intent?.getStringExtra("connection_id").orEmpty() != container.settings.current.connectionId) return
         val id = intent?.getStringExtra(Notifications.EXTRA_SESSION_ID) ?: return
         intent.removeExtra(Notifications.EXTRA_SESSION_ID)
         Notifications.cancel(this, id)

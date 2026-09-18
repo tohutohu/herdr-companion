@@ -29,6 +29,8 @@ import android.util.Log
 class PushService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
         val data = message.data
+        val configured = container.settings.current
+        if (configured.gatewayId.isNotEmpty() && data["gatewayId"] != configured.gatewayId) return
         val sessionId = data["sessionId"] ?: return
         val status = data["status"].orEmpty()
         Notifications.show(
@@ -50,6 +52,7 @@ class PushService : FirebaseMessagingService() {
 /** Fetches a session's messages into Room after a push. */
 class PrefetchWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
+        if (inputData.getString("connection_id").orEmpty() != applicationContext.container.settings.current.connectionId) return Result.failure()
         val sessionId = inputData.getString(KEY_SESSION_ID) ?: return Result.failure()
         val repo = applicationContext.container.repository
         return try {
@@ -83,7 +86,7 @@ class PrefetchWorker(context: Context, params: WorkerParameters) : CoroutineWork
 
         fun enqueue(context: Context, sessionId: String) {
             val req = OneTimeWorkRequestBuilder<PrefetchWorker>()
-                .setInputData(workDataOf(KEY_SESSION_ID to sessionId))
+                .setInputData(workDataOf(KEY_SESSION_ID to sessionId, "connection_id" to context.container.settings.current.connectionId))
                 .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 10, TimeUnit.SECONDS)

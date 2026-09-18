@@ -6,9 +6,9 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
-// google-services.json is a local secret (see README). Without it the app
-// builds and works, but push notifications are disabled.
-if (file("google-services.json").exists()) {
+// Shared APKs receive Firebase client settings at pairing time. Only personal
+// builds explicitly opting in may embed local google-services.json.
+if (providers.gradleProperty("bundleFirebase").orNull == "true" && file("google-services.json").exists()) {
     apply(plugin = libs.plugins.google.services.get().pluginId)
 }
 
@@ -86,6 +86,7 @@ dependencies {
 
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.messaging)
+    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
     implementation(libs.androidx.fragment)
 
     testImplementation(libs.junit)

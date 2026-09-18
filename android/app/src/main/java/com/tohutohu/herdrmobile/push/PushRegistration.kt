@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import com.tohutohu.herdrmobile.container
+import java.util.UUID
 
 /** Sends this device's FCM token to the gateway. */
 class PushRegistration(
@@ -26,8 +28,12 @@ class PushRegistration(
         get() = FirebaseApp.getApps(context).isNotEmpty()
 
     fun registerIfPossible() {
+        if (!context.container.settings.current.isConfigured) {
+            _status.value = "Pair with your Mac to configure notifications"
+            return
+        }
         if (!isAvailable) {
-            _status.value = "Push disabled (no google-services.json in this build)"
+            _status.value = "Push is optional. Import Firebase settings on the Mac and pair again to enable it."
             return
         }
         scope.launch {
@@ -52,7 +58,11 @@ class PushRegistration(
         }
     }
 
-    private fun deviceName(): String = "${Build.MANUFACTURER} ${Build.MODEL}".trim()
+    private fun deviceName(): String {
+        val prefs = context.getSharedPreferences("push_device", Context.MODE_PRIVATE)
+        val id = prefs.getString("id", null) ?: UUID.randomUUID().toString().also { prefs.edit().putString("id", it).apply() }
+        return "${Build.MANUFACTURER} ${Build.MODEL} ($id)"
+    }
 
     private companion object {
         const val TAG = "PushRegistration"

@@ -201,6 +201,10 @@ class GatewayApi(
         post(url("v1", "devices"), json.encodeToString(DeviceRequest(name, token)).toRequestBody(jsonType))
     }
 
+    suspend fun unregisterDevice(token: String) {
+        execute(request(url("v1", "devices", query = mapOf("fcmToken" to token))).delete().build())
+    }
+
     companion object {
         /**
          * Percent-encodes a file name for the ext-value of Content-Disposition.

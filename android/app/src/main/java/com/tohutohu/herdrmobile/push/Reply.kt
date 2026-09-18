@@ -25,6 +25,7 @@ import java.util.concurrent.TimeUnit
 /** Takes the text typed into a notification's reply field and hands it to [ReplyWorker]. */
 class ReplyReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        if (intent.getStringExtra("connection_id").orEmpty() != context.container.settings.current.connectionId) return
         val sessionId = intent.getStringExtra(Notifications.EXTRA_SESSION_ID) ?: return
         val reply = RemoteInput.getResultsFromIntent(intent)
             ?.getCharSequence(Notifications.KEY_REPLY)?.toString()?.trim()
@@ -45,6 +46,7 @@ class ReplyReceiver : BroadcastReceiver() {
  */
 class ReplyWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
+        if (inputData.getString("connection_id").orEmpty() != applicationContext.container.settings.current.connectionId) return Result.failure()
         val sessionId = inputData.getString(KEY_SESSION_ID) ?: return Result.failure()
         val reply = inputData.getString(KEY_REPLY) ?: return Result.failure()
         val status = inputData.getString(KEY_STATUS).orEmpty()
@@ -100,6 +102,7 @@ class ReplyWorker(context: Context, params: WorkerParameters) : CoroutineWorker(
                 .setInputData(
                     workDataOf(
                         KEY_SESSION_ID to sessionId,
+                        "connection_id" to context.container.settings.current.connectionId,
                         KEY_REPLY to reply,
                         KEY_STATUS to status,
                         KEY_TITLE to title,
