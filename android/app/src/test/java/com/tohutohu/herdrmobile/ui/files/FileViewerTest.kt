@@ -1,0 +1,21 @@
+package com.tohutohu.herdrmobile.ui.files
+
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class FileViewerTest {
+    @Test
+    fun `Markdownの拡張子を判定する`() {
+        assertTrue(isMarkdownFile("README.md"))
+        assertTrue(isMarkdownFile("docs/guide.MARKDOWN"))
+        assertTrue(isMarkdownFile("notes.mdown"))
+    }
+
+    @Test
+    fun `Markdownではない拡張子を誤判定しない`() {
+        assertFalse(isMarkdownFile("README.md.bak"))
+        assertFalse(isMarkdownFile("src/Main.kt"))
+        assertFalse(isMarkdownFile("Makefile"))
+    }
+}

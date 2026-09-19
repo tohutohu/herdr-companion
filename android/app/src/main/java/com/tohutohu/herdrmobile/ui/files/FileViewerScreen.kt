@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
@@ -34,7 +35,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -43,6 +47,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,6 +61,7 @@ import com.tohutohu.herdrmobile.data.DownloadState
 import com.tohutohu.herdrmobile.data.FileDownloads
 import com.tohutohu.herdrmobile.data.api.FileInfoDto
 import com.tohutohu.herdrmobile.ui.ExpandingContent
+import com.tohutohu.herdrmobile.ui.markdown.MarkdownText
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.unit.Dp
@@ -63,7 +69,7 @@ import com.tohutohu.herdrmobile.ui.exceptBottom
 
 private sealed interface FileState {
     data object Loading : FileState
-    data class Text(val lines: List<String>) : FileState
+    data class Text(val lines: List<String>, val markdown: Boolean) : FileState
     data class Image(val bytes: ByteArray) : FileState
     data class Media(val info: FileInfoDto) : FileState
     data class Download(val info: FileInfoDto) : FileState
@@ -71,6 +77,7 @@ private sealed interface FileState {
 }
 
 private const val MAX_LINES = 20_000
+private val MARKDOWN_EXTENSIONS = setOf("md", "markdown", "mdown", "mkdn", "mdwn")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -88,7 +95,10 @@ fun FileViewerScreen(sessionId: String, path: String, line: Int, onBack: () -> U
                 val (type, bytes) = api.fileContent(sessionId, path)
                 when {
                     type.startsWith("image/") -> FileState.Image(bytes)
-                    type.startsWith("text/") -> FileState.Text(bytes.decodeToString().lines().take(MAX_LINES))
+                    type.startsWith("text/") -> FileState.Text(
+                        lines = bytes.decodeToString().lines().take(MAX_LINES),
+                        markdown = isMarkdownFile(path) || type.substringBefore(';').equals("text/markdown", ignoreCase = true),
+                    )
                     else -> FileState.Download(info)
                 }
             }
@@ -125,7 +135,7 @@ fun FileViewerScreen(sessionId: String, path: String, line: Int, onBack: () -> U
                     FileState.Loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
                     is FileState.Error -> Text(s.message, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp))
                     is FileState.Image -> AsyncImage(model = s.bytes, contentDescription = path, modifier = Modifier.padding(bottom = bottom).fillMaxSize())
-                    is FileState.Text -> CodeView(path, s.lines, line, bottom)
+                    is FileState.Text -> TextFileView(sessionId, path, s.lines, s.markdown, line, bottom)
                     is FileState.Media -> Box(Modifier.padding(bottom = bottom)) { MediaFileView(sessionId, s.info) { state = FileState.Download(s.info) } }
                     is FileState.Download -> Box(Modifier.padding(bottom = bottom)) { DownloadView(sessionId, s.info) }
                 }
@@ -199,6 +209,67 @@ private fun DownloadView(sessionId: String, info: FileInfoDto) {
 private fun displayType(info: FileInfoDto): String =
     FileDownloads.mimeTypeFor(info.name).takeIf { it != "application/octet-stream" }
         ?: info.contentType.substringBefore(';')
+
+/** Returns whether a path is conventionally a Markdown document. */
+internal fun isMarkdownFile(path: String): Boolean =
+    path.substringAfterLast('.', "").lowercase() in MARKDOWN_EXTENSIONS
+
+@Composable
+private fun TextFileView(
+    sessionId: String,
+    path: String,
+    lines: List<String>,
+    markdown: Boolean,
+    target: Int,
+    bottom: Dp,
+) {
+    if (!markdown) {
+        CodeView(path, lines, target, bottom)
+        return
+    }
+
+    var rendered by rememberSaveable(sessionId, path) { mutableStateOf(false) }
+    val source = remember(lines) { lines.joinToString("\n") }
+    Column(Modifier.fillMaxSize()) {
+        SingleChoiceSegmentedButtonRow(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+        ) {
+            SegmentedButton(
+                selected = !rendered,
+                onClick = { rendered = false },
+                shape = SegmentedButtonDefaults.itemShape(0, 2),
+            ) { Text("Source") }
+            SegmentedButton(
+                selected = rendered,
+                onClick = { rendered = true },
+                shape = SegmentedButtonDefaults.itemShape(1, 2),
+            ) { Text("Markdown") }
+        }
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            if (rendered) {
+                MarkdownPreview(path, source, bottom)
+            } else {
+                CodeView(path, lines, target, bottom)
+            }
+        }
+    }
+}
+
+@Composable
+private fun MarkdownPreview(path: String, source: String, bottom: Dp) {
+    val scrollState = rememberScrollState()
+    SelectionContainer {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(scrollState)
+                .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = bottom + 12.dp),
+        ) {
+            Text(path, style = MaterialTheme.typography.labelSmall)
+            MarkdownText(source, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+        }
+    }
+}
 
 @Composable
 private fun CodeView(path: String, lines: List<String>, target: Int, bottom: Dp) {
