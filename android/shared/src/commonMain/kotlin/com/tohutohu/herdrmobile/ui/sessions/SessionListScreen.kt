@@ -77,6 +77,7 @@ fun SessionListScreen(
     onAction: (SessionListAction) -> Unit,
     topContent: @Composable () -> Unit = {},
     snackbarHost: @Composable () -> Unit = {},
+    sessionContextMenu: @Composable (SessionListItemUiState, @Composable () -> Unit) -> Unit = { _, content -> content() },
     selection: SessionSelection = rememberSessionSelection(),
     showTopBar: Boolean = true,
     showNewSessionFab: Boolean = true,
@@ -177,7 +178,7 @@ fun SessionListScreen(
                     if (state.isLoaded && sessions.isEmpty() && state.pendingStarts.isEmpty() && state.error == null) {
                         item(key = "empty") {
                             Text(
-                                "No sessions. Start Claude Code or Codex inside Herdr on your Mac.",
+                                state.emptyMessage,
                                 modifier = Modifier.animateItem().padding(16.dp),
                             )
                         }
@@ -212,6 +213,7 @@ fun SessionListScreen(
                             onOpen = { onAction(SessionListAction.OpenSession(it)) },
                             onArchive = { onAction(SessionListAction.Archive(listOf(it))) },
                             onUnarchive = { onAction(SessionListAction.Unarchive(listOf(it))) },
+                            sessionContextMenu = sessionContextMenu,
                         )
                     }
                 }
@@ -230,29 +232,32 @@ fun LazyItemScope.SessionItem(
     onOpen: (String) -> Unit,
     onArchive: (SessionRef) -> Unit,
     onUnarchive: (SessionRef) -> Unit,
+    sessionContextMenu: @Composable (SessionListItemUiState, @Composable () -> Unit) -> Unit = { _, content -> content() },
 ) {
     val s = item.session
     val ref = s.toSessionRef()
-    Column(Modifier.animateItem()) {
-        SwipeableSessionRow(
-            action = swipeActionFor(ref),
-            engaged = engaged,
-            isEngaged = { engaged },
-            busy = busy,
-            enabled = !selection.active,
-            onSwipe = { if (ref.archived) onUnarchive(ref) else onArchive(ref) },
-        ) {
-            SessionRow(
-                s = s,
-                relativeUpdatedAt = item.relativeUpdatedAt,
+    sessionContextMenu(item) {
+        Column(Modifier.animateItem()) {
+            SwipeableSessionRow(
+                action = swipeActionFor(ref),
+                engaged = engaged,
+                isEngaged = { engaged },
                 busy = busy,
-                selected = item.selected || selection.contains(s.id),
-                selecting = selection.active,
-                onClick = { if (selection.active) selection.toggle(s.id) else onOpen(s.id) },
-                onLongClick = { selection.toggle(s.id) },
-            )
+                enabled = !selection.active,
+                onSwipe = { if (ref.archived) onUnarchive(ref) else onArchive(ref) },
+            ) {
+                SessionRow(
+                    s = s,
+                    relativeUpdatedAt = item.relativeUpdatedAt,
+                    busy = busy,
+                    selected = item.selected || selection.contains(s.id),
+                    selecting = selection.active,
+                    onClick = { if (selection.active) selection.toggle(s.id) else onOpen(s.id) },
+                    onLongClick = { selection.toggle(s.id) },
+                )
+            }
+            HorizontalDivider()
         }
-        HorizontalDivider()
     }
 }
 

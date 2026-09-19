@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -75,6 +76,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -110,6 +113,8 @@ fun SessionDetailScreen(
     resolveUrl: (String) -> String,
     formatFileSize: (Long) -> String,
     resolveAttachmentPreview: (String) -> Any? = { null },
+    composerModifier: Modifier = Modifier,
+    attachmentDropActive: Boolean = false,
     onAction: (SessionDetailAction) -> Unit,
 ) {
     val session = state.session
@@ -298,7 +303,10 @@ fun SessionDetailScreen(
                         attachments = state.attachments,
                         attachmentsEnabled = state.attachmentsEnabled,
                         sendOnEnter = state.sendOnEnter,
+                        sendWithModifier = state.sendWithModifier,
                         resolveAttachmentPreview = resolveAttachmentPreview,
+                        composerModifier = composerModifier,
+                        attachmentDropActive = attachmentDropActive,
                         onAction = onAction,
                     )
                 }
@@ -441,12 +449,27 @@ private fun Composer(
     attachments: List<AttachmentUiState>,
     attachmentsEnabled: Boolean,
     sendOnEnter: Boolean,
+    sendWithModifier: Boolean,
     resolveAttachmentPreview: (String) -> Any?,
+    composerModifier: Modifier,
+    attachmentDropActive: Boolean,
     onAction: (SessionDetailAction) -> Unit,
 ) {
     var text by rememberSaveable { mutableStateOf("") }
-    Surface(tonalElevation = 3.dp) {
+    Surface(
+        modifier = composerModifier.fillMaxWidth(),
+        tonalElevation = 3.dp,
+        border = if (attachmentDropActive) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
+    ) {
         Column(Modifier.navigationBarsPadding().imePadding().padding(8.dp)) {
+            if (attachmentDropActive) {
+                Text(
+                    "Drop files to attach",
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                )
+            }
             ExpandingContent(value = attachments.takeIf { it.isNotEmpty() }) { shown ->
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 8.dp)) {
                     items(shown, key = { it.id }) { attachment ->
@@ -508,14 +531,20 @@ private fun Composer(
                     },
                     maxLines = 6,
                     modifier = Modifier.weight(1f).onPreviewKeyEvent { event ->
-                        if (!sendOnEnter || event.type != KeyEventType.KeyDown || event.key != Key.Enter || event.isShiftPressed) {
+                        if (event.type != KeyEventType.KeyDown || event.key != Key.Enter) {
                             false
-                        } else if (enabled && (text.isNotBlank() || attachments.isNotEmpty())) {
-                            onAction(SessionDetailAction.Send(text))
-                            text = ""
-                            true
                         } else {
-                            false
+                            val plainEnter = sendOnEnter && !event.isShiftPressed && !event.isMetaPressed && !event.isCtrlPressed
+                            val modifiedEnter = sendWithModifier && (event.isMetaPressed || event.isCtrlPressed)
+                            if (!plainEnter && !modifiedEnter) {
+                                false
+                            } else if (enabled && (text.isNotBlank() || attachments.isNotEmpty())) {
+                                onAction(SessionDetailAction.Send(text))
+                                text = ""
+                                true
+                            } else {
+                                false
+                            }
                         }
                     },
                 )

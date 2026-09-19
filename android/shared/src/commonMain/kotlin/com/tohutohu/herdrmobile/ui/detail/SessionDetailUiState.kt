@@ -37,6 +37,7 @@ data class SessionDetailUiState(
     val attachmentsEnabled: Boolean = true,
     val showBackButton: Boolean = true,
     val sendOnEnter: Boolean = false,
+    val sendWithModifier: Boolean = false,
 )
 
 /** User events emitted by the detail UI and handled by the Android route. */

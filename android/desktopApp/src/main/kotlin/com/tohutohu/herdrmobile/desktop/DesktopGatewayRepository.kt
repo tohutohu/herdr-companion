@@ -16,7 +16,8 @@ class DesktopGatewayRepository(private val api: GatewayApi) {
 
     suspend fun messageSnapshot(id: String, after: String? = null) = api.messages(id, after)
 
-    suspend fun send(id: String, text: String) = api.sendMessage(id, text, emptyList())
+    suspend fun send(id: String, text: String, uploads: List<String> = emptyList()) =
+        api.sendMessage(id, text, uploads)
 
     suspend fun respond(id: String, response: InteractionResponseDto) = api.respond(id, response)
 }

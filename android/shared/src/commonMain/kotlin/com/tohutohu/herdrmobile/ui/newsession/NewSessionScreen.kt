@@ -48,6 +48,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -61,6 +63,7 @@ fun NewSessionScreen(
     state: NewSessionUiState,
     onAction: (NewSessionAction) -> Unit,
     topContent: @Composable () -> Unit = {},
+    initialPromptFocusRequester: FocusRequester? = null,
 ) {
     val pending = state.pendingStart
     if (pending != null) {
@@ -153,7 +156,11 @@ fun NewSessionScreen(
                         enabled = !state.starting && !state.checking,
                         label = { Text("First prompt (optional)") },
                         maxLines = 4,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = if (initialPromptFocusRequester != null) {
+                            Modifier.fillMaxWidth().focusRequester(initialPromptFocusRequester)
+                        } else {
+                            Modifier.fillMaxWidth()
+                        },
                     )
                     Button(
                         enabled = state.path.isNotEmpty() && !state.starting && !state.checking && !state.loading && state.pendingStart == null,

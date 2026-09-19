@@ -6,6 +6,14 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -14,6 +22,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogWindow
 import androidx.compose.ui.window.rememberDialogState
@@ -39,6 +48,7 @@ fun DesktopNewSessionWindow(
     onError: (String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val promptFocusRequester = remember { FocusRequester() }
     var provider by rememberSaveable { mutableStateOf("claude") }
     var path by rememberSaveable { mutableStateOf("") }
     var listing by remember { mutableStateOf<DirListingDto?>(null) }
@@ -165,10 +175,39 @@ fun DesktopNewSessionWindow(
         title = "New Session",
         state = rememberDialogState(width = 900.dp, height = 720.dp),
         resizable = true,
+        onPreviewKeyEvent = { event ->
+            if (event.type == KeyEventType.KeyDown && event.key == Key.Escape) {
+                onDismiss()
+                true
+            } else {
+                false
+            }
+        },
     ) {
+        LaunchedEffect(Unit) {
+            window.toFront()
+            window.requestFocus()
+            promptFocusRequester.requestFocus()
+        }
         Surface(Modifier.fillMaxSize()) {
             NewSessionScreen(
                 state = state,
+                topContent = {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Choose a working folder from Gateway or Finder.")
+                        TextButton(
+                            onClick = {
+                                DesktopFilePicker.pickDirectory(window)?.let { selected ->
+                                    scope.launch { load(selected.toString()) }
+                                }
+                            },
+                        ) { Text("Choose folder…") }
+                    }
+                },
+                initialPromptFocusRequester = promptFocusRequester,
                 onAction = { action ->
                     when (action) {
                         NewSessionAction.Back -> onDismiss()

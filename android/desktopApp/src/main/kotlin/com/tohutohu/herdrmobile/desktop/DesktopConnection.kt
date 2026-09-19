@@ -28,6 +28,14 @@ data class DesktopGatewayConnection(
     val settings: Settings get() = Settings(gatewayUrl = baseUrl, token = token)
 }
 
+enum class DesktopConnectionState {
+    CONNECTING,
+    CONNECTED,
+    RECONNECTING,
+    OFFLINE,
+    AUTHENTICATION_FAILED,
+}
+
 /** Resolves Desktop's local connection without duplicating the Android pairing flow. */
 object DesktopConnectionConfig {
     const val DESKTOP_PORT = 8766

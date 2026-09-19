@@ -7,6 +7,7 @@ import com.tohutohu.herdrmobile.data.Message
 import com.tohutohu.herdrmobile.data.SendState
 import com.tohutohu.herdrmobile.data.api.InteractionResponseDto
 import com.tohutohu.herdrmobile.data.api.MessageDto
+import com.tohutohu.herdrmobile.data.api.Status
 import com.tohutohu.herdrmobile.model.SessionUiModel
 import com.tohutohu.herdrmobile.model.toUiModel
 import com.tohutohu.herdrmobile.ui.detail.AttachmentUiState
@@ -26,7 +27,10 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
+import java.nio.file.Files
+import java.nio.file.Path
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
@@ -34,6 +38,7 @@ import java.util.logging.Logger
 
 private const val LIST_POLL_MS = 5_000L
 private const val DETAIL_POLL_MS = 3_000L
+private const val MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
 /** Selection is intentionally separate from the Android navigation back stack. */
 class DesktopSelectionState {
@@ -63,6 +68,10 @@ class DesktopAppState(
     private var detailJob: Job? = null
     private var closed = false
     private var pendingBySession by mutableStateOf<Map<String, List<PendingMessageUiState>>>(emptyMap())
+    private var pendingAttachments by mutableStateOf<Map<String, List<DesktopAttachment>>>(emptyMap())
+    private var pendingMessageBaselines by mutableStateOf<Map<String, Set<String>>>(emptyMap())
+    private var composerAttachments by mutableStateOf<List<DesktopAttachment>>(emptyList())
+    private var previousStatuses = emptyMap<String, String>()
 
     var sessions by mutableStateOf<List<SessionListItemUiState>>(emptyList())
         private set
@@ -81,15 +90,33 @@ class DesktopAppState(
     var archiveConfirmation by mutableStateOf<SessionUiModel?>(null)
         private set
     var newSessionOpen by mutableStateOf(false)
+    var connectionState by mutableStateOf(
+        if (connection.configIssue == null) DesktopConnectionState.CONNECTING else DesktopConnectionState.OFFLINE,
+    )
+        private set
+    var notificationEvent by mutableStateOf<DesktopNotificationEvent?>(null)
+        private set
 
     val selectedSessionId: String? get() = selection.selectedId
     val connectionLabel: String
         get() = when {
             listRefreshing && !listLoaded -> "Connecting…"
-            listError != null && !listLoaded -> "Gateway unavailable"
-            listError != null -> "Connection problem"
-            else -> "Connected"
+            else -> when (connectionState) {
+                DesktopConnectionState.CONNECTING -> "Connecting…"
+                DesktopConnectionState.CONNECTED -> "Connected"
+                DesktopConnectionState.RECONNECTING -> "Reconnecting…"
+                DesktopConnectionState.OFFLINE -> "Offline"
+                DesktopConnectionState.AUTHENTICATION_FAILED -> "Authentication failed"
+            }
         }
+
+    val composerAttachmentStates: List<AttachmentUiState>
+        get() = composerAttachments.map { it.toUiState() }
+
+    fun resolveAttachmentPreview(id: String): Any? = (composerAttachments + pendingAttachments.values.flatten())
+        .firstOrNull { it.id == id }
+        ?.path
+        ?.toUri()
 
     init {
         refreshSessions()
@@ -109,13 +136,26 @@ class DesktopAppState(
     private suspend fun refreshSessionsNow(userInitiated: Boolean) {
         listMutex.withLock {
             val showRefreshing = userInitiated || !listLoaded
+            val wasLoaded = listLoaded
             if (showRefreshing) listRefreshing = true
             try {
                 if (!connection.settings.isConfigured) {
                     listError = connection.configIssue ?: "Gateway configuration is incomplete."
+                    connectionState = DesktopConnectionState.OFFLINE
                     return
                 }
                 val rows = repository.sessions()
+                if (wasLoaded) {
+                    rows.forEach { row ->
+                        notificationForStatusTransition(
+                            sessionId = row.id,
+                            project = row.title ?: row.project,
+                            previous = previousStatuses[row.id],
+                            next = row.status,
+                        )?.let { notificationEvent = it }
+                    }
+                }
+                previousStatuses = rows.associate { it.id to it.status }
                 val selected = selection.selectedId
                 sessions = rows.map { row ->
                     SessionListItemUiState(
@@ -126,6 +166,7 @@ class DesktopAppState(
                 }
                 listLoaded = true
                 listError = null
+                connectionState = DesktopConnectionState.CONNECTED
                 if (selected != null && rows.none { it.id == selected }) {
                     selection.clear()
                     detailJob?.cancel()
@@ -137,6 +178,13 @@ class DesktopAppState(
             } catch (error: Exception) {
                 val mapped = error.toDesktopGatewayError()
                 listError = mapped.message
+                connectionState = when (mapped.kind) {
+                    DesktopGatewayErrorKind.AUTHENTICATION -> DesktopConnectionState.AUTHENTICATION_FAILED
+                    DesktopGatewayErrorKind.GATEWAY_OFFLINE,
+                    DesktopGatewayErrorKind.NETWORK,
+                    DesktopGatewayErrorKind.STREAMING_DISCONNECTED -> DesktopConnectionState.RECONNECTING
+                    else -> DesktopConnectionState.OFFLINE
+                }
                 logger.warning("session list failed: ${mapped.kind}")
             } finally {
                 if (showRefreshing) listRefreshing = false
@@ -147,6 +195,7 @@ class DesktopAppState(
     fun selectSession(id: String) {
         if (closed || selection.selectedId == id) return
         detailJob?.cancel()
+        composerAttachments = emptyList()
         selection.select(id)
         sessions = sessions.map { it.copy(selected = it.session.id == id) }
         detail = SessionDetailUiState(
@@ -161,7 +210,8 @@ class DesktopAppState(
             loading = true,
             attachmentsEnabled = false,
             showBackButton = false,
-            sendOnEnter = true,
+            sendOnEnter = false,
+            sendWithModifier = true,
         )
         detailJob = scope.launch { detailLoop(id) }
     }
@@ -169,6 +219,7 @@ class DesktopAppState(
     fun clearSelection() {
         detailJob?.cancel()
         detailJob = null
+        composerAttachments = emptyList()
         selection.clear()
         sessions = sessions.map { it.copy(selected = false) }
         detail = null
@@ -194,12 +245,13 @@ class DesktopAppState(
                     pending = pendingBySession[id].orEmpty(),
                     error = null,
                     answering = detail?.answering == true,
-                    attachments = emptyList(),
+                    attachments = composerAttachmentStates,
                     actionBusy = id in busySessionIds,
                     loading = false,
-                    attachmentsEnabled = false,
+                    attachmentsEnabled = true,
                     showBackButton = false,
-                    sendOnEnter = true,
+                    sendOnEnter = false,
+                    sendWithModifier = true,
                 )
                 first = false
                 logger.fine("session detail refreshed")
@@ -215,6 +267,11 @@ class DesktopAppState(
                         pending = pendingBySession[id].orEmpty(),
                         error = null,
                         answering = false,
+                        attachments = composerAttachmentStates,
+                        attachmentsEnabled = true,
+                        showBackButton = false,
+                        sendOnEnter = false,
+                        sendWithModifier = true,
                     )).copy(error = mapped.message, loading = first)
                 }
                 logger.warning("session detail failed: ${mapped.kind}")
@@ -223,20 +280,44 @@ class DesktopAppState(
         }
     }
 
+    fun addAttachments(paths: List<Path>) {
+        if (selection.selectedId == null) return
+        val additions = paths
+            .filter { Files.isRegularFile(it) }
+            .map(Path::toDesktopAttachment)
+            .filterNot { candidate -> composerAttachments.any { it.id == candidate.id } }
+        if (additions.isEmpty()) return
+        composerAttachments = composerAttachments + additions
+        detail = detail?.copy(attachments = composerAttachmentStates)
+    }
+
+    fun removeAttachment(id: String) {
+        composerAttachments = composerAttachments.filterNot { it.id == id }
+        detail = detail?.copy(attachments = composerAttachmentStates)
+    }
+
     fun send(text: String) {
         val id = selection.selectedId ?: return
-        if (text.isBlank() || id in busySessionIds) return
+        val attachments = composerAttachments
+        if ((text.isBlank() && attachments.isEmpty()) || id in busySessionIds) return
         val pending = PendingMessageUiState(
             localId = UUID.randomUUID().toString(),
             text = text,
-            attachments = emptyList<AttachmentUiState>(),
+            attachments = attachments.map { it.toUiState() },
             state = SendState.SENDING,
             error = null,
         )
+        pendingAttachments = pendingAttachments + (pending.localId to attachments)
+        pendingMessageBaselines = pendingMessageBaselines + (
+            pending.localId to detail?.messages.orEmpty().map(Message::id).toSet()
+        )
         updatePending(id) { it + pending }
+        composerAttachments = emptyList()
+        detail = detail?.copy(attachments = emptyList())
         scope.launch {
             try {
-                repository.send(id, text)
+                val uploads = uploadAttachments(attachments)
+                repository.send(id, text, uploads)
                 updatePending(id) { rows ->
                     rows.map { row -> if (row.localId == pending.localId) row.copy(state = SendState.ACCEPTED) else row }
                 }
@@ -256,13 +337,17 @@ class DesktopAppState(
         val original = pendingBySession[id].orEmpty().firstOrNull { it.localId == localId } ?: return
         if (original.state != SendState.FAILED) return
         updatePending(id) { rows -> rows.map { if (it.localId == localId) it.copy(state = SendState.SENDING, error = null) else it } }
-        sendRetry(id, original)
+        pendingMessageBaselines = pendingMessageBaselines + (
+            localId to detail?.messages.orEmpty().map(Message::id).toSet()
+        )
+        sendRetry(id, original, pendingAttachments[localId].orEmpty())
     }
 
-    private fun sendRetry(id: String, original: PendingMessageUiState) {
+    private fun sendRetry(id: String, original: PendingMessageUiState, attachments: List<DesktopAttachment>) {
         scope.launch {
             try {
-                repository.send(id, original.text)
+                val uploads = uploadAttachments(attachments)
+                repository.send(id, original.text, uploads)
                 updatePending(id) { rows -> rows.map { if (it.localId == original.localId) it.copy(state = SendState.ACCEPTED) else it } }
             } catch (error: Exception) {
                 val mapped = error.toDesktopGatewayError()
@@ -273,6 +358,8 @@ class DesktopAppState(
 
     fun discard(localId: String) {
         val id = selection.selectedId ?: return
+        pendingAttachments = pendingAttachments - localId
+        pendingMessageBaselines = pendingMessageBaselines - localId
         updatePending(id) { rows -> rows.filterNot { it.localId == localId } }
     }
 
@@ -376,6 +463,10 @@ class DesktopAppState(
         transientError = null
     }
 
+    fun dismissNotification(id: String) {
+        if (notificationEvent?.id == id) notificationEvent = null
+    }
+
     fun openNewSession() {
         newSessionOpen = true
     }
@@ -394,14 +485,35 @@ class DesktopAppState(
         if (selection.selectedId == id) detail = detail?.copy(pending = pendingBySession[id].orEmpty())
     }
 
+    private suspend fun uploadAttachments(attachments: List<DesktopAttachment>): List<String> =
+        attachments.map { attachment ->
+            val bytes = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val size = Files.size(attachment.path)
+                if (size > MAX_UPLOAD_BYTES) {
+                    error("${attachment.name} is larger than ${MAX_UPLOAD_BYTES / (1024 * 1024)} MB")
+                }
+                Files.readAllBytes(attachment.path)
+            }
+            api.upload(bytes, attachment.mimeType, attachment.name)
+        }
+
     private fun settlePending(id: String, messages: List<Message>) {
-        val remaining = pendingBySession[id].orEmpty().filterNot { pending ->
+        val existing = pendingBySession[id].orEmpty()
+        val remaining = existing.filterNot { pending ->
             val wanted = normalize(pending.text).take(100)
-            wanted.isNotEmpty() && messages.any { message ->
+            val textMatched = wanted.isNotEmpty() && messages.any { message ->
                 message.role == "user" && normalize(message.text()).contains(wanted)
             }
+            val attachmentOnlyMatched = pending.text.isBlank() && pending.attachments.isNotEmpty() &&
+                messages.any { message ->
+                    message.role == "user" && message.id !in pendingMessageBaselines[pending.localId].orEmpty()
+                }
+            textMatched || attachmentOnlyMatched
         }
-        if (remaining.size != pendingBySession[id].orEmpty().size) {
+        if (remaining.size != existing.size) {
+            val settledIds = existing.filterNot { it in remaining }.map { it.localId }.toSet()
+            pendingAttachments = pendingAttachments - settledIds
+            pendingMessageBaselines = pendingMessageBaselines - settledIds
             pendingBySession = if (remaining.isEmpty()) pendingBySession - id else pendingBySession + (id to remaining)
         }
     }
@@ -426,6 +538,12 @@ private fun MessageDto.toMessage() = Message(
 )
 
 private fun Message.text(): String = blocks.filter { it.type == "text" }.joinToString(" ") { it.text.orEmpty() }
+
+private fun DesktopAttachment.toUiState() = AttachmentUiState(
+    id = id,
+    name = name,
+    mimeType = mimeType,
+)
 
 private fun normalize(value: String): String = value.replace(Regex("\\s+"), " ").trim()
 

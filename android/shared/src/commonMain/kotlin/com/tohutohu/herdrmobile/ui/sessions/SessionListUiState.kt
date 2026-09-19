@@ -17,6 +17,7 @@ data class SessionListUiState(
     val isLoaded: Boolean = false,
     val isRefreshing: Boolean = false,
     val error: String? = null,
+    val emptyMessage: String = "No sessions. Start Claude Code or Codex inside Herdr on your Mac.",
     val busySessionIds: Set<String> = emptySet(),
     val engagedSessionIds: Set<String> = emptySet(),
 )
