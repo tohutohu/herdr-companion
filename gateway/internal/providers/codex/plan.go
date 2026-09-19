@@ -31,31 +31,79 @@ const (
 	planPromptTitle  = "Implement this plan?"
 )
 
-var planPromptRow = regexp.MustCompile(`^\s*(?:›\s*)?(\d+)\.\s+(.+?)(?:\s{2,}(\S.*?))?\s*$`)
+var selectPromptRow = regexp.MustCompile(`^\s*(›\s*)?(\d+)\.\s+(.+?)(?:\s{2,}(\S.*?))?\s*$`)
 
-// planPromptRows reads the prompt's rows, or ok=false when it is not shown.
-func planPromptRows(screen string) (rows []model.Option, ok bool) {
-	i := strings.LastIndex(screen, planPromptTitle)
+// selectPrompt is a numbered choice popup the Codex TUI draws itself.
+type selectPrompt struct {
+	// Lines are the non-empty lines between the title and the first row.
+	Lines  []string
+	Rows   []model.Option
+	Cursor int // row the › marker is on
+}
+
+// readSelectPrompt reads the last popup titled title, or ok=false when it is
+// not shown.
+func readSelectPrompt(screen, title string) (sp selectPrompt, ok bool) {
+	i := strings.LastIndex(screen, title)
 	if i < 0 {
-		return nil, false
+		return sp, false
 	}
 	for _, line := range strings.Split(screen[i:], "\n")[1:] {
 		if strings.Contains(line, "Press enter to confirm") {
 			break
 		}
-		m := planPromptRow.FindStringSubmatch(line)
+		m := selectPromptRow.FindStringSubmatch(line)
 		if m == nil {
-			if strings.TrimSpace(line) != "" && len(rows) > 0 {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			if len(sp.Rows) > 0 {
 				break
 			}
+			sp.Lines = append(sp.Lines, strings.TrimSpace(line))
 			continue
 		}
-		if n, _ := strconv.Atoi(m[1]); n != len(rows)+1 {
+		if n, _ := strconv.Atoi(m[2]); n != len(sp.Rows)+1 {
 			break
 		}
-		rows = append(rows, model.Option{Label: m[2], Description: m[3]})
+		if m[1] != "" {
+			sp.Cursor = len(sp.Rows)
+		}
+		sp.Rows = append(sp.Rows, model.Option{Label: m[3], Description: m[4]})
 	}
-	return rows, len(rows) >= 2
+	return sp, len(sp.Rows) >= 2
+}
+
+// keys moves the cursor to the row labelled label and confirms it.
+func (sp selectPrompt) keys(label string) ([]string, error) {
+	idx := -1
+	for i, o := range sp.Rows {
+		if o.Label == label {
+			idx = i
+		}
+	}
+	if idx < 0 {
+		return nil, fmt.Errorf("unknown option %q", label)
+	}
+	var keys []string
+	for i := sp.Cursor; i < idx; i++ {
+		keys = append(keys, "down")
+	}
+	for i := sp.Cursor; i > idx; i-- {
+		keys = append(keys, "up")
+	}
+	return append(keys, "enter"), nil
+}
+
+// planPromptRows reads the prompt's rows, or ok=false when it is not shown.
+func planPromptRows(screen string) (rows []model.Option, ok bool) {
+	sp, ok := planSelectPrompt(screen)
+	return sp.Rows, ok
+}
+
+func planSelectPrompt(screen string) (selectPrompt, bool) {
+	sp, ok := readSelectPrompt(screen, planPromptTitle)
+	return sp, ok && len(sp.Lines) == 0
 }
 
 // latestPlanItem is the plan item of a finished last turn.
@@ -76,20 +124,25 @@ func latestPlanItem(th *Thread) string {
 // planPrompt is the pending prompt for the thread's latest plan, or nil when
 // the pane does not show it.
 func (p *Provider) planPrompt(ctx context.Context, th *Thread, live *providers.Live) *model.Interaction {
+	ia, _ := p.planPromptOnScreen(ctx, th, live)
+	return ia
+}
+
+func (p *Provider) planPromptOnScreen(ctx context.Context, th *Thread, live *providers.Live) (*model.Interaction, selectPrompt) {
 	if live == nil {
-		return nil
+		return nil, selectPrompt{}
 	}
 	id := latestPlanItem(th)
 	if id == "" {
-		return nil
+		return nil, selectPrompt{}
 	}
 	screen, err := p.visible(ctx, live.PaneID)
 	if err != nil {
-		return nil
+		return nil, selectPrompt{}
 	}
-	rows, ok := planPromptRows(screen)
+	sp, ok := planSelectPrompt(screen)
 	if !ok {
-		return nil
+		return nil, selectPrompt{}
 	}
 	return &model.Interaction{
 		ID:        planPromptPrefix + id,
@@ -98,11 +151,12 @@ func (p *Provider) planPrompt(ctx context.Context, th *Thread, live *providers.L
 		State:     model.InteractionPending,
 		Title:     "Codex has a plan",
 		Supported: true,
-		Questions: []model.Question{{ID: "0", Type: model.QuestionSelect, Question: planPromptTitle, Options: rows}},
-	}
+		Questions: []model.Question{{ID: "0", Type: model.QuestionSelect, Question: planPromptTitle, Options: sp.Rows}},
+	}, sp
 }
 
-func planPromptMessage(th *Thread, ia *model.Interaction) model.Message {
+// screenPromptMessage carries a popup read from the pane.
+func screenPromptMessage(th *Thread, ia *model.Interaction) model.Message {
 	return model.Message{
 		ID:        ia.ID,
 		Role:      model.RoleAssistant,
@@ -123,26 +177,22 @@ func (p *Provider) respondPlan(ctx context.Context, nativeID string, live *provi
 	}
 	// The prompt must still be on screen: keys sent to the composer would
 	// type into it instead.
-	ia := p.planPrompt(ctx, th, live)
+	ia, sp := p.planPromptOnScreen(ctx, th, live)
 	if ia == nil || ia.ID != r.InteractionID {
 		return providers.ErrInteractionGone
 	}
+	return p.answerSelectPrompt(ctx, live, sp, r)
+}
+
+// answerSelectPrompt picks the single chosen row of a popup on screen.
+func (p *Provider) answerSelectPrompt(ctx context.Context, live *providers.Live, sp selectPrompt, r model.InteractionResponse) error {
 	a := r.Answers["0"]
 	if len(a.Selected) != 1 {
 		return fmt.Errorf("choose one option")
 	}
-	idx := -1
-	for i, o := range ia.Questions[0].Options {
-		if o.Label == a.Selected[0] {
-			idx = i
-		}
+	keys, err := sp.keys(a.Selected[0])
+	if err != nil {
+		return err
 	}
-	if idx < 0 {
-		return fmt.Errorf("unknown option %q", a.Selected[0])
-	}
-	keys := make([]string, 0, idx+1)
-	for range idx {
-		keys = append(keys, "down")
-	}
-	return p.term.SendKeys(ctx, live.PaneID, append(keys, "enter")...)
+	return p.term.SendKeys(ctx, live.PaneID, keys...)
 }

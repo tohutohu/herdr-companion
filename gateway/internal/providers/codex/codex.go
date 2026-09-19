@@ -220,6 +220,11 @@ func (p *Provider) Summary(ctx context.Context, nativeID string, live *providers
 	if s.Pending == "" && p.planPrompt(ctx, th, live) != nil {
 		s.Pending, s.Status = model.InteractionApproval, model.StatusWaitingApproval
 	}
+	if s.Pending == "" {
+		if ia, _ := p.rateLimitPrompt(ctx, th, live); ia != nil {
+			s.Pending, s.Status = model.InteractionQuestions, model.StatusWaitingInput
+		}
+	}
 	return &s, nil
 }
 
@@ -298,7 +303,9 @@ func (p *Provider) Messages(ctx context.Context, nativeID string, live *provider
 		if ia := p.asyncInteraction(ctx, th, live); ia != nil {
 			pending = []model.Message{{ID: ia.ID, Role: model.RoleAssistant, Timestamp: time.Unix(th.UpdatedAt, 0).UTC(), Blocks: []model.Block{{Type: model.BlockInteraction, Interaction: ia}}}}
 		} else if ia := p.planPrompt(ctx, th, live); ia != nil {
-			pending = []model.Message{planPromptMessage(th, ia)}
+			pending = []model.Message{screenPromptMessage(th, ia)}
+		} else if ia, _ := p.rateLimitPrompt(ctx, th, live); ia != nil {
+			pending = []model.Message{screenPromptMessage(th, ia)}
 		}
 	}
 	if len(pending) == 0 && live.Blocked() {
@@ -376,6 +383,9 @@ func (p *Provider) Respond(ctx context.Context, nativeID string, live *providers
 	}
 	if strings.HasPrefix(r.InteractionID, planPromptPrefix) {
 		return p.respondPlan(ctx, nativeID, live, r)
+	}
+	if strings.HasPrefix(r.InteractionID, rateLimitPromptPrefix) {
+		return p.respondRateLimit(ctx, nativeID, live, r)
 	}
 	if r.InteractionID == blockedPromptID {
 		return providers.ErrUnsupported
