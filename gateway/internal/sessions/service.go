@@ -166,7 +166,27 @@ func (s *Service) List(ctx context.Context) ([]model.Session, error) {
 	if s.offlineWindow > 0 {
 		since := time.Now().Add(-s.offlineWindow)
 		for _, p := range s.providers {
-			recent, err := p.Recent(ctx, since)
+			var recent []providers.Summary
+			var err error
+			if filtered, ok := p.(providers.FilteredRecentProvider); ok {
+				exclude := map[string]bool{}
+				for _, r := range live {
+					if r.Provider.Name() == p.Name() {
+						exclude[r.NativeID] = true
+					}
+				}
+				if s.Archive != nil {
+					for _, id := range s.Archive.IDs() {
+						name, native, ok := SplitID(id)
+						if ok && name == p.Name() {
+							exclude[native] = true
+						}
+					}
+				}
+				recent, err = filtered.RecentExcluding(ctx, since, exclude)
+			} else {
+				recent, err = p.Recent(ctx, since)
+			}
 			if err != nil {
 				slog.Warn("listing recent sessions failed", "provider", p.Name(), "operation", "recent", "error", err)
 			}

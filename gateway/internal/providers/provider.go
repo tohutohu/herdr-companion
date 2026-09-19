@@ -92,6 +92,12 @@ type Summary struct {
 	Cost *model.Cost
 }
 
+// FilteredRecentProvider can skip unwanted native IDs before reading history.
+// Filtering does not backfill beyond the provider's normal candidate limit.
+type FilteredRecentProvider interface {
+	RecentExcluding(ctx context.Context, since time.Time, exclude map[string]bool) ([]Summary, error)
+}
+
 type Provider interface {
 	Name() string        // id prefix, e.g. "claude"
 	DisplayName() string // e.g. "Claude Code"

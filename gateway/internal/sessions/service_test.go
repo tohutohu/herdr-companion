@@ -1,7 +1,9 @@
 package sessions
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
@@ -68,3 +70,40 @@ func Test稼働中セッションのcwdはファイルリンクと同じペイ�
 }
 
 func (stubProvider) DisplayName() string { return "Claude Code" }
+
+type listSnapshot struct{}
+
+func (listSnapshot) Snapshot(context.Context) (*herdr.Snapshot, error) {
+	agent := "claude"
+	return &herdr.Snapshot{Panes: []herdr.Pane{{PaneID: "pane", Agent: &agent, AgentSession: &herdr.AgentSession{Agent: agent, Kind: "id", Value: "live"}}}}, nil
+}
+
+type listArchive struct{}
+
+func (listArchive) Has(id string) bool { return id == "claude:archived" }
+func (listArchive) IDs() []string      { return []string{"claude:archived", "codex:other"} }
+
+type filteredListProvider struct {
+	stubProvider
+	excluded map[string]bool
+}
+
+func (p *filteredListProvider) Summary(context.Context, string, *providers.Live) (*providers.Summary, error) {
+	return &providers.Summary{NativeID: "live"}, nil
+}
+func (p *filteredListProvider) RecentExcluding(_ context.Context, _ time.Time, exclude map[string]bool) ([]providers.Summary, error) {
+	p.excluded = exclude
+	return []providers.Summary{{NativeID: "offline"}}, nil
+}
+func Test一覧は稼働中とアーカイブ済みを解析前の除外対象にする(t *testing.T) {
+	p := &filteredListProvider{}
+	s := New(listSnapshot{}, time.Hour, p)
+	s.Archive = listArchive{}
+	got, err := s.List(context.Background())
+	if err != nil || len(got) != 2 {
+		t.Fatalf("got=%v err=%v", got, err)
+	}
+	if len(p.excluded) != 2 || !p.excluded["live"] || !p.excluded["archived"] {
+		t.Fatalf("excluded=%v", p.excluded)
+	}
+}

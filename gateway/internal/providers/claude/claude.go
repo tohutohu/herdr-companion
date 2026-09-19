@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
@@ -25,6 +26,8 @@ const providerName = "claude"
 const maxRecent = 30
 
 type Provider struct {
+	summaryMu sync.Mutex
+	summaries map[summaryKey]cachedSummary
 	configDir string
 	term      providers.Terminal
 	sink      deadletter.Sink
@@ -108,11 +111,14 @@ func root(t *Transcript, live *providers.Live) string {
 }
 
 func (p *Provider) Summary(ctx context.Context, nativeID string, live *providers.Live) (*providers.Summary, error) {
-	t, err := p.load(nativeID)
+	path, err := p.transcriptPath(nativeID)
 	if err != nil {
 		return nil, err
 	}
-	s := t.summary(ParseOptions{SessionID: gatewayID(nativeID), Live: live})
+	s, err := p.summaryPath(ctx, path, nativeID, live)
+	if err != nil {
+		return nil, err
+	}
 	s.NativeID = nativeID
 	if s.Cwd == "" && live != nil {
 		s.Cwd = live.Cwd
@@ -121,6 +127,10 @@ func (p *Provider) Summary(ctx context.Context, nativeID string, live *providers
 }
 
 func (p *Provider) Recent(ctx context.Context, since time.Time) ([]providers.Summary, error) {
+	return p.RecentExcluding(ctx, since, nil)
+}
+
+func (p *Provider) RecentExcluding(ctx context.Context, since time.Time, exclude map[string]bool) ([]providers.Summary, error) {
 	matches, err := filepath.Glob(filepath.Join(p.configDir, "projects", "*", "*.jsonl"))
 	if err != nil {
 		return nil, err
@@ -147,11 +157,13 @@ func (p *Provider) Recent(ctx context.Context, since time.Time) ([]providers.Sum
 			return out, ctx.Err()
 		}
 		id := strings.TrimSuffix(filepath.Base(c.path), ".jsonl")
-		t, err := p.loadPath(c.path, id)
+		if exclude[id] {
+			continue
+		}
+		s, err := p.summaryPath(ctx, c.path, id, nil)
 		if err != nil {
 			continue
 		}
-		s := t.summary(ParseOptions{SessionID: gatewayID(id)})
 		if s.LastMessage == "" {
 			continue // empty or metadata-only sessions
 		}
