@@ -1,0 +1,118 @@
+name: macOS release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # Compose Multiplatform 1.12.0 supports macOS arm64 for this project.
+    runs-on: macos-14
+    env:
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+
+      - name: Run Android and shared regression checks
+        working-directory: android
+        run: ./gradlew --console=plain test assembleDebug
+
+      - name: Run Gateway regression checks
+        working-directory: gateway
+        run: |
+          env -u GOROOT go test ./...
+          env -u GOROOT go vet ./...
+
+      - name: Import Developer ID certificate
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          if [[ -z "${MACOS_CERTIFICATE_P12_BASE64:-}" || -z "${MACOS_CERTIFICATE_PASSWORD:-}" ]]; then
+            echo "Developer ID certificate secrets are not configured; producing an unsigned local-style artifact."
+            exit 0
+          fi
+
+          KEYCHAIN_PATH="$RUNNER_TEMP/herdr-build.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          CERT_PATH="$RUNNER_TEMP/herdr-developer-id.p12"
+          printf '%s' "$MACOS_CERTIFICATE_P12_BASE64" | base64 -D > "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -k "$KEYCHAIN_PATH" -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: -s \
+            -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+          security default-keychain -s "$KEYCHAIN_PATH"
+
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
+            | sed -n 's/.*"\(Developer ID Application:.*\)"/\1/p' | head -n 1)"
+          if [[ -z "$IDENTITY" ]]; then
+            echo "No Developer ID Application identity was found in the imported keychain." >&2
+            exit 1
+          fi
+
+          {
+            echo "MACOS_SIGNING_IDENTITY=$IDENTITY"
+            echo "MACOS_SIGNING_KEYCHAIN=$KEYCHAIN_PATH"
+            echo "HERDR_CI_KEYCHAIN=$KEYCHAIN_PATH"
+          } >> "$GITHUB_ENV"
+
+      - name: Build and verify separate macOS DMGs
+        run: ./scripts/build-macos-release.sh
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Herdr-macos-${{ github.ref_name }}
+          if-no-files-found: error
+          path: |
+            dist/Herdr-*.dmg
+            dist/Herdr-*.dmg.sha256
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="$(awk -F= '$1 == "version" { print $2; exit }' version.properties)"
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/Herdr-$VERSION.dmg" \
+            "dist/Herdr-$VERSION.dmg.sha256" \
+            "dist/Herdr-Mobile-$VERSION.dmg" \
+            "dist/Herdr-Mobile-$VERSION.dmg.sha256" \
+            --verify-tag --generate-notes
+
+      - name: Delete temporary keychain
+        if: always()
+        run: |
+          if [[ -n "${HERDR_CI_KEYCHAIN:-}" ]]; then
+            security delete-keychain "$HERDR_CI_KEYCHAIN" >/dev/null 2>&1 || true
+          fi
+          rm -f "$RUNNER_TEMP/herdr-developer-id.p12"

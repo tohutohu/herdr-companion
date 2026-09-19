@@ -3,10 +3,12 @@
 <plist version="1.0"><dict>
 <key>CFBundleIdentifier</key><string>com.tohutohu.herdrmobile.mac</string>
 <key>CFBundleName</key><string>Herdr Mobile</string>
+<key>CFBundleDisplayName</key><string>Herdr Mobile</string>
 <key>CFBundleExecutable</key><string>HerdrMenu</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.1.0</string>
-<key>CFBundleVersion</key><string>1</string>
+<key>CFBundleShortVersionString</key><string>__HERDR_VERSION__</string>
+<key>CFBundleVersion</key><string>__HERDR_BUILD__</string>
+<key>CFBundleIconFile</key><string>Herdr.icns</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>

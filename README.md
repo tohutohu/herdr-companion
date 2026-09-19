@@ -20,6 +20,7 @@ Gateway は独自の会話 DB を持たず、Herdr と各エージェント自�
 ## Macのメニューバーアプリから始める
 
 [macos/README.md](macos/README.md)にDMGの作成・導入手順があります。メニューバーからGatewayを起動し、Androidの「Scan Mac QR」で接続できます。
+Compose Desktop UIの配布（`Herdr.app`）と、SwiftUI Gateway Manager + Go Gatewayの配布（`Herdr Mobile.app`）は別アプリ・別DMGです。詳細は[macOS release guide](docs/macos-release.md)を参照してください。
 Firebase秘密鍵・Jevキーはどちらも任意です。未設定でも閲覧・送信・承認・セッション起動を利用できます。
 通知を使う場合は、Mac画面でサービスアカウントJSONと`google-services.json`を取り込んでからペアリングしてください。Androidの再ビルドは不要です。
 以下は従来のCLIによるセットアップ手順です。
@@ -28,9 +29,9 @@ Firebase秘密鍵・Jevキーはどちらも任意です。未設定でも閲覧
 
 ```text
 gateway/   Go 製 Gateway（cmd/herdr-mobile-gateway, internal/...）
-android/   Android アプリ（Kotlin / Jetpack Compose）
-macos/     メニューバーアプリ（SwiftUI）とDMGビルド
-docs/      設計ドキュメント
+android/   Android アプリとCompose Desktop UI（Kotlin / Compose）
+macos/     Gateway Manager（SwiftUI）とGateway用DMGビルド
+docs/      設計・macOS releaseドキュメント
 ```
 
 ## 前提

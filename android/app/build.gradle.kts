@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -5,6 +7,18 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
 }
+
+val releaseProperties = Properties().apply {
+    val file = rootProject.projectDir.parentFile.resolve("version.properties")
+    require(file.isFile) { "Missing release version source: $file" }
+    file.inputStream().use(::load)
+}
+val herdrVersion = providers.gradleProperty("herdr.version").orNull
+    ?: releaseProperties.getProperty("version")
+    ?: error("Missing 'version' in version.properties")
+val herdrBuild = providers.gradleProperty("herdr.build").orNull
+    ?: releaseProperties.getProperty("build")
+    ?: error("Missing 'build' in version.properties")
 
 // Shared APKs receive Firebase client settings at pairing time. Only personal
 // builds explicitly opting in may embed local google-services.json.
@@ -20,8 +34,9 @@ android {
         applicationId = "com.tohutohu.herdrmobile"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = herdrBuild.toIntOrNull()?.takeIf { it > 0 }
+            ?: error("Herdr build must be a positive integer, got '$herdrBuild'")
+        versionName = herdrVersion
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

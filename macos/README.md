@@ -2,11 +2,13 @@
 
 macOS 13以降のメニューバーアプリです。Go Gatewayを同梱し、起動・停止、Firebase設定の取り込み、任意のJevキー設定、AndroidとのQRペアリング、ログイン時起動を管理します。
 
+これはCompose Desktop UI（`Herdr.app`）とは別アプリです。UIとGatewayをまとめて使う場合も、`Herdr-x.y.z.dmg`と`Herdr-Mobile-x.y.z.dmg`をそれぞれインストールします。releaseの全手順は[macOS release guide](../docs/macos-release.md)を参照してください。
+
 ## 使い方
 
 1. MacとAndroidにTailscaleを用意し、同じtailnetに接続します。
 2. MacのHerdrとClaude Code／Codexをセットアップします。Herdrのintegration設定は[ルートREADME](../README.md#1-herdr-のセットアップ)を参照してください。
-3. DMGを開き、`Herdr Mobile.app`をApplicationsへドラッグして起動します。
+3. Gateway DMGを開き、`Herdr Mobile.app`をApplicationsへドラッグして起動します。Compose UIを使う場合はUI DMGの`Herdr.app`も別途Applicationsへ入れます。
 4. メニューバーのターミナルアイコンを開き、Tailscale IPv4とポートを確認して「Gatewayを起動」。
 5. 「ペアリングQRを表示」→ Androidの設定で「Scan Mac QR」→ 接続先を確認して「Pair」。
 
@@ -43,23 +45,26 @@ Firebase APIキーをAndroidアプリに制限する場合、配布APKのパッ�
 
 ## ビルド・DMG
 
-Xcode Command Line Tools（Swift）、Go、macOSが必要です。
+Xcode Command Line Tools（Swift）、Go、JDK 17、arm64 macOSが必要です。UIとGatewayを別々に含むrelease成果物はルートのwrapperで作成します。
+
+```bash
+./scripts/build-macos-release.sh
+```
+
+次の2本が生成されます。
+
+```text
+dist/Herdr-x.y.z.dmg
+dist/Herdr-Mobile-x.y.z.dmg
+```
+
+Gateway Managerだけを開発用に作る場合は、従来の次のコマンドも利用できます。`macos/build/Herdr-Mobile-$(uname -m).dmg`が出力されます。
 
 ```bash
 bash macos/scripts/build-dmg.sh
 ```
 
-現在のMacのアーキテクチャ向けに`macos/build/Herdr-Mobile-arm64.dmg`または`Herdr-Mobile-x86_64.dmg`を作成します。Intel版はIntel環境でビルドしてください。
-
-既定はローカル検証用のad-hoc署名です。一般配布にはDeveloper ID署名・Apple公証を行ってください。
-
-```bash
-SIGNING_IDENTITY='Developer ID Application: …' \
-NOTARY_PROFILE='your-keychain-profile' \
-bash macos/scripts/build-dmg.sh
-```
-
-署名用秘密鍵や公証パスワードはソースに入れず、Keychainに保存します。ビルドスクリプトは署名検証、任意の公証・staple、DMGのSHA-256出力まで行います。
+既定はローカル検証用のad-hoc署名です。一般配布では、`MACOS_SIGNING_IDENTITY`、`MACOS_SIGNING_KEYCHAIN`、`APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD`、`APPLE_TEAM_ID`を環境変数またはCI secretsから渡してDeveloper ID署名・Apple notarizationを行います。署名用秘密鍵や公証パスワードはソースに入れません。
 
 ## ペアリング仕様
 

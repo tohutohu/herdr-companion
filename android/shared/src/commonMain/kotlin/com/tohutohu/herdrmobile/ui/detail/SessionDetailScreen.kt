@@ -423,7 +423,7 @@ private fun BoxScope.PinnedFlowStack(
     }
 }
 
-internal fun messageStartOffset(messageHeight: Int, viewportHeight: Int, panelHeight: Int): Int =
+fun messageStartOffset(messageHeight: Int, viewportHeight: Int, panelHeight: Int): Int =
     (messageHeight - (viewportHeight - panelHeight)).coerceAtLeast(0)
 
 private suspend fun LazyListState.showNewestFromStart(index: Int, panelHeight: () -> Int) {
