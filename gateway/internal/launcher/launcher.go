@@ -55,13 +55,14 @@ type Launcher struct {
 	IdentityWait time.Duration
 
 	mu sync.Mutex
-	// pending holds launches waiting on a trust answer, by pane id, until the
-	// app answers or the gateway restarts. Entries are small, so unanswered
+	// pending holds launches waiting on trust, readiness or identity, by pane
+	// id, until they finish or the gateway restarts. Entries are small, so unanswered
 	// ones are simply kept.
 	pending map[string]*pendingLaunch
+	panes   map[string]bool
 }
 
-// pendingLaunch is a launch stopped at the agent's folder-trust dialog.
+// pendingLaunch retains the context needed to finish a partial launch.
 type pendingLaunch struct {
 	p       providers.Provider
 	lp      providers.Launchable
@@ -288,6 +289,12 @@ func (l *Launcher) launch(ctx context.Context, p providers.Provider, lp provider
 		}
 		return nil, fmt.Errorf("start agent: %w", err)
 	}
+	l.mu.Lock()
+	if l.panes == nil {
+		l.panes = map[string]bool{}
+	}
+	l.panes[pane] = true
+	l.mu.Unlock()
 	pl := &pendingLaunch{p: p, lp: lp, ws: ws, cwd: cwd, prompt: prompt, knownID: knownID, started: started, logKV: logKV}
 	switch l.passStartupDialog(ctx, lp, pane, trust) {
 	case startupTrust:
@@ -296,10 +303,11 @@ func (l *Launcher) launch(ctx context.Context, p providers.Provider, lp provider
 		log.Info("launch waiting on folder trust", "cwd", cwd)
 		return res, nil
 	case startupStuck:
+		l.putPending(pane, pl)
 		res.Warning = "The agent is waiting on a startup dialog. Open the terminal to continue."
 		return res, nil
 	}
-	return l.finish(ctx, pane, pl), nil
+	return l.finishPending(ctx, pane, pl), nil
 }
 
 // AnswerTrust resumes a launch stopped at the folder-trust dialog. Declining
@@ -310,13 +318,57 @@ func (l *Launcher) AnswerTrust(ctx context.Context, pane string, accept bool) (*
 		return nil, ErrNoPendingTrust
 	}
 	if !accept {
+		l.mu.Lock()
+		delete(l.panes, pane)
+		l.mu.Unlock()
 		slog.Info("folder trust declined", "provider", pl.p.Name(), "pane", pane, "cwd", pl.cwd)
 		return &StartResult{PaneID: pane}, l.Herdr.CloseWorkspace(ctx, pl.ws)
 	}
 	if l.passStartupDialog(ctx, pl.lp, pane, true) != startupReady {
+		l.putPending(pane, pl)
 		return &StartResult{PaneID: pane, Warning: "The agent is waiting on a startup dialog. Open the terminal to continue."}, nil
 	}
-	return l.finish(ctx, pane, pl), nil
+	return l.finishPending(ctx, pane, pl), nil
+}
+
+// TerminalPane allows fallback access only to panes launched by this gateway.
+func (l *Launcher) TerminalPane(ctx context.Context, pane string) (string, error) {
+	l.mu.Lock()
+	owned := l.panes[pane]
+	l.mu.Unlock()
+	if !owned {
+		return "", providers.ErrNotFound
+	}
+	if _, err := l.Herdr.Pane(ctx, pane); err != nil {
+		return "", err
+	}
+	return pane, nil
+}
+
+// Continue retries readiness after the user handles an unfamiliar dialog.
+// Taking the pending entry prevents concurrent requests from sending twice.
+func (l *Launcher) Continue(ctx context.Context, pane string) (*StartResult, error) {
+	pl := l.takePending(pane)
+	if pl == nil {
+		return nil, ErrNoPendingTrust
+	}
+	switch l.passStartupDialog(ctx, pl.lp, pane, false) {
+	case startupTrust:
+		l.putPending(pane, pl)
+		return &StartResult{PaneID: pane, TrustRequired: true}, nil
+	case startupStuck:
+		l.putPending(pane, pl)
+		return &StartResult{PaneID: pane, Warning: "The agent is still waiting. Open the terminal to continue."}, nil
+	}
+	return l.finishPending(ctx, pane, pl), nil
+}
+
+func (l *Launcher) finishPending(ctx context.Context, pane string, pl *pendingLaunch) *StartResult {
+	res := l.finish(ctx, pane, pl)
+	if res.SessionID == "" {
+		l.putPending(pane, pl)
+	}
+	return res
 }
 
 func (l *Launcher) putPending(pane string, pl *pendingLaunch) {
@@ -347,6 +399,8 @@ func (l *Launcher) finish(ctx context.Context, pane string, pl *pendingLaunch) *
 		if err := l.Herdr.Prompt(ctx, pane, pl.prompt); err != nil {
 			res.Warning = "Prompt could not be sent: " + err.Error()
 		}
+		// Never replay a prompt after an ambiguous send error.
+		pl.prompt = ""
 	}
 
 	res.SessionID = l.waitIdentity(ctx, pane, pl.p, pl.cwd, pl.started, pl.knownID)

@@ -493,19 +493,19 @@ func Test起動引数にdaemon接続とモデルとエフォート指定を含�
 	args := func(model, effort, cwd string) string {
 		return strings.Join(p.LaunchArgs(providers.LaunchOptions{Model: model, Effort: effort, Cwd: cwd}), " ")
 	}
-	if got := args("gpt-6-mini", "", "/w/app"); got != "--model gpt-6-mini" {
+	if got := args("gpt-6-mini", "", "/w/app"); got != "-c check_for_update_on_startup=false --model gpt-6-mini" {
 		t.Errorf("without daemon = %q", got)
 	}
 	os.WriteFile(sock, nil, 0o600)
 	// daemon に繋ぐときは作業ディレクトリを明示する
-	if got := args("", "", "/w/app"); got != "--remote unix://"+sock+" --cd /w/app" {
+	if got := args("", "", "/w/app"); got != "-c check_for_update_on_startup=false --remote unix://"+sock+" --cd /w/app" {
 		t.Errorf("default model = %q", got)
 	}
-	if got := args("gpt-6-mini", "", "/w/app"); got != "--remote unix://"+sock+" --cd /w/app --model gpt-6-mini" {
+	if got := args("gpt-6-mini", "", "/w/app"); got != "-c check_for_update_on_startup=false --remote unix://"+sock+" --cd /w/app --model gpt-6-mini" {
 		t.Errorf("with daemon = %q", got)
 	}
 	// エフォートは TUI が daemon に渡す設定上書きで指定する
-	want := "--remote unix://" + sock + ` --cd /w/app -c model_reasoning_effort="xhigh"`
+	want := "-c check_for_update_on_startup=false --remote unix://" + sock + ` --cd /w/app -c model_reasoning_effort="xhigh"`
 	if got := args("", "xhigh", "/w/app"); got != want {
 		t.Errorf("with effort = %q", got)
 	}
@@ -692,5 +692,14 @@ func TestCodexのコストはスレッドの累計トークンから見積もる
 	}
 	if c := infoFromRollout("").cost("gpt-5.6-luna"); c != nil {
 		t.Errorf("missing rollout cost = %+v, want nil", c)
+	}
+}
+
+func Test新規と再開のどちらも起動時の更新確認を無効にする(t *testing.T) {
+	p := New("codex", filepath.Join(t.TempDir(), "absent.sock"), &fakeTerm{}, deadletter.Nop{})
+	for _, args := range [][]string{p.LaunchArgs(providers.LaunchOptions{}), p.ResumeArgs("thread", "/work")} {
+		if !strings.Contains(strings.Join(args, " "), "-c check_for_update_on_startup=false") {
+			t.Fatal(args)
+		}
 	}
 }

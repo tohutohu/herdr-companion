@@ -705,7 +705,7 @@ func (d *daemonConn) interactions(thread string, sink deadletter.Sink) []model.M
 // approvals and questions can be answered from the app. A remote TUI would
 // otherwise start its thread in the daemon's directory, so cwd is explicit.
 func (p *Provider) LaunchArgs(opts providers.LaunchOptions) []string {
-	args := p.remoteArgs(opts.Cwd)
+	args := append([]string{"-c", "check_for_update_on_startup=false"}, p.remoteArgs(opts.Cwd)...)
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
 	}
@@ -726,7 +726,7 @@ func (p *Provider) remoteArgs(cwd string) []string {
 
 // ResumeArgs reopens a thread with `codex resume <id>`.
 func (p *Provider) ResumeArgs(nativeID, cwd string) []string {
-	return append([]string{"resume", nativeID}, p.remoteArgs(cwd)...)
+	return append([]string{"resume", nativeID, "-c", "check_for_update_on_startup=false"}, p.remoteArgs(cwd)...)
 }
 
 // LocateLaunched finds the newest thread loaded on the shared daemon that

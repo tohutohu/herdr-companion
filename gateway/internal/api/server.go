@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tohutohu/herdr-android-client/gateway/internal/agentupdate"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/archive"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/config"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
@@ -39,6 +40,7 @@ type Terminal interface {
 
 type Server struct {
 	pairing        pairingState
+	AgentUpdates   *agentupdate.Service
 	DirectoryCheck *directorycheck.Checker
 	Sessions       *sessions.Service
 	Terminal       Terminal
@@ -63,6 +65,11 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("POST /v1/sessions", s.startSession)
 	api.HandleFunc("POST /v1/launches/{pane}/trust", s.answerTrust)
 	api.HandleFunc("GET /v1/models", s.listModels)
+	api.HandleFunc("GET /v1/agents", s.listAgents)
+	api.HandleFunc("POST /v1/agents/{provider}/update", s.updateAgent)
+	api.HandleFunc("GET /v1/launches/{pane}/terminal", s.readTerminal)
+	api.HandleFunc("POST /v1/launches/{pane}/terminal", s.writeTerminal)
+	api.HandleFunc("POST /v1/launches/{pane}/continue", s.continueLaunch)
 	api.HandleFunc("GET /v1/directories", s.listDirectories)
 	api.HandleFunc("POST /v1/directories", s.createDirectory)
 	api.HandleFunc("POST /v1/directories/check", s.checkDirectory)
@@ -479,7 +486,7 @@ func (s *Server) readTerminal(w http.ResponseWriter, r *http.Request) {
 	if v, err := strconv.Atoi(r.URL.Query().Get("lines")); err == nil && v > 0 && v <= 2000 {
 		lines = v
 	}
-	pane, err := s.livePane(r.Context(), id)
+	pane, err := s.terminalPane(r)
 	if err != nil {
 		s.fail(w, r, id, "read_terminal", err)
 		return
@@ -518,7 +525,7 @@ func (s *Server) writeTerminal(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	pane, err := s.livePane(r.Context(), id)
+	pane, err := s.terminalPane(r)
 	if err != nil {
 		s.fail(w, r, id, "write_terminal", err)
 		return

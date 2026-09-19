@@ -321,6 +321,10 @@ whole thing off, and `herdr-mobile-gateway usage` prints one read.
 | GET | `/v1/sessions` | live + recent offline sessions |
 | POST | `/v1/sessions` | start `{provider, cwd, prompt, model?, effort?, trust}` in a new Herdr workspace → `{sessionId?, paneId, warning?, trustRequired?}` |
 | POST | `/v1/launches/{pane}/trust` | `{trust}` answer a start that returned `trustRequired`: continue it or close its workspace → `{sessionId?, paneId, warning?}` |
+| GET / POST | `/v1/launches/{pane}/terminal` | terminal fallback before a session id exists; only panes launched by this gateway |
+| POST | `/v1/launches/{pane}/continue` | retry readiness after manual terminal interaction, then send the retained initial prompt once |
+| GET | `/v1/agents` | installed CLI versions and latest update status/output |
+| POST | `/v1/agents/{provider}/update` | start `claude update` or `codex update`; repeated requests while running share the same job |
 | GET | `/v1/models?provider=` | models and efforts offered for new sessions `{models[{id, name, description?, default?, efforts?[]}], efforts?[{id, name, description?, default?}]}` |
 | GET | `/v1/directories?path=` | workspace roots, or subfolders of `path` |
 | POST | `/v1/directories` | create `{parent, name}` under a root |
@@ -372,3 +376,25 @@ of the app's archive filter. Provider scan limits still apply. There is no
 persistent derived history or decision cache. The request has a 10-second context
 budget, of which history gets at most 3 seconds; provider filesystem reads may
 finish after cancellation. API errors return unavailable without logging payloads.
+
+## Agent updates and startup fallback
+
+Herdr-launched Codex TUIs (new and resumed) pass
+`-c check_for_update_on_startup=false`. Updates are explicit in Android Settings.
+The authenticated update endpoints execute only the configured Codex binary or
+`claude` on the Gateway PATH, with fixed `--version` / `update` arguments, no shell
+and no interactive stdin. Native CLI installations supporting these commands
+are required; package-manager-only installations report their CLI error/output
+and may require updating on the Mac. Update jobs survive HTTP disconnects and
+leaving the Android screen, are serialized per provider, have a ten-minute
+limit, and retain at most 32 KiB of output. Status lives until Gateway restart.
+Existing Herdr panes and the shared Codex app-server are never restarted by the
+Gateway. A running shared app-server retains its old version until the user
+restarts it after finishing active sessions.
+
+A partial start keeps its pane and initial prompt in the launcher. Android's
+pending start screen offers Terminal and Continue start. Continue rechecks
+readiness (and still asks for folder trust when needed). A prompt is not retried
+after a send attempt, including an ambiguous send failure. Terminal access and
+pending launch state last until Gateway restart; dismissing the Android row
+does not close the pane. Partial resumes are also listed as pending starts.

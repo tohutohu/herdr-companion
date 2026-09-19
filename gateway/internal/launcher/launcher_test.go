@@ -412,3 +412,60 @@ func Testフックが報告しないセッションはproviderが見つけてHer
 		t.Errorf("resume = %+v %v", res, err)
 	}
 }
+
+func Test未知の起動ダイアログから端末操作後に続行できる(t *testing.T) {
+	fh := &fakeHerdr{status: herdr.StatusBlocked, screen: "Update now?", startErr: &herdr.Error{Code: "agent_not_ready"}}
+	l, root := newLauncher(t, fh)
+	l.StartTimeout = 25 * time.Millisecond
+	ctx := context.Background()
+	res, err := l.Start(ctx, StartRequest{Provider: "claude", Cwd: filepath.Join(root, "app-b"), Prompt: "hello"})
+	if err != nil || res.Warning == "" || res.SessionID != "" {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if pane, err := l.TerminalPane(ctx, res.PaneID); err != nil || pane != res.PaneID {
+		t.Fatal(pane, err)
+	}
+	if _, err := l.TerminalPane(ctx, "unrelated"); !errors.Is(err, providers.ErrNotFound) {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.Join(fh.calls, "|"), "prompt ") {
+		t.Fatal("sent before readiness")
+	}
+	// The terminal handles the update prompt, then a separate trust prompt appears.
+	fh.screen = "trust this folder"
+	res, err = l.Continue(ctx, res.PaneID)
+	if err != nil || !res.TrustRequired {
+		t.Fatalf("%+v %v", res, err)
+	}
+	res, err = l.AnswerTrust(ctx, res.PaneID, true)
+	if err != nil || res.SessionID != "claude:abc-123" {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if _, err = l.Continue(ctx, res.PaneID); !errors.Is(err, ErrNoPendingTrust) {
+		t.Fatal(err)
+	}
+	if strings.Count(strings.Join(fh.calls, "|"), "prompt hello") != 1 {
+		t.Fatal(fh.calls)
+	}
+}
+
+func TestセッションID待ちの再試行でプロンプトを再送しない(t *testing.T) {
+	fh := &fakeHerdr{status: herdr.StatusIdle}
+	l, root := newLauncher(t, fh)
+	// Identity belongs to a different provider, so the launcher keeps waiting.
+	p := fakeProvider{}
+	pl := &pendingLaunch{p: p, lp: p, cwd: root, prompt: "hello", started: time.Now()}
+	l.IdentityWait = time.Nanosecond
+	res := l.finishPending(context.Background(), "w9:p1", pl)
+	if res.SessionID != "" || res.Warning == "" {
+		t.Fatal(res)
+	}
+	l.IdentityWait = time.Second
+	res, err := l.Continue(context.Background(), "w9:p1")
+	if err != nil || res.SessionID != "claude:abc-123" {
+		t.Fatal(res, err)
+	}
+	if strings.Count(strings.Join(fh.calls, "|"), "prompt hello") != 1 {
+		t.Fatal(fh.calls)
+	}
+}
