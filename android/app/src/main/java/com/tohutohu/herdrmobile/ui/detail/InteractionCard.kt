@@ -101,10 +101,10 @@ fun InteractionCard(
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         when {
                             !open -> AnsweredSummary(interaction)
-                            !interaction.supported -> Unsupported(onOpenTerminal)
+                            !interaction.supported -> Unsupported(interaction, onOpenTerminal)
                             interaction.type == "approval" -> Approval(interaction, enabled, onRespond)
                             interaction.type == "questions" -> Questions(interaction, enabled, onRespond)
-                            else -> Unsupported(onOpenTerminal)
+                            else -> Unsupported(interaction, onOpenTerminal)
                         }
                     }
                 }
@@ -125,9 +125,16 @@ private fun AnsweredSummary(interaction: InteractionDto) {
 }
 
 @Composable
-private fun Unsupported(onOpenTerminal: () -> Unit) {
-    Text("This interaction isn't supported yet.")
-    OutlinedButton(onClick = onOpenTerminal, colors = outlinedButtonColors()) { Text("Open Terminal") }
+private fun Unsupported(interaction: InteractionDto, onOpenTerminal: () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("This interaction needs to be completed in the terminal.")
+        interaction.detail?.takeIf { it.isNotBlank() }?.let {
+            Text(it, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+        }
+        OutlinedButton(onClick = onOpenTerminal, colors = outlinedButtonColors()) {
+            Text("Open Terminal to continue")
+        }
+    }
 }
 
 @Composable
