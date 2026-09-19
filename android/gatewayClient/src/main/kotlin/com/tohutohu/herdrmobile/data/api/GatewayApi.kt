@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit
 
 class GatewayException(val code: Int, message: String) : IOException(message)
 
-/** Thin OkHttp client for the gateway HTTP API. */
+/** Thin OkHttp client for the gateway HTTP API, shared by Android and Desktop JVM. */
 class GatewayApi(
     private val http: OkHttpClient,
     private val settings: () -> Settings,
@@ -225,10 +225,7 @@ class GatewayApi(
     }
 
     companion object {
-        /**
-         * Percent-encodes a file name for the ext-value of Content-Disposition.
-         * URLEncoder is form encoding, so its "+" has to become "%20".
-         */
+        /** Percent-encodes a file name for the ext-value of Content-Disposition. */
         internal fun encodeFilename(name: String): String =
             URLEncoder.encode(name, "UTF-8").replace("+", "%20")
 

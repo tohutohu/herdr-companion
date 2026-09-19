@@ -12,21 +12,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-
-@Serializable
-data class FirebaseSettings(val apiKey: String, val applicationId: String, val projectId: String, val senderId: String)
-
-@Serializable
-data class Settings(
-    val gatewayUrl: String = "", val token: String = "",
-    val firebase: FirebaseSettings? = null,
-    val connectionId: String = "",
-    val gatewayId: String = "",
-) {
-    val isConfigured get() = gatewayUrl.isNotBlank() && token.isNotBlank()
-}
 
 private val Context.dataStore by preferencesDataStore("settings")
 

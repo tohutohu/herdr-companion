@@ -57,6 +57,7 @@ ksp {
 
 dependencies {
     implementation(project(":shared"))
+    implementation(project(":gatewayClient"))
 
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.ui)

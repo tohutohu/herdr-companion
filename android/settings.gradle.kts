@@ -18,3 +18,4 @@ rootProject.name = "HerdrMobile"
 include(":app")
 include(":shared")
 include(":desktopApp")
+include(":gatewayClient")

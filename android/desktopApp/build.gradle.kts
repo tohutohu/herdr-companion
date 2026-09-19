@@ -10,8 +10,15 @@ kotlin {
 
 dependencies {
     implementation(project(":shared"))
+    implementation(project(":gatewayClient"))
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
+    implementation(libs.okhttp)
+    implementation(libs.coil.network.okhttp)
+    implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.kotlinx.serialization.json)
+
+    testImplementation(kotlin("test"))
 }
 
 compose.desktop {

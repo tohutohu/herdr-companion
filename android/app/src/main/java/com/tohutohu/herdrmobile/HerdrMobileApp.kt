@@ -94,11 +94,12 @@ class AppContainer(private val app: Application) {
             return false
         }
         val existingFirebase = FirebaseApp.getApps(app).firstOrNull { it.name == FirebaseApp.DEFAULT_APP_NAME }
-        val firebaseChanged = existingFirebase != null && (next.firebase == null ||
-            existingFirebase.options.applicationId != next.firebase.applicationId ||
-            existingFirebase.options.apiKey != next.firebase.apiKey ||
-            existingFirebase.options.projectId != next.firebase.projectId ||
-            existingFirebase.options.gcmSenderId != next.firebase.senderId)
+        val nextFirebase = next.firebase
+        val firebaseChanged = existingFirebase != null && (nextFirebase == null ||
+            existingFirebase.options.applicationId != nextFirebase.applicationId ||
+            existingFirebase.options.apiKey != nextFirebase.apiKey ||
+            existingFirebase.options.projectId != nextFirebase.projectId ||
+            existingFirebase.options.gcmSenderId != nextFirebase.senderId)
         if ((settings.current.isConfigured && next != settings.current) || firebaseChanged) {
             if (existingFirebase != null && settings.current.isConfigured) {
                 val oldToken = withTimeoutOrNull(3_000) { runCatching { FirebaseMessaging.getInstance().token.await() }.getOrNull() }
