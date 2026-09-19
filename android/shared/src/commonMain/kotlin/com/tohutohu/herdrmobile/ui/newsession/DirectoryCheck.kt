@@ -6,7 +6,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeoutOrNull
 
 /** Advisory only. An old/offline gateway or disabled Jev must not prevent launch. */
-internal suspend fun needsDirectoryConfirmation(
+suspend fun needsDirectoryConfirmation(
     request: StartSessionRequest,
     check: suspend (StartSessionRequest) -> DirectoryCheckResult,
 ): Boolean {

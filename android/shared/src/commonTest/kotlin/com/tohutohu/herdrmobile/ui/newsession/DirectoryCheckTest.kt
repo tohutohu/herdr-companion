@@ -4,8 +4,10 @@ import com.tohutohu.herdrmobile.data.api.DirectoryCheckResult
 import com.tohutohu.herdrmobile.data.api.StartSessionRequest
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
-import org.junit.Assert.*
-import org.junit.Test
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.fail
 
 class DirectoryCheckTest {
     private val request = StartSessionRequest("claude", "/workspace/app", "通知を直して", true)
@@ -15,7 +17,7 @@ class DirectoryCheckTest {
         for (verdict in listOf("mismatch", "match", "unknown", "disabled", "unavailable")) {
             assertEquals(verdict == "mismatch", needsDirectoryConfirmation(request) { DirectoryCheckResult(verdict) })
         }
-        assertFalse(needsDirectoryConfirmation(request) { throw java.io.IOException("404") })
+        assertFalse(needsDirectoryConfirmation(request) { throw Exception("404") })
         assertFalse(needsDirectoryConfirmation(request.copy(prompt = "  ")) { error("called") })
     }
 
