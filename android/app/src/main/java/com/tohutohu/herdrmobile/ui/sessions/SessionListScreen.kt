@@ -80,6 +80,7 @@ fun SessionListScreen(
     state: SessionListUiState,
     onAction: (SessionListAction) -> Unit,
     topContent: @Composable () -> Unit = {},
+    snackbarHost: @Composable () -> Unit = {},
 ) {
     val sessions = state.sessions
     val selection = rememberSessionSelection()
@@ -132,6 +133,7 @@ fun SessionListScreen(
                 )
             }
         },
+        snackbarHost = snackbarHost,
         floatingActionButton = {
             AnimatedVisibility(
                 visible = !selection.active,

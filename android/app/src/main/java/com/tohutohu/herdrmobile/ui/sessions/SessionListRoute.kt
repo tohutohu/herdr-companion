@@ -10,6 +10,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
@@ -46,6 +48,7 @@ fun SessionListRoute(
     var refreshing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val snackbar = remember { SnackbarHostState() }
 
     suspend fun refresh() {
         error = try {
@@ -56,7 +59,7 @@ fun SessionListRoute(
         }
     }
 
-    val actions = rememberSessionActions(onChanged = { refresh() })
+    val actions = rememberSessionActions(snackbar = snackbar, onChanged = { refresh() })
     actions.Dialogs()
 
     // Poll only while visible; always refresh when returning to foreground.
@@ -104,5 +107,6 @@ fun SessionListRoute(
             }
         },
         topContent = { UsageCardRoute() },
+        snackbarHost = { SnackbarHost(snackbar) },
     )
 }
