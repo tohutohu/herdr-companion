@@ -1,6 +1,5 @@
 package com.tohutohu.herdrmobile.ui.detail
 
-import android.text.format.Formatter
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
@@ -31,7 +30,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -51,6 +49,7 @@ fun MessageItem(
     showRole: Boolean,
     providerName: String,
     resolveUrl: (String) -> String,
+    formatFileSize: (Long) -> String,
     onOpenFile: (String, Int) -> Unit,
     onOpenImage: (String) -> Unit,
     onOpenTerminal: () -> Unit,
@@ -80,7 +79,7 @@ fun MessageItem(
         val content: @Composable () -> Unit = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 message.blocks.forEach { block ->
-                    BlockView(message.role, block, resolveUrl, onOpenFile, onOpenImage, onOpenTerminal, interactionsEnabled, onRespond)
+                    BlockView(message.role, block, resolveUrl, formatFileSize, onOpenFile, onOpenImage, onOpenTerminal, interactionsEnabled, onRespond)
                 }
             }
         }
@@ -102,6 +101,7 @@ private fun BlockView(
     role: String,
     block: BlockDto,
     resolveUrl: (String) -> String,
+    formatFileSize: (Long) -> String,
     onOpenFile: (String, Int) -> Unit,
     onOpenImage: (String) -> Unit,
     onOpenTerminal: () -> Unit,
@@ -138,12 +138,11 @@ private fun BlockView(
             )
         }
         "file" -> block.path?.let { path ->
-            val context = LocalContext.current
             val label = buildString {
                 // A file outside the workspace (e.g. a saved plan) is named by the gateway.
                 append(block.text ?: path)
                 if ((block.line ?: 0) > 0) append(":${block.line}")
-                block.size?.let { append(" · ").append(Formatter.formatShortFileSize(context, it)) }
+                block.size?.let { append(" · ").append(formatFileSize(it)) }
             }
             AssistChip(
                 onClick = { onOpenFile(path, block.line ?: 0) },

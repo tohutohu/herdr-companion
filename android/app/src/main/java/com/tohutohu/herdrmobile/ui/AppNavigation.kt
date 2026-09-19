@@ -13,7 +13,7 @@ import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.runtime.serialization.NavBackStackSerializer
 import androidx.navigation3.ui.NavDisplay
-import com.tohutohu.herdrmobile.ui.detail.SessionDetailScreen
+import com.tohutohu.herdrmobile.ui.detail.SessionDetailRoute
 import com.tohutohu.herdrmobile.ui.files.FileViewerScreen
 import com.tohutohu.herdrmobile.ui.files.ImageViewerScreen
 import com.tohutohu.herdrmobile.ui.newsession.NewSessionScreen
@@ -96,7 +96,7 @@ fun AppNavigation(start: Route, openSession: String?, onSessionOpened: () -> Uni
             }
             entry<DetailRoute> { route ->
                 val lifecycle = LocalLifecycleOwner.current.lifecycle
-                SessionDetailScreen(
+                SessionDetailRoute(
                     sessionId = route.sessionId,
                     focusLatest = route.focusLatest,
                     onBack = { lifecycle.ifResumed { nav.back(orReplaceWith = SessionsRoute) } },

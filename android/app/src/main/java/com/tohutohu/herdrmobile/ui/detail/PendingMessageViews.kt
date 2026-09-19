@@ -34,7 +34,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
-import com.tohutohu.herdrmobile.data.PendingMessage
 import com.tohutohu.herdrmobile.data.SendState
 import com.tohutohu.herdrmobile.ui.SwapContent
 import com.tohutohu.herdrmobile.ui.markdown.MarkdownText
@@ -46,7 +45,7 @@ import com.tohutohu.herdrmobile.ui.markdown.MarkdownText
  */
 @Composable
 fun PendingMessageItem(
-    message: PendingMessage,
+    message: PendingMessageUiState,
     showRole: Boolean,
     onRetry: () -> Unit,
     onDiscard: () -> Unit,
@@ -79,7 +78,7 @@ fun PendingMessageItem(
                 message.attachments.forEach { a ->
                     if (a.isImage) {
                         AsyncImage(
-                            model = a.uri,
+                            model = a.previewModel,
                             contentDescription = a.name,
                             contentScale = ContentScale.Fit,
                             modifier = Modifier.heightIn(max = 160.dp).clip(RoundedCornerShape(8.dp)),

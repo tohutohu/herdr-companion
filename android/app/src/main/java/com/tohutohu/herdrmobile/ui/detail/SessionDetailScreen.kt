@@ -1,10 +1,5 @@
 package com.tohutohu.herdrmobile.ui.detail
 
-import android.app.Application
-import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
@@ -65,11 +60,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -80,18 +73,10 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
-import com.tohutohu.herdrmobile.container
-import com.tohutohu.herdrmobile.data.Attachment
-import com.tohutohu.herdrmobile.data.readAttachment
 import com.tohutohu.herdrmobile.data.api.Status
 import com.tohutohu.herdrmobile.data.db.SessionEntity
 import com.tohutohu.herdrmobile.ui.ContextBar
@@ -100,64 +85,51 @@ import com.tohutohu.herdrmobile.ui.ExpandingContent
 import com.tohutohu.herdrmobile.ui.SwapContent
 import com.tohutohu.herdrmobile.ui.agentSettingsLabel
 import com.tohutohu.herdrmobile.ui.costLabel
+import com.tohutohu.herdrmobile.ui.sessions.SessionActionMenuItems
 import com.tohutohu.herdrmobile.ui.sessions.SessionRef
-import com.tohutohu.herdrmobile.ui.sessions.rememberSessionActions
 import com.tohutohu.herdrmobile.ui.statusStyle
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
+/**
+ * Pure Compose rendering for a session detail. The route supplies state,
+ * gateway URL/file-size formatting, and handles every external side effect
+ * through [SessionDetailAction].
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SessionDetailScreen(
-    sessionId: String,
+    state: SessionDetailUiState,
     focusLatest: Boolean = false,
-    onBack: () -> Unit,
-    onOpenFile: (String, Int) -> Unit,
-    onOpenImage: (String) -> Unit,
-    onOpenTerminal: () -> Unit,
+    resolveUrl: (String) -> String,
+    formatFileSize: (Long) -> String,
+    onAction: (SessionDetailAction) -> Unit,
 ) {
-    val context = LocalContext.current
-    val vm: SessionDetailViewModel = viewModel(key = sessionId) {
-        SessionDetailViewModel(context.applicationContext as Application, sessionId)
-    }
-    val api = context.container.api
-    val session by vm.session.collectAsState()
-    val actions = rememberSessionActions(onChanged = { vm.refresh() })
-    actions.Dialogs()
+    val session = state.session
+    val messages = state.messages
+    val pending = state.pending
+    val error = state.error
+    val answering = state.answering
     var menu by remember { mutableStateOf(false) }
     // The header carries only what changes; the directory and the context bar
     // open under it when the title or the context ring is tapped.
-    var detailsOpen by rememberSaveable(sessionId) { mutableStateOf(false) }
-    val messages by vm.messages.collectAsState()
-    val error by vm.error.collectAsState()
-    val pending by vm.pending.collectAsState()
-    val answering by vm.answering.collectAsState()
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-
-    LaunchedEffect(lifecycle, sessionId) {
-        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { vm.pollWhileVisible() }
-    }
+    var detailsOpen by rememberSaveable(state.sessionId) { mutableStateOf(false) }
 
     // The list is laid out bottom-up, so it opens at the newest message and
     // growing items (streamed output, loading images) keep the bottom in place.
     val listState = rememberLazyListState()
-    // Messages hidden above the viewport or under the pinned panel feed the panel.
     var panelHeight by remember { mutableIntStateOf(0) }
     // Opened from a notification: the newest message is what the notification
     // announced, so park it on its first line instead of its tail. Holds until
     // the reader scrolls somewhere themselves.
-    var readFromStart by rememberSaveable(sessionId) { mutableStateOf(focusLatest) }
+    var readFromStart by rememberSaveable(state.sessionId) { mutableStateOf(focusLatest) }
     LaunchedEffect(listState) {
         listState.interactionSource.interactions.collect {
             if (it is DragInteraction.Start) readFromStart = false
         }
     }
     // Whether changes scroll the newest message into view. Only the reader's
-    // own scrolls decide it: where a drag (and its fling) comes to rest. The
-    // list's position right after a change can't tell, because the list stays
-    // on the item it showed while messages are added or shrink below it.
+    // own scrolls decide it: where a drag (and its fling) comes to rest.
     var followNewest by remember { mutableStateOf(true) }
     LaunchedEffect(listState) {
         var dragged = false
@@ -193,8 +165,6 @@ fun SessionDetailScreen(
             return@LaunchedEffect
         }
         if (prev == null) return@LaunchedEffect
-        // New messages, and also an answered card that disappears or settles
-        // without a new message after it.
         if (followNewest) listState.animateScrollToItem(0)
     }
     // A message just written goes to the bottom, and so does the reader.
@@ -215,12 +185,6 @@ fun SessionDetailScreen(
     val stack by remember(messages, tail) {
         derivedStateOf {
             val info = listState.layoutInfo
-            // Do not use the pinned panel's measured height here. The panel
-            // changes height when this stack changes, so using that height to
-            // choose the stack creates a feedback loop at the top boundary:
-            // reports appear, the panel grows, reports disappear, and so on.
-            // The oldest visible message is a stable boundary; the panel can
-            // overlay it briefly, just like any other pinned content.
             val top = info.visibleItemsInfo.maxOfOrNull { it.index }
             if (top == null) {
                 FlowStack.EMPTY
@@ -236,12 +200,14 @@ fun SessionDetailScreen(
             TopAppBar(
                 expandedHeight = 52.dp,
                 navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+                    IconButton(onClick = { onAction(SessionDetailAction.Back) }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
                 },
                 title = {
                     Column(Modifier.clickable { detailsOpen = !detailsOpen }) {
                         Text(
-                            session?.headline() ?: sessionId,
+                            session?.headline() ?: state.sessionId,
                             style = MaterialTheme.typography.titleSmall,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -282,10 +248,16 @@ fun SessionDetailScreen(
                                     enabled = s.paneId != null,
                                     onClick = {
                                         menu = false
-                                        onOpenTerminal()
+                                        onAction(SessionDetailAction.OpenTerminal)
                                     },
                                 )
-                                actions.MenuItems(s.ref()) { menu = false }
+                                SessionActionMenuItems(
+                                    s = s.ref(),
+                                    onResume = { onAction(SessionDetailAction.Resume) },
+                                    onUnarchive = { onAction(SessionDetailAction.Unarchive) },
+                                    onArchive = { onAction(SessionDetailAction.Archive) },
+                                    onDismiss = { menu = false },
+                                )
                             }
                         }
                     }
@@ -293,11 +265,10 @@ fun SessionDetailScreen(
             )
         },
         bottomBar = {
-            val s = session
             // The composer gives way to the resume bar when the agent stops,
             // and comes back when it runs again: slide the newcomer up.
             AnimatedContent(
-                targetState = s != null && s.status == Status.OFFLINE,
+                targetState = session != null && session.status == Status.OFFLINE,
                 transitionSpec = {
                     if (settled) {
                         (fadeIn(tween(200, delayMillis = 60)) + slideInVertically(tween(260)) { it / 3 })
@@ -310,12 +281,13 @@ fun SessionDetailScreen(
                 label = "bottomBar",
             ) { offline ->
                 if (offline) {
-                    ResumeBar(busy = s != null && actions.busy(s.id), onResume = { s?.let { actions.resume(it.ref()) } })
+                    ResumeBar(busy = state.actionBusy, onResume = { onAction(SessionDetailAction.Resume) })
                 } else {
                     Composer(
-                        enabled = s?.canSend == true && !answering,
+                        enabled = session?.canSend == true && !answering,
                         busy = answering,
-                        onSend = vm::send,
+                        attachments = state.attachments,
+                        onAction = onAction,
                     )
                 }
             }
@@ -361,8 +333,8 @@ fun SessionDetailScreen(
                             modifier = Modifier.animateItem(),
                             message = p,
                             showRole = i == 0 && messages.lastOrNull()?.role != "user",
-                            onRetry = { vm.retry(p.localId) },
-                            onDiscard = { vm.discard(p.localId) },
+                            onRetry = { onAction(SessionDetailAction.Retry(p.localId)) },
+                            onDiscard = { onAction(SessionDetailAction.Discard(p.localId)) },
                         )
                     }
                     itemsIndexed(messages.asReversed(), key = { _, m -> m.id }) { r, m ->
@@ -372,12 +344,13 @@ fun SessionDetailScreen(
                             message = m,
                             showRole = i == 0 || messages[i - 1].role != m.role,
                             providerName = session?.providerName ?: "Agent",
-                            resolveUrl = api::absolute,
-                            onOpenFile = onOpenFile,
-                            onOpenImage = { onOpenImage(api.absolute(it)) },
-                            onOpenTerminal = onOpenTerminal,
+                            resolveUrl = resolveUrl,
+                            formatFileSize = formatFileSize,
+                            onOpenFile = { path, line -> onAction(SessionDetailAction.OpenFile(path, line)) },
+                            onOpenImage = { url -> onAction(SessionDetailAction.OpenImage(url)) },
+                            onOpenTerminal = { onAction(SessionDetailAction.OpenTerminal) },
                             interactionsEnabled = !answering,
-                            onRespond = vm::respond,
+                            onRespond = { onAction(SessionDetailAction.Respond(it)) },
                         )
                     }
                 }
@@ -400,16 +373,8 @@ fun SessionDetailScreen(
     }
 }
 
-/**
- * How long after the first messages arrive the screen counts as loaded: long
- * enough for the screen transition and the scroll to the newest message.
- */
 private const val SETTLE_MS = 400L
 
-/**
- * Over the list rather than above it, so it never pushes the messages; and
- * late, so a quick load never shows it at all.
- */
 @Composable
 private fun LoadingHint(visible: Boolean) {
     AnimatedVisibility(visible = visible, enter = fadeIn(tween(200, delayMillis = 400)), exit = ExitTransition.None) {
@@ -417,7 +382,6 @@ private fun LoadingHint(visible: Boolean) {
     }
 }
 
-/** The flow-stack panel, slid in over the top of the list while it has content. */
 @Composable
 private fun BoxScope.PinnedFlowStack(
     stack: FlowStack,
@@ -426,7 +390,6 @@ private fun BoxScope.PinnedFlowStack(
     onHeight: (Int) -> Unit,
     onJump: (String) -> Unit,
 ) {
-    // Keep the last stack while the panel slides away empty.
     var shownStack by remember { mutableStateOf(stack) }
     if (!stack.isEmpty) shownStack = stack
     AnimatedVisibility(
@@ -439,18 +402,9 @@ private fun BoxScope.PinnedFlowStack(
     }
 }
 
-/**
- * How far the newest message has to be pushed past the bottom edge for its
- * first line to sit right under the pinned panel. Zero once it already fits.
- */
 internal fun messageStartOffset(messageHeight: Int, viewportHeight: Int, panelHeight: Int): Int =
     (messageHeight - (viewportHeight - panelHeight)).coerceAtLeast(0)
 
-/**
- * Scrolls the newest message so that reading starts at its first line.
- * The panel only appears once the message above is off screen, so its height
- * is read again after every scroll until the target stops moving.
- */
 private suspend fun LazyListState.showNewestFromStart(index: Int, panelHeight: () -> Int) {
     scrollToItem(index)
     var applied = 0
@@ -462,52 +416,32 @@ private suspend fun LazyListState.showNewestFromStart(index: Int, panelHeight: (
         if (offset == applied) return
         applied = offset
         scrollToItem(index, offset)
-        // One frame for the panel to recompose against the new position,
-        // a second one for its measured height to reach panelHeight.
         withFrameNanos {}
         withFrameNanos {}
     }
 }
 
-/**
- * Clears as soon as a message is sent: the message itself stays on show above
- * until the conversation has it, so the next one can be written meanwhile.
- * [busy] is an answer to a question or approval on its way.
- */
 @Composable
 private fun Composer(
     enabled: Boolean,
     busy: Boolean,
-    onSend: (String, List<Attachment>) -> Unit,
+    attachments: List<AttachmentUiState>,
+    onAction: (SessionDetailAction) -> Unit,
 ) {
     var text by rememberSaveable { mutableStateOf("") }
-    val attachments = remember { mutableStateListOf<Attachment>() }
-    val resolver = LocalContext.current.contentResolver
-    val scope = rememberCoroutineScope()
-    val add: (List<Uri>) -> Unit = { uris ->
-        val fresh = uris.filterNot { uri -> attachments.any { it.uri == uri } }
-        if (fresh.isNotEmpty()) {
-            scope.launch {
-                attachments.addAll(withContext(Dispatchers.IO) { fresh.map { readAttachment(resolver, it) } })
-            }
-        }
-    }
-    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(4), add)
-    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments(), add)
     Surface(tonalElevation = 3.dp) {
         Column(Modifier.navigationBarsPadding().imePadding().padding(8.dp)) {
-            // A copy, so the row still has its thumbnails while it shrinks away.
-            ExpandingContent(value = attachments.toList().takeIf { it.isNotEmpty() }) { shown ->
+            ExpandingContent(value = attachments.takeIf { it.isNotEmpty() }) { shown ->
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 8.dp)) {
-                    items(shown, key = { it.uri.toString() }) { attachment ->
+                    items(shown, key = { it.id }) { attachment ->
                         Box(Modifier.animateItem()) {
                             if (attachment.isImage) {
-                                AsyncImage(model = attachment.uri, contentDescription = null, modifier = Modifier.size(64.dp))
+                                AsyncImage(model = attachment.previewModel, contentDescription = null, modifier = Modifier.size(64.dp))
                             } else {
                                 FileChip(attachment.name)
                             }
                             IconButton(
-                                onClick = { attachments.remove(attachment) },
+                                onClick = { onAction(SessionDetailAction.RemoveAttachment(attachment.id)) },
                                 modifier = Modifier.size(24.dp).align(Alignment.TopEnd),
                             ) {
                                 Icon(Icons.Default.Close, contentDescription = "Remove")
@@ -528,7 +462,7 @@ private fun Composer(
                             leadingIcon = { Icon(Icons.Default.Image, contentDescription = null) },
                             onClick = {
                                 menuOpen = false
-                                imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                                onAction(SessionDetailAction.PickImage)
                             },
                         )
                         DropdownMenuItem(
@@ -536,12 +470,11 @@ private fun Composer(
                             leadingIcon = { Icon(Icons.Default.AttachFile, contentDescription = null) },
                             onClick = {
                                 menuOpen = false
-                                filePicker.launch(arrayOf("*/*"))
+                                onAction(SessionDetailAction.PickFile)
                             },
                         )
                     }
                 }
-                // Same size as the message text, not the larger text-field default.
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it },
@@ -563,9 +496,8 @@ private fun Composer(
                         IconButton(
                             enabled = enabled && (text.isNotBlank() || attachments.isNotEmpty()),
                             onClick = {
-                                onSend(text, attachments.toList())
+                                onAction(SessionDetailAction.Send(text))
                                 text = ""
-                                attachments.clear()
                             },
                         ) { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send") }
                     }
@@ -575,7 +507,6 @@ private fun Composer(
     }
 }
 
-/** Stands in for the thumbnail of an attachment that has nothing to show. */
 @Composable
 private fun FileChip(name: String) {
     Surface(
@@ -589,28 +520,16 @@ private fun FileChip(name: String) {
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Icon(Icons.Default.AttachFile, contentDescription = null, modifier = Modifier.size(16.dp))
-            Text(
-                name,
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Text(name, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
     }
 }
 
 private fun SessionEntity.ref() = SessionRef(id, live = status != Status.OFFLINE, archived = archived)
 
-/**
- * The header's first line: the session's own name, which says more than the
- * agent and the folder do. Both of those are still reachable - the model name
- * sits right below it and the directory is one tap away - so they only stand
- * in when the agent has not named the session yet.
- */
 private fun SessionEntity.headline(): String =
     title?.takeIf { it.isNotBlank() } ?: project.takeIf { it.isNotBlank() } ?: cwd?.takeIf { it.isNotBlank() } ?: id
 
-/** Shown instead of the composer while the session is not running. */
 @Composable
 private fun ResumeBar(busy: Boolean, onResume: () -> Unit) {
     Surface(tonalElevation = 3.dp) {
