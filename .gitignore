@@ -27,6 +27,9 @@ captures/
 # OS
 .DS_Store
 
+# Temporary screenshots and local scratch files
+/tmp/
+
 # macOS app artifacts
 /macos/.build/
 *.dmg
