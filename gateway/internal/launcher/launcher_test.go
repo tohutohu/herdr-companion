@@ -282,9 +282,9 @@ func Test不正な起動リクエストは拒否する(t *testing.T) {
 	if len(fh.calls) != 0 {
 		t.Errorf("nothing should be created: %v", fh.calls)
 	}
-	// session id が報告されなくても起動自体は成功扱い
+	// 初期プロンプトなしではID待ちをせず、起動自体を成功扱いにする
 	res, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: root})
-	if err != nil || res.SessionID != "" || !strings.Contains(res.Warning, "integration") {
+	if err != nil || res.SessionID != "" || res.Warning != "" {
 		t.Errorf("res = %+v err = %v", res, err)
 	}
 	if last := fh.calls[len(fh.calls)-1]; last != "start claude --default" {
@@ -389,18 +389,17 @@ func Testフックが報告しないセッションはproviderが見つけてHer
 	l, root := newLauncher(t, fh)
 	lp := &locatingProvider{}
 	l.Providers = []providers.Provider{lp}
-	before := time.Now()
 	res, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: root})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.SessionID != "claude:thread-9" || res.Warning != "" {
+	if res.SessionID != "" || res.Warning != "" {
 		t.Errorf("result = %+v", res)
 	}
-	if lp.cwd != root || lp.since.After(before) {
-		t.Errorf("locate args = %s %v", lp.cwd, lp.since)
+	if lp.cwd != "" || !lp.since.IsZero() {
+		t.Errorf("locate should wait for the first prompt: %s %v", lp.cwd, lp.since)
 	}
-	if last := fh.calls[len(fh.calls)-1]; last != "report claude thread-9" {
+	if last := fh.calls[len(fh.calls)-1]; last != "start claude --default" {
 		t.Errorf("calls = %v", fh.calls)
 	}
 

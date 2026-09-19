@@ -81,7 +81,7 @@ fun AppNavigation(start: Route, openSession: String?, onSessionOpened: () -> Uni
                 )
             }
             entry<StartingRoute> { route ->
-                com.tohutohu.herdrmobile.ui.newsession.StartingSessionScreen(
+                com.tohutohu.herdrmobile.ui.newsession.StartingSessionRoute(
                     route.startId,
                     onOpenTerminal = { pane -> nav.push(TerminalRoute(paneId = pane)) },
                     onBack = { nav.back(orReplaceWith = SessionsRoute) },

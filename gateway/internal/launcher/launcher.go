@@ -64,13 +64,14 @@ type Launcher struct {
 
 // pendingLaunch retains the context needed to finish a partial launch.
 type pendingLaunch struct {
-	p       providers.Provider
-	lp      providers.Launchable
-	ws, cwd string
-	prompt  string
-	knownID string
-	started time.Time
-	logKV   []any
+	p          providers.Provider
+	lp         providers.Launchable
+	ws, cwd    string
+	prompt     string
+	promptSent bool
+	knownID    string
+	started    time.Time
+	logKV      []any
 }
 
 // DefaultRoots returns ~/workspace when it exists, else the home directory.
@@ -409,6 +410,14 @@ func (l *Launcher) finish(ctx context.Context, pane string, pl *pendingLaunch) *
 		}
 		// Never replay a prompt after an ambiguous send error.
 		pl.prompt = ""
+		pl.promptSent = true
+	} else if !pl.promptSent && pl.knownID == "" {
+		// Agents do not always create a native session until the first prompt
+		// is entered. Waiting for an identity here makes a valid, prompt-less
+		// launch look like a failure and needlessly blocks the response.
+		// The pane is already running; the session id is picked up by the
+		// normal session refresh after the first prompt creates the thread.
+		return res
 	}
 
 	res.SessionID = l.waitIdentity(ctx, pane, pl.p, pl.cwd, pl.started, pl.knownID)
