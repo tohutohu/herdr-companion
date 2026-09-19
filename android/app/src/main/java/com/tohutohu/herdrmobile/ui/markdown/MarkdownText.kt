@@ -201,14 +201,26 @@ private fun MarkdownTable(block: MdBlock.Table, style: TextStyle, modifier: Modi
                 }
             }
 
-            val placeables = ArrayList<Placeable>(measurables.size)
             val rowHeights = IntArray(rows.size)
             childIndex = 0
             rows.forEachIndexed { rowIndex, (row, _) ->
                 row.forEachIndexed { column, _ ->
-                    val placeable = measurables[childIndex++].measure(Constraints.fixedWidth(columnWidths[column]))
+                    val naturalHeight = measurables[childIndex++].maxIntrinsicHeight(columnWidths[column])
+                    rowHeights[rowIndex] = maxOf(
+                        rowHeights[rowIndex],
+                        naturalHeight,
+                    )
+                }
+            }
+
+            val placeables = ArrayList<Placeable>(measurables.size)
+            childIndex = 0
+            rows.forEachIndexed { rowIndex, (row, _) ->
+                row.forEachIndexed { column, _ ->
+                    val placeable = measurables[childIndex++].measure(
+                        Constraints.fixed(columnWidths[column], rowHeights[rowIndex]),
+                    )
                     placeables += placeable
-                    rowHeights[rowIndex] = maxOf(rowHeights[rowIndex], placeable.height)
                 }
             }
 
