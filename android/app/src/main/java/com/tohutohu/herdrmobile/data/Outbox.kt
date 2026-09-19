@@ -26,15 +26,6 @@ private const val UNSEEN_EXPIRY_MS = 30L * 60 * 1000
 /** Leading characters compared when looking for a sent message in the conversation. */
 private const val MATCH_CHARS = 100
 
-enum class SendState {
-    /** Uploading or talking to the gateway. */
-    SENDING,
-
-    /** The gateway has typed it into the agent; it runs on even if the app goes away. */
-    ACCEPTED,
-    FAILED,
-}
-
 /** A message sent from the app that the conversation does not show yet. */
 data class PendingMessage(
     val localId: String,

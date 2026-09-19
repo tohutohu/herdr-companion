@@ -13,15 +13,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.serialization.builtins.ListSerializer
 import java.time.Instant
 
-data class Message(
-    val id: String,
-    val role: String,
-    val timestamp: Long,
-    val blocks: List<BlockDto>,
-    /** Waiting in the agent's queue; the real entry replaces it. */
-    val queued: Boolean = false,
-)
-
 /**
  * Room is the UI's read source; this class pulls from the gateway and
  * writes into Room.

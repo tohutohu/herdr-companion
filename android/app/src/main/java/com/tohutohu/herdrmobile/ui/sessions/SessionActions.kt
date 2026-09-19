@@ -1,14 +1,8 @@
 package com.tohutohu.herdrmobile.ui.sessions
 
 import android.widget.Toast
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Archive
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Unarchive
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.Icon
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
@@ -24,9 +18,6 @@ import androidx.compose.ui.platform.LocalContext
 import com.tohutohu.herdrmobile.container
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
-
-/** What the archive / resume actions need to know about a session. */
-data class SessionRef(val id: String, val live: Boolean, val archived: Boolean)
 
 /**
  * Archive, unarchive and resume, shared by the list, archive and detail
@@ -200,49 +191,6 @@ class SessionActions internal constructor(
         DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
             MenuItems(s, onDismiss)
         }
-    }
-}
-
-/**
- * Pure menu rendering shared by screens. The route supplies the operations so
- * this component does not need a repository, a Context, or a Toast.
- */
-@Composable
-fun SessionActionMenuItems(
-    s: SessionRef,
-    onResume: () -> Unit,
-    onUnarchive: () -> Unit,
-    onArchive: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    if (!s.live) {
-        DropdownMenuItem(
-            text = { Text("Resume in Herdr") },
-            leadingIcon = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
-            onClick = {
-                onDismiss()
-                onResume()
-            },
-        )
-    }
-    if (s.archived) {
-        DropdownMenuItem(
-            text = { Text("Unarchive") },
-            leadingIcon = { Icon(Icons.Default.Unarchive, contentDescription = null) },
-            onClick = {
-                onDismiss()
-                onUnarchive()
-            },
-        )
-    } else {
-        DropdownMenuItem(
-            text = { Text(if (s.live) "Stop and archive" else "Archive") },
-            leadingIcon = { Icon(Icons.Default.Archive, contentDescription = null) },
-            onClick = {
-                onDismiss()
-                onArchive()
-            },
-        )
     }
 }
 

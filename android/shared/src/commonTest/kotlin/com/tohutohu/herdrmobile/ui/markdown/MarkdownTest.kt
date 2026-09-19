@@ -1,8 +1,8 @@
 package com.tohutohu.herdrmobile.ui.markdown
 
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
-import org.junit.Test
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class MarkdownTest {
     private fun text(spans: List<MdSpan>) = spans.joinToString("") { it.text }
