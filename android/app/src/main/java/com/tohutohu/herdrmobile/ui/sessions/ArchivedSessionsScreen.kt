@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import com.tohutohu.herdrmobile.container
 import com.tohutohu.herdrmobile.data.api.SessionDto
 import com.tohutohu.herdrmobile.data.toEntity
+import com.tohutohu.herdrmobile.ui.toUiModel
 import kotlinx.coroutines.launch
 import androidx.navigationevent.NavigationEventInfo
 import androidx.navigationevent.compose.NavigationBackHandler
@@ -73,11 +74,11 @@ fun ArchivedSessionsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
         val now = System.currentTimeMillis()
         sessions.orEmpty().map {
             val entity = it.toEntity(now, listed = false)
-            SessionListItemUiState(entity, DateUtils.getRelativeTimeSpanString(entity.updatedAt).toString())
+            SessionListItemUiState(entity.toUiModel(), DateUtils.getRelativeTimeSpanString(entity.updatedAt).toString())
         }
     }
     val selection = rememberSessionSelection()
-    val refs = remember(rows) { rows.map { it.session.ref() } }
+    val refs = remember(rows) { rows.map { it.session.toSessionRef() } }
     LaunchedEffect(refs) { selection.keepOnly(refs.map { it.id }) }
     NavigationBackHandler(
         state = rememberNavigationEventState(currentInfo = NavigationEventInfo.None),

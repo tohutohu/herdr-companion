@@ -57,11 +57,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.navigationevent.NavigationEventInfo
-import androidx.navigationevent.compose.NavigationBackHandler
-import androidx.navigationevent.compose.rememberNavigationEventState
-import com.tohutohu.herdrmobile.data.api.Status
-import com.tohutohu.herdrmobile.data.db.SessionEntity
+import com.tohutohu.herdrmobile.model.SessionUiModel
 import com.tohutohu.herdrmobile.ui.agentSettingsLabel
 import com.tohutohu.herdrmobile.ui.contextLabel
 import com.tohutohu.herdrmobile.ui.exceptBottom
@@ -81,16 +77,11 @@ fun SessionListScreen(
     onAction: (SessionListAction) -> Unit,
     topContent: @Composable () -> Unit = {},
     snackbarHost: @Composable () -> Unit = {},
+    selection: SessionSelection = rememberSessionSelection(),
 ) {
     val sessions = state.sessions
-    val selection = rememberSessionSelection()
-    val refs = remember(sessions) { sessions.map { it.session.ref() } }
+    val refs = remember(sessions) { sessions.map { it.session.toSessionRef() } }
     LaunchedEffect(refs) { selection.keepOnly(refs.map { it.id }) }
-    NavigationBackHandler(
-        state = rememberNavigationEventState(currentInfo = NavigationEventInfo.None),
-        isBackEnabled = selection.active,
-        onBackCompleted = { selection.clear() },
-    )
 
     // Keyed items keep the scroll anchor, which would hide sessions that
     // appear above the first row; stay at the top while the user is there.
@@ -192,8 +183,8 @@ fun SessionListScreen(
                                 .padding(16.dp),
                             verticalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
-                            Text(entry.request.cwd.substringAfterLast('/'), style = MaterialTheme.typography.titleMedium)
-                            Text(entry.request.prompt, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(entry.cwd.substringAfterLast('/'), style = MaterialTheme.typography.titleMedium)
+                            Text(entry.prompt, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             Text(entry.label, style = MaterialTheme.typography.labelMedium)
                             if (entry.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                         }
@@ -218,7 +209,7 @@ fun SessionListScreen(
 
 /** A list entry with its already formatted display time. */
 @Composable
-internal fun LazyItemScope.SessionItem(
+fun LazyItemScope.SessionItem(
     item: SessionListItemUiState,
     selection: SessionSelection,
     busy: Boolean,
@@ -228,7 +219,7 @@ internal fun LazyItemScope.SessionItem(
     onUnarchive: (SessionRef) -> Unit,
 ) {
     val s = item.session
-    val ref = s.ref()
+    val ref = s.toSessionRef()
     Column(Modifier.animateItem()) {
         SwipeableSessionRow(
             action = swipeActionFor(ref),
@@ -254,7 +245,7 @@ internal fun LazyItemScope.SessionItem(
 
 /** Fades between the screen's own app bar and the selection bar. */
 @Composable
-internal fun SwitchingTopBar(selecting: Boolean, selectionBar: @Composable () -> Unit, bar: @Composable () -> Unit) {
+fun SwitchingTopBar(selecting: Boolean, selectionBar: @Composable () -> Unit, bar: @Composable () -> Unit) {
     AnimatedContent(
         targetState = selecting,
         transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(120)) },
@@ -264,13 +255,11 @@ internal fun SwitchingTopBar(selecting: Boolean, selectionBar: @Composable () ->
     }
 }
 
-internal fun SessionEntity.ref() = SessionRef(id, live = status != Status.OFFLINE, archived = archived)
-
 /** A session; long press starts a selection for the batch actions. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun SessionRow(
-    s: SessionEntity,
+    s: SessionUiModel,
     relativeUpdatedAt: String,
     busy: Boolean,
     selected: Boolean,

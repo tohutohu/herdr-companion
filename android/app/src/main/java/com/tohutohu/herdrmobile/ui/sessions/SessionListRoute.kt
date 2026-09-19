@@ -16,6 +16,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.tohutohu.herdrmobile.container
+import com.tohutohu.herdrmobile.ui.toUiModel
+import com.tohutohu.herdrmobile.ui.toUiState
 import com.tohutohu.herdrmobile.ui.usage.UsageCardRoute
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -75,11 +77,11 @@ fun SessionListRoute(
     val uiState = SessionListUiState(
         sessions = sessions.map { session ->
             SessionListItemUiState(
-                session = session,
+                session = session.toUiModel(),
                 relativeUpdatedAt = DateUtils.getRelativeTimeSpanString(session.updatedAt).toString(),
             )
         },
-        pendingStarts = pendingStarts,
+        pendingStarts = pendingStarts.map { it.toUiState() },
         isLoaded = loaded != null,
         isRefreshing = refreshing,
         error = error,
@@ -87,7 +89,7 @@ fun SessionListRoute(
         engagedSessionIds = actions.engagedIds,
     )
 
-    SessionListScreen(
+    AndroidSessionListScreen(
         state = uiState,
         onAction = { action ->
             when (action) {

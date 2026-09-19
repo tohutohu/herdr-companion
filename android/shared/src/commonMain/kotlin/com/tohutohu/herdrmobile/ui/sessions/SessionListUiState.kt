@@ -1,18 +1,18 @@
 package com.tohutohu.herdrmobile.ui.sessions
 
-import com.tohutohu.herdrmobile.data.SessionStart
-import com.tohutohu.herdrmobile.data.db.SessionEntity
+import com.tohutohu.herdrmobile.model.PendingStartUiState
+import com.tohutohu.herdrmobile.model.SessionUiModel
 
 /** Display data for one row. Formatting stays outside the common-ready UI. */
 data class SessionListItemUiState(
-    val session: SessionEntity,
+    val session: SessionUiModel,
     val relativeUpdatedAt: String,
 )
 
 /** The state needed to render the session list without accessing the app container. */
 data class SessionListUiState(
     val sessions: List<SessionListItemUiState> = emptyList(),
-    val pendingStarts: List<SessionStart> = emptyList(),
+    val pendingStarts: List<PendingStartUiState> = emptyList(),
     val isLoaded: Boolean = false,
     val isRefreshing: Boolean = false,
     val error: String? = null,

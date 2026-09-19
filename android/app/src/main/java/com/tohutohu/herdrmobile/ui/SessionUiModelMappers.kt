@@ -1,7 +1,9 @@
 package com.tohutohu.herdrmobile.ui
 
+import com.tohutohu.herdrmobile.data.SessionStart
 import com.tohutohu.herdrmobile.data.api.Status
 import com.tohutohu.herdrmobile.data.db.SessionEntity
+import com.tohutohu.herdrmobile.model.PendingStartUiState
 import com.tohutohu.herdrmobile.model.SessionUiModel
 
 /** Converts the Android Room row into the platform-neutral presentation model. */
@@ -26,4 +28,14 @@ fun SessionEntity.toUiModel() = SessionUiModel(
     costEstimated = costEstimated,
     archived = archived,
     live = status != Status.OFFLINE,
+)
+
+/** Converts Android-owned launch tracking into the common list state. */
+fun SessionStart.toUiState() = PendingStartUiState(
+    id = id,
+    cwd = request.cwd,
+    prompt = request.prompt,
+    label = label,
+    busy = busy,
+    sessionId = sessionId,
 )
