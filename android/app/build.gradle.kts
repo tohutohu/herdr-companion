@@ -56,6 +56,8 @@ ksp {
 }
 
 dependencies {
+    implementation(project(":shared"))
+
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.ui)
     implementation(libs.androidx.core.ktx)
