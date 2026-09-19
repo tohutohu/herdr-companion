@@ -215,9 +215,18 @@ fun SessionDetailScreen(
     val stack by remember(messages, tail) {
         derivedStateOf {
             val info = listState.layoutInfo
-            val bottomEdge = info.viewportEndOffset + info.afterContentPadding
-            val top = info.visibleItemsInfo.filter { bottomEdge - it.offset > panelHeight }.maxOfOrNull { it.index }
-            if (top == null) FlowStack.EMPTY else flowStack(messages, messages.lastIndex - (top - tail))
+            // Do not use the pinned panel's measured height here. The panel
+            // changes height when this stack changes, so using that height to
+            // choose the stack creates a feedback loop at the top boundary:
+            // reports appear, the panel grows, reports disappear, and so on.
+            // The oldest visible message is a stable boundary; the panel can
+            // overlay it briefly, just like any other pinned content.
+            val top = info.visibleItemsInfo.maxOfOrNull { it.index }
+            if (top == null) {
+                FlowStack.EMPTY
+            } else {
+                flowStack(messages, messages.lastIndex - (top - tail))
+            }
         }
     }
     val scope = rememberCoroutineScope()
