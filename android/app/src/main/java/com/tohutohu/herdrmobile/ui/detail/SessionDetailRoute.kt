@@ -89,6 +89,7 @@ fun SessionDetailRoute(
         focusLatest = focusLatest,
         resolveUrl = api::absolute,
         formatFileSize = { Formatter.formatShortFileSize(context, it) },
+        resolveAttachmentPreview = { id -> attachments.firstOrNull { it.uri.toString() == id }?.uri },
         onAction = { action ->
             when (action) {
                 SessionDetailAction.Back -> onBack()
@@ -118,8 +119,7 @@ fun SessionDetailRoute(
 private fun Attachment.toUiState() = AttachmentUiState(
     id = uri.toString(),
     name = name,
-    isImage = isImage,
-    previewModel = uri,
+    mimeType = mime,
 )
 
 private fun PendingMessage.toUiState() = PendingMessageUiState(

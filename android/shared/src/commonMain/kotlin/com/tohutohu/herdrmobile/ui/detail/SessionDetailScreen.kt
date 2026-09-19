@@ -103,6 +103,7 @@ fun SessionDetailScreen(
     focusLatest: Boolean = false,
     resolveUrl: (String) -> String,
     formatFileSize: (Long) -> String,
+    resolveAttachmentPreview: (String) -> Any? = { null },
     onAction: (SessionDetailAction) -> Unit,
 ) {
     val session = state.session
@@ -287,6 +288,7 @@ fun SessionDetailScreen(
                         enabled = session?.canSend == true && !answering,
                         busy = answering,
                         attachments = state.attachments,
+                        resolveAttachmentPreview = resolveAttachmentPreview,
                         onAction = onAction,
                     )
                 }
@@ -333,6 +335,7 @@ fun SessionDetailScreen(
                             modifier = Modifier.animateItem(),
                             message = p,
                             showRole = i == 0 && messages.lastOrNull()?.role != "user",
+                            resolveAttachmentPreview = resolveAttachmentPreview,
                             onRetry = { onAction(SessionDetailAction.Retry(p.localId)) },
                             onDiscard = { onAction(SessionDetailAction.Discard(p.localId)) },
                         )
@@ -426,6 +429,7 @@ private fun Composer(
     enabled: Boolean,
     busy: Boolean,
     attachments: List<AttachmentUiState>,
+    resolveAttachmentPreview: (String) -> Any?,
     onAction: (SessionDetailAction) -> Unit,
 ) {
     var text by rememberSaveable { mutableStateOf("") }
@@ -436,7 +440,11 @@ private fun Composer(
                     items(shown, key = { it.id }) { attachment ->
                         Box(Modifier.animateItem()) {
                             if (attachment.isImage) {
-                                AsyncImage(model = attachment.previewModel, contentDescription = null, modifier = Modifier.size(64.dp))
+                                AsyncImage(
+                                    model = resolveAttachmentPreview(attachment.id),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(64.dp),
+                                )
                             } else {
                                 FileChip(attachment.name)
                             }

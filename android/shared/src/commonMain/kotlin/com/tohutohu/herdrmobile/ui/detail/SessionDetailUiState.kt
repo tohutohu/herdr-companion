@@ -9,9 +9,10 @@ import com.tohutohu.herdrmobile.model.SessionUiModel
 data class AttachmentUiState(
     val id: String,
     val name: String,
-    val isImage: Boolean,
-    val previewModel: Any,
-)
+    val mimeType: String,
+) {
+    val isImage get() = mimeType.startsWith("image/")
+}
 
 /** Pending-message presentation data without the Android content-provider type. */
 data class PendingMessageUiState(

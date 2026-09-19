@@ -47,6 +47,7 @@ import com.tohutohu.herdrmobile.ui.markdown.MarkdownText
 fun PendingMessageItem(
     message: PendingMessageUiState,
     showRole: Boolean,
+    resolveAttachmentPreview: (String) -> Any?,
     onRetry: () -> Unit,
     onDiscard: () -> Unit,
     modifier: Modifier = Modifier,
@@ -78,7 +79,7 @@ fun PendingMessageItem(
                 message.attachments.forEach { a ->
                     if (a.isImage) {
                         AsyncImage(
-                            model = a.previewModel,
+                            model = resolveAttachmentPreview(a.id),
                             contentDescription = a.name,
                             contentScale = ContentScale.Fit,
                             modifier = Modifier.heightIn(max = 160.dp).clip(RoundedCornerShape(8.dp)),
