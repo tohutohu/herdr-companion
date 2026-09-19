@@ -18,7 +18,7 @@ import com.tohutohu.herdrmobile.ui.files.FileViewerScreen
 import com.tohutohu.herdrmobile.ui.files.ImageViewerScreen
 import com.tohutohu.herdrmobile.ui.newsession.NewSessionScreen
 import com.tohutohu.herdrmobile.ui.sessions.ArchivedSessionsScreen
-import com.tohutohu.herdrmobile.ui.sessions.SessionListScreen
+import com.tohutohu.herdrmobile.ui.sessions.SessionListRoute
 import com.tohutohu.herdrmobile.ui.settings.SettingsScreen
 import com.tohutohu.herdrmobile.ui.terminal.TerminalScreen
 
@@ -58,7 +58,7 @@ fun AppNavigation(start: Route, openSession: String?, onSessionOpened: () -> Uni
         entryProvider = entryProvider {
             entry<SessionsRoute> {
                 val lifecycle = LocalLifecycleOwner.current.lifecycle
-                SessionListScreen(
+                SessionListRoute(
                     onOpen = { id -> lifecycle.ifResumed { nav.push(DetailRoute(id)) } },
                     onSettings = { lifecycle.ifResumed { nav.push(SettingsRoute) } },
                     onNew = { lifecycle.ifResumed { nav.push(NewSessionRoute) } },

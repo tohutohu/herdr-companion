@@ -65,7 +65,13 @@ fun rememberSessionSelection(): SessionSelection = remember { SessionSelection()
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SelectionTopBar(selection: SessionSelection, all: List<SessionRef>, actions: SessionActions) {
+fun SelectionTopBar(
+    selection: SessionSelection,
+    all: List<SessionRef>,
+    onArchive: (List<SessionRef>) -> Unit,
+    onUnarchive: (List<SessionRef>) -> Unit,
+    onResume: (SessionRef) -> Unit,
+) {
     val selected = all.filter { selection.contains(it.id) }
     val toArchive = selected.filter { !it.archived }
     val toUnarchive = selected.filter { it.archived }
@@ -84,13 +90,13 @@ fun SelectionTopBar(selection: SessionSelection, all: List<SessionRef>, actions:
             if (toArchive.isNotEmpty()) {
                 IconButton(onClick = {
                     selection.clear()
-                    actions.archive(toArchive)
+                    onArchive(toArchive)
                 }) { Icon(Icons.Default.Archive, contentDescription = "Archive") }
             }
             if (toUnarchive.isNotEmpty()) {
                 IconButton(onClick = {
                     selection.clear()
-                    actions.unarchive(toUnarchive)
+                    onUnarchive(toUnarchive)
                 }) { Icon(Icons.Default.Unarchive, contentDescription = "Unarchive") }
             }
             Box {
@@ -106,7 +112,7 @@ fun SelectionTopBar(selection: SessionSelection, all: List<SessionRef>, actions:
                             onClick = {
                                 menu = false
                                 selection.clear()
-                                actions.resume(s)
+                                onResume(s)
                             },
                         )
                     }

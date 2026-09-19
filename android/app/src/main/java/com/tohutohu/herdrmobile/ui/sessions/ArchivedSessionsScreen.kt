@@ -1,5 +1,6 @@
 package com.tohutohu.herdrmobile.ui.sessions
 
+import android.text.format.DateUtils
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -70,10 +71,13 @@ fun ArchivedSessionsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
 
     val rows = remember(sessions) {
         val now = System.currentTimeMillis()
-        sessions.orEmpty().map { it.toEntity(now, listed = false) }
+        sessions.orEmpty().map {
+            val entity = it.toEntity(now, listed = false)
+            SessionListItemUiState(entity, DateUtils.getRelativeTimeSpanString(entity.updatedAt).toString())
+        }
     }
     val selection = rememberSessionSelection()
-    val refs = remember(rows) { rows.map { it.ref() } }
+    val refs = remember(rows) { rows.map { it.session.ref() } }
     LaunchedEffect(refs) { selection.keepOnly(refs.map { it.id }) }
     NavigationBackHandler(
         state = rememberNavigationEventState(currentInfo = NavigationEventInfo.None),
@@ -83,7 +87,18 @@ fun ArchivedSessionsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
 
     Scaffold(
         topBar = {
-            SwitchingTopBar(selecting = selection.active, selectionBar = { SelectionTopBar(selection, refs, actions) }) {
+            SwitchingTopBar(
+                selecting = selection.active,
+                selectionBar = {
+                    SelectionTopBar(
+                        selection = selection,
+                        all = refs,
+                        onArchive = actions::archive,
+                        onUnarchive = actions::unarchive,
+                        onResume = actions::resume,
+                    )
+                },
+            ) {
                 TopAppBar(
                     navigationIcon = {
                         IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
@@ -120,8 +135,16 @@ fun ArchivedSessionsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
                             )
                         }
                     }
-                    items(rows, key = { it.id }) { s ->
-                        SessionItem(s, selection, actions, onOpen)
+                    items(rows, key = { it.session.id }) { s ->
+                        SessionItem(
+                            item = s,
+                            selection = selection,
+                            busy = actions.busy(s.session.id),
+                            engaged = actions.engaged(s.session.id),
+                            onOpen = onOpen,
+                            onArchive = actions::archive,
+                            onUnarchive = actions::unarchive,
+                        )
                     }
                 }
                 if (sessions == null && error == null) {

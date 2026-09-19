@@ -1,6 +1,5 @@
 package com.tohutohu.herdrmobile.ui.sessions
 
-import android.text.format.DateUtils
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -18,7 +17,9 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -41,78 +42,48 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
-import com.tohutohu.herdrmobile.container
+import androidx.navigationevent.NavigationEventInfo
+import androidx.navigationevent.compose.NavigationBackHandler
+import androidx.navigationevent.compose.rememberNavigationEventState
 import com.tohutohu.herdrmobile.data.api.Status
 import com.tohutohu.herdrmobile.data.db.SessionEntity
 import com.tohutohu.herdrmobile.ui.agentSettingsLabel
 import com.tohutohu.herdrmobile.ui.contextLabel
-import com.tohutohu.herdrmobile.ui.statusStyle
-import com.tohutohu.herdrmobile.ui.usage.UsageCard
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.filter
-import kotlinx.coroutines.launch
-import androidx.navigationevent.NavigationEventInfo
-import androidx.navigationevent.compose.NavigationBackHandler
-import androidx.navigationevent.compose.rememberNavigationEventState
-import androidx.compose.foundation.layout.consumeWindowInsets
-import androidx.compose.foundation.layout.PaddingValues
 import com.tohutohu.herdrmobile.ui.exceptBottom
+import com.tohutohu.herdrmobile.ui.statusStyle
+import kotlinx.coroutines.flow.filter
 
-private const val LIST_POLL_MS = 5_000L
-
-/** An extended FAB (56dp) and the margin Scaffold puts around it. */
 private val FAB_CLEARANCE = 88.dp
 
+/**
+ * Pure session-list rendering. Data access, lifecycle polling and Android
+ * actions are supplied by [SessionListRoute] through state and events.
+ */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun SessionListScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onNew: () -> Unit, onArchived: () -> Unit, onOpenStart: (String) -> Unit) {
-    val container = LocalContext.current.container
-    val repo = container.repository
-    // null until the cache has answered; then the rows render without a flash.
-    val loaded by container.sessions.collectAsState()
-    val sessions = loaded.orEmpty()
-    val starts by container.sessionStarts.entries.collectAsState()
-    val pendingStarts = starts.filter { entry -> !entry.listed && sessions.none { it.id == entry.sessionId } }
-    LaunchedEffect(sessions, starts) { container.sessionStarts.reconcile(sessions.map { it.id }.toSet(), sessions.mapNotNull { s -> s.paneId?.let { it to s.id } }.toMap()) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var refreshing by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    val snackbar = remember { SnackbarHostState() }
-
-    suspend fun refresh() {
-        error = try {
-            repo.refreshSessions()
-            null
-        } catch (e: Exception) {
-            e.message ?: e.toString()
-        }
-    }
+fun SessionListScreen(
+    state: SessionListUiState,
+    onAction: (SessionListAction) -> Unit,
+    topContent: @Composable () -> Unit = {},
+) {
+    val sessions = state.sessions
     val selection = rememberSessionSelection()
-    val refs = remember(sessions) { sessions.map { it.ref() } }
+    val refs = remember(sessions) { sessions.map { it.session.ref() } }
     LaunchedEffect(refs) { selection.keepOnly(refs.map { it.id }) }
     NavigationBackHandler(
         state = rememberNavigationEventState(currentInfo = NavigationEventInfo.None),
@@ -122,8 +93,6 @@ fun SessionListScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onNew: (
 
     // Keyed items keep the scroll anchor, which would hide sessions that
     // appear above the first row; stay at the top while the user is there.
-    // "There" is where their last scroll left the list, not where the anchor
-    // put it, so it is sampled when a scroll settles.
     val listState = rememberLazyListState()
     var pinnedToTop by remember { mutableStateOf(true) }
     LaunchedEffect(listState) {
@@ -131,36 +100,38 @@ fun SessionListScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onNew: (
             pinnedToTop = listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
         }
     }
-    val firstId = sessions.firstOrNull()?.id
+    val firstId = sessions.firstOrNull()?.session?.id
     LaunchedEffect(firstId) {
         if (pinnedToTop && !selection.active) listState.scrollToItem(0)
-    }
-    val actions = rememberSessionActions(snackbar = snackbar, onChanged = { refresh() })
-    actions.Dialogs()
-
-    // Poll only while visible; always refresh when returning to foreground.
-    LaunchedEffect(lifecycle) {
-        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            while (true) {
-                refresh()
-                delay(LIST_POLL_MS)
-            }
-        }
     }
 
     Scaffold(
         topBar = {
-            SwitchingTopBar(selecting = selection.active, selectionBar = { SelectionTopBar(selection, refs, actions) }) {
+            SwitchingTopBar(
+                selecting = selection.active,
+                selectionBar = {
+                    SelectionTopBar(
+                        selection = selection,
+                        all = refs,
+                        onArchive = { selected -> selected.forEach { onAction(SessionListAction.Archive(it)) } },
+                        onUnarchive = { selected -> selected.forEach { onAction(SessionListAction.Unarchive(it)) } },
+                        onResume = { onAction(SessionListAction.Resume(it)) },
+                    )
+                },
+            ) {
                 TopAppBar(
                     title = { Text("Sessions") },
                     actions = {
-                        IconButton(onClick = onArchived) { Icon(Icons.Default.Inventory2, contentDescription = "Archived sessions") }
-                        IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, contentDescription = "Settings") }
+                        IconButton(onClick = { onAction(SessionListAction.OpenArchived) }) {
+                            Icon(Icons.Default.Inventory2, contentDescription = "Archived sessions")
+                        }
+                        IconButton(onClick = { onAction(SessionListAction.OpenSettings) }) {
+                            Icon(Icons.Default.Settings, contentDescription = "Settings")
+                        }
                     },
                 )
             }
         },
-        snackbarHost = { SnackbarHost(snackbar) },
         floatingActionButton = {
             AnimatedVisibility(
                 visible = !selection.active,
@@ -168,7 +139,7 @@ fun SessionListScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onNew: (
                 exit = scaleOut() + fadeOut(),
             ) {
                 ExtendedFloatingActionButton(
-                    onClick = onNew,
+                    onClick = { onAction(SessionListAction.OpenNewSession) },
                     icon = { Icon(Icons.Default.Add, contentDescription = null) },
                     text = { Text("New session") },
                 )
@@ -176,25 +147,18 @@ fun SessionListScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onNew: (
         },
     ) { padding ->
         PullToRefreshBox(
-            isRefreshing = refreshing,
-            onRefresh = {
-                scope.launch {
-                    refreshing = true
-                    refresh()
-                    refreshing = false
-                }
-            },
+            isRefreshing = state.isRefreshing,
+            onRefresh = { onAction(SessionListAction.Refresh) },
             modifier = Modifier.padding(padding.exceptBottom()).consumeWindowInsets(padding).fillMaxSize(),
         ) {
             Column(Modifier.fillMaxSize()) {
-                UsageCard()
+                topContent()
                 LazyColumn(
                     Modifier.fillMaxSize(),
                     state = listState,
-                    // Room to scroll the last row out from under the FAB.
                     contentPadding = PaddingValues(bottom = padding.calculateBottomPadding() + FAB_CLEARANCE),
                 ) {
-                    error?.let {
+                    state.error?.let {
                         item(key = "error") {
                             Text(
                                 "Gateway unreachable: $it",
@@ -204,7 +168,7 @@ fun SessionListScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onNew: (
                             )
                         }
                     }
-                    if (loaded != null && sessions.isEmpty() && pendingStarts.isEmpty() && error == null) {
+                    if (state.isLoaded && sessions.isEmpty() && state.pendingStarts.isEmpty() && state.error == null) {
                         item(key = "empty") {
                             Text(
                                 "No sessions. Start Claude Code or Codex inside Herdr on your Mac.",
@@ -212,10 +176,20 @@ fun SessionListScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onNew: (
                             )
                         }
                     }
-                    items(pendingStarts, key = { "starting:${it.id}" }) { entry ->
-                        Column(Modifier.animateItem().fillMaxWidth().combinedClickable(
-                            onClick = { entry.sessionId?.let(onOpen) ?: onOpenStart(entry.id) },
-                        ).padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    items(state.pendingStarts, key = { "starting:${it.id}" }) { entry ->
+                        Column(
+                            Modifier
+                                .animateItem()
+                                .fillMaxWidth()
+                                .combinedClickable(
+                                    onClick = {
+                                        entry.sessionId?.let { onAction(SessionListAction.OpenSession(it)) }
+                                            ?: onAction(SessionListAction.OpenStarting(entry.id))
+                                    },
+                                )
+                                .padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
                             Text(entry.request.cwd.substringAfterLast('/'), style = MaterialTheme.typography.titleMedium)
                             Text(entry.request.prompt, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             Text(entry.label, style = MaterialTheme.typography.labelMedium)
@@ -223,8 +197,16 @@ fun SessionListScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onNew: (
                         }
                         HorizontalDivider()
                     }
-                    items(sessions, key = { it.id }) { s ->
-                        SessionItem(s, selection, actions, onOpen)
+                    items(sessions, key = { it.session.id }) { item ->
+                        SessionItem(
+                            item = item,
+                            selection = selection,
+                            busy = item.session.id in state.busySessionIds,
+                            engaged = item.session.id in state.engagedSessionIds,
+                            onOpen = { onAction(SessionListAction.OpenSession(it)) },
+                            onArchive = { onAction(SessionListAction.Archive(it)) },
+                            onUnarchive = { onAction(SessionListAction.Unarchive(it)) },
+                        )
                     }
                 }
             }
@@ -232,30 +214,32 @@ fun SessionListScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onNew: (
     }
 }
 
-/**
- * A list entry: the row, swipeable into [swipeActionFor] unless a selection
- * is active, and its divider. Animates its place in the list.
- */
+/** A list entry with its already formatted display time. */
 @Composable
 internal fun LazyItemScope.SessionItem(
-    s: SessionEntity,
+    item: SessionListItemUiState,
     selection: SessionSelection,
-    actions: SessionActions,
+    busy: Boolean,
+    engaged: Boolean,
     onOpen: (String) -> Unit,
+    onArchive: (SessionRef) -> Unit,
+    onUnarchive: (SessionRef) -> Unit,
 ) {
+    val s = item.session
     val ref = s.ref()
     Column(Modifier.animateItem()) {
         SwipeableSessionRow(
             action = swipeActionFor(ref),
-            engaged = actions.engaged(s.id),
-            isEngaged = { actions.engaged(s.id) },
-            busy = actions.busy(s.id),
+            engaged = engaged,
+            isEngaged = { engaged },
+            busy = busy,
             enabled = !selection.active,
-            onSwipe = { if (ref.archived) actions.unarchive(ref) else actions.archive(ref) },
+            onSwipe = { if (ref.archived) onUnarchive(ref) else onArchive(ref) },
         ) {
             SessionRow(
-                s,
-                busy = actions.busy(s.id),
+                s = s,
+                relativeUpdatedAt = item.relativeUpdatedAt,
+                busy = busy,
                 selected = selection.contains(s.id),
                 selecting = selection.active,
                 onClick = { if (selection.active) selection.toggle(s.id) else onOpen(s.id) },
@@ -285,6 +269,7 @@ internal fun SessionEntity.ref() = SessionRef(id, live = status != Status.OFFLIN
 @Composable
 internal fun SessionRow(
     s: SessionEntity,
+    relativeUpdatedAt: String,
     busy: Boolean,
     selected: Boolean,
     selecting: Boolean,
@@ -292,7 +277,6 @@ internal fun SessionRow(
     onLongClick: () -> Unit,
 ) {
     val style = statusStyle(s.status)
-    // Opaque, so the swipe background stays hidden until the row moves.
     val background by animateColorAsState(
         if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
         label = "rowBackground",
@@ -307,8 +291,6 @@ internal fun SessionRow(
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // Everything but the status shares what the status leaves; the
-                // settings label gives way first so the time stays on one line.
                 Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                     AnimatedVisibility(
                         visible = selecting,
@@ -337,7 +319,7 @@ internal fun SessionRow(
                             )
                         }
                     Text(
-                        "  " + DateUtils.getRelativeTimeSpanString(s.updatedAt),
+                        "  $relativeUpdatedAt",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,

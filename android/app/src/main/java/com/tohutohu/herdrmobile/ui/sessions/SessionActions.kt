@@ -49,6 +49,10 @@ class SessionActions internal constructor(
         private set
     private var confirmArchive by mutableStateOf<List<SessionRef>>(emptyList())
 
+    /** Busy or waiting for the stop-and-archive confirmation. */
+    val engagedIds: Set<String>
+        get() = busyIds + confirmArchive.mapTo(HashSet()) { it.id }
+
     private val repo get() = context.container.repository
 
     fun busy(id: String) = id in busyIds
@@ -182,35 +186,13 @@ class SessionActions internal constructor(
     /** Menu entries that apply to [s]. */
     @Composable
     fun MenuItems(s: SessionRef, onDismiss: () -> Unit) {
-        if (!s.live) {
-            DropdownMenuItem(
-                text = { Text("Resume in Herdr") },
-                leadingIcon = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
-                onClick = {
-                    onDismiss()
-                    resume(s)
-                },
-            )
-        }
-        if (s.archived) {
-            DropdownMenuItem(
-                text = { Text("Unarchive") },
-                leadingIcon = { Icon(Icons.Default.Unarchive, contentDescription = null) },
-                onClick = {
-                    onDismiss()
-                    unarchive(s)
-                },
-            )
-        } else {
-            DropdownMenuItem(
-                text = { Text(if (s.live) "Stop and archive" else "Archive") },
-                leadingIcon = { Icon(Icons.Default.Archive, contentDescription = null) },
-                onClick = {
-                    onDismiss()
-                    archive(s)
-                },
-            )
-        }
+        SessionActionMenuItems(
+            s = s,
+            onResume = { resume(s) },
+            onUnarchive = { unarchive(s) },
+            onArchive = { archive(s) },
+            onDismiss = onDismiss,
+        )
     }
 
     @Composable
@@ -218,6 +200,49 @@ class SessionActions internal constructor(
         DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
             MenuItems(s, onDismiss)
         }
+    }
+}
+
+/**
+ * Pure menu rendering shared by screens. The route supplies the operations so
+ * this component does not need a repository, a Context, or a Toast.
+ */
+@Composable
+fun SessionActionMenuItems(
+    s: SessionRef,
+    onResume: () -> Unit,
+    onUnarchive: () -> Unit,
+    onArchive: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    if (!s.live) {
+        DropdownMenuItem(
+            text = { Text("Resume in Herdr") },
+            leadingIcon = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
+            onClick = {
+                onDismiss()
+                onResume()
+            },
+        )
+    }
+    if (s.archived) {
+        DropdownMenuItem(
+            text = { Text("Unarchive") },
+            leadingIcon = { Icon(Icons.Default.Unarchive, contentDescription = null) },
+            onClick = {
+                onDismiss()
+                onUnarchive()
+            },
+        )
+    } else {
+        DropdownMenuItem(
+            text = { Text(if (s.live) "Stop and archive" else "Archive") },
+            leadingIcon = { Icon(Icons.Default.Archive, contentDescription = null) },
+            onClick = {
+                onDismiss()
+                onArchive()
+            },
+        )
     }
 }
 
