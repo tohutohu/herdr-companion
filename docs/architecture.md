@@ -329,7 +329,9 @@ Reading either would mean re-implementing an OAuth flow and handling their
 credentials in the gateway, so `internal/usage` shells out to the CodexBar CLI
 (`brew install --cask codexbar`), which already talks to both dashboards, and
 normalises its JSON into windows (`5h`, `7d`, and Claude's per-model weekly
-bucket).
+bucket). When Codex reports the separate Luna Reserve allocation,
+`internal/usage` reads `base_model_inference` from the existing Codex
+app-server connection and appends it as a `gpt-reserve` window.
 
 A read takes several seconds, so it runs in the background every
 `usageRefreshMinutes` (default 5) and `GET /v1/usage` answers from the cache.

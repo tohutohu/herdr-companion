@@ -160,7 +160,7 @@ func serve(args []string) error {
 	}
 	dirCheck := &directorycheck.Checker{APIKey: jevKey, Providers: []directorycheck.History{claudeProvider, codexProvider}}
 
-	limits := usage.New(cfg.UsageCommand, time.Duration(cfg.UsageRefreshMinutes)*time.Minute)
+	limits := usage.New(cfg.UsageCommand, time.Duration(cfg.UsageRefreshMinutes)*time.Minute, codexProvider)
 	go limits.Run(ctx)
 
 	watcher := &notifications.Watcher{Herdr: hc, Sessions: svc, Config: store, Sink: sink}

@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 )
 
 const sample = `[
@@ -53,6 +55,15 @@ func fakeCommand(t *testing.T, stdout, stderr string, code int) string {
 	return path
 }
 
+type fakeReserveReader struct {
+	window *model.UsageWindow
+	err    error
+}
+
+func (r fakeReserveReader) ReadReserveWindow(context.Context) (*model.UsageWindow, error) {
+	return r.window, r.err
+}
+
 func Testレート制限の出力をウィンドウに変換する(t *testing.T) {
 	providers, err := parse([]byte(sample))
 	if err != nil {
@@ -90,6 +101,34 @@ func Testレート制限の出力をウィンドウに変換する(t *testing.T)
 	}
 	if w := claude.Windows[2]; w.Scope != "Fable only" || w.Label != "7d" || w.UsedPercent != 8 {
 		t.Errorf("モデル別ウィンドウ = %+v", w)
+	}
+}
+
+func TestReserveのウィンドウをCodexに追加する(t *testing.T) {
+	reader := fakeReserveReader{window: &model.UsageWindow{
+		Key:           "gpt-reserve",
+		Label:         "7d",
+		Scope:         "gpt-reserve",
+		UsedPercent:   6,
+		WindowMinutes: 10080,
+	}}
+	svc := New(fakeCommand(t, sample, "", 0), time.Hour, reader)
+	snap := svc.Refresh(context.Background())
+	if snap.Error != "" {
+		t.Fatalf("refresh = %+v", snap)
+	}
+	var codex model.UsageProvider
+	for _, provider := range snap.Providers {
+		if provider.Provider == "codex" {
+			codex = provider
+			break
+		}
+	}
+	if len(codex.Windows) != 2 {
+		t.Fatalf("codex windows = %+v", codex.Windows)
+	}
+	if got := codex.Windows[1]; got.Key != "gpt-reserve" || got.Scope != "gpt-reserve" || got.UsedPercent != 6 {
+		t.Errorf("reserve window = %+v", got)
 	}
 }
 

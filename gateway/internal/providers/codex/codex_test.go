@@ -328,6 +328,21 @@ func (f *fakeServer) serve(p *pipeTransport, send func(any)) {
 					})
 				}
 			}
+		case "account/rateLimits/read":
+			result = map[string]any{
+				"rateLimitsByLimitId": map[string]any{
+					"base_model_inference": map[string]any{
+						"limitId":         "base_model_inference",
+						"limitName":       "gpt-reserve",
+						"normalModelSlug": "gpt-5.6-luna",
+						"primary": map[string]any{
+							"usedPercent":        6,
+							"windowDurationMins": 10080,
+							"resetsAt":           1789855214,
+						},
+					},
+				},
+			}
 		}
 		send(map[string]any{"id": m.ID, "result": result})
 	}
@@ -499,6 +514,37 @@ func Testモデル一覧をページングしてReserve以外の非表示や不�
 	exp, _ := json.Marshal(want)
 	if string(got) != string(exp) {
 		t.Errorf("catalog = %s", got)
+	}
+}
+
+func TestReserveのレート制限を別ウィンドウとして取得する(t *testing.T) {
+	f := &fakeServer{t: t}
+	pt := &pipeTransport{in: make(chan []byte, 16), out: make(chan []byte, 16), closed: make(chan struct{})}
+	go f.serve(pt, func(v any) {
+		b, _ := json.Marshal(v)
+		pt.in <- b
+	})
+	p := New("codex-not-used", "/nonexistent.sock", &fakeTerm{}, deadletter.Nop{})
+	p.reader = newRPCClient(pt, nil)
+	defer p.reader.close()
+
+	window, err := p.ReadReserveWindow(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if window == nil {
+		t.Fatal("Reserve window is missing")
+	}
+	if window.Key != "gpt-reserve" || window.Label != "7d" || window.Scope != "gpt-reserve" || window.UsedPercent != 6 {
+		t.Errorf("window = %+v", window)
+	}
+	wantReset := time.Unix(1789855214, 0).UTC()
+	if window.ResetsAt == nil || !window.ResetsAt.Equal(wantReset) {
+		t.Errorf("resetsAt = %v, want %v", window.ResetsAt, wantReset)
+	}
+	calls := f.callList()
+	if len(calls) != 1 || !strings.Contains(calls[0], `"supportsLunaReserve":true`) {
+		t.Errorf("calls = %v", calls)
 	}
 }
 

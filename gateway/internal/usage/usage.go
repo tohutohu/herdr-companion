@@ -4,8 +4,10 @@
 // Neither agent exposes this on its own CLI, and reading their credentials
 // here would duplicate two OAuth flows, so the gateway shells out to CodexBar
 // (`brew install --cask codexbar`), which already speaks to both dashboards.
-// A fetch takes several seconds, so the result is polled in the background and
-// served from cache; Android can force a fresh read.
+// Codex's separate Luna Reserve window is read through the existing Codex
+// app-server connection when the account reports it. A fetch takes several
+// seconds, so the result is polled in the background and served from cache;
+// Android can force a fresh read.
 package usage
 
 import (
@@ -38,11 +40,19 @@ const (
 // DefaultArgs asks CodexBar for Claude and Codex as JSON on stdout.
 var DefaultArgs = []string{"usage", "--provider", "both", "--format", "json"}
 
+// ReserveWindowReader reads Codex's model-specific reserve quota. It is kept
+// as a small interface so normal CodexBar usage remains testable without
+// starting an app-server process.
+type ReserveWindowReader interface {
+	ReadReserveWindow(context.Context) (*model.UsageWindow, error)
+}
+
 type Service struct {
 	cmd      string
 	args     []string
 	interval time.Duration
 	timeout  time.Duration
+	reserve  ReserveWindowReader
 
 	mu       sync.Mutex
 	snap     model.Usage
@@ -50,7 +60,7 @@ type Service struct {
 }
 
 // New returns nil when usage reporting is turned off.
-func New(command string, interval time.Duration) *Service {
+func New(command string, interval time.Duration, reserve ...ReserveWindowReader) *Service {
 	if command == "" {
 		command = DefaultCommand
 	}
@@ -60,7 +70,17 @@ func New(command string, interval time.Duration) *Service {
 	if interval <= 0 {
 		interval = DefaultInterval
 	}
-	return &Service{cmd: command, args: DefaultArgs, interval: interval, timeout: fetchTimeout}
+	var reader ReserveWindowReader
+	if len(reserve) > 0 {
+		reader = reserve[0]
+	}
+	return &Service{
+		cmd:      command,
+		args:     DefaultArgs,
+		interval: interval,
+		timeout:  fetchTimeout,
+		reserve:  reader,
+	}
 }
 
 // Snapshot returns the cached reading without touching the network.
@@ -146,7 +166,61 @@ func (s *Service) fetch(ctx context.Context) ([]model.UsageProvider, error) {
 		}
 		return nil, fmt.Errorf("%s: %w", s.cmd, err)
 	}
-	return parse(stdout.Bytes())
+	providers, err := parse(stdout.Bytes())
+	if err != nil {
+		return nil, err
+	}
+	if s.reserve == nil || !hasProvider(providers, "codex") || hasReserveWindow(providers) {
+		return providers, nil
+	}
+	reserve, err := s.reserve.ReadReserveWindow(ctx)
+	if err != nil {
+		// CodexBar is still the source for the normal limits. Reserve is an
+		// additive window, so an app-server error should not hide those values.
+		slog.Debug("reserve limit refresh failed", "operation", "usage.reserve", "error", err)
+		return providers, nil
+	}
+	if reserve != nil {
+		appendReserveWindow(providers, *reserve)
+	}
+	return providers, nil
+}
+
+func hasProvider(providers []model.UsageProvider, name string) bool {
+	for _, p := range providers {
+		if p.Provider == name {
+			return true
+		}
+	}
+	return false
+}
+
+func hasReserveWindow(providers []model.UsageProvider) bool {
+	for _, p := range providers {
+		if p.Provider != "codex" {
+			continue
+		}
+		for _, w := range p.Windows {
+			if w.Key == "gpt-reserve" || strings.EqualFold(w.Key, "codex-gpt-reserve") ||
+				strings.EqualFold(w.Scope, "gpt-reserve") || strings.EqualFold(w.Label, "gpt-reserve") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func appendReserveWindow(providers []model.UsageProvider, reserve model.UsageWindow) {
+	for i := range providers {
+		if providers[i].Provider != "codex" {
+			continue
+		}
+		providers[i].Windows = append(providers[i].Windows, reserve)
+		if providers[i].Error == "no limits reported" {
+			providers[i].Error = ""
+		}
+		return
+	}
 }
 
 func firstLine(s string) string {
