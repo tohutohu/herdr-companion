@@ -113,8 +113,8 @@ fun SessionListScreen(
                     SelectionTopBar(
                         selection = selection,
                         all = refs,
-                        onArchive = { selected -> selected.forEach { onAction(SessionListAction.Archive(it)) } },
-                        onUnarchive = { selected -> selected.forEach { onAction(SessionListAction.Unarchive(it)) } },
+                        onArchive = { selected -> onAction(SessionListAction.Archive(selected)) },
+                        onUnarchive = { selected -> onAction(SessionListAction.Unarchive(selected)) },
                         onResume = { onAction(SessionListAction.Resume(it)) },
                     )
                 },
@@ -204,8 +204,8 @@ fun SessionListScreen(
                             busy = item.session.id in state.busySessionIds,
                             engaged = item.session.id in state.engagedSessionIds,
                             onOpen = { onAction(SessionListAction.OpenSession(it)) },
-                            onArchive = { onAction(SessionListAction.Archive(it)) },
-                            onUnarchive = { onAction(SessionListAction.Unarchive(it)) },
+                            onArchive = { onAction(SessionListAction.Archive(listOf(it))) },
+                            onUnarchive = { onAction(SessionListAction.Unarchive(listOf(it))) },
                         )
                     }
                 }

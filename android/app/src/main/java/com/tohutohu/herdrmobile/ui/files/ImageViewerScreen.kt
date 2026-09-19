@@ -1,8 +1,5 @@
 package com.tohutohu.herdrmobile.ui.files
 
-import android.app.Activity
-import android.content.Context
-import android.content.ContextWrapper
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
@@ -19,7 +16,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -30,8 +26,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalView
-import androidx.core.view.WindowCompat
 import coil3.compose.AsyncImage
 
 /** Fullscreen image with pinch zoom. */
@@ -42,15 +36,6 @@ fun ImageViewerScreen(url: String, onBack: () -> Unit) {
     val transform = rememberTransformableState { zoom, pan, _ ->
         scale = (scale * zoom).coerceIn(1f, 8f)
         offset = if (scale == 1f) Offset.Zero else offset + pan
-    }
-    // Light status bar icons on the black backdrop, whatever the theme.
-    val view = LocalView.current
-    DisposableEffect(view) {
-        val window = view.context.findActivity()?.window ?: return@DisposableEffect onDispose { }
-        val bars = WindowCompat.getInsetsController(window, view)
-        val wasLight = bars.isAppearanceLightStatusBars
-        bars.isAppearanceLightStatusBars = false
-        onDispose { bars.isAppearanceLightStatusBars = wasLight }
     }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         AsyncImage(
@@ -69,10 +54,4 @@ fun ImageViewerScreen(url: String, onBack: () -> Unit) {
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Start)),
         ) { Icon(Icons.Default.Close, contentDescription = "Close") }
     }
-}
-
-private tailrec fun Context.findActivity(): Activity? = when (this) {
-    is Activity -> this
-    is ContextWrapper -> baseContext.findActivity()
-    else -> null
 }

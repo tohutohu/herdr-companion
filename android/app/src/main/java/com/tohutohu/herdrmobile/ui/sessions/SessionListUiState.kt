@@ -28,7 +28,7 @@ sealed interface SessionListAction {
     data object OpenNewSession : SessionListAction
     data object OpenArchived : SessionListAction
     data object Refresh : SessionListAction
-    data class Archive(val session: SessionRef) : SessionListAction
-    data class Unarchive(val session: SessionRef) : SessionListAction
+    data class Archive(val sessions: List<SessionRef>) : SessionListAction
+    data class Unarchive(val sessions: List<SessionRef>) : SessionListAction
     data class Resume(val session: SessionRef) : SessionListAction
 }

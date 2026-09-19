@@ -17,7 +17,7 @@ import com.tohutohu.herdrmobile.data.lastUsedDirectory
 import com.tohutohu.herdrmobile.data.api.DirListingDto
 import com.tohutohu.herdrmobile.data.api.ModelsResponse
 import com.tohutohu.herdrmobile.data.api.StartSessionRequest
-import com.tohutohu.herdrmobile.ui.usage.UsageCard
+import com.tohutohu.herdrmobile.ui.usage.UsageCardRoute
 import kotlinx.coroutines.launch
 
 /** Android route: owns stores, gateway calls, loading and start side effects. */
@@ -215,6 +215,6 @@ fun NewSessionRoute(
                 }
             }
         },
-        topContent = { UsageCard() },
+        topContent = { UsageCardRoute() },
     )
 }

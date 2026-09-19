@@ -15,7 +15,7 @@ import androidx.navigation3.runtime.serialization.NavBackStackSerializer
 import androidx.navigation3.ui.NavDisplay
 import com.tohutohu.herdrmobile.ui.detail.SessionDetailRoute
 import com.tohutohu.herdrmobile.ui.files.FileViewerScreen
-import com.tohutohu.herdrmobile.ui.files.ImageViewerScreen
+import com.tohutohu.herdrmobile.ui.files.ImageViewerRoute
 import com.tohutohu.herdrmobile.ui.newsession.NewSessionRoute
 import com.tohutohu.herdrmobile.ui.sessions.ArchivedSessionsScreen
 import com.tohutohu.herdrmobile.ui.sessions.SessionListRoute
@@ -111,7 +111,7 @@ fun AppNavigation(start: Route, openSession: String?, onSessionOpened: () -> Uni
             }
             entry<ImageRoute>(metadata = ScreenMotion.zoom) { route ->
                 val lifecycle = LocalLifecycleOwner.current.lifecycle
-                ImageViewerScreen(route.url, onBack = { lifecycle.ifResumed { nav.back() } })
+                ImageViewerRoute(route.url, onBack = { lifecycle.ifResumed { nav.back() } })
             }
             entry<TerminalRoute> { route ->
                 val lifecycle = LocalLifecycleOwner.current.lifecycle

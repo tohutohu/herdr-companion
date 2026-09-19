@@ -14,7 +14,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.tohutohu.herdrmobile.container
-import com.tohutohu.herdrmobile.ui.usage.UsageCard
+import com.tohutohu.herdrmobile.ui.usage.UsageCardRoute
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -98,11 +98,11 @@ fun SessionListRoute(
                     refresh()
                     refreshing = false
                 }
-                is SessionListAction.Archive -> actions.archive(action.session)
-                is SessionListAction.Unarchive -> actions.unarchive(action.session)
+                is SessionListAction.Archive -> actions.archive(action.sessions)
+                is SessionListAction.Unarchive -> actions.unarchive(action.sessions)
                 is SessionListAction.Resume -> actions.resume(action.session)
             }
         },
-        topContent = { UsageCard() },
+        topContent = { UsageCardRoute() },
     )
 }
