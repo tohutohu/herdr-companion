@@ -1,7 +1,6 @@
 package com.tohutohu.herdrmobile.ui.newsession
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -43,174 +42,51 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.tohutohu.herdrmobile.container
-import com.tohutohu.herdrmobile.data.AgentPreset
-import com.tohutohu.herdrmobile.data.DirectoryShortcuts
-import com.tohutohu.herdrmobile.data.lastUsedDirectory
-import com.tohutohu.herdrmobile.data.api.DirListingDto
-import com.tohutohu.herdrmobile.data.api.ModelsResponse
-import com.tohutohu.herdrmobile.data.api.StartSessionRequest
 import com.tohutohu.herdrmobile.ui.ExpandingContent
 import com.tohutohu.herdrmobile.ui.SwapContent
-import com.tohutohu.herdrmobile.ui.usage.UsageCard
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.launch
 
-/**
- * Pick how the agent runs (a favorite agent / model / effort combination, or
- * any other one from the full pickers) and a working directory (browse or
- * create one under the gateway's workspace roots), then start the agent in a
- * new Herdr workspace.
- */
+/** Pure Compose rendering for choosing an agent and working directory. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NewSessionScreen(
-    onBack: () -> Unit,
-    onStarted: (startId: String) -> Unit,
+    state: NewSessionUiState,
+    onAction: (NewSessionAction) -> Unit,
+    topContent: @Composable () -> Unit = {},
 ) {
-    val context = LocalContext.current
-    val api = context.container.api
-    val starts = context.container.sessionStarts
-    val shortcutStore = context.container.directoryShortcuts
-    val presetStore = context.container.agentPresets
-    // Null until the store has been read; restoring waits for it.
-    val shortcuts by shortcutStore.shortcuts.collectAsState(initial = null)
-    // Null until the store has been read; restoring waits for it.
-    val presets by presetStore.presets.collectAsState(initial = null)
-    val scope = rememberCoroutineScope()
-
-    var provider by rememberSaveable { mutableStateOf("claude") }
-    var path by rememberSaveable { mutableStateOf("") } // "" = list of roots
-    var listing by remember { mutableStateOf<DirListingDto?>(null) }
-    var loading by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var prompt by rememberSaveable { mutableStateOf("") }
-    var starting by remember { mutableStateOf(false) }
-    var checking by remember { mutableStateOf(false) }
-    var pendingStart by remember { mutableStateOf<Pair<StartSessionRequest, AgentPreset>?>(null) }
-    var showMkdir by remember { mutableStateOf(false) }
-    var showPicker by remember { mutableStateOf(false) }
-    // "" = the agent's default model / effort.
-    var model by rememberSaveable { mutableStateOf("") }
-    var effort by rememberSaveable { mutableStateOf("") }
-    var catalog by remember { mutableStateOf(ModelsResponse()) }
-    var modelsError by remember { mutableStateOf<String?>(null) }
-    var restored by rememberSaveable { mutableStateOf(false) }
-    // This is deliberately not saveable: after rotation, listing is lost but
-    // path is restored, so the current directory must be loaded again.
-    var directoryRestored by remember { mutableStateOf(false) }
-
-    val loadedShortcuts = shortcuts ?: DirectoryShortcuts()
-    val saved = presets?.presets.orEmpty()
-    val current = withKnownNames(
-        agentPreset(provider, model, effort, catalog),
-        saved + listOfNotNull(presets?.lastUsed),
-    )
-    val favorite = saved.any { it.key == current.key }
-
-    fun start(request: StartSessionRequest, preset: AgentPreset) {
-        if (starting) return
-        starting = true
-        val id = starts.enqueue(request)
-        context.container.scope.launch {
-            runCatching { shortcutStore.recordUsed(request.cwd) }
-            runCatching { presetStore.recordUsed(preset) }
-        }
-        onStarted(id)
-    }
-
-    pendingStart?.let { (request, preset) ->
+    val pending = state.pendingStart
+    if (pending != null) {
         AlertDialog(
-            onDismissRequest = { pendingStart = null },
+            onDismissRequest = { onAction(NewSessionAction.ChangeFolder) },
             title = { Text("Check the working folder") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("This request may belong to a different project, based on this folder's files and available session history.")
-                    Text(request.cwd, fontFamily = FontFamily.Monospace)
-                    Text(request.prompt, maxLines = 6, overflow = TextOverflow.Ellipsis)
+                    Text(pending.request.cwd, fontFamily = FontFamily.Monospace)
+                    Text(pending.request.prompt, maxLines = 6, overflow = TextOverflow.Ellipsis)
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    pendingStart = null
-                    scope.launch { start(request, preset) }
-                }) { Text("Start anyway") }
+                TextButton(onClick = { onAction(NewSessionAction.StartAnyway) }) { Text("Start anyway") }
             },
             dismissButton = {
-                TextButton(onClick = { pendingStart = null }) { Text("Change folder") }
+                TextButton(onClick = { onAction(NewSessionAction.ChangeFolder) }) { Text("Change folder") }
             },
         )
     }
 
-    suspend fun load(p: String) {
-        loading = true
-        try {
-            val l = api.directories(p.ifEmpty { null })
-            listing = l
-            path = l.path
-            error = null
-            // A single root: open it directly.
-            if (l.path.isEmpty() && l.entries.size == 1) {
-                load(l.entries.first().path)
-            }
-        } catch (e: Exception) {
-            error = e.message
-        } finally {
-            loading = false
-        }
-    }
-
-    LaunchedEffect(shortcuts) {
-        val loaded = shortcuts ?: return@LaunchedEffect
-        if (directoryRestored) return@LaunchedEffect
-        directoryRestored = true
-        // Keep a path restored by rememberSaveable after rotation; otherwise
-        // start in the directory used by the most recent session.
-        load(path.ifEmpty { lastUsedDirectory(loaded) })
-    }
-
-    // Start where the last session left off, once.
-    LaunchedEffect(presets) {
-        val loaded = presets ?: return@LaunchedEffect
-        if (restored) return@LaunchedEffect
-        restored = true
-        loaded.lastUsed?.let {
-            provider = it.provider
-            model = it.model
-            effort = it.effort
-        }
-    }
-
-    LaunchedEffect(provider) {
-        catalog = ModelsResponse()
-        modelsError = null
-        try {
-            catalog = api.models(provider)
-            if (model.isNotEmpty() && catalog.models.none { it.id == model }) model = ""
-            if (effort.isNotEmpty() && effortsFor(catalog, model).none { it.id == effort }) effort = ""
-        } catch (e: Exception) {
-            modelsError = e.message
-        }
-    }
-
-    if (showMkdir) {
+    if (state.showMkdir) {
         var name by remember { mutableStateOf("") }
         AlertDialog(
-            onDismissRequest = { showMkdir = false },
+            onDismissRequest = { onAction(NewSessionAction.CancelMkdir) },
             title = { Text("New folder") },
             text = {
                 OutlinedTextField(
@@ -218,45 +94,32 @@ fun NewSessionScreen(
                     onValueChange = { name = it },
                     singleLine = true,
                     label = { Text("Folder name") },
-                    supportingText = { Text("in $path") },
+                    supportingText = { Text("in ${state.path}") },
                 )
             },
             confirmButton = {
                 TextButton(
                     enabled = name.isNotBlank(),
-                    onClick = {
-                        showMkdir = false
-                        scope.launch {
-                            try {
-                                load(api.createDirectory(path, name.trim()))
-                            } catch (e: Exception) {
-                                error = "Could not create folder: ${e.message}"
-                            }
-                        }
-                    },
+                    onClick = { onAction(NewSessionAction.CreateDirectory(name.trim())) },
                 ) { Text("Create") }
             },
-            dismissButton = { TextButton(onClick = { showMkdir = false }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { onAction(NewSessionAction.CancelMkdir) }) { Text("Cancel") } },
         )
     }
 
-    if (showPicker) {
+    if (state.showPicker) {
         AgentPickerDialog(
-            provider = provider,
-            model = model,
-            effort = effort,
-            catalog = catalog,
-            modelsError = modelsError,
-            favorite = favorite,
-            onProvider = { provider = it },
-            onModel = { picked ->
-                model = picked
-                // The new model may not offer the picked effort.
-                if (effortsFor(catalog, picked).none { it.id == effort }) effort = ""
-            },
-            onEffort = { effort = it },
-            onToggleFavorite = { scope.launch { presetStore.toggle(current) } },
-            onDismiss = { showPicker = false },
+            provider = state.provider,
+            model = state.model,
+            effort = state.effort,
+            catalog = state.catalog,
+            modelsError = state.modelsError,
+            favorite = state.favorite,
+            onProvider = { onAction(NewSessionAction.SetProvider(it)) },
+            onModel = { onAction(NewSessionAction.SetModel(it)) },
+            onEffort = { onAction(NewSessionAction.SetEffort(it)) },
+            onToggleFavorite = { onAction(NewSessionAction.ToggleFavorite) },
+            onDismiss = { onAction(NewSessionAction.DismissPicker) },
         )
     }
 
@@ -264,7 +127,9 @@ fun NewSessionScreen(
         topBar = {
             TopAppBar(
                 navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+                    IconButton(onClick = { onAction(NewSessionAction.Back) }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
                 },
                 title = { Text("New session") },
             )
@@ -276,58 +141,32 @@ fun NewSessionScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     AgentPresetsRow(
-                        presets = saved,
-                        current = current,
-                        onSelect = {
-                            provider = it.provider
-                            model = it.model
-                            effort = it.effort
-                        },
-                        onReorder = { order -> scope.launch { presetStore.setOrder(order) } },
-                        onCustomize = { showPicker = true },
+                        presets = state.savedPresets,
+                        current = state.currentPreset,
+                        onSelect = { onAction(NewSessionAction.SelectPreset(it)) },
+                        onReorder = { onAction(NewSessionAction.ReorderPresets(it)) },
+                        onCustomize = { onAction(NewSessionAction.CustomizeAgent) },
                     )
                     OutlinedTextField(
-                        value = prompt,
-                        onValueChange = { prompt = it },
-                        enabled = !starting && !checking,
+                        value = state.prompt,
+                        onValueChange = { onAction(NewSessionAction.SetPrompt(it)) },
+                        enabled = !state.starting && !state.checking,
                         label = { Text("First prompt (optional)") },
                         maxLines = 4,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Button(
-                        enabled = path.isNotEmpty() && !starting && !checking && !loading && pendingStart == null,
+                        enabled = state.path.isNotEmpty() && !state.starting && !state.checking && !state.loading && state.pendingStart == null,
                         modifier = Modifier.fillMaxWidth(),
-                        onClick = {
-                            // Capture all selections before suspension; confirmation must
-                            // start exactly the request that was checked.
-                            val request = StartSessionRequest(
-                                provider, path, prompt.trim(), trust = false,
-                                model.ifEmpty { null }, effort.ifEmpty { null },
-                            )
-                            val preset = current
-                            scope.launch {
-                                checking = true
-                                error = null
-                                try {
-                                    if (needsDirectoryConfirmation(request) { api.checkDirectory(it.cwd, it.prompt) }) {
-                                        pendingStart = request to preset
-                                    } else {
-                                        start(request, preset)
-                                    }
-                                } finally {
-                                    checking = false
-                                }
-                            }
-                        },
+                        onClick = { onAction(NewSessionAction.Start) },
                     ) {
-                        // The label follows the folder and gives way to the progress text.
                         val busyLabel = when {
-                            starting -> "Starting…"
-                            checking -> "Checking folder…"
+                            state.starting -> "Starting…"
+                            state.checking -> "Checking folder…"
                             else -> null
                         }
                         AnimatedContent(
-                            targetState = busyLabel ?: "Start ${providerName(provider)} in ${path.substringAfterLast('/').ifEmpty { "…" }}",
+                            targetState = busyLabel ?: "Start ${providerName(state.provider)} in ${state.path.substringAfterLast('/').ifEmpty { "…" }}",
                             transitionSpec = { fadeIn(tween(160)) togetherWith fadeOut(tween(100)) using SizeTransform(clip = false) },
                             contentAlignment = Alignment.Center,
                             label = "startButton",
@@ -343,13 +182,13 @@ fun NewSessionScreen(
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
-            UsageCard()
+            topContent()
             DirectoryShortcutsRow(
-                shortcuts = loadedShortcuts,
-                currentPath = path,
-                enabled = !loading && !checking && !starting,
-                onOpen = { scope.launch { load(it) } },
-                onReorderFavorites = { order -> scope.launch { shortcutStore.setFavoriteOrder(order) } },
+                shortcuts = state.shortcuts,
+                currentPath = state.path,
+                enabled = !state.loading && !state.checking && !state.starting,
+                onOpen = { onAction(NewSessionAction.OpenDirectory(it)) },
+                onReorderFavorites = { onAction(NewSessionAction.ReorderFavoriteDirectories(it)) },
                 modifier = Modifier.padding(top = 8.dp),
             )
             Row(
@@ -357,11 +196,11 @@ fun NewSessionScreen(
                 modifier = Modifier.padding(start = 8.dp, end = 8.dp),
             ) {
                 IconButton(
-                    enabled = listing?.parent != null && !loading && !checking && !starting,
-                    onClick = { scope.launch { load(listing?.parent.orEmpty()) } },
+                    enabled = state.listing?.parent != null && !state.loading && !state.checking && !state.starting,
+                    onClick = { onAction(NewSessionAction.OpenParent) },
                 ) { Icon(Icons.Default.ArrowUpward, contentDescription = "Parent folder") }
                 AnimatedContent(
-                    targetState = path,
+                    targetState = state.path,
                     transitionSpec = { fadeIn(tween(160)) togetherWith fadeOut(tween(100)) using SizeTransform(clip = false) },
                     contentAlignment = Alignment.CenterStart,
                     modifier = Modifier.weight(1f),
@@ -376,10 +215,10 @@ fun NewSessionScreen(
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
-                val favoriteDir = path in loadedShortcuts.favorites
+                val favoriteDir = state.path in state.shortcuts.favorites
                 IconButton(
-                    enabled = path.isNotEmpty(),
-                    onClick = { scope.launch { shortcutStore.toggleFavorite(path) } },
+                    enabled = state.path.isNotEmpty(),
+                    onClick = { onAction(NewSessionAction.ToggleFavoriteDirectory) },
                 ) {
                     SwapContent(favoriteDir) { starred ->
                         Icon(
@@ -388,19 +227,19 @@ fun NewSessionScreen(
                         )
                     }
                 }
-                IconButton(enabled = path.isNotEmpty() && !loading && !checking && !starting, onClick = { showMkdir = true }) {
-                    Icon(Icons.Default.CreateNewFolder, contentDescription = "New folder")
-                }
+                IconButton(
+                    enabled = state.path.isNotEmpty() && !state.loading && !state.checking && !state.starting,
+                    onClick = { onAction(NewSessionAction.ShowMkdir) },
+                ) { Icon(Icons.Default.CreateNewFolder, contentDescription = "New folder") }
             }
-            ExpandingContent(value = error) {
+            ExpandingContent(value = state.error) {
                 Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp))
             }
             HorizontalDivider()
-            ExpandingContent(value = Unit.takeIf { loading && listing == null }) {
+            ExpandingContent(value = Unit.takeIf { state.loading && state.listing == null }) {
                 CircularProgressIndicator(Modifier.padding(24.dp))
             }
-            // Descending slides the new listing in from the right, going up from the left.
-            val shownPath = listing?.path ?: path
+            val shownPath = state.listing?.path ?: state.path
             AnimatedContent(
                 targetState = shownPath,
                 transitionSpec = {
@@ -410,9 +249,9 @@ fun NewSessionScreen(
                 },
                 label = "listing",
             ) { current ->
-                val entries = if (current == shownPath) listing?.entries.orEmpty() else emptyList()
+                val entries = if (current == shownPath) state.listing?.entries.orEmpty() else emptyList()
                 LazyColumn(Modifier.fillMaxSize()) {
-                    if (entries.isEmpty() && !loading && current == shownPath) {
+                    if (entries.isEmpty() && !state.loading && current == shownPath) {
                         item(key = "empty") { Text("No subfolders", modifier = Modifier.animateItem().padding(16.dp)) }
                     }
                     items(entries, key = { it.path }) { dir ->
@@ -421,7 +260,9 @@ fun NewSessionScreen(
                             modifier = Modifier
                                 .animateItem()
                                 .fillMaxWidth()
-                                .clickable(enabled = !loading && !checking && !starting) { scope.launch { load(dir.path) } }
+                                .clickable(enabled = !state.loading && !state.checking && !state.starting) {
+                                    onAction(NewSessionAction.OpenDirectory(dir.path))
+                                }
                                 .padding(horizontal = 16.dp, vertical = 12.dp),
                         ) {
                             Icon(Icons.Default.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary)

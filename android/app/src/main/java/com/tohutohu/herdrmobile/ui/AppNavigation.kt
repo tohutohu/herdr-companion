@@ -16,7 +16,7 @@ import androidx.navigation3.ui.NavDisplay
 import com.tohutohu.herdrmobile.ui.detail.SessionDetailRoute
 import com.tohutohu.herdrmobile.ui.files.FileViewerScreen
 import com.tohutohu.herdrmobile.ui.files.ImageViewerScreen
-import com.tohutohu.herdrmobile.ui.newsession.NewSessionScreen
+import com.tohutohu.herdrmobile.ui.newsession.NewSessionRoute
 import com.tohutohu.herdrmobile.ui.sessions.ArchivedSessionsScreen
 import com.tohutohu.herdrmobile.ui.sessions.SessionListRoute
 import com.tohutohu.herdrmobile.ui.settings.SettingsScreen
@@ -75,7 +75,7 @@ fun AppNavigation(start: Route, openSession: String?, onSessionOpened: () -> Uni
             }
             entry<NewSessionRoute> {
                 val lifecycle = LocalLifecycleOwner.current.lifecycle
-                NewSessionScreen(
+                NewSessionRoute(
                     onBack = { lifecycle.ifResumed { nav.back() } },
                     onStarted = { id -> nav.replaceAbove(SessionsRoute, StartingRoute(id)) },
                 )
