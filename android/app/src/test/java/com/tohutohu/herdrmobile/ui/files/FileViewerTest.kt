@@ -18,4 +18,12 @@ class FileViewerTest {
         assertFalse(isMarkdownFile("src/Main.kt"))
         assertFalse(isMarkdownFile("Makefile"))
     }
+
+    @Test
+    fun `HTMLの拡張子を判定する`() {
+        assertTrue(isHtmlFile("public/index.html"))
+        assertTrue(isHtmlFile("docs/legacy.HTM"))
+        assertFalse(isHtmlFile("index.html.bak"))
+        assertFalse(isHtmlFile("src/Main.kt"))
+    }
 }

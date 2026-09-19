@@ -73,7 +73,11 @@ import com.tohutohu.herdrmobile.ui.exceptBottom
 
 private sealed interface FileState {
     data object Loading : FileState
-    data class Text(val lines: List<String>, val markdown: Boolean) : FileState
+    data class Text(
+        val lines: List<String>,
+        val markdown: Boolean,
+        val htmlInfo: FileInfoDto? = null,
+    ) : FileState
     data class Image(val bytes: ByteArray) : FileState
     data class Media(val info: FileInfoDto) : FileState
     data class Download(val info: FileInfoDto) : FileState
@@ -82,6 +86,7 @@ private sealed interface FileState {
 
 private const val MAX_LINES = 20_000
 private val MARKDOWN_EXTENSIONS = setOf("md", "markdown", "mdown", "mkdn", "mdwn")
+private val HTML_EXTENSIONS = setOf("htm", "html")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -102,6 +107,7 @@ fun FileViewerScreen(sessionId: String, path: String, line: Int, onBack: () -> U
                     type.startsWith("text/") -> FileState.Text(
                         lines = bytes.decodeToString().lines().take(MAX_LINES),
                         markdown = isMarkdownFile(path) || type.substringBefore(';').equals("text/markdown", ignoreCase = true),
+                        htmlInfo = info.takeIf { isHtmlFile(path) },
                     )
                     else -> FileState.Download(info)
                 }
@@ -139,7 +145,7 @@ fun FileViewerScreen(sessionId: String, path: String, line: Int, onBack: () -> U
                     FileState.Loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
                     is FileState.Error -> Text(s.message, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp))
                     is FileState.Image -> AsyncImage(model = s.bytes, contentDescription = path, modifier = Modifier.padding(bottom = bottom).fillMaxSize())
-                    is FileState.Text -> TextFileView(sessionId, path, s.lines, s.markdown, line, bottom)
+                    is FileState.Text -> TextFileView(sessionId, path, s.lines, s.markdown, s.htmlInfo, line, bottom)
                     is FileState.Media -> Box(Modifier.padding(bottom = bottom)) { MediaFileView(sessionId, s.info) { state = FileState.Download(s.info) } }
                     is FileState.Download -> Box(Modifier.padding(bottom = bottom)) { DownloadView(sessionId, s.info) }
                 }
@@ -218,15 +224,24 @@ private fun displayType(info: FileInfoDto): String =
 internal fun isMarkdownFile(path: String): Boolean =
     path.substringAfterLast('.', "").lowercase() in MARKDOWN_EXTENSIONS
 
+/** Returns whether a path is an HTML document that can be rendered by a browser. */
+internal fun isHtmlFile(path: String): Boolean =
+    path.substringAfterLast('.', "").lowercase() in HTML_EXTENSIONS
+
 @Composable
 private fun TextFileView(
     sessionId: String,
     path: String,
     lines: List<String>,
     markdown: Boolean,
+    htmlInfo: FileInfoDto?,
     target: Int,
     bottom: Dp,
 ) {
+    if (htmlInfo != null) {
+        HtmlSourceView(sessionId, path, lines, target, bottom, htmlInfo)
+        return
+    }
     if (!markdown) {
         CodeView(path, lines, target, bottom)
         return
@@ -255,6 +270,81 @@ private fun TextFileView(
             } else {
                 CodeView(path, lines, target, bottom)
             }
+        }
+    }
+}
+
+/** Keeps HTML source inspection available while offering a rendered browser view. */
+@Composable
+private fun HtmlSourceView(
+    sessionId: String,
+    path: String,
+    lines: List<String>,
+    target: Int,
+    bottom: Dp,
+    info: FileInfoDto,
+) {
+    val context = LocalContext.current
+    val downloads = context.container.downloads
+    val downloadState by remember(sessionId, info.path) { downloads.state(sessionId, info.path) }.collectAsState()
+    var openAfterDownload by remember(sessionId, info.path) { mutableStateOf(false) }
+    var openFailed by remember(sessionId, info.path) { mutableStateOf(false) }
+
+    LaunchedEffect(downloadState, openAfterDownload) {
+        when (val state = downloadState) {
+            is DownloadState.Done -> if (openAfterDownload) {
+                openAfterDownload = false
+                openFailed = !downloads.open(state)
+            }
+            is DownloadState.Failed -> openAfterDownload = false
+            else -> Unit
+        }
+    }
+
+    fun openInBrowser() {
+        openFailed = false
+        when (val state = downloadState) {
+            is DownloadState.Done -> openFailed = !downloads.open(state)
+            DownloadState.Idle, is DownloadState.Failed -> {
+                openAfterDownload = true
+                downloads.start(sessionId, info.path, info.name, info.size)
+            }
+            is DownloadState.Running -> openAfterDownload = true
+        }
+    }
+
+    val error = when {
+        openFailed -> "No app can open this file"
+        downloadState is DownloadState.Failed -> (downloadState as DownloadState.Failed).message
+        else -> null
+    }
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            when (val state = downloadState) {
+                DownloadState.Idle, is DownloadState.Done, is DownloadState.Failed ->
+                    Button(onClick = { openInBrowser() }) {
+                        Text(if (state is DownloadState.Failed) "Retry in browser" else "Open in browser")
+                    }
+                is DownloadState.Running -> {
+                    if (state.total > 0) {
+                        val progress by animateFloatAsState(state.bytes.toFloat() / state.total, label = "htmlDownloadProgress")
+                        LinearProgressIndicator(progress = { progress }, modifier = Modifier.width(180.dp))
+                    } else {
+                        LinearProgressIndicator(Modifier.width(180.dp))
+                    }
+                    Text("Preparing browser…", modifier = Modifier.padding(start = 12.dp))
+                }
+            }
+        }
+        ExpandingContent(value = error) {
+            Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp))
+        }
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            CodeView(path, lines, target, bottom)
         }
     }
 }
