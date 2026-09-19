@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#090b22">
+  <title>星くずキャッチャー</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #f8f7ff;
+      --muted: #aaa8c7;
+      --panel: rgba(19, 21, 59, .72);
+      --line: rgba(255, 255, 255, .12);
+      --pink: #ff79c6;
+      --cyan: #64e8ff;
+      --gold: #ffd166;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { min-height: 100%; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 15% 10%, rgba(117, 92, 255, .25), transparent 32rem),
+        radial-gradient(circle at 95% 35%, rgba(255, 71, 176, .18), transparent 30rem),
+        #090b22;
+      font-family: ui-rounded, "Hiragino Maru Gothic ProN", "Yu Gothic", system-ui, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .app {
+      width: min(100%, 760px);
+      margin: 0 auto;
+      padding: max(24px, env(safe-area-inset-top)) 18px max(28px, env(safe-area-inset-bottom));
+    }
+
+    .topbar { padding: 10px 4px 18px; }
+
+    .eyebrow {
+      color: var(--cyan);
+      font-size: .74rem;
+      font-weight: 800;
+      letter-spacing: .18em;
+    }
+
+    h1 {
+      margin: 8px 0 4px;
+      font-size: clamp(2rem, 8vw, 3.25rem);
+      line-height: 1;
+      letter-spacing: -.06em;
+    }
+
+    .topbar p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 1rem;
+    }
+
+    .dashboard {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .stat {
+      min-width: 0;
+      padding: 13px 14px 12px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--panel);
+      box-shadow: 0 12px 34px rgba(0, 0, 0, .16);
+      backdrop-filter: blur(16px);
+    }
+
+    .stat-label {
+      display: block;
+      color: var(--muted);
+      font-size: .73rem;
+      font-weight: 700;
+      letter-spacing: .08em;
+    }
+
+    .stat-value {
+      display: block;
+      margin-top: 2px;
+      font-size: clamp(1.35rem, 6vw, 2rem);
+      font-weight: 900;
+      line-height: 1.1;
+    }
+
+    .game-shell {
+      position: relative;
+      overflow: hidden;
+      min-height: 430px;
+      aspect-ratio: 4 / 5;
+      border: 1px solid rgba(255, 255, 255, .18);
+      border-radius: 28px;
+      background: #0b0e31;
+      box-shadow: 0 24px 70px rgba(0, 0, 0, .35), 0 0 60px rgba(116, 97, 255, .12);
+      isolation: isolate;
+    }
+
+    .game-shell::after {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      pointer-events: none;
+      content: "";
+      border: 1px solid rgba(255, 255, 255, .06);
+      border-radius: inherit;
+      box-shadow: inset 0 0 80px rgba(4, 5, 23, .58);
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      touch-action: none;
+      cursor: crosshair;
+    }
+
+    .game-message {
+      position: absolute;
+      top: 18px;
+      left: 50%;
+      z-index: 2;
+      max-width: calc(100% - 32px);
+      padding: 8px 13px;
+      border: 1px solid rgba(255, 255, 255, .14);
+      border-radius: 999px;
+      background: rgba(11, 14, 49, .62);
+      color: #fff;
+      font-size: .88rem;
+      font-weight: 800;
+      text-align: center;
+      transform: translateX(-50%);
+      backdrop-filter: blur(14px);
+      pointer-events: none;
+    }
+
+    .hint {
+      position: absolute;
+      right: 18px;
+      bottom: 16px;
+      left: 18px;
+      z-index: 2;
+      color: rgba(238, 237, 255, .64);
+      font-size: .8rem;
+      text-align: center;
+      pointer-events: none;
+    }
+
+    .actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 14px 4px 0;
+    }
+
+    button {
+      min-height: 46px;
+      padding: 0 17px;
+      border: 1px solid rgba(255, 255, 255, .18);
+      border-radius: 14px;
+      background: linear-gradient(135deg, rgba(255, 121, 198, .95), rgba(132, 99, 255, .95));
+      color: #fff;
+      font: inherit;
+      font-size: .95rem;
+      font-weight: 850;
+      box-shadow: 0 8px 22px rgba(112, 74, 214, .25);
+      cursor: pointer;
+    }
+
+    button:active { transform: translateY(1px) scale(.985); }
+
+    .actions p {
+      margin: 0;
+      color: var(--muted);
+      font-size: .8rem;
+      line-height: 1.4;
+      text-align: right;
+    }
+
+    @media (min-width: 640px) {
+      .app { padding-right: 28px; padding-left: 28px; }
+      .game-shell { min-height: 520px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header class="topbar">
+      <div class="eyebrow">POCKET COSMOS</div>
+      <h1>星くずキャッチャー</h1>
+      <p>30秒で、できるだけたくさんの星をタップ。</p>
+    </header>
+
+    <section class="dashboard" aria-label="ゲーム状況">
+      <div class="stat">
+        <span class="stat-label">SCORE</span>
+        <span class="stat-value" id="score">0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">TIME</span>
+        <span class="stat-value"><span id="time">30</span><small>s</small></span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">COMBO</span>
+        <span class="stat-value">×<span id="combo">0</span></span>
+      </div>
+    </section>
+
+    <section class="game-shell" aria-label="星空ゲーム">
+      <canvas id="sky" aria-label="星をタップして集めるゲーム"></canvas>
+      <div class="game-message" id="message" aria-live="polite">光っている星をタップ！</div>
+      <div class="hint">金色の星はボーナス +5</div>
+    </section>
+
+    <div class="actions">
+      <button id="reset" type="button">星空をリセット</button>
+      <p>星を連続で取ると<br>コンボボーナス。</p>
+    </div>
+  </main>
+
+  <script>
+    (() => {
+      const canvas = document.getElementById("sky");
+      const ctx = canvas.getContext("2d");
+      const scoreEl = document.getElementById("score");
+      const timeEl = document.getElementById("time");
+      const comboEl = document.getElementById("combo");
+      const messageEl = document.getElementById("message");
+      const resetButton = document.getElementById("reset");
+
+      let width = 0;
+      let height = 0;
+      let dpr = 1;
+      let stars = [];
+      let particles = [];
+      let backgroundStars = [];
+      let score = 0;
+      let combo = 0;
+      let comboTime = 0;
+      let timeLeft = 30;
+      let spawnTime = 0;
+      let messageTime = 0;
+      let playing = false;
+      let running = false;
+      let previous = 0;
+
+      const colors = ["#ff79c6", "#64e8ff", "#b89cff", "#ffffff"];
+
+      function resize() {
+        const rect = canvas.getBoundingClientRect();
+        width = Math.max(1, rect.width);
+        height = Math.max(1, rect.height);
+        dpr = Math.min(window.devicePixelRatio || 1, 2);
+        canvas.width = Math.round(width * dpr);
+        canvas.height = Math.round(height * dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        backgroundStars = Array.from({ length: 85 }, () => ({
+          x: Math.random(),
+          y: Math.random(),
+          size: Math.random() * 1.7 + .35,
+          alpha: Math.random() * .55 + .2,
+          phase: Math.random() * Math.PI * 2,
+        }));
+      }
+
+      function randomStar(initial = false) {
+        const special = Math.random() < .12;
+        return {
+          x: Math.random() * Math.max(1, width - 48) + 24,
+          y: initial ? Math.random() * Math.max(1, height - 80) + 34 : height + 28,
+          r: special ? 13 : Math.random() * 7 + 8,
+          speed: Math.random() * 15 + 18,
+          drift: (Math.random() - .5) * 20,
+          phase: Math.random() * Math.PI * 2,
+          spin: (Math.random() - .5) * 2,
+          special,
+          color: special ? "#ffd166" : colors[Math.floor(Math.random() * colors.length)],
+        };
+      }
+
+      function setMessage(text, seconds = 1.5) {
+        messageEl.textContent = text;
+        messageTime = seconds;
+      }
+
+      function updateHud() {
+        scoreEl.textContent = score;
+        timeEl.textContent = Math.ceil(timeLeft);
+        comboEl.textContent = combo;
+      }
+
+      function reset() {
+        score = 0;
+        combo = 0;
+        comboTime = 0;
+        timeLeft = 30;
+        spawnTime = 0;
+        messageTime = 2;
+        stars = [];
+        particles = [];
+        for (let i = 0; i < 13; i += 1) stars.push(randomStar(true));
+        playing = true;
+        setMessage("光っている星をタップ！", 2);
+        updateHud();
+        if (!running) {
+          running = true;
+          previous = performance.now();
+          requestAnimationFrame(loop);
+        }
+      }
+
+      function addBurst(x, y, color, amount = 14) {
+        for (let i = 0; i < amount; i += 1) {
+          const angle = Math.random() * Math.PI * 2;
+          const speed = Math.random() * 85 + 35;
+          particles.push({
+            x,
+            y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            life: Math.random() * .45 + .4,
+            maxLife: .85,
+            size: Math.random() * 2.6 + 1.2,
+            color,
+          });
+        }
+      }
+
+      function collect(star) {
+        const base = star.special ? 5 : 1;
+        combo = Math.min(99, combo + 1);
+        comboTime = 1.7;
+        const multiplier = 1 + Math.floor(combo / 5);
+        score += base * multiplier;
+        addBurst(star.x, star.y, star.color, star.special ? 26 : 14);
+        setMessage(star.special ? `大当たり！ +${base * multiplier}` : `+${base * multiplier}`, .7);
+        updateHud();
+      }
+
+      function update(dt) {
+        if (playing) {
+          timeLeft = Math.max(0, timeLeft - dt);
+          spawnTime += dt;
+          comboTime = Math.max(0, comboTime - dt);
+          if (comboTime === 0) combo = 0;
+          if (spawnTime > .42) {
+            spawnTime = 0;
+            if (stars.length < 18) stars.push(randomStar());
+          }
+          for (const star of stars) {
+            star.y -= star.speed * dt;
+            star.x += Math.sin(star.phase + star.y / 80) * star.drift * dt;
+            star.phase += star.spin * dt;
+          }
+          stars = stars.filter(star => star.y > -40 && star.x > -50 && star.x < width + 50);
+          if (timeLeft === 0) {
+            playing = false;
+            stars = [];
+            setMessage(`時間切れ！ ${score}点`, 999);
+            addBurst(width / 2, height / 2, "#ffd166", 38);
+          }
+          updateHud();
+        }
+
+        if (messageTime < 900) {
+          messageTime = Math.max(0, messageTime - dt);
+          if (messageTime === 0 && playing) messageEl.textContent = "光っている星をタップ！";
+        }
+
+        particles = particles.filter(particle => {
+          particle.life -= dt;
+          particle.x += particle.vx * dt;
+          particle.y += particle.vy * dt;
+          particle.vy += 50 * dt;
+          return particle.life > 0;
+        });
+      }
+
+      function drawStar(x, y, radius, color, special, phase) {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(phase);
+        ctx.shadowColor = color;
+        ctx.shadowBlur = special ? 26 : 17;
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        for (let i = 0; i < 8; i += 1) {
+          const angle = -Math.PI / 2 + i * Math.PI / 4;
+          const distance = i % 2 === 0 ? radius : radius * .34;
+          const px = Math.cos(angle) * distance;
+          const py = Math.sin(angle) * distance;
+          if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.fill();
+        if (special) {
+          ctx.shadowBlur = 0;
+          ctx.strokeStyle = "rgba(255, 255, 255, .78)";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.arc(0, 0, radius + 7, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+
+      function draw(now) {
+        const t = now / 1000;
+        const gradient = ctx.createLinearGradient(0, 0, width, height);
+        gradient.addColorStop(0, "#14194a");
+        gradient.addColorStop(.5, "#0b1239");
+        gradient.addColorStop(1, "#170c35");
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, width, height);
+
+        const glow = ctx.createRadialGradient(width * .25, height * .2, 0, width * .25, height * .2, width * .72);
+        glow.addColorStop(0, "rgba(98, 232, 255, .13)");
+        glow.addColorStop(1, "rgba(98, 232, 255, 0)");
+        ctx.fillStyle = glow;
+        ctx.fillRect(0, 0, width, height);
+
+        for (const star of backgroundStars) {
+          const pulse = .72 + Math.sin(t * 1.5 + star.phase) * .28;
+          ctx.globalAlpha = star.alpha * pulse;
+          ctx.fillStyle = "#d9dcff";
+          ctx.beginPath();
+          ctx.arc(star.x * width, star.y * height, star.size, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+
+        for (const star of stars) {
+          const pulse = 1 + Math.sin(t * 4 + star.phase) * .09;
+          drawStar(star.x, star.y, star.r * pulse, star.color, star.special, star.phase);
+        }
+
+        for (const particle of particles) {
+          ctx.globalAlpha = Math.max(0, particle.life / particle.maxLife);
+          ctx.fillStyle = particle.color;
+          ctx.beginPath();
+          ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+      }
+
+      function loop(now) {
+        const dt = Math.min(.05, Math.max(0, (now - previous) / 1000));
+        previous = now;
+        update(dt);
+        draw(now);
+        if (playing || particles.length > 0) {
+          requestAnimationFrame(loop);
+        } else {
+          running = false;
+        }
+      }
+
+      function handlePointer(event) {
+        if (!playing) return;
+        const rect = canvas.getBoundingClientRect();
+        const x = event.clientX - rect.left;
+        const y = event.clientY - rect.top;
+        let hit = -1;
+        let distance = Infinity;
+        for (let i = stars.length - 1; i >= 0; i -= 1) {
+          const star = stars[i];
+          const d = Math.hypot(star.x - x, star.y - y);
+          if (d < star.r + 16 && d < distance) {
+            hit = i;
+            distance = d;
+          }
+        }
+        if (hit >= 0) {
+          const [star] = stars.splice(hit, 1);
+          collect(star);
+        }
+      }
+
+      window.addEventListener("resize", resize);
+      canvas.addEventListener("pointerdown", handlePointer);
+      resetButton.addEventListener("click", reset);
+      resize();
+      reset();
+    })();
+  </script>
+</body>
+</html>
