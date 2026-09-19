@@ -31,6 +31,7 @@ bash macos/scripts/build-dmg.sh                 # native-architecture DMG, ad-ho
 - 「APKをビルドして」 means `assembleRelease`: R8 (`isMinifyEnabled = true`) and resource shrinking (`isShrinkResources = true`) must both be enabled. Do not deliver a debug APK unless the user explicitly requests one.
 - Before reporting completion, confirm the release build succeeded and link `android/app/build/outputs/apk/release/app-release.apk`.
 - Release currently uses the debug signing key so it is installable; this does not disable R8 or resource shrinking.
+- 実機が adb に接続されていない場合は、USB 接続を依頼したり接続待ちしたりせず、ビルド済み release APK のパスを提示する。
 
 `compileSdk` is 37 because Coil 3.6 requires it (targetSdk stays 36).
 
