@@ -11,7 +11,8 @@ cd gateway
 go test ./...                                  # must pass
 go test ./internal/providers/... -update       # regenerate golden JSON after intended parser changes
 go vet ./...
-go build -o ~/.local/bin/herdr-mobile-gateway ./cmd/herdr-mobile-gateway   # installs the binary launchd runs
+env -u GOROOT go test ./...                    # avoid inherited GOROOT/toolchain mismatch
+# Production updates: rebuild the Mac app, replace /Applications/Herdr Mobile.app, reopen it.
 herdr-mobile-gateway token | devices | usage | notify-test | debug replay FILE
 
 # Android (JDK 17 required; the default `java` is 24)
@@ -40,25 +41,28 @@ Screens are shown with Navigation 3 (`ui/AppNavigation.kt`): the back stack is a
 | What | How | Notes |
 |---|---|---|
 | Herdr server | LaunchAgent `com.herdr-mobile.herdr-server` | from `gateway/deploy/*.plist` (placeholders replaced with `sed`, see README) |
-| Gateway | LaunchAgent `com.herdr-mobile.gateway` | listens on the Tailscale IP only: `100.99.15.34:8765` |
+| Gateway | `/Applications/Herdr Mobile.app` (menu-bar app, login item) | bundled child process; `100.99.15.34:8765` |
 
 ```bash
 launchctl list | grep herdr-mobile
-launchctl kickstart -k gui/$(id -u)/com.herdr-mobile.gateway      # after installing a new binary
-launchctl bootout gui/$(id -u)/com.herdr-mobile.<name>             # stop
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.herdr-mobile.<name>.plist
+# Gateway updates (quit the menu-bar app before replacing its signed bundle):
+osascript -e 'tell application id "com.tohutohu.herdrmobile.mac" to quit'
+bash macos/scripts/build-dmg.sh
+ditto "macos/build/Herdr Mobile.app" "/Applications/Herdr Mobile.app"
+open "/Applications/Herdr Mobile.app"
 ```
 
 - Keep the Herdr server plist `PATH` minimal (`/usr/bin:/bin:/usr/sbin:/sbin`). With a long PATH, pane login shells put `/opt/homebrew/bin` first and start an old Homebrew `claude` (2.1.1), which rejects `~/.claude/settings.json`.
 - Restarting the Herdr server (`bootout`/`bootstrap`) kills the user's panes. Don't do it without asking.
-- Gateway logs: `~/.local/state/herdr-mobile/gateway.log`. Dead letters: `~/.local/state/herdr-mobile/errors/*.jsonl`.
+- Gateway LaunchAgent is retired; do not bootstrap it or update the old standalone binary for production. The menu-bar app auto-starts its bundled Gateway.
+- Gateway logs: `~/.local/state/herdr-mobile/desktop/gateway.log`. Dead letters: `~/.local/state/herdr-mobile/desktop/errors/*.jsonl`.
 
 ## Persistent state and secrets (never commit)
 
-- `~/.config/herdr-mobile/config.json`: auth token, FCM device tokens, optional `workspaceRoots` etc. Mode 600.
-- `~/.config/herdr-mobile/firebase-service-account.json`: FCM key (Firebase project `herdr-client-android`, SA `firebase-adminsdk-fbsvc`).
+- Active config: `~/.config/herdr-mobile/desktop/config.json`: auth token, FCM device tokens, optional `workspaceRoots` etc. Mode 600. For CLI diagnostics set `HERDR_MOBILE_CONFIG` to this path and use the app-bundled executable. The old root config is a migration backup, not active state.
+- `~/.config/herdr-mobile/desktop/firebase-service-account.json`: FCM key (Firebase project `herdr-client-android`, SA `firebase-adminsdk-fbsvc`).
 - `android/app/google-services.json`: gitignored. Shared APKs use Firebase settings received at QR pairing; only `-PbundleFirebase=true` embeds this file in a personal build.
-- Mac menu-bar app uses separate `~/.config/herdr-mobile/desktop/config.json` and `~/.local/state/herdr-mobile/desktop/`, port 8766 by default. It manages only its own bundled Gateway; never stops Herdr or the existing LaunchAgent. Firebase and Jev keys are optional. See `macos/README.md`.
+- Mac menu-bar app uses separate `~/.config/herdr-mobile/desktop/config.json` and `~/.local/state/herdr-mobile/desktop/`, port 8766 by default (this Mac retains 8765 after migration). It manages only its own bundled Gateway; never stops Herdr. Firebase and Jev keys are optional. See `macos/README.md`.
 - Recreate them with `firebase` / `gcloud`. gcloud's default account is a work account, so always pass `--account tohu.soy@gmail.com --project herdr-client-android`. Don't change the gcloud config.
 - Herdr integrations are installed in `~/.claude/settings.json` and `~/.codex/hooks.json`. Codex needs the Herdr `SessionStart` hook marked trusted (Hooks review screen → `t`) or no session id is reported.
 
@@ -92,7 +96,7 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.herdr-mobile.<name>.
 - Real phone: Pixel 7a over USB. It reaches the gateway via Tailscale IP `100.99.15.34`; the MagicDNS name doesn't resolve on the phone.
 - `adb shell input text` goes through the phone's Japanese IME and gets converted. Configure debug builds with the DUMP-guarded receiver (only adb can send it), then launch the app:
   ```bash
-  adb shell am broadcast -n com.tohutohu.herdrmobile/.DebugConfigReceiver --es gateway_url http://100.99.15.34:8765 --es token "$(herdr-mobile-gateway token)"
+  adb shell am broadcast -n com.tohutohu.herdrmobile/.DebugConfigReceiver --es gateway_url http://100.99.15.34:8765 --es token "$(HERDR_MOBILE_CONFIG="$HOME/.config/herdr-mobile/desktop/config.json" "/Applications/Herdr Mobile.app/Contents/Resources/herdr-mobile-gateway" token)"
   adb shell am start -n com.tohutohu.herdrmobile/.MainActivity
   ```
 - Automating the user's phone is risky: taps landed in Developer options once and toggled "Pointer location". Before tapping, check `adb shell dumpsys window | grep mCurrentFocus` is the app, and find coordinates with `uiautomator dump`.

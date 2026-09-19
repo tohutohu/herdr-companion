@@ -74,3 +74,28 @@ bash macos/scripts/build-dmg.sh
 ## 検証範囲
 
 Goのペアリング有効期限・一度限り・並行交換・認証・鍵なし動作、Firebase設定の整合性、AndroidのQR解析を自動テストします。実Firebaseプロジェクトでの通知受信、実機カメラからのQR読み取り、署名済み配布物の別Macへの初回導入は別途確認が必要です。
+
+## このMacの運用・更新
+
+このMacはLaunchAgent版Gatewayからメニューバー版へ移行済みです。
+`/Applications/Herdr Mobile.app`をログイン時に開き、同梱Gatewayを自動起動します。
+接続先は移行前と同じ`100.99.15.34:8765`で、認証トークン・登録端末・Firebase秘密鍵・Jevキーをdesktop設定へ引き継いでいます。
+HerdrサーバーのLaunchAgentは引き続き必要です。
+
+Gatewayを更新するときは、メニューバーアプリを終了し、ビルドと置き換え後に開き直します。
+
+```bash
+osascript -e 'tell application id "com.tohutohu.herdrmobile.mac" to quit'
+bash macos/scripts/build-dmg.sh
+ditto "macos/build/Herdr Mobile.app" "/Applications/Herdr Mobile.app"
+open "/Applications/Herdr Mobile.app"
+```
+
+終了後は子Gatewayの停止を確認してから置き換えます。旧GatewayのLaunchAgentは再登録しません。
+CLIで診断するときも同じ実装・設定を使います。
+
+```bash
+HERDR_MOBILE_CONFIG="$HOME/.config/herdr-mobile/desktop/config.json" \
+HERDR_MOBILE_STATE_DIR="$HOME/.local/state/herdr-mobile/desktop" \
+  "/Applications/Herdr Mobile.app/Contents/Resources/herdr-mobile-gateway" devices
+```
