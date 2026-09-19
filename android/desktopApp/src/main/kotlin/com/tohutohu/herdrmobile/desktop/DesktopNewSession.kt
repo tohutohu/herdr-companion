@@ -1,0 +1,242 @@
+package com.tohutohu.herdrmobile.desktop
+
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogWindow
+import androidx.compose.ui.window.rememberDialogState
+import com.tohutohu.herdrmobile.data.DirectoryShortcuts
+import com.tohutohu.herdrmobile.data.api.DirListingDto
+import com.tohutohu.herdrmobile.data.api.GatewayApi
+import com.tohutohu.herdrmobile.data.api.ModelsResponse
+import com.tohutohu.herdrmobile.data.api.StartSessionRequest
+import com.tohutohu.herdrmobile.data.api.StartSessionResponse
+import com.tohutohu.herdrmobile.ui.newsession.NewSessionAction
+import com.tohutohu.herdrmobile.ui.newsession.NewSessionScreen
+import com.tohutohu.herdrmobile.ui.newsession.NewSessionUiState
+import com.tohutohu.herdrmobile.ui.newsession.PendingNewSessionStart
+import com.tohutohu.herdrmobile.ui.newsession.agentPreset
+import com.tohutohu.herdrmobile.ui.newsession.needsDirectoryConfirmation
+import kotlinx.coroutines.launch
+
+@Composable
+fun DesktopNewSessionWindow(
+    api: GatewayApi,
+    onCreated: (String?) -> Unit,
+    onDismiss: () -> Unit,
+    onError: (String) -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    var provider by rememberSaveable { mutableStateOf("claude") }
+    var path by rememberSaveable { mutableStateOf("") }
+    var listing by remember { mutableStateOf<DirListingDto?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var prompt by rememberSaveable { mutableStateOf("") }
+    var starting by remember { mutableStateOf(false) }
+    var checking by remember { mutableStateOf(false) }
+    var pendingStart by remember { mutableStateOf<PendingNewSessionStart?>(null) }
+    var showMkdir by remember { mutableStateOf(false) }
+    var showPicker by remember { mutableStateOf(false) }
+    var model by rememberSaveable { mutableStateOf("") }
+    var effort by rememberSaveable { mutableStateOf("") }
+    var catalog by remember { mutableStateOf(ModelsResponse()) }
+    var modelsError by remember { mutableStateOf<String?>(null) }
+    var trustRequest by remember { mutableStateOf<StartSessionResponse?>(null) }
+
+    suspend fun load(nextPath: String?) {
+        loading = true
+        try {
+            val result = api.directories(nextPath?.ifBlank { null })
+            listing = result
+            path = result.path
+            error = null
+            if (result.path.isEmpty() && result.entries.size == 1) {
+                load(result.entries.first().path)
+            }
+        } catch (cause: Exception) {
+            val mapped = cause.toDesktopGatewayError()
+            error = mapped.message
+            onError(mapped.message)
+        } finally {
+            loading = false
+        }
+    }
+
+    fun finish(result: StartSessionResponse) {
+        if (result.trustRequired) trustRequest = result else onCreated(result.sessionId)
+    }
+
+    fun start(request: StartSessionRequest) {
+        if (starting) return
+        starting = true
+        scope.launch {
+            try {
+                finish(api.startSession(request))
+            } catch (cause: Exception) {
+                val mapped = cause.toDesktopGatewayError()
+                error = mapped.message
+                onError(mapped.message)
+            } finally {
+                starting = false
+            }
+        }
+    }
+
+    fun answerTrust(trust: Boolean) {
+        val request = trustRequest ?: return
+        trustRequest = null
+        starting = true
+        scope.launch {
+            try {
+                if (trust) finish(api.answerTrust(request.paneId, true))
+                else api.answerTrust(request.paneId, false)
+            } catch (cause: Exception) {
+                val mapped = cause.toDesktopGatewayError()
+                error = mapped.message
+                onError(mapped.message)
+            } finally {
+                starting = false
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) { load(null) }
+    LaunchedEffect(provider) {
+        catalog = ModelsResponse()
+        modelsError = null
+        try {
+            catalog = api.models(provider)
+            if (model.isNotEmpty() && catalog.models.none { it.id == model }) model = ""
+            if (effort.isNotEmpty() && catalog.models.flatMap { it.efforts }.none { it.id == effort } && catalog.efforts.none { it.id == effort }) effort = ""
+        } catch (cause: Exception) {
+            val mapped = cause.toDesktopGatewayError()
+            modelsError = mapped.message
+        }
+    }
+
+    val currentPreset = agentPreset(provider, model, effort, catalog)
+    val state = NewSessionUiState(
+        provider = provider,
+        path = path,
+        listing = listing,
+        loading = loading,
+        error = error,
+        prompt = prompt,
+        starting = starting,
+        checking = checking,
+        pendingStart = pendingStart,
+        showMkdir = showMkdir,
+        showPicker = showPicker,
+        model = model,
+        effort = effort,
+        catalog = catalog,
+        modelsError = modelsError,
+        shortcuts = DirectoryShortcuts(),
+        savedPresets = emptyList(),
+        currentPreset = currentPreset,
+        favorite = false,
+    )
+
+    if (trustRequest != null) {
+        AlertDialog(
+            onDismissRequest = { answerTrust(false) },
+            title = { Text("Trust this folder?") },
+            text = { Text("The agent needs permission to use this working folder. Continue starting the session?") },
+            confirmButton = { TextButton(onClick = { answerTrust(true) }) { Text("Trust and continue") } },
+            dismissButton = { TextButton(onClick = { answerTrust(false) }) { Text("Cancel") } },
+        )
+    }
+
+    DialogWindow(
+        onCloseRequest = onDismiss,
+        title = "New Session",
+        state = rememberDialogState(width = 900.dp, height = 720.dp),
+        resizable = true,
+    ) {
+        Surface(Modifier.fillMaxSize()) {
+            NewSessionScreen(
+                state = state,
+                onAction = { action ->
+                    when (action) {
+                        NewSessionAction.Back -> onDismiss()
+                        is NewSessionAction.SetProvider -> provider = action.provider
+                        is NewSessionAction.SetModel -> model = action.model
+                        is NewSessionAction.SetEffort -> effort = action.effort
+                        is NewSessionAction.SetPrompt -> prompt = action.prompt
+                        is NewSessionAction.SelectPreset -> {
+                            provider = action.preset.provider
+                            model = action.preset.model
+                            effort = action.preset.effort
+                        }
+                        is NewSessionAction.ReorderPresets,
+                        is NewSessionAction.ReorderFavoriteDirectories,
+                        NewSessionAction.ToggleFavorite,
+                        NewSessionAction.ToggleFavoriteDirectory -> Unit
+                        NewSessionAction.CustomizeAgent -> showPicker = true
+                        is NewSessionAction.OpenDirectory -> scope.launch { load(action.path) }
+                        NewSessionAction.OpenParent -> scope.launch { load(listing?.parent) }
+                        NewSessionAction.ShowMkdir -> showMkdir = true
+                        NewSessionAction.CancelMkdir -> showMkdir = false
+                        is NewSessionAction.CreateDirectory -> {
+                            showMkdir = false
+                            scope.launch {
+                                try {
+                                    load(api.createDirectory(path, action.name.trim()))
+                                } catch (cause: Exception) {
+                                    val mapped = cause.toDesktopGatewayError()
+                                    error = mapped.message
+                                    onError(mapped.message)
+                                }
+                            }
+                        }
+                        NewSessionAction.DismissPicker -> showPicker = false
+                        NewSessionAction.StartAnyway -> {
+                            pendingStart?.let {
+                                pendingStart = null
+                                start(it.request)
+                            }
+                        }
+                        NewSessionAction.ChangeFolder -> pendingStart = null
+                        NewSessionAction.Start -> {
+                            if (path.isNotEmpty() && !starting && !checking && !loading && pendingStart == null) {
+                                val request = StartSessionRequest(
+                                    provider = provider,
+                                    cwd = path,
+                                    prompt = prompt.trim(),
+                                    trust = false,
+                                    model = model.ifEmpty { null },
+                                    effort = effort.ifEmpty { null },
+                                )
+                                scope.launch {
+                                    checking = true
+                                    try {
+                                        if (needsDirectoryConfirmation(request) { api.checkDirectory(it.cwd, it.prompt) }) {
+                                            pendingStart = PendingNewSessionStart(request, currentPreset)
+                                        } else {
+                                            start(request)
+                                        }
+                                    } finally {
+                                        checking = false
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+            )
+        }
+    }
+}

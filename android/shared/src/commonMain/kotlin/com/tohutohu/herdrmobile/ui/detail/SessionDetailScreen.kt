@@ -73,6 +73,12 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -201,8 +207,10 @@ fun SessionDetailScreen(
             TopAppBar(
                 expandedHeight = 52.dp,
                 navigationIcon = {
-                    IconButton(onClick = { onAction(SessionDetailAction.Back) }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    if (state.showBackButton) {
+                        IconButton(onClick = { onAction(SessionDetailAction.Back) }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
                     }
                 },
                 title = {
@@ -288,6 +296,8 @@ fun SessionDetailScreen(
                         enabled = session?.canSend == true && !answering,
                         busy = answering,
                         attachments = state.attachments,
+                        attachmentsEnabled = state.attachmentsEnabled,
+                        sendOnEnter = state.sendOnEnter,
                         resolveAttachmentPreview = resolveAttachmentPreview,
                         onAction = onAction,
                     )
@@ -322,7 +332,7 @@ fun SessionDetailScreen(
                 )
             }
             Box(Modifier.fillMaxSize()) {
-                LoadingHint(visible = messages.isEmpty())
+                LoadingHint(visible = messages.isEmpty() && (state.loading || state.session == null))
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
@@ -429,6 +439,8 @@ private fun Composer(
     enabled: Boolean,
     busy: Boolean,
     attachments: List<AttachmentUiState>,
+    attachmentsEnabled: Boolean,
+    sendOnEnter: Boolean,
     resolveAttachmentPreview: (String) -> Any?,
     onAction: (SessionDetailAction) -> Unit,
 ) {
@@ -461,7 +473,7 @@ private fun Composer(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box {
                     var menuOpen by remember { mutableStateOf(false) }
-                    IconButton(enabled = enabled, onClick = { menuOpen = true }) {
+                    IconButton(enabled = enabled && attachmentsEnabled, onClick = { menuOpen = true }) {
                         Icon(Icons.Default.Add, contentDescription = "Attach")
                     }
                     DropdownMenu(expanded = menuOpen && enabled, onDismissRequest = { menuOpen = false }) {
@@ -495,7 +507,17 @@ private fun Composer(
                         )
                     },
                     maxLines = 6,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).onPreviewKeyEvent { event ->
+                        if (!sendOnEnter || event.type != KeyEventType.KeyDown || event.key != Key.Enter || event.isShiftPressed) {
+                            false
+                        } else if (enabled && (text.isNotBlank() || attachments.isNotEmpty())) {
+                            onAction(SessionDetailAction.Send(text))
+                            text = ""
+                            true
+                        } else {
+                            false
+                        }
+                    },
                 )
                 SwapContent(busy) { spinning ->
                     if (spinning) {

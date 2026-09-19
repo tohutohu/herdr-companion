@@ -7,6 +7,7 @@ import com.tohutohu.herdrmobile.model.SessionUiModel
 data class SessionListItemUiState(
     val session: SessionUiModel,
     val relativeUpdatedAt: String,
+    val selected: Boolean = false,
 )
 
 /** The state needed to render the session list without accessing the app container. */

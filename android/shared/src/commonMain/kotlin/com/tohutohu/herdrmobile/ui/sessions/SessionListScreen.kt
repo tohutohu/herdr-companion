@@ -78,6 +78,8 @@ fun SessionListScreen(
     topContent: @Composable () -> Unit = {},
     snackbarHost: @Composable () -> Unit = {},
     selection: SessionSelection = rememberSessionSelection(),
+    showTopBar: Boolean = true,
+    showNewSessionFab: Boolean = true,
 ) {
     val sessions = state.sessions
     val refs = remember(sessions) { sessions.map { it.session.toSessionRef() } }
@@ -99,43 +101,49 @@ fun SessionListScreen(
 
     Scaffold(
         topBar = {
-            SwitchingTopBar(
-                selecting = selection.active,
-                selectionBar = {
-                    SelectionTopBar(
-                        selection = selection,
-                        all = refs,
-                        onArchive = { selected -> onAction(SessionListAction.Archive(selected)) },
-                        onUnarchive = { selected -> onAction(SessionListAction.Unarchive(selected)) },
-                        onResume = { onAction(SessionListAction.Resume(it)) },
-                    )
-                },
-            ) {
-                TopAppBar(
-                    title = { Text("Sessions") },
-                    actions = {
-                        IconButton(onClick = { onAction(SessionListAction.OpenArchived) }) {
-                            Icon(Icons.Default.Inventory2, contentDescription = "Archived sessions")
-                        }
-                        IconButton(onClick = { onAction(SessionListAction.OpenSettings) }) {
-                            Icon(Icons.Default.Settings, contentDescription = "Settings")
-                        }
+            if (showTopBar || selection.active) {
+                SwitchingTopBar(
+                    selecting = selection.active,
+                    selectionBar = {
+                        SelectionTopBar(
+                            selection = selection,
+                            all = refs,
+                            onArchive = { selected -> onAction(SessionListAction.Archive(selected)) },
+                            onUnarchive = { selected -> onAction(SessionListAction.Unarchive(selected)) },
+                            onResume = { onAction(SessionListAction.Resume(it)) },
+                        )
                     },
-                )
+                ) {
+                    if (showTopBar) {
+                        TopAppBar(
+                            title = { Text("Sessions") },
+                            actions = {
+                                IconButton(onClick = { onAction(SessionListAction.OpenArchived) }) {
+                                    Icon(Icons.Default.Inventory2, contentDescription = "Archived sessions")
+                                }
+                                IconButton(onClick = { onAction(SessionListAction.OpenSettings) }) {
+                                    Icon(Icons.Default.Settings, contentDescription = "Settings")
+                                }
+                            },
+                        )
+                    }
+                }
             }
         },
         snackbarHost = snackbarHost,
         floatingActionButton = {
-            AnimatedVisibility(
-                visible = !selection.active,
-                enter = scaleIn() + fadeIn(),
-                exit = scaleOut() + fadeOut(),
-            ) {
-                ExtendedFloatingActionButton(
-                    onClick = { onAction(SessionListAction.OpenNewSession) },
-                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                    text = { Text("New session") },
-                )
+            if (showNewSessionFab) {
+                AnimatedVisibility(
+                    visible = !selection.active,
+                    enter = scaleIn() + fadeIn(),
+                    exit = scaleOut() + fadeOut(),
+                ) {
+                    ExtendedFloatingActionButton(
+                        onClick = { onAction(SessionListAction.OpenNewSession) },
+                        icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                        text = { Text("New session") },
+                    )
+                }
             }
         },
     ) { padding ->
@@ -154,11 +162,16 @@ fun SessionListScreen(
                     state.error?.let {
                         item(key = "error") {
                             Text(
-                                "Gateway unreachable: $it",
+                                it,
                                 color = MaterialTheme.colorScheme.error,
                                 style = MaterialTheme.typography.bodySmall,
                                 modifier = Modifier.animateItem().padding(16.dp),
                             )
+                        }
+                    }
+                    if (!state.isLoaded && state.error == null) {
+                        item(key = "loading") {
+                            LinearProgressIndicator(Modifier.fillMaxWidth().animateItem())
                         }
                     }
                     if (state.isLoaded && sessions.isEmpty() && state.pendingStarts.isEmpty() && state.error == null) {
@@ -233,7 +246,7 @@ fun LazyItemScope.SessionItem(
                 s = s,
                 relativeUpdatedAt = item.relativeUpdatedAt,
                 busy = busy,
-                selected = selection.contains(s.id),
+                selected = item.selected || selection.contains(s.id),
                 selecting = selection.active,
                 onClick = { if (selection.active) selection.toggle(s.id) else onOpen(s.id) },
                 onLongClick = { selection.toggle(s.id) },

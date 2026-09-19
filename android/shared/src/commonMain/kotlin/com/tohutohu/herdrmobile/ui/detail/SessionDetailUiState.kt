@@ -33,6 +33,10 @@ data class SessionDetailUiState(
     val answering: Boolean,
     val attachments: List<AttachmentUiState> = emptyList(),
     val actionBusy: Boolean = false,
+    val loading: Boolean = false,
+    val attachmentsEnabled: Boolean = true,
+    val showBackButton: Boolean = true,
+    val sendOnEnter: Boolean = false,
 )
 
 /** User events emitted by the detail UI and handled by the Android route. */
