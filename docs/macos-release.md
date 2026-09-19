@@ -152,7 +152,7 @@ open dist/Herdr.app
 open 'dist/Herdr Mobile.app'
 ```
 
-UIだけを先に入れた場合、Gateway設定が存在しないとUIは設定案内を表示します。これはGatewayをUIへ隠れて同梱しない設計上の明示的な状態です。両方を利用する場合は、先に`Herdr Mobile.app`を起動してGatewayを起動し、既存の`~/.config/herdr-mobile/desktop/config.json`を利用します。ログと状態は`~/.local/state/herdr-mobile/desktop/`です。
+UIだけを先に入れた場合、Gateway設定が存在しないとUIは設定案内を表示します。設定画面または接続画面の`Start Gateway manager`から、別アプリの`Herdr Mobile.app`へ起動要求を送れます。managerが設定を作成・Gatewayを起動すると、UIは設定を再読込して接続します。GatewayはUIへ隠れて同梱しません。設定は`~/.config/herdr-mobile/desktop/config.json`、ログと状態は`~/.local/state/herdr-mobile/desktop/`です。
 
 ## インストール手順
 
@@ -204,17 +204,16 @@ tag名と`version.properties`が一致しないreleaseはwrapperが停止しま�
 今回の配布では、次を実装していません。
 
 - IntelまたはUniversal Binary
-- UIからのGateway lifecycle管理、single-instance統合
-- launch-at-loginの新設（既存Gateway Managerの機能は維持）
 - Sparkle等のautomatic updater、release channel、rollback
 
-次フェーズでは、現行の別アプリ構成を保ったまま、Gateway Managerを所有者として次の順に拡張するのが安全です。
+実装済みのruntime連携は次のとおりです。
 
-1. UIがGateway Managerの状態をIPC/localhost health endpointで参照するGateway lifecycle integration
-2. Gateway Managerをsingle-instance coordinatorにし、UIは既存Gatewayへ再接続する
-3. launch-at-loginはGateway Managerだけに限定する
-4. UIとGatewayを同じrelease manifestで配布し、stable/beta等のrelease channelを分ける
-5. Developer ID/notarizationに加えて更新payloadへ独立したupdate signingを付ける
-6. staged update、起動health check、旧bundle保持によるrollbackを実装する
+1. Gateway ManagerがGatewayの唯一のprocess ownerとしてstart/stopを実行する
+2. UIから`herdr-mobile://gateway/start`でmanagerへ起動要求を送る
+3. managerは`/healthz`でGateway readinessを確認する
+4. UIとmanagerの両方でper-user instance lockを取得する
+5. login itemは`SMAppService.mainApp`で管理し、承認待ち状態からSystem Settingsを開ける
+
+次フェーズでは、現行の別アプリ構成を保ったまま、UIとGatewayを同じrelease manifestで配布し、stable/beta等のrelease channel、独立したupdate signing、staged update、旧bundle保持によるrollbackを追加します。
 
 automatic updaterは今回のrelease pipelineへ追加していません。

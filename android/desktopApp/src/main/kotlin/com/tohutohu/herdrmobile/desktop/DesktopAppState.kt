@@ -55,7 +55,7 @@ class DesktopSelectionState {
 }
 
 class DesktopAppState(
-    val connection: DesktopGatewayConnection,
+    private val connectionSource: DesktopConnectionSource,
     private val api: com.tohutohu.herdrmobile.data.api.GatewayApi,
     private val http: OkHttpClient,
     private val repository: DesktopGatewayRepository = DesktopGatewayRepository(api),
@@ -65,6 +65,7 @@ class DesktopAppState(
     private val listMutex = Mutex()
     private val selection = DesktopSelectionState()
     private var listJob: Job? = null
+    private var gatewayStartJob: Job? = null
     private var detailJob: Job? = null
     private var closed = false
     private var pendingBySession by mutableStateOf<Map<String, List<PendingMessageUiState>>>(emptyMap())
@@ -72,6 +73,9 @@ class DesktopAppState(
     private var pendingMessageBaselines by mutableStateOf<Map<String, Set<String>>>(emptyMap())
     private var composerAttachments by mutableStateOf<List<DesktopAttachment>>(emptyList())
     private var previousStatuses = emptyMap<String, String>()
+
+    var connection by mutableStateOf(connectionSource.current)
+        private set
 
     var sessions by mutableStateOf<List<SessionListItemUiState>>(emptyList())
         private set
@@ -133,8 +137,29 @@ class DesktopAppState(
         scope.launch { refreshSessionsNow(userInitiated) }
     }
 
+    /** Starts the separately installed manager and waits for its config/API to become ready. */
+    fun startGateway() {
+        if (closed) return
+        if (!DesktopPlatformActions.requestGatewayStart()) {
+            reportError("Could not open the Herdr Mobile Gateway manager.")
+            return
+        }
+        gatewayStartJob?.cancel()
+        connectionState = DesktopConnectionState.CONNECTING
+        gatewayStartJob = scope.launch {
+            repeat(16) {
+                delay(500)
+                if (closed) return@launch
+                refreshSessionsNow(userInitiated = it == 0)
+                if (connectionState == DesktopConnectionState.CONNECTED) return@launch
+            }
+            refreshSessions(userInitiated = true)
+        }
+    }
+
     private suspend fun refreshSessionsNow(userInitiated: Boolean) {
         listMutex.withLock {
+            connection = connectionSource.reload()
             val showRefreshing = userInitiated || !listLoaded
             val wasLoaded = listLoaded
             if (showRefreshing) listRefreshing = true
@@ -523,6 +548,7 @@ class DesktopAppState(
         closed = true
         detailJob?.cancel()
         listJob?.cancel()
+        gatewayStartJob?.cancel()
         scope.cancel()
         http.connectionPool.evictAll()
         http.dispatcher.executorService.shutdown()

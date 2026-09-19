@@ -12,5 +12,9 @@
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>
+<key>CFBundleURLTypes</key><array><dict>
+<key>CFBundleURLName</key><string>com.tohutohu.herdrmobile.mac.commands</string>
+<key>CFBundleURLSchemes</key><array><string>herdr-mobile</string></array>
+</dict></array>
 <key>NSAppTransportSecurity</key><dict><key>NSAllowsArbitraryLoads</key><true/></dict>
 </dict></plist>

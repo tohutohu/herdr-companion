@@ -85,31 +85,42 @@ import java.awt.event.WindowStateListener
 private val MIN_SIDEBAR_WIDTH = 240.dp
 private val MIN_DETAIL_WIDTH = 420.dp
 
-fun main() = application {
-    val restored = remember { DesktopPreferences.loadWindow() }
-    val windowState = rememberWindowState(
-        placement = restored.placement(),
-        position = restored.position(),
-        width = restored.width.dp,
-        height = restored.height.dp,
-    )
-    Window(
-        onCloseRequest = ::exitApplication,
-        title = "Herdr",
-        state = windowState,
-    ) {
-        window.minimumSize = java.awt.Dimension(880, 560)
-        val connection = remember { DesktopConnectionConfig.load() }
-        val http = remember { DesktopHttp.client() }
-        val api = remember { GatewayApi(http) { connection.settings } }
-        val appState = remember { DesktopAppState(connection, api, http) }
-        DesktopWindowPersistence(window)
-        DisposableEffect(appState) {
-            onDispose { appState.close() }
+fun main() {
+    val instanceLock = DesktopInstanceLock.tryAcquire()
+    if (instanceLock == null) {
+        DesktopInstanceLock.activateExisting()
+        return
+    }
+    try {
+        application {
+            val restored = remember { DesktopPreferences.loadWindow() }
+            val windowState = rememberWindowState(
+                placement = restored.placement(),
+                position = restored.position(),
+                width = restored.width.dp,
+                height = restored.height.dp,
+            )
+            Window(
+                onCloseRequest = ::exitApplication,
+                title = "Herdr",
+                state = windowState,
+            ) {
+                window.minimumSize = java.awt.Dimension(880, 560)
+                val connectionSource = remember { DesktopConnectionSource() }
+                val http = remember { DesktopHttp.client() }
+                val api = remember { GatewayApi(http) { connectionSource.current.settings } }
+                val appState = remember { DesktopAppState(connectionSource, api, http) }
+                DesktopWindowPersistence(window)
+                DisposableEffect(appState) {
+                    onDispose { appState.close() }
+                }
+                SharedTheme {
+                    DesktopShell(appState, api, onCloseWindow = ::exitApplication)
+                }
+            }
         }
-        SharedTheme {
-            DesktopShell(appState, api, onCloseWindow = ::exitApplication)
-        }
+    } finally {
+        instanceLock.close()
     }
 }
 
@@ -524,6 +535,11 @@ private fun EmptyDetail(state: DesktopAppState) {
                 Text("Gateway connection needs attention", style = MaterialTheme.typography.titleMedium)
                 Text(state.listError!!, color = MaterialTheme.colorScheme.error)
                 TextButton(onClick = { state.refreshSessions(userInitiated = true) }) { Text("Retry") }
+                if (state.connectionState == DesktopConnectionState.OFFLINE ||
+                    state.connectionState == DesktopConnectionState.RECONNECTING
+                ) {
+                    Button(onClick = state::startGateway) { Text("Start Gateway manager") }
+                }
             }
         } else {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {

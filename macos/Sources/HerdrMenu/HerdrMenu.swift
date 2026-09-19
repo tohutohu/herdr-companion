@@ -10,6 +10,10 @@ struct HerdrMenuApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @StateObject private var model: GatewayModel
     init() {
+        guard AppInstanceLock.shared.acquire() else {
+            AppInstanceLock.shared.activateExisting()
+            Darwin.exit(EXIT_SUCCESS)
+        }
         // Start the owner at login even if the menu popover has never been opened.
         let owner = GatewayModel()
         _model = StateObject(wrappedValue: owner)
@@ -23,9 +27,18 @@ struct HerdrMenuApp: App {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        NotificationCenter.default.post(name: .init("HerdrMenuQuit"), object: nil)
+        NotificationCenter.default.post(name: .herdrMenuQuit, object: nil)
         return .terminateNow
     }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        urls.forEach { NotificationCenter.default.post(name: .herdrGatewayCommand, object: $0) }
+    }
+}
+
+private extension Notification.Name {
+    static let herdrMenuQuit = Notification.Name("HerdrMenuQuit")
+    static let herdrGatewayCommand = Notification.Name("HerdrGatewayCommand")
 }
 
 struct Invitation: Decodable { let code: String; let expiresAt: Date }
@@ -56,11 +69,14 @@ struct SetupError: LocalizedError {
     @Published var expires: Date?
     @Published var serviceAccount: URL?
     @Published var androidConfig: URL?
-    @Published var loginEnabled = SMAppService.mainApp.status == .enabled
+    @Published var loginEnabled = false
+    @Published var loginNeedsApproval = false
+    @Published var loginStatus = ""
     @Published var diagnostics = "Herdr・Tailscaleは別途インストールが必要です。"
     private var child: Process?
     private var timer: Timer?
     private var quitObserver: NSObjectProtocol?
+    private var commandObserver: NSObjectProtocol?
     private let fm = FileManager.default
     private var home: URL { fm.homeDirectoryForCurrentUser }
     var configURL: URL { home.appendingPathComponent(".config/herdr-mobile/desktop/config.json") }
@@ -81,8 +97,12 @@ struct SetupError: LocalizedError {
         return env
     }
     init() {
-        quitObserver = NotificationCenter.default.addObserver(forName: .init("HerdrMenuQuit"), object: nil, queue: .main) { [weak self] _ in
+        quitObserver = NotificationCenter.default.addObserver(forName: .herdrMenuQuit, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.child?.terminate() }
+        }
+        commandObserver = NotificationCenter.default.addObserver(forName: .herdrGatewayCommand, object: nil, queue: .main) { [weak self] note in
+            guard let url = note.object as? URL else { return }
+            Task { @MainActor in self?.handleCommand(url) }
         }
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -91,9 +111,27 @@ struct SetupError: LocalizedError {
             }
         }
         Task {
+            refreshLoginStatus()
             await detectAddress()
             loadConfig()
             if UserDefaults.standard.bool(forKey: "autoStart") { perform { await self.start() } }
+        }
+    }
+
+    private func handleCommand(_ url: URL) {
+        guard url.scheme == "herdr-mobile", url.host == "gateway" else { return }
+        switch url.path {
+        case "/start":
+            UserDefaults.standard.set(true, forKey: "autoStart")
+            perform { await self.start() }
+        case "/restart":
+            UserDefaults.standard.set(true, forKey: "autoStart")
+            perform {
+                await self.stop()
+                await self.start()
+            }
+        default:
+            break
         }
     }
     func validAddress(_ input: String) -> Bool {
@@ -151,9 +189,15 @@ struct SetupError: LocalizedError {
     }
     func start() async {
         guard child == nil else { return }
+        if address.isEmpty { await detectAddress() }
         guard let baseURL, let executable else { error = "Tailscale IPv4とポートを確認してください。"; return }
         do {
             _ = try await command(["token"])
+            if await healthCheck(base: baseURL) {
+                status = "別のGatewayが起動中"
+                error = "同じポートで別のGatewayが起動しています。既存のGatewayを停止してから再試行してください。"
+                return
+            }
             try fm.createDirectory(at: stateURL, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             let log = stateURL.appendingPathComponent("desktop.log")
             if !fm.fileExists(atPath: log.path) { fm.createFile(atPath: log.path, contents: nil, attributes: [.posixPermissions: 0o600]) }
@@ -176,8 +220,7 @@ struct SetupError: LocalizedError {
             for _ in 0..<25 {
                 try await Task.sleep(nanoseconds: 200_000_000)
                 guard child === process, process.isRunning else { return }
-                // Authenticated endpoint prevents mistaking a different server for our child.
-                if (try? await request("/v1/pairing", method: "DELETE", base: baseURL)) != nil {
+                if await healthCheck(base: baseURL) {
                     running = true; status = "接続待機中"; UserDefaults.standard.set(true, forKey: "autoStart"); return
                 }
             }
@@ -196,6 +239,18 @@ struct SetupError: LocalizedError {
         if process.isRunning { error = "Gatewayの終了を待っています。再起動は終了後に行ってください。"; return }
         if child === process { child = nil }
         running = false; status = "停止中"
+    }
+
+    private func healthCheck(base: URL) async -> Bool {
+        let url = base.appendingPathComponent("healthz")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 1.5
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode)
+        else { return false }
+        return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) == "ok"
     }
     func request(_ path: String, method: String, base: URL? = nil) async throws -> Data {
         guard let url = (base ?? baseURL)?.appendingPathComponent(String(path.dropFirst())) else { throw SetupError(message: "接続先が未設定です。") }
@@ -252,10 +307,49 @@ struct SetupError: LocalizedError {
     }
     func setLogin(_ enabled: Bool) {
         do {
-            if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
-            loginEnabled = SMAppService.mainApp.status == .enabled
-            if enabled && !loginEnabled { error = "システム設定 → 一般 → ログイン項目でHerdr Mobileを許可してください。" }
-        } catch { self.error = error.localizedDescription }
+            if enabled {
+                try SMAppService.mainApp.register()
+                refreshLoginStatus()
+                UserDefaults.standard.set(loginEnabled, forKey: "autoStart")
+            } else {
+                try SMAppService.mainApp.unregister()
+                UserDefaults.standard.set(false, forKey: "autoStart")
+                refreshLoginStatus()
+            }
+        } catch {
+            refreshLoginStatus()
+            if enabled { UserDefaults.standard.set(loginEnabled, forKey: "autoStart") }
+            if !loginEnabled { self.error = error.localizedDescription }
+        }
+    }
+
+    func refreshLoginStatus() {
+        switch SMAppService.mainApp.status {
+        case .enabled:
+            loginEnabled = true
+            loginNeedsApproval = false
+            loginStatus = "ログイン時に起動"
+        case .requiresApproval:
+            loginEnabled = true
+            loginNeedsApproval = true
+            loginStatus = "システム設定で許可が必要です"
+        case .notRegistered:
+            loginEnabled = false
+            loginNeedsApproval = false
+            loginStatus = "ログイン時に起動しない"
+        case .notFound:
+            loginEnabled = false
+            loginNeedsApproval = false
+            loginStatus = "インストール済みアプリから起動してください"
+        @unknown default:
+            loginEnabled = false
+            loginNeedsApproval = false
+            loginStatus = "ログイン項目の状態を確認できません"
+        }
+    }
+
+    func openLoginItems() {
+        SMAppService.openSystemSettingsLoginItems()
     }
     func saveJev(remove: Bool = false) async throws {
         guard remove || !jevKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
@@ -341,9 +435,15 @@ struct Panel: View {
                     }.padding(6)
                 }
                 Toggle("ログイン時に起動", isOn: Binding(get: { model.loginEnabled }, set: { model.setLogin($0) }))
+                Text(model.loginStatus).font(.caption).foregroundStyle(.secondary)
+                if model.loginNeedsApproval {
+                    Button("ログイン項目の設定を開く") { model.openLoginItems() }
+                }
                 if model.busy { ProgressView().controlSize(.small) }
                 if let error = model.error { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
             }.padding(18).disabled(model.busy)
-        }.frame(width: 430, height: 700)
+        }
+        .frame(width: 430, height: 700)
+        .onAppear { model.refreshLoginStatus() }
     }
 }

@@ -10,6 +10,8 @@ import java.nio.file.Paths
 
 /** Small Desktop-only bridge for operations that should not enter commonMain. */
 object DesktopPlatformActions {
+    private const val GATEWAY_MANAGER_BUNDLE_ID = "com.tohutohu.herdrmobile.mac"
+
     fun copyText(text: String): Boolean = runCatching {
         Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null)
         true
@@ -53,6 +55,17 @@ object DesktopPlatformActions {
             true
         }.getOrDefault(false)
     }
+
+    /** Ask the separately installed SwiftUI manager to start its owned Gateway. */
+    fun requestGatewayStart(): Boolean = runCatching {
+        ProcessBuilder(
+            "/usr/bin/open",
+            "-b",
+            GATEWAY_MANAGER_BUNDLE_ID,
+            "herdr-mobile://gateway/start",
+        ).start()
+        true
+    }.getOrDefault(false)
 
     private fun resolvePath(path: String, baseDirectory: String?): Path? {
         val candidate = Paths.get(path)

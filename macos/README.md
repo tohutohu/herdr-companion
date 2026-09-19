@@ -9,7 +9,7 @@ macOS 13以降のメニューバーアプリです。Go Gatewayを同梱し、�
 1. MacとAndroidにTailscaleを用意し、同じtailnetに接続します。
 2. MacのHerdrとClaude Code／Codexをセットアップします。Herdrのintegration設定は[ルートREADME](../README.md#1-herdr-のセットアップ)を参照してください。
 3. Gateway DMGを開き、`Herdr Mobile.app`をApplicationsへドラッグして起動します。Compose UIを使う場合はUI DMGの`Herdr.app`も別途Applicationsへ入れます。
-4. メニューバーのターミナルアイコンを開き、Tailscale IPv4とポートを確認して「Gatewayを起動」。
+4. メニューバーのターミナルアイコンを開き、Tailscale IPv4とポートを確認して「Gatewayを起動」。UI側がオフラインの場合は、UIの接続画面またはSettingsからGateway managerを起動できます。
 5. 「ペアリングQRを表示」→ Androidの設定で「Scan Mac QR」→ 接続先を確認して「Pair」。
 
 **Firebaseの秘密鍵もJevのキーも不要で起動・ペアリングできます。** 閲覧・送信・承認・セッション起動は通常どおり使えます。Firebase未設定ではプッシュ通知、Jev未設定では開始前のフォルダ確認だけが無効になります。
@@ -41,7 +41,9 @@ Firebase APIキーをAndroidアプリに制限する場合、配布APKのパッ�
 - Herdr本体は同梱・自動起動・停止しません。稼働中のHerdrサーバーを利用します。
 - アプリ自身が起動したGatewayだけを管理します。既存LaunchAgentは変更しません。
 - アプリを終了すると同梱Gatewayも終了します。ログイン時起動は設定で有効にできます。
-- Gatewayがクラッシュした場合は状態が停止に変わります。「Gatewayを起動」で再起動してください。
+- managerとCompose UIは同一ユーザー内で複数起動しません。2つ目の起動は既存プロセスを前面化します。
+- Gatewayがクラッシュした場合は状態が停止に変わります。managerの「Gatewayを起動」またはCompose UIの「Start Gateway manager」で再起動してください。
+- ログイン時起動を有効にするとmanagerの起動後にGatewayも自動起動します。承認待ちの場合はアプリ内のボタンからシステム設定を開けます。
 
 ## ビルド・DMG
 
