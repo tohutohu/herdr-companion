@@ -86,14 +86,17 @@ private const val LIST_POLL_MS = 5_000L
 /** An extended FAB (56dp) and the margin Scaffold puts around it. */
 private val FAB_CLEARANCE = 88.dp
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun SessionListScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onNew: () -> Unit, onArchived: () -> Unit) {
+fun SessionListScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onNew: () -> Unit, onArchived: () -> Unit, onOpenStart: (String) -> Unit) {
     val container = LocalContext.current.container
     val repo = container.repository
     // null until the cache has answered; then the rows render without a flash.
     val loaded by container.sessions.collectAsState()
     val sessions = loaded.orEmpty()
+    val starts by container.sessionStarts.entries.collectAsState()
+    val pendingStarts = starts.filter { entry -> !entry.listed && sessions.none { it.id == entry.sessionId } }
+    LaunchedEffect(sessions, starts) { container.sessionStarts.reconcile(sessions.map { it.id }.toSet(), sessions.mapNotNull { s -> s.paneId?.let { it to s.id } }.toMap()) }
     var error by remember { mutableStateOf<String?>(null) }
     var refreshing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -201,13 +204,24 @@ fun SessionListScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onNew: (
                             )
                         }
                     }
-                    if (loaded != null && sessions.isEmpty() && error == null) {
+                    if (loaded != null && sessions.isEmpty() && pendingStarts.isEmpty() && error == null) {
                         item(key = "empty") {
                             Text(
                                 "No sessions. Start Claude Code or Codex inside Herdr on your Mac.",
                                 modifier = Modifier.animateItem().padding(16.dp),
                             )
                         }
+                    }
+                    items(pendingStarts, key = { "starting:${it.id}" }) { entry ->
+                        Column(Modifier.animateItem().fillMaxWidth().combinedClickable(
+                            onClick = { entry.sessionId?.let(onOpen) ?: onOpenStart(entry.id) },
+                        ).padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(entry.request.cwd.substringAfterLast('/'), style = MaterialTheme.typography.titleMedium)
+                            Text(entry.request.prompt, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(entry.label, style = MaterialTheme.typography.labelMedium)
+                            if (entry.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                        }
+                        HorizontalDivider()
                     }
                     items(sessions, key = { it.id }) { s ->
                         SessionItem(s, selection, actions, onOpen)

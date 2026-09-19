@@ -75,6 +75,7 @@ class AppContainer(private val app: Application) {
         FirebaseRuntime.initialize(app, settings.current)
     }
     val repository = SessionRepository(db, api)
+    val sessionStarts = com.tohutohu.herdrmobile.data.SessionStarts(scope, api::startSession, api::answerTrust, repository::refreshSessions)
     val outbox = Outbox(app.contentResolver, api, repository, scope)
 
     /**

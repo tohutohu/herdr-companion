@@ -38,3 +38,6 @@ data object NewSessionRoute : Route
 
 @Serializable
 data object ArchivedRoute : Route
+
+@Serializable
+data class StartingRoute(val startId: String) : Route

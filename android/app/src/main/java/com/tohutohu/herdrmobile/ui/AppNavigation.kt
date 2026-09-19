@@ -1,11 +1,9 @@
 package com.tohutohu.herdrmobile.ui
 
-import android.widget.Toast
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSerializable
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -43,7 +41,6 @@ fun AppNavigation(start: Route, openSession: String?, onSessionOpened: () -> Uni
         nav.openFromNotification(DetailRoute(openSession, focusLatest = true))
         onSessionOpened()
     }
-    val context = LocalContext.current
     val density = LocalDensity.current
     val motion = remember(density) { ScreenMotion(density) }
 
@@ -66,6 +63,7 @@ fun AppNavigation(start: Route, openSession: String?, onSessionOpened: () -> Uni
                     onSettings = { lifecycle.ifResumed { nav.push(SettingsRoute) } },
                     onNew = { lifecycle.ifResumed { nav.push(NewSessionRoute) } },
                     onArchived = { lifecycle.ifResumed { nav.push(ArchivedRoute) } },
+                    onOpenStart = { id -> lifecycle.ifResumed { nav.push(StartingRoute(id)) } },
                 )
             }
             entry<ArchivedRoute> {
@@ -79,11 +77,16 @@ fun AppNavigation(start: Route, openSession: String?, onSessionOpened: () -> Uni
                 val lifecycle = LocalLifecycleOwner.current.lifecycle
                 NewSessionScreen(
                     onBack = { lifecycle.ifResumed { nav.back() } },
-                    // Arrives when the gateway answers, possibly while the app
-                    // is in the background: not guarded, it must not be lost.
-                    onStarted = { sessionId, warning ->
-                        warning?.let { Toast.makeText(context, it, Toast.LENGTH_LONG).show() }
-                        if (sessionId != null) nav.replaceAbove(SessionsRoute, DetailRoute(sessionId)) else nav.back()
+                    onStarted = { id -> nav.replaceAbove(SessionsRoute, StartingRoute(id)) },
+                )
+            }
+            entry<StartingRoute> { route ->
+                com.tohutohu.herdrmobile.ui.newsession.StartingSessionScreen(
+                    route.startId,
+                    onBack = { nav.back(orReplaceWith = SessionsRoute) },
+                    onReady = { id ->
+                        val at = backStack.indexOf(route)
+                        if (at >= 0) backStack[at] = DetailRoute(id)
                     },
                 )
             }

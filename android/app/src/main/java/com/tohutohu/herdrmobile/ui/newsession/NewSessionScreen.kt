@@ -64,7 +64,6 @@ import com.tohutohu.herdrmobile.data.lastUsedDirectory
 import com.tohutohu.herdrmobile.data.api.DirListingDto
 import com.tohutohu.herdrmobile.data.api.ModelsResponse
 import com.tohutohu.herdrmobile.data.api.StartSessionRequest
-import com.tohutohu.herdrmobile.data.api.StartSessionResponse
 import com.tohutohu.herdrmobile.ui.ExpandingContent
 import com.tohutohu.herdrmobile.ui.SwapContent
 import com.tohutohu.herdrmobile.ui.usage.UsageCard
@@ -81,11 +80,11 @@ import kotlinx.coroutines.launch
 @Composable
 fun NewSessionScreen(
     onBack: () -> Unit,
-    onStarted: (sessionId: String?, warning: String?) -> Unit,
+    onStarted: (startId: String) -> Unit,
 ) {
     val context = LocalContext.current
     val api = context.container.api
-    val repo = context.container.repository
+    val starts = context.container.sessionStarts
     val shortcutStore = context.container.directoryShortcuts
     val presetStore = context.container.agentPresets
     // Null until the store has been read; restoring waits for it.
@@ -103,8 +102,6 @@ fun NewSessionScreen(
     var starting by remember { mutableStateOf(false) }
     var checking by remember { mutableStateOf(false) }
     var pendingStart by remember { mutableStateOf<Pair<StartSessionRequest, AgentPreset>?>(null) }
-    // A start stopped at the agent's folder-trust dialog, waiting on the user.
-    var pendingTrust by remember { mutableStateOf<PendingTrust?>(null) }
     var showMkdir by remember { mutableStateOf(false) }
     var showPicker by remember { mutableStateOf(false) }
     // "" = the agent's default model / effort.
@@ -125,69 +122,15 @@ fun NewSessionScreen(
     )
     val favorite = saved.any { it.key == current.key }
 
-    suspend fun started(request: StartSessionRequest, preset: AgentPreset, res: StartSessionResponse) {
-        runCatching { shortcutStore.recordUsed(request.cwd) }
-        runCatching { presetStore.recordUsed(preset) }
-        runCatching { repo.refreshSessions() }
-        onStarted(res.sessionId, res.warning)
-    }
-
-    suspend fun start(request: StartSessionRequest, preset: AgentPreset) {
+    fun start(request: StartSessionRequest, preset: AgentPreset) {
+        if (starting) return
         starting = true
-        error = null
-        try {
-            val res = api.startSession(request)
-            if (res.trustRequired) {
-                pendingTrust = PendingTrust(res.paneId, request, preset)
-            } else {
-                started(request, preset, res)
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            error = "Start failed: ${e.message}"
-        } finally {
-            starting = false
+        val id = starts.enqueue(request)
+        context.container.scope.launch {
+            runCatching { shortcutStore.recordUsed(request.cwd) }
+            runCatching { presetStore.recordUsed(preset) }
         }
-    }
-
-    suspend fun answerTrust(pending: PendingTrust, trust: Boolean) {
-        starting = true
-        error = null
-        try {
-            val res = api.answerTrust(pending.paneId, trust)
-            if (trust) started(pending.request, pending.preset, res)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            error = "Start failed: ${e.message}"
-        } finally {
-            starting = false
-        }
-    }
-
-    pendingTrust?.let { pending ->
-        // Clear the dialog before launching so a second tap can't answer twice.
-        val answer = { trust: Boolean ->
-            pendingTrust = null
-            scope.launch { answerTrust(pending, trust) }
-        }
-        AlertDialog(
-            onDismissRequest = { answer(false) },
-            title = { Text("Trust this folder?") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("${providerName(pending.request.provider)} asks whether to trust the files in this folder.")
-                    Text(pending.request.cwd, fontFamily = FontFamily.Monospace)
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { answer(true) }) { Text("Trust") }
-            },
-            dismissButton = {
-                TextButton(onClick = { answer(false) }) { Text("Cancel") }
-            },
-        )
+        onStarted(id)
     }
 
     pendingStart?.let { (request, preset) ->
@@ -352,7 +295,7 @@ fun NewSessionScreen(
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Button(
-                        enabled = path.isNotEmpty() && !starting && !checking && !loading && pendingStart == null && pendingTrust == null,
+                        enabled = path.isNotEmpty() && !starting && !checking && !loading && pendingStart == null,
                         modifier = Modifier.fillMaxWidth(),
                         onClick = {
                             // Capture all selections before suspension; confirmation must
@@ -490,5 +433,3 @@ fun NewSessionScreen(
         }
     }
 }
-
-private data class PendingTrust(val paneId: String, val request: StartSessionRequest, val preset: AgentPreset)
