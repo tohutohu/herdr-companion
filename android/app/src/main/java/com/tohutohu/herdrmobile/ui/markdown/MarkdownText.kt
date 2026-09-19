@@ -1,6 +1,7 @@
 package com.tohutohu.herdrmobile.ui.markdown
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,6 +24,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.Placeable
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -32,9 +35,11 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.takeOrElse
@@ -148,7 +153,109 @@ private fun MarkdownBlock(block: MdBlock, style: TextStyle, previous: MdBlock?) 
             }
         }
 
+        is MdBlock.Table -> MarkdownTable(block, style, top)
+
         MdBlock.Rule -> HorizontalDivider(Modifier.padding(vertical = 4.dp))
+    }
+}
+
+@Composable
+private fun MarkdownTable(block: MdBlock.Table, style: TextStyle, modifier: Modifier) {
+    val scrollState = rememberScrollState()
+    val rows = remember(block) {
+        buildList {
+            add(block.header to true)
+            block.rows.forEach { add(it to false) }
+        }
+    }
+
+    Box(modifier.fillMaxWidth().horizontalScroll(scrollState)) {
+        Layout(
+            content = {
+                rows.forEach { (row, header) ->
+                    row.forEachIndexed { column, spans ->
+                        MarkdownTableCell(
+                            spans = spans,
+                            style = style,
+                            header = header,
+                            alignment = block.alignments.getOrElse(column) { MdTableAlignment.Start },
+                        )
+                    }
+                }
+            },
+            modifier = Modifier.padding(vertical = 4.dp),
+        ) { measurables, constraints ->
+            val columnCount = block.alignments.size
+            val minCellWidth = 72.dp.roundToPx()
+            val maxCellWidth = 240.dp.roundToPx()
+            val columnWidths = IntArray(columnCount) { minCellWidth }
+
+            var childIndex = 0
+            rows.forEach { (row, _) ->
+                row.forEachIndexed { column, _ ->
+                    val naturalWidth = measurables[childIndex++].maxIntrinsicWidth(Constraints.Infinity)
+                    columnWidths[column] = maxOf(
+                        columnWidths[column],
+                        naturalWidth.coerceAtMost(maxCellWidth),
+                    )
+                }
+            }
+
+            val placeables = ArrayList<Placeable>(measurables.size)
+            val rowHeights = IntArray(rows.size)
+            childIndex = 0
+            rows.forEachIndexed { rowIndex, (row, _) ->
+                row.forEachIndexed { column, _ ->
+                    val placeable = measurables[childIndex++].measure(Constraints.fixedWidth(columnWidths[column]))
+                    placeables += placeable
+                    rowHeights[rowIndex] = maxOf(rowHeights[rowIndex], placeable.height)
+                }
+            }
+
+            val tableWidth = columnWidths.sum().coerceAtLeast(constraints.minWidth)
+            val tableHeight = rowHeights.sum()
+            layout(tableWidth, tableHeight) {
+                var y = 0
+                var placeableIndex = 0
+                rows.forEachIndexed { rowIndex, (row, _) ->
+                    var x = 0
+                    row.forEachIndexed { column, _ ->
+                        placeables[placeableIndex++].placeRelative(x, y)
+                        x += columnWidths[column]
+                    }
+                    y += rowHeights[rowIndex]
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MarkdownTableCell(
+    spans: List<MdSpan>,
+    style: TextStyle,
+    header: Boolean,
+    alignment: MdTableAlignment,
+) {
+    val colors = MaterialTheme.colorScheme
+    Box(
+        Modifier
+            .background(if (header) colors.surfaceVariant else Color.Transparent)
+            .border(1.dp, colors.outlineVariant)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+    ) {
+        Text(
+            text = spans.annotated(),
+            style = style.copy(
+                fontWeight = if (header) FontWeight.Bold else style.fontWeight,
+                textAlign = when (alignment) {
+                    MdTableAlignment.Start -> TextAlign.Start
+                    MdTableAlignment.Center -> TextAlign.Center
+                    MdTableAlignment.End -> TextAlign.End
+                },
+            ),
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 

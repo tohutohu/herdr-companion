@@ -80,6 +80,37 @@ class MarkdownTest {
     }
 
     @Test
+    fun `パイプ区切りの表をヘッダーと行に分解する`() {
+        val table = parseMarkdown(
+            """
+            | 名前 | 状態 | 備考 |
+            | :--- | :---: | ---: |
+            | **A** | `ok` | そのまま |
+            | B \| C | 待機中 | - |
+            """.trimIndent(),
+        ).single() as MdBlock.Table
+
+        assertEquals(3, table.header.size)
+        assertEquals(2, table.rows.size)
+        assertEquals(listOf(MdTableAlignment.Start, MdTableAlignment.Center, MdTableAlignment.End), table.alignments)
+        assertTrue(table.header[0].single().text == "名前")
+        assertTrue(table.rows[0][0].single().bold)
+        assertTrue(table.rows[0][1].single().code)
+        assertEquals("B | C", text(table.rows[1][0]))
+    }
+
+    @Test
+    fun `表のセル内コードに含まれるパイプは列区切りにしない`() {
+        val table = parseMarkdown(
+            "列1 | 列2\n--- | ---\n`a | b` | 結果",
+        ).single() as MdBlock.Table
+
+        assertEquals(2, table.rows.single().size)
+        assertEquals("a | b", text(table.rows.single()[0]))
+        assertTrue(table.rows.single()[0].single().code)
+    }
+
+    @Test
     fun `水平線を認識する`() {
         assertTrue(parseMarkdown("上\n\n---\n\n下")[1] is MdBlock.Rule)
         assertTrue(parseMarkdown("***")[0] is MdBlock.Rule)

@@ -21,7 +21,20 @@ sealed interface MdBlock {
 
     data class Quote(val blocks: List<MdBlock>) : MdBlock
 
+    /** A pipe table. Each cell contains independently parsed inline spans. */
+    data class Table(
+        val header: List<List<MdSpan>>,
+        val rows: List<List<List<MdSpan>>>,
+        val alignments: List<MdTableAlignment>,
+    ) : MdBlock
+
     data object Rule : MdBlock
+}
+
+enum class MdTableAlignment {
+    Start,
+    Center,
+    End,
 }
 
 /** A run of text with inline styling. */
@@ -40,6 +53,12 @@ private val FENCE = Regex("""^ {0,3}(```+|~~~+)\s*(\S*).*$""")
 private val QUOTE = Regex("""^ {0,3}>\s?(.*)$""")
 private val LIST_ITEM = Regex("""^(\s*)(?:([-*+])|(\d{1,9})[.)])\s+(.*)$""")
 private val TASK = Regex("""^\[([ xX])]\s+(.*)$""")
+private val TABLE_SEPARATOR = Regex("""^:?-+:?$""")
+
+private data class ParsedTable(
+    val block: MdBlock.Table,
+    val nextLine: Int,
+)
 
 /** Parses [src] into blocks. Anything unrecognized stays literal text. */
 fun parseMarkdown(src: String): List<MdBlock> {
@@ -60,6 +79,7 @@ fun parseMarkdown(src: String): List<MdBlock> {
     while (i < lines.size) {
         val line = lines[i]
         val fence = FENCE.matchEntire(line)
+        val table = parseTableAt(lines, i)
         when {
             fence != null -> {
                 flushParagraph()
@@ -109,6 +129,13 @@ fun parseMarkdown(src: String): List<MdBlock> {
                 blocks += MdBlock.Quote(parseMarkdown(quoted.joinToString("\n")))
             }
 
+            table != null -> {
+                flushParagraph()
+                listIndents.clear()
+                blocks += table.block
+                i = table.nextLine
+            }
+
             LIST_ITEM.matchEntire(line) != null -> {
                 flushParagraph()
                 val m = LIST_ITEM.matchEntire(line)!!
@@ -144,6 +171,106 @@ fun parseMarkdown(src: String): List<MdBlock> {
     }
     flushParagraph()
     return blocks
+}
+
+/** Finds a GitHub-style pipe table beginning at [start]. */
+private fun parseTableAt(lines: List<String>, start: Int): ParsedTable? {
+    val header = splitTableRow(lines[start]) ?: return null
+    val separator = lines.getOrNull(start + 1)?.let(::splitTableRow) ?: return null
+    if (header.size < 2 || separator.size < 2 || separator.any { !TABLE_SEPARATOR.matches(it) }) return null
+
+    val columnCount = maxOf(header.size, separator.size)
+    val normalizedHeader = normalizeTableCells(header, columnCount)
+    val normalizedSeparator = normalizeTableCells(separator, columnCount)
+    val alignments = normalizedSeparator.map { cell ->
+        when {
+            cell.startsWith(":") && cell.endsWith(":") -> MdTableAlignment.Center
+            cell.endsWith(":") -> MdTableAlignment.End
+            else -> MdTableAlignment.Start
+        }
+    }
+
+    val rows = mutableListOf<List<List<MdSpan>>>()
+    var i = start + 2
+    while (i < lines.size && lines[i].isNotBlank()) {
+        val row = splitTableRow(lines[i]) ?: break
+        rows += normalizeTableCells(row, columnCount).map(::parseInline)
+        i++
+    }
+
+    return ParsedTable(
+        block = MdBlock.Table(
+            header = normalizedHeader.map(::parseInline),
+            rows = rows,
+            alignments = alignments,
+        ),
+        nextLine = i,
+    )
+}
+
+/**
+ * Splits one table row while leaving escaped pipes and pipes inside inline code
+ * in their cells. The backslashes are kept for [parseInline] to remove later.
+ */
+private fun splitTableRow(line: String): List<String>? {
+    val trimmed = line.trim()
+    if (!trimmed.contains('|')) return null
+
+    var from = 0
+    var to = trimmed.length
+    if (trimmed.startsWith("|")) from++
+    if (to > from && trimmed[to - 1] == '|' && !isEscaped(trimmed, to - 1)) to--
+
+    val cells = mutableListOf<String>()
+    val cell = StringBuilder()
+    var codeDelimiter = 0
+    var i = from
+    while (i < to) {
+        val c = trimmed[i]
+        when {
+            c == '\\' && codeDelimiter == 0 && i + 1 < to -> {
+                cell.append(c).append(trimmed[i + 1])
+                i += 2
+            }
+
+            c == '`' -> {
+                val run = runLength(trimmed, i, '`')
+                if (codeDelimiter == 0) codeDelimiter = run
+                else if (codeDelimiter == run) codeDelimiter = 0
+                cell.append(trimmed, i, i + run)
+                i += run
+            }
+
+            c == '|' && codeDelimiter == 0 -> {
+                cells += cell.toString().trim()
+                cell.clear()
+                i++
+            }
+
+            else -> {
+                cell.append(c)
+                i++
+            }
+        }
+    }
+    cells += cell.toString().trim()
+    return cells.takeIf { it.size >= 2 }
+}
+
+private fun normalizeTableCells(cells: List<String>, columnCount: Int): List<String> = when {
+    cells.size == columnCount -> cells
+    cells.size < columnCount -> cells + List(columnCount - cells.size) { "" }
+    else -> cells.take(columnCount - 1) + cells.drop(columnCount - 1).joinToString(" | ")
+}
+
+private fun isEscaped(text: String, index: Int): Boolean {
+    var backslashes = 0
+    var i = index - 1
+    while (i >= 0 && text[i] == '\\') {
+        backslashes++
+        i--
+    }
+    return backslashes % 2 == 1
 }
 
 private const val ESCAPABLE = "\\`*_{}[]()#+-.!~>|"
