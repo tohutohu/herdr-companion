@@ -61,7 +61,11 @@ import com.tohutohu.herdrmobile.data.DownloadState
 import com.tohutohu.herdrmobile.data.FileDownloads
 import com.tohutohu.herdrmobile.data.api.FileInfoDto
 import com.tohutohu.herdrmobile.ui.ExpandingContent
+import com.tohutohu.herdrmobile.ui.markdown.CodeToken
+import com.tohutohu.herdrmobile.ui.markdown.HighlightedCodeLine
 import com.tohutohu.herdrmobile.ui.markdown.MarkdownText
+import com.tohutohu.herdrmobile.ui.markdown.highlightCodeLines
+import com.tohutohu.herdrmobile.ui.markdown.languageForPath
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.unit.Dp
@@ -274,6 +278,9 @@ private fun MarkdownPreview(path: String, source: String, bottom: Dp) {
 @Composable
 private fun CodeView(path: String, lines: List<String>, target: Int, bottom: Dp) {
     val listState = rememberLazyListState()
+    val language = remember(path) { languageForPath(path) }
+    val source = remember(lines) { lines.joinToString("\n") { it.replace("\t", "    ") } }
+    val highlightedLines = remember(source, language) { highlightCodeLines(source, language) }
     LaunchedEffect(target, lines.size) {
         if (target > 0) listState.scrollToItem((target - 1 - 5).coerceIn(0, (lines.size - 1).coerceAtLeast(0)))
     }
@@ -283,7 +290,7 @@ private fun CodeView(path: String, lines: List<String>, target: Int, bottom: Dp)
         SelectionContainer {
             LazyColumn(state = listState, modifier = Modifier.width(2000.dp), contentPadding = PaddingValues(bottom = bottom)) {
                 item { Text(path, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(8.dp)) }
-                itemsIndexed(lines) { i, text ->
+                itemsIndexed(lines) { i, _ ->
                     val n = i + 1
                     Row(
                         Modifier
@@ -298,7 +305,10 @@ private fun CodeView(path: String, lines: List<String>, target: Int, bottom: Dp)
                             textAlign = TextAlign.End,
                             modifier = Modifier.padding(horizontal = 8.dp),
                         )
-                        Text(text.replace("\t", "    "), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, softWrap = false)
+                        HighlightedCodeLine(
+                            tokens = highlightedLines.getOrElse(i) { listOf(CodeToken("")) },
+                            style = MaterialTheme.typography.bodySmall,
+                        )
                     }
                 }
             }

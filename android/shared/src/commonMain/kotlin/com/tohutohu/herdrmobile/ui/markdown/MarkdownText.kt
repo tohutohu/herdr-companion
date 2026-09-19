@@ -123,11 +123,10 @@ private fun MarkdownBlock(block: MdBlock, style: TextStyle, previous: MdBlock?) 
                 .horizontalScroll(rememberScrollState())
                 .padding(horizontal = 8.dp, vertical = 6.dp),
         ) {
-            Text(
-                block.code,
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            HighlightedCodeText(
+                code = block.code,
+                language = block.language,
+                style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant),
             )
         }
 
