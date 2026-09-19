@@ -78,7 +78,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.tohutohu.herdrmobile.data.api.Status
-import com.tohutohu.herdrmobile.data.db.SessionEntity
+import com.tohutohu.herdrmobile.model.headline
 import com.tohutohu.herdrmobile.ui.ContextBar
 import com.tohutohu.herdrmobile.ui.ContextGauge
 import com.tohutohu.herdrmobile.ui.ExpandingContent
@@ -86,7 +86,7 @@ import com.tohutohu.herdrmobile.ui.SwapContent
 import com.tohutohu.herdrmobile.ui.agentSettingsLabel
 import com.tohutohu.herdrmobile.ui.costLabel
 import com.tohutohu.herdrmobile.ui.sessions.SessionActionMenuItems
-import com.tohutohu.herdrmobile.ui.sessions.SessionRef
+import com.tohutohu.herdrmobile.ui.sessions.toSessionRef
 import com.tohutohu.herdrmobile.ui.statusStyle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -252,7 +252,7 @@ fun SessionDetailScreen(
                                     },
                                 )
                                 SessionActionMenuItems(
-                                    s = s.ref(),
+                                    s = s.toSessionRef(),
                                     onResume = { onAction(SessionDetailAction.Resume) },
                                     onUnarchive = { onAction(SessionDetailAction.Unarchive) },
                                     onArchive = { onAction(SessionDetailAction.Archive) },
@@ -524,11 +524,6 @@ private fun FileChip(name: String) {
         }
     }
 }
-
-private fun SessionEntity.ref() = SessionRef(id, live = status != Status.OFFLINE, archived = archived)
-
-private fun SessionEntity.headline(): String =
-    title?.takeIf { it.isNotBlank() } ?: project.takeIf { it.isNotBlank() } ?: cwd?.takeIf { it.isNotBlank() } ?: id
 
 @Composable
 private fun ResumeBar(busy: Boolean, onResume: () -> Unit) {

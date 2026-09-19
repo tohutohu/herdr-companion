@@ -26,6 +26,7 @@ import com.tohutohu.herdrmobile.data.db.SessionEntity
 import com.tohutohu.herdrmobile.data.readAttachment
 import com.tohutohu.herdrmobile.ui.sessions.SessionRef
 import com.tohutohu.herdrmobile.ui.sessions.rememberSessionActions
+import com.tohutohu.herdrmobile.ui.toUiModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -74,7 +75,7 @@ fun SessionDetailRoute(
 
     val uiState = SessionDetailUiState(
         sessionId = sessionId,
-        session = session,
+        session = session?.toUiModel(),
         messages = messages,
         pending = pending.map(PendingMessage::toUiState),
         error = error,

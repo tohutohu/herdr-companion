@@ -3,7 +3,7 @@ package com.tohutohu.herdrmobile.ui.detail
 import com.tohutohu.herdrmobile.data.Message
 import com.tohutohu.herdrmobile.data.SendState
 import com.tohutohu.herdrmobile.data.api.InteractionResponseDto
-import com.tohutohu.herdrmobile.data.db.SessionEntity
+import com.tohutohu.herdrmobile.model.SessionUiModel
 
 /** A picked or pending attachment in the form needed by the Compose UI. */
 data class AttachmentUiState(
@@ -25,7 +25,7 @@ data class PendingMessageUiState(
 /** The state required to render a session detail screen. */
 data class SessionDetailUiState(
     val sessionId: String,
-    val session: SessionEntity?,
+    val session: SessionUiModel?,
     val messages: List<Message>,
     val pending: List<PendingMessageUiState>,
     val error: String?,
