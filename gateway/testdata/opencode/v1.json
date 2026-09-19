@@ -1,0 +1,4 @@
+[
+ {"ID":"msg_user","Created":1000,"Raw":{"role":"user","model":{"providerID":"anthropic","modelID":"claude-test"}},"Parts":[{"type":"text","text":"Check this image"},{"type":"file","mime":"image/png","url":"data:image/png;base64,Zml4dHVyZS1pbWFnZQ==","filename":"sample.png"}]},
+ {"ID":"msg_assistant","Created":2000,"Raw":{"role":"assistant","providerID":"anthropic","modelID":"claude-test","agent":"build","cost":0.012},"Parts":[{"type":"reasoning","text":"hidden reasoning"},{"type":"tool","tool":"read","state":{"status":"completed","input":{"filePath":"/work/demo/README.md"},"output":"File content"}},{"type":"text","text":"Done"}]}
+]

@@ -469,3 +469,39 @@ func TestセッションID待ちの再試行でプロンプトを再送しない
 		t.Fatal(fh.calls)
 	}
 }
+
+type preparedProvider struct {
+	locatingProvider
+	fail    error
+	options providers.LaunchOptions
+}
+
+func (p *preparedProvider) PrepareLaunch(_ context.Context, options providers.LaunchOptions) ([]string, string, error) {
+	p.options = options
+	return []string{"--session", "prepared-1"}, "prepared-1", p.fail
+}
+func Test準備済みのネイティブIDを起動とHerdrへの報告に使う(t *testing.T) {
+	fh := &fakeHerdr{status: herdr.StatusIdle}
+	l, root := newLauncher(t, fh)
+	p := &preparedProvider{}
+	l.Providers = []providers.Provider{p}
+	result, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: root, Model: "provider/model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.SessionID != "claude:prepared-1" || p.options.Model != "provider/model" || p.options.Cwd != root {
+		t.Fatalf("%+v %+v", result, p.options)
+	}
+	calls := strings.Join(fh.calls, "|")
+	if !strings.Contains(calls, "start claude --session prepared-1") || !strings.Contains(calls, "report claude prepared-1") {
+		t.Fatal(calls)
+	}
+	if p.cwd != "" {
+		t.Fatal("searched for a different session despite a known id")
+	}
+	fh.calls = nil
+	p.fail = errors.New("prepare failed")
+	if _, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: root}); err == nil || len(fh.calls) != 0 {
+		t.Fatal("started a pane despite failed preparation")
+	}
+}

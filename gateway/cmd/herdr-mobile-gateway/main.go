@@ -28,6 +28,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/claude"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/codex"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/opencode"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/sessions"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/uploads"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/usage"
@@ -139,7 +140,8 @@ func serve(args []string) error {
 	claudeProvider := claude.New(cfg.ClaudeConfigDir, hc, sink)
 	codexProvider := codex.New(cfg.CodexBinary, cfg.CodexDaemonSock, hc, sink)
 	go codexProvider.Run(ctx)
-	svc := sessions.New(hc, time.Duration(cfg.OfflineSessionDays)*24*time.Hour, claudeProvider, codexProvider)
+	openCodeProvider := opencode.New(cfg.OpenCode, hc, sink)
+	svc := sessions.New(hc, time.Duration(cfg.OfflineSessionDays)*24*time.Hour, claudeProvider, codexProvider, openCodeProvider)
 	archived, err := archive.Open(filepath.Join(config.StateDir(), "archive.json"))
 	if err != nil {
 		return err
@@ -150,7 +152,7 @@ func serve(args []string) error {
 	if len(roots) == 0 {
 		roots = launcher.DefaultRoots()
 	}
-	launch := &launcher.Launcher{Herdr: hc, Roots: roots, Providers: []providers.Provider{claudeProvider, codexProvider}}
+	launch := &launcher.Launcher{Herdr: hc, Roots: roots, Providers: []providers.Provider{claudeProvider, codexProvider, openCodeProvider}}
 
 	jevKey := os.Getenv("TYPESAFE_API_KEY")
 	if jevKey == "" {

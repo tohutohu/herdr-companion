@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/opencode"
 )
 
 type Device struct {
@@ -34,11 +36,12 @@ type Config struct {
 	// HERDR_MOBILE_FCM_CREDENTIALS or GOOGLE_APPLICATION_CREDENTIALS).
 	FCMCredentialsFile string `json:"fcmCredentialsFile,omitempty"`
 
-	HerdrSocket     string `json:"herdrSocket,omitempty"`
-	ClaudeConfigDir string `json:"claudeConfigDir,omitempty"`
-	CodexBinary     string `json:"codexBinary,omitempty"`
-	CodexDaemonSock string `json:"codexDaemonSocket,omitempty"`
-	UploadDir       string `json:"uploadDir,omitempty"`
+	HerdrSocket     string          `json:"herdrSocket,omitempty"`
+	ClaudeConfigDir string          `json:"claudeConfigDir,omitempty"`
+	OpenCode        opencode.Config `json:"opencode,omitempty"`
+	CodexBinary     string          `json:"codexBinary,omitempty"`
+	CodexDaemonSock string          `json:"codexDaemonSocket,omitempty"`
+	UploadDir       string          `json:"uploadDir,omitempty"`
 	// Directories under which the app may browse, create folders and start sessions.
 	WorkspaceRoots []string `json:"workspaceRoots,omitempty"`
 	// Sessions not running in Herdr are listed as offline when updated within this window.

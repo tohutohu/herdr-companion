@@ -250,8 +250,16 @@ func (l *Launcher) Start(ctx context.Context, req StartRequest) (*StartResult, e
 	if err != nil {
 		return nil, err
 	}
-	args := lp.LaunchArgs(providers.LaunchOptions{Model: req.Model, Effort: req.Effort, Cwd: cwd})
-	return l.launch(ctx, p, lp, cwd, args, req.Trust, req.Prompt, "", "model", req.Model, "effort", req.Effort)
+	opts := providers.LaunchOptions{Model: req.Model, Effort: req.Effort, Cwd: cwd}
+	args := lp.LaunchArgs(opts)
+	nativeID := ""
+	if prep, ok := p.(providers.PreparedLauncher); ok {
+		args, nativeID, err = prep.PrepareLaunch(ctx, opts)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return l.launch(ctx, p, lp, cwd, args, req.Trust, req.Prompt, nativeID, "model", req.Model, "effort", req.Effort)
 }
 
 // Resume reopens an existing session (not currently in Herdr) in a new

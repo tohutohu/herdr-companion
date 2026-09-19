@@ -1,0 +1,5 @@
+[
+ {"ID":"msg_user","Kind":"user","Created":1000,"Raw":{"text":"Check this image","files":[{"mime":"image/png","data":"Zml4dHVyZS1pbWFnZQ==","source":{"type":"inline"},"name":"sample.png"}]}},
+ {"ID":"msg_assistant","Kind":"assistant","Created":2000,"Raw":{"model":{"providerID":"anthropic","id":"claude-test"},"agent":"build","cost":0.012,"content":[{"type":"reasoning","text":"hidden reasoning"},{"type":"tool","id":"call_1","name":"read","state":{"status":"completed","input":{"filePath":"/work/demo/README.md"},"content":[{"type":"text","text":"File content"}]}},{"type":"text","text":"Done"}]}},
+ {"ID":"msg_idle","Kind":"idle","Created":2001,"Raw":{"outcome":"succeeded"}}
+]

@@ -1,6 +1,6 @@
 # Herdr Mobile
 
-Mac 上の [Herdr](https://herdr.dev) で動いている Claude Code / Codex のセッションを、Android から確認・操作するためのアプリです。
+Mac 上の [Herdr](https://herdr.dev) で動いている Claude Code / Codex / OpenCode（v1・公式 v2）のセッションを、Android から確認・操作するためのアプリです。
 
 - 完了・質問・承認待ちで Android に通知（タップで該当セッションへ）
 - 通知受信時にログを先読みして Room に保存（開いた瞬間に読める）
@@ -8,14 +8,14 @@ Mac 上の [Herdr](https://herdr.dev) で動いている Claude Code / Codex の
 - 会話中の画像のインライン表示、Android からの画像・ファイル送信
 - メッセージ内のファイル参照をタップしてファイルを表示
 - 非対応のダイアログは簡易ターミナル（`pane.read` + キー入力）で操作
-- アプリから新しいセッションを起動（Claude Code / Codex、フォルダの選択・新規作成）
+- アプリから新しいセッションを起動（Claude Code / Codex / OpenCode、フォルダの選択・新規作成）
 
 ```text
 Android ──(Tailscale, HTTP + Bearer)──▶ herdr-mobile-gateway (Mac) ──▶ Herdr / Claude Code / Codex
 ```
 
 設計の詳細は [docs/architecture.md](docs/architecture.md) を参照してください。
-Gateway は DB を持たず、Herdr・Claude・Codex 自身のデータを都度読みます。
+Gateway は独自の会話 DB を持たず、Herdr と各エージェント自身のデータを都度読みます。
 
 ## Macのメニューバーアプリから始める
 
@@ -286,3 +286,46 @@ Claude / Codex の仕様変更で dead-letter に記録されたデータは、r
 - Codex の構造化回答は共有 daemon（`codex --remote unix://`）で動くセッションのみです。
 - セッションの identity は Herdr インテグレーションが報告する session id です。インテグレーション未導入のペインは一覧に出ません。
 - 通知の重複防止はメモリ上のみで、Gateway 再起動直後の状態は通知しません。
+
+## OpenCode（v1 / 公式 v2）
+
+アプリのエージェント選択で **OpenCode** を選びます。Herdr の PATH にある
+`opencode` を起動し、インストール済みのバージョンを使います。
+[公式 v2](https://opencode.ai/v2/docs) は v2.0.9 で API 接続を確認しています。
+Herdr のセッション識別・状態通知には、OpenCode を一度起動した後で
+`herdr integration install opencode` を実行してください。既に導入済みの場合も
+v2 の TUI 連携を含む最新の Herdr integration に更新します。
+
+- 会話は `~/.local/share/opencode/opencode.db` を読み取り専用で参照します。
+  v1 の `session` / `message` / `part` と v2 の `session_v2` / `session_message`
+  を読み分けます。XDG_DATA_HOME と OPENCODE_DB にも対応します。
+- v2 の共有サービスは `~/.local/state/opencode/service.json` から自動検出します。
+  送信、画像・ファイル添付、承認、通常の選択式・自由記述フォームに対応します。
+  条件付きフォームや数値入力など、アプリで表現できないものは端末で回答します。
+- v1 は通常のテキスト送信を Herdr 経由で行います。承認・質問への構造化回答や
+  画像添付には、TUI と同じ v1 サーバーへの接続設定が必要です。
+- v2 でモデルを指定する場合は共有サービスが必要です。モデル一覧を取得すると
+  OpenCode CLI が共有サービスを起動します。v2 では API でモデルを設定した
+  セッションを作り、`--session` で TUI を開きます。
+
+独自の保存先や、既存の v1 サーバーを使う場合は Gateway の private config に
+`opencode` を追加します（以下は例。ほかの設定は保持してください）。
+
+```json
+{
+  "opencode": {
+    "database": "/absolute/path/opencode.db",
+    "binary": "opencode",
+    "serverUrl": "http://127.0.0.1:4096",
+    "serverVersion": 1,
+    "username": "opencode",
+    "password": "your-server-password"
+  }
+}
+```
+
+`serverUrl` を省略すると公式 v2 の共有サービスを検出します。v2 の接続先を明示する
+場合は `serverVersion: 2` を指定します。`stateDir` でサービス登録ファイルの
+ディレクトリも変更できます。`binary` はモデル一覧・バージョン確認に使う実行ファイルで、
+Herdr が起動する `opencode` と同じバージョンを指定します。
+JSON ファイルに保存していた古い v1（SQLite 移行前）は対象外です。

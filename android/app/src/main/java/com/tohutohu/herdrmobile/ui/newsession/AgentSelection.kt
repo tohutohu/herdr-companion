@@ -10,6 +10,7 @@ data class ProviderInfo(val id: String, val name: String, val shortName: String)
 val PROVIDERS = listOf(
     ProviderInfo("claude", "Claude Code", "Claude"),
     ProviderInfo("codex", "Codex", "Codex"),
+    ProviderInfo("opencode", "OpenCode", "OpenCode"),
 )
 
 fun providerName(id: String): String = PROVIDERS.firstOrNull { it.id == id }?.name ?: id

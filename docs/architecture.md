@@ -1,6 +1,6 @@
 # Architecture
 
-Herdr Mobile lets an Android phone follow and answer Claude Code / Codex
+Herdr Mobile lets an Android phone follow and answer Claude Code / Codex / OpenCode
 sessions that run inside [Herdr](https://herdr.dev) on a Mac.
 
 ```text
@@ -60,8 +60,8 @@ A Codex thread loaded on the shared daemon may report its own status
 
 `internal/providers.Provider` is the whole abstraction:
 `Summary`, `Recent`, `Messages`, `Image`, `Send`, `Respond`.
-Adding OpenCode means one more package implementing it and one line in
-`main.go`.
+OpenCode v1 and official v2 share one adapter and the `opencode:<session-id>`
+identity; the native database schema selects the history format.
 
 ### Claude Code
 
@@ -119,6 +119,31 @@ Adding OpenCode means one more package implementing it and one line in
   shown as answered cards before the agent message that followed the answer.
 - Herdr's `api schema` (protocol 22) defines the `pane.read` visible source
   and the key/text request shapes used here; scrollback is not dialog state.
+
+### OpenCode v1 / official v2
+
+- History is read directly from the native SQLite database in `mode=ro`, including
+  active WAL writes. v1 uses `session`, `message`, and `part`; released v2.0.9 uses
+  `session_v2` and `session_message`. Migrated duplicate ids prefer v2.
+- Both versions use Herdr's `opencode` identity and its official TUI integration.
+  New sessions can also be located by a unique matching cwd and creation time.
+- v2's local shared service is discovered from XDG state's `opencode/service.json`.
+  The embedded password is only sent to loopback; redirects are disabled.
+  An explicitly configured server supports either protocol version.
+- Text, tool output, inline/file images, current model, agent and reported cost
+  map to the common DTOs. Reasoning is hidden. Unknown records are dead-lettered
+  with their complete source record for `debug replay`.
+- v1 permission/question endpoints and v2 permission/form endpoints expose pending
+  interactions. Responses re-read the request and verify its session ownership.
+  v2 option labels map back to the form's native values. Conditional, hidden and
+  unsupported field types retain terminal fallback. Approvals offer once/deny;
+  the provider's persistent `always` permission is not mislabeled as session-only.
+- Sends use the connected server, or Herdr for plain text without a server. An
+  ambiguous HTTP failure is never retried through the terminal. v1 sessions are
+  not sent to an unrelated discovered v2 service. Image sends require the server.
+- v2's root TUI has no model flag: `PreparedLauncher` creates the session with
+  its selected model via API, then the launcher opens `--session <id>` and keeps
+  that known identity. v1 continues to use `--model`.
 
 ## Message model
 

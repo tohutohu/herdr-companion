@@ -1,5 +1,5 @@
 // Package providers defines the adapter boundary between coding agents
-// (Claude Code, Codex, later OpenCode) and the provider-neutral model.
+// (Claude Code, Codex, OpenCode v1/v2) and the provider-neutral model.
 package providers
 
 import (
@@ -212,4 +212,10 @@ type Launchable interface {
 	// StartupKeys returns the keys that accept a folder-trust dialog shown on
 	// screen, or nil when the screen is not a known trust dialog.
 	StartupKeys(screen string) []string
+}
+
+// PreparedLauncher can create a native session before starting its TUI when
+// model selection is an API operation rather than a command-line option.
+type PreparedLauncher interface {
+	PrepareLaunch(context.Context, LaunchOptions) (args []string, nativeID string, err error)
 }
