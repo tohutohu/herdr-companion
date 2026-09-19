@@ -12,7 +12,7 @@ import (
 )
 
 func Test更新は重複せずHTTP切断後も結果を取得できる(t *testing.T) {
-	s := New(context.Background(), "my-codex")
+	s := New(context.Background(), "my-codex", "")
 	gate := make(chan struct{})
 	var calls atomic.Int32
 	s.run = func(_ context.Context, command string, args ...string) (string, error) {
@@ -49,7 +49,7 @@ func Test更新は重複せずHTTP切断後も結果を取得できる(t *testin
 	t.Fatal("update did not complete")
 }
 func Test更新失敗はバージョンとエラーを残す(t *testing.T) {
-	s := New(context.Background(), "codex")
+	s := New(context.Background(), "codex", "")
 	s.run = func(_ context.Context, _ string, args ...string) (string, error) {
 		if args[0] == "--version" {
 			return "old", nil
@@ -90,4 +90,73 @@ func Testタイムアウトで更新コマンドと子プロセスを止める(t
 	if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > 3*time.Second {
 		t.Fatal(err, time.Since(start))
 	}
+}
+
+func TestOpenCodeは設定済みバイナリのupgradeを使い更新結果を検証する(t *testing.T) {
+	for _, version := range []string{"1.2.0", "opencode v2.0.9"} {
+		t.Run(version, func(t *testing.T) {
+			s := New(context.Background(), "", "/custom/bin/opencode")
+			gate := make(chan struct{})
+			var updates atomic.Int32
+			s.run = func(_ context.Context, command string, args ...string) (string, error) {
+				if args[0] == "--version" {
+					return version, nil
+				}
+				if command != "/custom/bin/opencode" || strings.Join(args, " ") != "upgrade" {
+					t.Errorf("unexpected command: %s %v", command, args)
+				}
+				updates.Add(1)
+				<-gate
+				return "Upgrade complete", nil
+			}
+			list := s.List(context.Background())
+			if len(list) != 3 || list[2].Provider != "opencode" || list[2].Version != version {
+				t.Fatal(list)
+			}
+			first, err := s.Start("opencode")
+			if err != nil || first.State != "running" {
+				t.Fatal(first, err)
+			}
+			second, err := s.Start("opencode")
+			if err != nil || second.State != "running" {
+				t.Fatal(second, err)
+			}
+			close(gate)
+			for range 1000 {
+				st := s.List(context.Background())[2]
+				if st.State != "running" {
+					if st.State != "succeeded" || st.Version != version || st.Output != "Upgrade complete" || updates.Load() != 1 {
+						t.Fatal(st, updates.Load())
+					}
+					return
+				}
+				time.Sleep(time.Millisecond)
+			}
+			t.Fatal("update did not complete")
+		})
+	}
+}
+func TestOpenCodeの未導入と更新後バージョン確認失敗を表示する(t *testing.T) {
+	s := New(context.Background(), "", "")
+	s.run = func(_ context.Context, command string, args ...string) (string, error) {
+		if command == "opencode" && args[0] == "--version" {
+			return "", errors.New("binary unavailable")
+		}
+		return "done", nil
+	}
+	if st := s.List(context.Background())[2]; st.Provider != "opencode" || st.State != "idle" || st.Error == "" {
+		t.Fatal(st)
+	}
+	s.Start("opencode")
+	for range 1000 {
+		st := s.List(context.Background())[2]
+		if st.State == "failed" {
+			if !strings.Contains(st.Error, "version verification failed") {
+				t.Fatal(st)
+			}
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("verification failure not reported")
 }

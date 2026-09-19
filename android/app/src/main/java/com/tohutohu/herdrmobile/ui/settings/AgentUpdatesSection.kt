@@ -15,6 +15,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.tohutohu.herdrmobile.container
 import com.tohutohu.herdrmobile.data.api.AgentUpdateDto
+import com.tohutohu.herdrmobile.ui.newsession.providerName
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -47,13 +48,13 @@ fun AgentUpdatesSection() {
     HorizontalDivider()
     Text("Agent updates on Mac", style = MaterialTheme.typography.titleMedium)
     Text("Check for updates and install them on the connected Mac. Updates continue if you leave this screen. Running sessions stay open.", style = MaterialTheme.typography.bodySmall)
-    Text("Codex: an already-running shared server keeps its current version. After your sessions finish, restart that server on the Mac to use the updated version.", style = MaterialTheme.typography.bodySmall)
+    Text("Codex / OpenCode v2: an already-running shared server keeps its current version. After your sessions finish, restart that server on the Mac to use the updated version.", style = MaterialTheme.typography.bodySmall)
     error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     agents.forEach { agent ->
         val running = agent.state == "running" || submitting == agent.provider
         Surface(tonalElevation = 1.dp, shape = MaterialTheme.shapes.medium) {
             Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(if (agent.provider == "codex") "Codex" else "Claude Code", style = MaterialTheme.typography.titleSmall)
+                Text(providerName(agent.provider), style = MaterialTheme.typography.titleSmall)
                 Text(agent.version.ifBlank { "Version unavailable" })
                 if (running) LinearProgressIndicator(Modifier.fillMaxWidth())
                 if (agent.state == "succeeded") Text("Update check completed")

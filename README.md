@@ -329,3 +329,12 @@ v2 の TUI 連携を含む最新の Herdr integration に更新します。
 ディレクトリも変更できます。`binary` はモデル一覧・バージョン確認に使う実行ファイルで、
 Herdr が起動する `opencode` と同じバージョンを指定します。
 JSON ファイルに保存していた古い v1（SQLite 移行前）は対象外です。
+
+### 設定画面から OpenCode を更新
+
+「Agent updates on Mac」に OpenCode のバージョンと「Check and update」を表示します。
+[公式の `upgrade` コマンド](https://opencode.ai/v2/docs/cli/commands#upgrade)を実行し、
+完了後にバージョンを再取得します。v1 と公式 v2 のどちらも対象です。
+`opencode.binary` を指定している場合は、その実行ファイルを更新します。
+インストール方式を CLI が判定できない場合は、更新出力とエラーを画面に表示します。
+更新中に画面を離れても処理は続き、同じエージェントの重複更新は実行しません。

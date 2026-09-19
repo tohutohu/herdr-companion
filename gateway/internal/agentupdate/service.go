@@ -31,11 +31,14 @@ type Service struct {
 	run      func(context.Context, string, ...string) (string, error)
 }
 
-func New(ctx context.Context, codex string) *Service {
+func New(ctx context.Context, codex, opencode string) *Service {
 	if codex == "" {
 		codex = "codex"
 	}
-	return &Service{ctx: ctx, commands: map[string]string{"codex": codex, "claude": "claude"}, statuses: map[string]Status{}, run: runCommand}
+	if opencode == "" {
+		opencode = "opencode"
+	}
+	return &Service{ctx: ctx, commands: map[string]string{"codex": codex, "claude": "claude", "opencode": opencode}, statuses: map[string]Status{}, run: runCommand}
 }
 
 // boundedOutput keeps verbose or broken installers from exhausting memory.
@@ -78,8 +81,8 @@ func runCommand(ctx context.Context, binary string, args ...string) (string, err
 }
 
 func (s *Service) List(ctx context.Context) []Status {
-	out := make([]Status, 0, 2)
-	for _, id := range []string{"claude", "codex"} {
+	out := make([]Status, 0, 3)
+	for _, id := range []string{"claude", "codex", "opencode"} {
 		s.mu.Lock()
 		st, ok := s.statuses[id]
 		s.mu.Unlock()
@@ -129,7 +132,13 @@ func (s *Service) Start(id string) (Status, error) {
 	go func() {
 		ctx, cancel := context.WithTimeout(s.ctx, 10*time.Minute)
 		defer cancel()
-		output, err := s.run(ctx, command, "update")
+		// Both OpenCode v1 and official v2 use upgrade; the CLI detects
+		// its own supported installation method (curl, npm, ...).
+		verb := "update"
+		if id == "opencode" {
+			verb = "upgrade"
+		}
+		output, err := s.run(ctx, command, verb)
 		next := Status{Provider: id, Version: st.Version, State: "succeeded", Output: output}
 		if err != nil {
 			next.State, next.Error = "failed", fmt.Sprintf("Update failed: %v", err)

@@ -19,15 +19,15 @@ func Testエージェント更新は認証必須で固定のプロバイダー�
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	for _, name := range []string{"claude", "codex"} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\ncase \"$1\" in\n--version) echo test-1;;\nupdate) echo updated;;\n*) exit 1;;\nesac\n"), 0700); err != nil {
+	for _, name := range []string{"claude", "codex", "opencode"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\ncase \"$1\" in\n--version) echo test-1;;\nupdate|upgrade) echo updated;;\n*) exit 1;;\nesac\n"), 0700); err != nil {
 			t.Fatal(err)
 		}
 	}
 	t.Setenv("PATH", dir)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	srv := &Server{Config: store, AgentUpdates: agentupdate.New(ctx, filepath.Join(dir, "codex"))}
+	srv := &Server{Config: store, AgentUpdates: agentupdate.New(ctx, filepath.Join(dir, "codex"), filepath.Join(dir, "opencode"))}
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 	token := store.Get().AuthToken
@@ -40,13 +40,18 @@ func Testエージェント更新は認証必須で固定のプロバイダー�
 		t.Fatal(resp.StatusCode)
 	}
 	resp, body := do(t, ts, token, "GET", "/v1/agents", nil, "")
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "test-1") {
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "test-1") || !strings.Contains(string(body), `"provider":"opencode"`) {
 		t.Fatal(resp.StatusCode, string(body))
 	}
 	resp, body = do(t, ts, token, "POST", "/v1/agents/codex/update", nil, "")
 	if resp.StatusCode != http.StatusAccepted || !strings.Contains(string(body), "running") {
 		t.Fatal(resp.StatusCode, string(body))
 	}
+	resp, body = do(t, ts, token, "POST", "/v1/agents/opencode/update", nil, "")
+	if resp.StatusCode != http.StatusAccepted || !strings.Contains(string(body), `"provider":"opencode"`) || !strings.Contains(string(body), "running") {
+		t.Fatal(resp.StatusCode, string(body))
+	}
+
 }
 
 func Test起動ペイン端末は認証と起動済みチェックとキー制限を使う(t *testing.T) {
