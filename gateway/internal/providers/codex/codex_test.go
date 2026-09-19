@@ -298,7 +298,10 @@ func (f *fakeServer) serve(p *pipeTransport, send func(any)) {
 			result = map[string]any{"thread": f.thread}
 			f.mu.Unlock()
 		case "model/list":
-			var params struct{ Cursor string }
+			var params struct {
+				Cursor        string
+				IncludeHidden bool
+			}
 			json.Unmarshal(m.Params, &params)
 			if params.Cursor == "" {
 				result = map[string]any{"nextCursor": "p2", "data": []map[string]any{
@@ -315,6 +318,15 @@ func (f *fakeServer) serve(p *pipeTransport, send func(any)) {
 					{"id": "mini", "model": "gpt-6-mini", "displayName": "", "description": "Fast"},
 					{"id": "bad", "model": "--oops", "displayName": "Bad"},
 				}}
+				if params.IncludeHidden {
+					page := result.(map[string]any)
+					page["data"] = append(page["data"].([]map[string]any), map[string]any{
+						"id": "gpt-reserve", "model": "gpt-reserve", "displayName": "GPT-Reserve", "hidden": true,
+						"defaultReasoningEffort": "medium", "supportedReasoningEfforts": []map[string]any{
+							{"reasoningEffort": "medium", "description": "Balanced"},
+						},
+					})
+				}
 			}
 		}
 		send(map[string]any{"id": m.ID, "result": result})
@@ -453,7 +465,7 @@ func Testスレッドのモデルをサマリーに含める(t *testing.T) {
 	}
 }
 
-func Testモデル一覧をページングして取得し非表示や不正なIDを除く(t *testing.T) {
+func Testモデル一覧をページングしてReserve以外の非表示や不正なIDを除く(t *testing.T) {
 	f := &fakeServer{t: t}
 	pt := &pipeTransport{in: make(chan []byte, 16), out: make(chan []byte, 16), closed: make(chan struct{})}
 	go f.serve(pt, func(v any) {
@@ -476,6 +488,9 @@ func Testモデル一覧をページングして取得し非表示や不正なID
 		Models: []providers.ModelOption{
 			{ID: "gpt-6-astra", Name: "GPT-6 Astra", Description: "Frontier", Default: true, Efforts: astraEfforts},
 			{ID: "gpt-6-mini", Name: "gpt-6-mini", Description: "Fast"},
+			{ID: "gpt-reserve", Name: "GPT-Reserve", Efforts: []providers.EffortOption{
+				{ID: "medium", Name: "Medium", Description: "Balanced", Default: true},
+			}},
 		},
 		// モデル未指定時は既定モデルのエフォートを出す
 		Efforts: astraEfforts,

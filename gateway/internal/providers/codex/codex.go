@@ -786,7 +786,9 @@ func (p *Provider) Models(ctx context.Context) (providers.ModelCatalog, error) {
 	var cat providers.ModelCatalog
 	cursor := ""
 	for range 10 {
-		params := map[string]any{"includeHidden": false}
+		// Reserve is hidden in Codex's catalog; fetch it along with visible
+		// models and keep filtering other hidden models in modelOptions.
+		params := map[string]any{"includeHidden": true}
 		if cursor != "" {
 			params["cursor"] = cursor
 		}
@@ -821,7 +823,7 @@ func modelOptions(ms []catalogModel) []providers.ModelOption {
 		if id == "" {
 			id = m.ID
 		}
-		if m.Hidden || !providers.ValidModelID(id) {
+		if (m.Hidden && id != "gpt-reserve") || !providers.ValidModelID(id) {
 			continue
 		}
 		name := m.DisplayName
