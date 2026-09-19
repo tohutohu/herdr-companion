@@ -180,6 +180,7 @@ fun SettingsScreen(onDone: () -> Unit) {
             ExpandingContent(value = testResult) { result ->
                 Crossfade(result, label = "testResult") { Text(it, style = MaterialTheme.typography.bodyMedium) }
             }
+            if (current.gatewayUrl.isNotBlank() && current.token.isNotBlank()) AgentUpdatesSection()
             ExpandingContent(value = pushStatus.takeIf { it.isNotEmpty() }) {
                 Text(it, style = MaterialTheme.typography.bodySmall)
             }

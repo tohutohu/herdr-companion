@@ -70,4 +70,36 @@ class SessionStartsTest {
         starts.dismiss(id)
         assertTrue(starts.entries.value.isEmpty())
     }
+
+    @Test fun `端末待ちでは一覧のID判明だけで初期プロンプトを飛ばさない`() = runBlocking {
+        var calls = 0
+        val response = CompletableDeferred<StartSessionResponse>()
+        val starts = SessionStarts(this,
+            { StartSessionResponse(paneId = "pane", warning = "Open terminal") },
+            { _, _ -> error("unused") }, {},
+            { calls++; response.await() })
+        val id = starts.enqueue(request)
+        yield()
+        starts.reconcile(setOf("real"), mapOf("pane" to "real"))
+        assertNull(starts.entries.value.single().sessionId)
+        assertEquals("pane", starts.entries.value.single().paneId)
+        starts.continueLaunch(id)
+        starts.continueLaunch(id)
+        yield()
+        response.complete(StartSessionResponse(sessionId = "real", paneId = "pane"))
+        yield()
+        assertEquals(1, calls)
+        assertEquals("real", starts.entries.value.single().sessionId)
+    }
+
+    @Test fun `信頼を拒否したペインは端末への導線に残さない`() = runBlocking {
+        val starts = SessionStarts(this,
+            { StartSessionResponse(paneId = "pane", trustRequired = true) },
+            { _, _ -> StartSessionResponse(paneId = "pane") }, {})
+        val id = starts.enqueue(request)
+        yield()
+        starts.answerTrust(id, false)
+        yield()
+        assertNull(starts.entries.value.single().paneId)
+    }
 }

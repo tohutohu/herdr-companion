@@ -77,7 +77,16 @@ class SessionActions internal constructor(
 
     fun unarchive(s: SessionRef) = unarchive(listOf(s))
 
-    fun resume(s: SessionRef) = run(listOf(s), "Resumed in Herdr", "resumed") { repo.resume(it.id) }
+    fun resume(s: SessionRef) = run(listOf(s), "Resumed in Herdr", "resumed") {
+        val session = context.container.api.session(it.id)
+        val result = repo.resume(it.id)
+        if (result.sessionId == null || result.trustRequired) {
+            context.container.sessionStarts.trackResume(
+                com.tohutohu.herdrmobile.data.api.StartSessionRequest(session.provider, session.cwd.orEmpty(), "", true), result,
+            )
+            "Startup needs attention. Open the pending start in the session list."
+        } else result.warning
+    }
 
     private fun runArchive(targets: List<SessionRef>) {
         val stopping = targets.any { it.live }

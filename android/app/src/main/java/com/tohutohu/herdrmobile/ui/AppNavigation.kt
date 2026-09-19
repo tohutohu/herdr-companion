@@ -83,6 +83,7 @@ fun AppNavigation(start: Route, openSession: String?, onSessionOpened: () -> Uni
             entry<StartingRoute> { route ->
                 com.tohutohu.herdrmobile.ui.newsession.StartingSessionScreen(
                     route.startId,
+                    onOpenTerminal = { pane -> nav.push(TerminalRoute(paneId = pane)) },
                     onBack = { nav.back(orReplaceWith = SessionsRoute) },
                     onReady = { id ->
                         val at = backStack.indexOf(route)
@@ -114,7 +115,7 @@ fun AppNavigation(start: Route, openSession: String?, onSessionOpened: () -> Uni
             }
             entry<TerminalRoute> { route ->
                 val lifecycle = LocalLifecycleOwner.current.lifecycle
-                TerminalScreen(route.sessionId, onBack = { lifecycle.ifResumed { nav.back() } })
+                TerminalScreen(route.sessionId, onBack = { lifecycle.ifResumed { nav.back() } }, paneId = route.paneId)
             }
         },
     )

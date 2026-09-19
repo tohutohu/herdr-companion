@@ -15,8 +15,9 @@ data class SessionStart(
     val request: StartSessionRequest,
     val busy: Boolean = true,
     val trustPane: String? = null,
-    val sessionId: String? = null,
     val paneId: String? = null,
+    val sessionId: String? = null,
+    val needsContinue: Boolean = false,
     val notice: String? = null,
     val listed: Boolean = false,
 ) {
@@ -34,6 +35,7 @@ class SessionStarts(
     private val start: suspend (StartSessionRequest) -> StartSessionResponse,
     private val answer: suspend (String, Boolean) -> StartSessionResponse,
     private val refresh: suspend () -> Unit,
+    private val continueStart: suspend (String) -> StartSessionResponse = { error("Continue is unavailable") },
 ) {
     private val mutable = MutableStateFlow<List<SessionStart>>(emptyList())
     val entries = mutable.asStateFlow()
@@ -52,14 +54,31 @@ class SessionStarts(
         change(id) { it.copy(busy = true, trustPane = null, notice = null) }
         execute(id) {
             val result = answer(pane, trust)
-            if (!trust) result.copy(warning = "Session start cancelled.") else result
+            if (!trust) result.copy(paneId = "", warning = "Session start cancelled.") else result
         }
+    }
+
+    fun continueLaunch(id: String) {
+        val entry = mutable.value.find { it.id == id } ?: return
+        val pane = entry.paneId ?: return
+        if (entry.busy) return
+        change(id) { it.copy(busy = true, notice = null) }
+        execute(id) { continueStart(pane) }
+    }
+
+    /** Keep a partial resume reachable from the session list as well. */
+    fun trackResume(request: StartSessionRequest, result: StartSessionResponse) {
+        val entry = SessionStart(UUID.randomUUID().toString(), request, busy = false,
+            paneId = result.paneId.takeIf { it.isNotEmpty() },
+            trustPane = result.paneId.takeIf { result.trustRequired },
+            sessionId = result.sessionId, needsContinue = result.sessionId == null, notice = result.warning)
+        mutable.update { listOf(entry) + it }
     }
 
     fun reconcile(sessionIds: Set<String>, paneSessions: Map<String, String> = emptyMap()) {
         mutable.update { rows -> rows.map {
             val resolved = it.sessionId ?: it.paneId?.let(paneSessions::get)
-            if (!it.busy && it.trustPane == null && resolved in sessionIds) it.copy(sessionId = resolved, listed = true) else it
+            if (!it.busy && !it.needsContinue && it.trustPane == null && resolved in sessionIds) it.copy(sessionId = resolved, listed = true) else it
         } }
     }
 
@@ -75,7 +94,7 @@ class SessionStarts(
         scope.launch {
             try {
                 val res = call()
-                change(id) { it.copy(busy = false, trustPane = res.paneId.takeIf { res.trustRequired }, sessionId = res.sessionId, paneId = res.paneId, notice = res.warning) }
+                change(id) { it.copy(busy = false, paneId = res.paneId.takeIf { it.isNotEmpty() }, trustPane = res.paneId.takeIf { res.trustRequired }, sessionId = res.sessionId, needsContinue = res.sessionId == null && res.warning != null && res.paneId.isNotEmpty(), notice = res.warning) }
                 // A refresh failure must not turn a successful launch into a failed one.
                 try { refresh() } catch (e: CancellationException) { throw e } catch (_: Exception) { }
             } catch (e: CancellationException) {

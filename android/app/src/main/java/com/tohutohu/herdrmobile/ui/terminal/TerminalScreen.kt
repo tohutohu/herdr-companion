@@ -46,6 +46,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.tohutohu.herdrmobile.container
 import com.tohutohu.herdrmobile.data.api.TerminalInput
 import com.tohutohu.herdrmobile.ui.ExpandingContent
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -64,7 +65,7 @@ private val KEYS = listOf(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TerminalScreen(sessionId: String, onBack: () -> Unit) {
+fun TerminalScreen(sessionId: String, onBack: () -> Unit, paneId: String? = null) {
     val api = LocalContext.current.container.api
     var text by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
@@ -75,8 +76,10 @@ fun TerminalScreen(sessionId: String, onBack: () -> Unit) {
 
     suspend fun refresh() {
         try {
-            text = api.terminal(sessionId).text.trimEnd()
+            text = (if (paneId != null) api.launchTerminal(paneId) else api.terminal(sessionId)).text.trimEnd()
             error = null
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             error = e.message
         }
@@ -85,9 +88,11 @@ fun TerminalScreen(sessionId: String, onBack: () -> Unit) {
     fun send(input: TerminalInput) {
         scope.launch {
             try {
-                api.terminalInput(sessionId, input)
+                if (paneId != null) api.launchTerminalInput(paneId, input) else api.terminalInput(sessionId, input)
                 delay(300)
                 refresh()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 error = e.message
             }

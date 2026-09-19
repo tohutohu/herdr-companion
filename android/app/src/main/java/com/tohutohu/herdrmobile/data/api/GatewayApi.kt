@@ -119,6 +119,21 @@ class GatewayApi(
         post(url("v1", "sessions", id, "terminal"), json.encodeToString(input).toRequestBody(jsonType))
     }
 
+    suspend fun launchTerminal(paneId: String): TerminalResponse =
+        get(url("v1", "launches", paneId, "terminal"))
+
+    suspend fun launchTerminalInput(paneId: String, input: TerminalInput) {
+        post(url("v1", "launches", paneId, "terminal"), json.encodeToString(input).toRequestBody(jsonType))
+    }
+
+    suspend fun continueLaunch(paneId: String): StartSessionResponse =
+        slowPost(url("v1", "launches", paneId, "continue"), "{}")
+
+    suspend fun agentUpdates(): AgentUpdatesResponse = get(url("v1", "agents"))
+
+    suspend fun updateAgent(provider: String): AgentUpdateDto =
+        json.decodeFromString(post(url("v1", "agents", provider, "update"), "{}".toRequestBody(jsonType)))
+
     suspend fun files(id: String, path: String): FilesResponse =
         get(url("v1", "sessions", id, "files", query = mapOf("path" to path)))
 

@@ -85,11 +85,11 @@ class SessionRepository(
         db.sessions().upsert(listOf(s.toEntity(System.currentTimeMillis(), listed = true)))
     }
 
-    /** Returns a warning when the agent started only partially. */
-    suspend fun resume(sessionId: String, trust: Boolean = true): String? {
+    /** Keeps the pane id available when resuming stops at a startup dialog. */
+    suspend fun resume(sessionId: String, trust: Boolean = true): com.tohutohu.herdrmobile.data.api.StartSessionResponse {
         val res = api.resume(sessionId, trust)
         runCatching { refreshSessions() }
-        return res.warning
+        return res
     }
 
     suspend fun send(sessionId: String, text: String, uploads: List<String>) =

@@ -14,7 +14,7 @@ import androidx.compose.foundation.verticalScroll
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun StartingSessionScreen(startId: String, onBack: () -> Unit, onReady: (String) -> Unit) {
+fun StartingSessionScreen(startId: String, onBack: () -> Unit, onReady: (String) -> Unit, onOpenTerminal: (String) -> Unit) {
     val context = LocalContext.current
     val starts = context.container.sessionStarts
     val entries by starts.entries.collectAsState()
@@ -64,6 +64,13 @@ fun StartingSessionScreen(startId: String, onBack: () -> Unit, onReady: (String)
                         TextButton(onClick = { starts.answerTrust(startId, false) }) { Text("Cancel") }
                     }
                 } else if (!entry.busy && entry.sessionId == null) {
+                    entry.paneId?.let { pane ->
+                        Text("Resolve the startup dialog in Terminal, then continue here. Your initial prompt is kept until the agent is ready.")
+                        Row {
+                            TextButton(onClick = { onOpenTerminal(pane) }) { Text("Open terminal") }
+                            TextButton(onClick = { starts.continueLaunch(startId) }) { Text("Continue start") }
+                        }
+                    }
                     TextButton(onClick = { starts.dismiss(startId); onBack() }) { Text("Dismiss") }
                 }
             }
