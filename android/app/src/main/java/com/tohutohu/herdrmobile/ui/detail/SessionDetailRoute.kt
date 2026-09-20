@@ -49,6 +49,7 @@ fun SessionDetailRoute(
     val session by vm.session.collectAsState()
     val messagePresentation by vm.messagePresentation.collectAsState()
     val error by vm.error.collectAsState()
+    val loading by vm.loading.collectAsState()
     val answering by vm.answering.collectAsState()
     val actions = rememberSessionActions(onChanged = { vm.refresh() })
     actions.Dialogs()
@@ -80,6 +81,7 @@ fun SessionDetailRoute(
         messageKeys = messagePresentation.messageKeys,
         error = error,
         answering = answering,
+        loading = loading,
         attachments = attachments.map(Attachment::toUiState),
         actionBusy = session?.let { actions.busy(it.id) } == true,
     )

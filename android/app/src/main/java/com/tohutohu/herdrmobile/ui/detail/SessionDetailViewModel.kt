@@ -22,6 +22,8 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.scan
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 private const val POLL_MS = 3_000L
 
@@ -86,6 +88,10 @@ class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidV
     private val _error = MutableStateFlow<String?>(null)
     val error = _error.asStateFlow()
 
+    private val refreshMutex = Mutex()
+    private val _loading = MutableStateFlow(true)
+    val loading = _loading.asStateFlow()
+
     /** An answer to a question or approval is on its way. */
     private val _answering = MutableStateFlow(false)
     val answering = _answering.asStateFlow()
@@ -111,15 +117,22 @@ class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidV
     }
 
     suspend fun refresh() {
-        _error.value = try {
-            // The first fetch after opening replaces the cache entirely.
-            repo.refreshMessages(sessionId, full = !fullSyncDone)
-            fullSyncDone = true
-            null
-        } catch (e: GatewayException) {
-            "${e.message}"
-        } catch (e: Exception) {
-            "Offline: showing cached messages (${e.message})"
+        refreshMutex.withLock {
+            _loading.value = true
+            try {
+                _error.value = try {
+                    // The first fetch after opening replaces the cache entirely.
+                    repo.refreshMessages(sessionId, full = !fullSyncDone)
+                    fullSyncDone = true
+                    null
+                } catch (e: GatewayException) {
+                    "${e.message}"
+                } catch (e: Exception) {
+                    "Offline: showing cached messages (${e.message})"
+                }
+            } finally {
+                _loading.value = false
+            }
         }
     }
 

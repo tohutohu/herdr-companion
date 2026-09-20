@@ -100,8 +100,11 @@ fun SessionListRoute(
                 SessionListAction.OpenArchived -> onArchived()
                 SessionListAction.Refresh -> scope.launch {
                     refreshing = true
-                    refresh()
-                    refreshing = false
+                    try {
+                        refresh()
+                    } finally {
+                        refreshing = false
+                    }
                 }
                 is SessionListAction.Archive -> actions.archive(action.sessions)
                 is SessionListAction.Unarchive -> actions.unarchive(action.sessions)

@@ -93,6 +93,7 @@ import com.tohutohu.herdrmobile.ui.ContextBar
 import com.tohutohu.herdrmobile.ui.ContextGauge
 import com.tohutohu.herdrmobile.ui.ExpandingContent
 import com.tohutohu.herdrmobile.ui.SwapContent
+import com.tohutohu.herdrmobile.ui.SyncIndicator
 import com.tohutohu.herdrmobile.ui.agentSettingsLabel
 import com.tohutohu.herdrmobile.ui.costLabel
 import com.tohutohu.herdrmobile.ui.sessions.SessionActionMenuItems
@@ -340,8 +341,11 @@ fun SessionDetailScreen(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                 )
             }
+            SyncIndicator(
+                visible = state.loading && session == null && messages.isEmpty(),
+                label = "Loading…",
+            )
             Box(Modifier.fillMaxSize()) {
-                LoadingHint(visible = messages.isEmpty() && (state.loading || state.session == null))
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
@@ -405,13 +409,6 @@ fun SessionDetailScreen(
 
 private const val SETTLE_MS = 400L
 private const val ITEM_ANIMATION_MS = 260
-
-@Composable
-private fun LoadingHint(visible: Boolean) {
-    AnimatedVisibility(visible = visible, enter = fadeIn(tween(200, delayMillis = 400)), exit = ExitTransition.None) {
-        Text("Loading…", modifier = Modifier.padding(16.dp))
-    }
-}
 
 @Composable
 private fun BoxScope.PinnedFlowStack(
