@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -63,7 +64,6 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.FrameWindowScope
 import androidx.compose.ui.window.MenuBar
@@ -73,7 +73,6 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.tohutohu.herdrcompanion.data.api.GatewayApi
 import com.tohutohu.herdrcompanion.model.SessionUiModel
-import com.tohutohu.herdrcompanion.model.headline
 import com.tohutohu.herdrcompanion.ui.detail.SessionDetailAction
 import com.tohutohu.herdrcompanion.ui.detail.SessionDetailScreen
 import com.tohutohu.herdrcompanion.ui.sessions.SessionListAction
@@ -419,7 +418,6 @@ private fun FrameWindowScope.DesktopShell(
                                             api = api,
                                             window = window,
                                             sessionId = id,
-                                            paneNumber = index + 1,
                                             paneCount = detailIds.size,
                                         )
                                     }
@@ -528,7 +526,6 @@ private fun DesktopSessionPane(
     api: GatewayApi,
     window: java.awt.Window,
     sessionId: String,
-    paneNumber: Int,
     paneCount: Int,
 ) {
     val detail = state.detailFor(sessionId)
@@ -537,39 +534,27 @@ private fun DesktopSessionPane(
         onFilesDropped = { paths -> state.addAttachments(sessionId, paths) },
     )
     Column(Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    if (state.selectedSessionId == sessionId) {
-                        MaterialTheme.colorScheme.secondaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.surfaceVariant
-                    },
-                )
-                .clickable { state.focusSession(sessionId) }
-                .padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (paneCount > 1) {
-                Text(
-                    text = "Pane $paneNumber of $paneCount",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Text(
-                text = detail?.session?.headline() ?: sessionId,
-                style = MaterialTheme.typography.titleSmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f).padding(start = if (paneCount > 1) 8.dp else 0.dp),
-            )
-            IconButton(
-                onClick = { state.closeSession(sessionId) },
-                modifier = Modifier.size(32.dp),
+        if (paneCount > 1) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(28.dp)
+                    .background(
+                        if (state.selectedSessionId == sessionId) {
+                            MaterialTheme.colorScheme.secondaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant
+                        },
+                    )
+                    .clickable { state.focusSession(sessionId) },
+                contentAlignment = Alignment.CenterEnd,
             ) {
-                Icon(Icons.Default.Close, contentDescription = "Close session pane")
+                IconButton(
+                    onClick = { state.closeSession(sessionId) },
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    Icon(Icons.Default.Close, contentDescription = "Close session pane")
+                }
             }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
