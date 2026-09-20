@@ -1,0 +1,407 @@
+# Herdr Companion
+
+英語版: [README.md](README.md)
+
+Mac 上の [Herdr](https://herdr.dev) で動いている Claude Code / Codex / OpenCode のセッションを、Android から確認・操作するためのアプリです。Mac で AI エージェントを走らせたまま、スマホから進捗を確認したり、質問に答えたり、次の指示を送ったりできます。
+
+## このアプリの良さ
+
+特に便利なのは、アプリをずっと画面に出しておかなくてもセッションを追えることです。
+
+- エージェントの完了・質問・承認待ち・エラーを Android の通知で知らせる
+- 通知を受けた時点で会話をバックグラウンド取得し、端末の Room キャッシュへ保存する
+- 通知をタップすると、該当セッションの最新ログをすぐ開ける（ネットワーク状況によっては再試行）
+- 通知のインライン返信から、通常のメッセージをそのまま送れる
+- AskUserQuestion、Codex の `requestUserInput`、承認操作はネイティブ UI で回答できる
+- 画像・ファイルの送信、会話中の画像表示、メッセージ内のファイル参照にも対応
+- アプリから新しいセッションを起動し、作業フォルダやモデルも選べる
+
+通知から画面を開くまでの流れは次のとおりです。
+
+```text
+Mac上のGatewayがHerdrを監視
+        │ FCM通知
+        ▼
+Androidがバックグラウンドで会話を取得 → Roomに保存 → 通知タップで即表示
+```
+
+Firebase のプロジェクト作成とサービスアカウント設定は、正直に言うとこのプロジェクトで一番面倒な部分です。ただし通知を使わない場合でも、閲覧・送信・承認・セッション起動は利用できます。通知を使う場合も、推奨のメニューバーアプリなら設定は一度だけで、共通 APK の再ビルドは必要ありません。
+
+Gateway は Mac 上で動き、会話データをクラウドへ保存する独自 DB は持ちません。Herdr と各エージェントのデータを読み、Android 側に必要な範囲だけキャッシュします。
+
+```text
+Android ──(Tailscale推奨 / trusted LAN / HTTPS tunnel, HTTP(S) + Bearer)──▶ Herdr Companion Gateway (Mac) ──▶ Herdr / Claude Code / Codex / OpenCode
+```
+
+設計の詳細は [docs/architecture.md](docs/architecture.md) を参照してください。
+
+## 最短の導入手順
+
+1. Mac に Herdr と Claude Code / Codex / OpenCode を用意し、必要な Herdr integration を入れる。
+2. Mac で `Herdr Companion Gateway.app` を起動し、Gateway を起動する。
+3. Android アプリの **Scan Mac QR** でメニューバーアプリのペアリング QR を読み取る。
+4. 通知が必要なら、Firebase を設定してから QR を発行し直してペアリングする。
+
+Gateway と Android の接続には、Mac と Android が同じ tailnet にいる Tailscale を推奨します。信頼できる LAN や HTTPS トンネルも利用できます。Mac のメニューバーアプリの使い方は [macos/README.md](macos/README.md)、DMG の作成・配布は [docs/macos-release.md](docs/macos-release.md) を参照してください。
+
+Firebase の秘密鍵と Jev の API キーは任意です。どちらも未設定のままペアリングできます。
+
+## リポジトリ構成
+
+```text
+gateway/   Go 製 Gateway（cmd/herdr-mobile-gateway, internal/...）
+android/   Android アプリとCompose Desktop UI（Kotlin / Compose）
+macos/     Gateway Manager（SwiftUI）とGateway用DMGビルド
+docs/      設計・macOS releaseドキュメント
+```
+
+## 前提
+
+| 対象 | 必要なもの |
+|---|---|
+| Mac | Go 1.24+、Herdr 0.9+、Claude Code および/または Codex CLI、ネットワーク接続（Tailscale推奨） |
+| 残量表示 | CodexBar（`brew install --cask codexbar`、任意） |
+| Android | Android 10 (API 29) 以上、Macへ到達できるネットワーク（Tailscale推奨） |
+| ビルド | JDK 17、Android SDK（compileSdk 37）|
+| 通知 | Firebase プロジェクト（無料枠で可） |
+
+## 1. Herdr のセットアップ
+
+Gateway はペインごとの「どのセッションが動いているか」を Herdr の公式インテグレーションから取得します。**必須**です。
+
+```bash
+herdr integration install claude
+herdr integration install codex
+# OpenCode を使う場合は、OpenCode を一度起動してから実行
+herdr integration install opencode
+herdr integration status   # 利用する integration が installed になっていること
+```
+
+インストール後に起動した Claude Code / Codex から認識されます（既存セッションは一度再起動してください）。
+
+### Codex の構造化操作（推奨）
+
+Codex の承認・requestUserInput・メッセージ送信を構造化 API で行うには、Codex TUI を共有 app-server daemon に接続して起動します。
+
+```bash
+codex app-server daemon start     # 共有 daemon（~/.codex/app-server-control/app-server-control.sock）
+codex --remote unix://            # Herdr のペインで Codex をこの形で起動
+```
+
+daemon を使わない通常の `codex` でも履歴の閲覧とメッセージ送信（ペイン経由）はできますが、承認・質問への回答はターミナル画面からの操作になります。
+
+## 2. Gateway のセットアップ
+
+### メニューバー版（推奨）
+
+配布 DMG を使う場合は、`Herdr Companion Gateway.app` を Applications に入れて起動し、メニューバーのアイコンから Gateway を起動します。表示された接続先を確認して「ペアリングQRを表示」→ Android の「Scan Mac QR」で接続してください。
+
+`Herdr Companion.app`（Compose Desktop UI）も利用する場合は、UI 用 DMG を別途インストールします。Gateway Manager と UI は別アプリです。Firebase の取り込み、ログイン時起動、Gateway の start/stop もメニューバー版で管理できます。詳しくは [macos/README.md](macos/README.md) を参照してください。
+
+### CLI / launchd 版
+
+配布アプリを使わず、Gateway をソースから起動する場合は次の手順です。
+
+```bash
+cd gateway
+go build -o ~/.local/bin/herdr-mobile-gateway ./cmd/herdr-mobile-gateway
+~/.local/bin/herdr-mobile-gateway token  # 初回実行で設定と認証トークンを生成
+```
+
+`~/.config/herdr-mobile/config.json`（自動生成、パーミッション 600）:
+
+```json
+{
+  "listen": ":8765",
+  "authToken": "…",
+  "devices": [],
+  "offlineSessionDays": 3
+}
+```
+
+任意項目: `fcmCredentialsFile`, `herdrSocket`, `claudeConfigDir`, `codexBinary`, `codexDaemonSocket`, `uploadDir`, `workspaceRoots`, `usageCommand`, `usageRefreshMinutes`。
+
+`workspaceRoots`（既定: `~/workspace`、なければホーム）は、アプリからフォルダを選択・作成してセッションを起動できる範囲です。
+
+### サブスクの残量表示
+
+Claude / Codex のプラン上限の消費率をアプリの一覧画面に表示します。Claude Code も Codex も残量を CLI から出せないため、両方のダッシュボードを見に行く CodexBar の CLI を使います。Codex が Luna Reserve（`gpt-reserve`）を返すアカウントでは、その別枠も Limits に表示します。
+
+```bash
+brew install --cask codexbar     # /opt/homebrew/bin/codexbar が入る
+herdr-mobile-gateway usage       # 取得できるか確認
+```
+
+Gateway は既定で 5 分ごとに読み直してキャッシュし、アプリはそれを表示します（カードの更新ボタンで即時再取得）。間隔は `usageRefreshMinutes`、無効化は `usageCommand: "off"` です。CodexBar が入っていなければ機能が無効になるだけで、他の動作には影響しません。
+
+### アプリからのセッション起動
+
+一覧画面の「New session」で、Claude Code / Codex、作業フォルダ（`workspaceRoots` 配下で選択または新規作成）、最初のプロンプトを指定して起動します。
+Gateway は Herdr に新しいワークスペースを作り、`agent.start` でエージェントを起動します。
+エージェントがフォルダ信頼確認ダイアログを出したときだけ、アプリが信頼するか確認します。「Trust」を選ぶと Gateway がダイアログに回答して起動を続け、「Cancel」を選ぶと作成したワークスペースを閉じます。
+Codex の共有 daemon が動いていれば `codex --remote unix://…` で起動します。
+
+Codex では、Herdr インテグレーションのフックを一度「信頼」する必要があります（Codex 起動時に表示される Hooks の確認画面で `t`）。
+
+### 開始前のフォルダ確認（Jev、任意）
+
+Gateway の環境変数 `TYPESAFE_API_KEY`、または `~/.config/herdr-mobile/config.json` の
+`jevApiKey` に TypeSafe のAPIキーを設定し、Gatewayを再起動すると有効になります。
+環境変数が優先されます。launchd ではターミナルの環境変数を継承しないため、
+config.json での設定が簡単です。キーはAndroidへ送られません。
+
+新規セッションで「Start」を押すと、入力した指示と選択フォルダを照合します。
+明確な不一致だけ「Change folder / Start anyway」を表示します。
+未設定・判定不能・通信失敗ではそのまま開始し、指示が空の場合はチェックしません。
+旧Gatewayとの組み合わせでも開始できます。
+
+**有効化すると以下の抜粋をTypeSafe APIへ送信します。**
+
+- 入力した指示とフォルダ名、直下の隠しファイル以外の名前（最大60件）
+- 直下のREADME.md、AGENTS.mdと代表的な構成ファイル（各先頭4KiBまで）
+- 同じ実ディレクトリの直近30日・最大3セッションから、最近の指示3件と最後の報告（各1,000文字まで）
+
+履歴はClaude／Codexの既存の最近のセッション取得範囲内で探します。
+別ディレクトリの会話、画像、ツール結果、ソース本文全体は送信対象にしません。
+ただし、指示や報告・READMEに含まれる情報はそのまま抜粋されるため、
+外部送信できるプロジェクトで利用してください。判定用の本文やAPI応答はログに残しません。
+6,000文字を超える指示は、一部だけで誤判定しないようチェックを省略します。
+Jevの誤判定はあり得るので、開始の禁止やディレクトリの自動変更は行いません。
+
+### 認証トークン
+
+すべての `/v1/*` API は、接続経路にかかわらず `Authorization: Bearer <token>` が必要です。
+
+```bash
+herdr-mobile-gateway token            # 表示
+herdr-mobile-gateway token --rotate   # 再発行（アプリ側の設定も更新してください）
+```
+
+### 接続方法（Tailscale推奨）
+
+Tailscaleを使うと、MacとAndroidが別のネットワークにいてもGatewayを公開インターネットへ直接さらさず接続できます。両方を同じtailnetに入れ、アプリにはMagicDNS名かTailscale IPを設定してください。
+
+```bash
+tailscale status              # Mac のホスト名（例: my-mac）を確認
+tailscale ip -4               # 例: 100.101.102.103
+```
+
+アプリの Gateway URL 例: `http://my-mac.<tailnet名>.ts.net:8765` または `http://100.101.102.103:8765`
+
+Tailscaleを使わない場合は、MacとAndroidを同じ信頼できる家庭・社内LANに接続し、MacのIPをGateway URLに設定できます。Macのメニューバーアプリは、Tailscaleが見つからない場合にローカルIPv4も検出します。
+
+Cloudflare Tunnelなどを使う場合は、Mac上のGatewayを通常どおり起動し、AndroidのSettingsでGateway URLにTunnelの`https://...` URLを入力します。認証トークンは同じGatewayのものを使います。公開経路ではHTTPSのTunnelを使い、平文HTTPをインターネットへ直接公開しないでください。
+
+CLIでTailscale IPだけに待ち受けさせたい場合は次のようにします:
+
+```bash
+herdr-mobile-gateway serve --listen 100.101.102.103:8765
+```
+
+（Tailscale上のHTTPはWireGuardで暗号化されます。LANでHTTPを使う場合も、信頼できるネットワーク内に限定してください。インターネットへ直接公開する場合はHTTPSと追加のアクセス制御を用意してください。）
+
+### launchd で常駐させる
+
+Herdr サーバー（ヘッドレス）と Gateway をそれぞれ LaunchAgent にします。`herdr` TUI は起動中のサーバーにアタッチします。
+
+```bash
+mkdir -p ~/Library/LaunchAgents ~/.local/state/herdr-mobile
+# Tailscale（推奨）を使う場合:
+LISTEN=$(tailscale ip -4):8765
+# Tailscaleを使わない場合は、上の行を次のように置き換える:
+# LISTEN=$(ipconfig getifaddr en0):8765
+# （例: 192.168.1.20:8765）
+sed -e "s#__HOME__#$HOME#g" -e "s#__HERDR__#$(which herdr)#g" \
+  gateway/deploy/com.herdr-mobile.herdr-server.plist > ~/Library/LaunchAgents/com.herdr-mobile.herdr-server.plist
+sed -e "s#__HOME__#$HOME#g" -e "s#__LISTEN__#$LISTEN#g" \
+  gateway/deploy/com.herdr-mobile.gateway.plist > ~/Library/LaunchAgents/com.herdr-mobile.gateway.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.herdr-mobile.herdr-server.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.herdr-mobile.gateway.plist
+
+# 状態 / 再起動 / 停止
+launchctl list | grep herdr-mobile
+launchctl kickstart -k gui/$(id -u)/com.herdr-mobile.gateway
+launchctl bootout gui/$(id -u)/com.herdr-mobile.gateway
+```
+
+Herdr サーバーの plist は PATH を最小にしています。ペインのログインシェルが普段のターミナルと同じ順序で PATH を組み立てるためです（長い PATH を渡すと、古い Homebrew 版 `claude` などが先に見つかることがあります）。
+Herdr サーバーはクラッシュ時のみ自動再起動し、`herdr server stop` による停止は尊重します。
+
+ログ: `~/.local/state/herdr-mobile/gateway.log`（JSON、10MB × 3 世代でローテーション）
+
+## 3. Firebase（通知）のセットアップ（任意）
+
+通知まで有効にする場合だけ必要です。Firebase の設定は少し手間ですが、Gateway が Mac 上で FCM HTTP v1 を使って通知を送り、Android は通知受信後に会話をバックグラウンド取得します。これが「通知をタップしたら、すでに最新ログが読める」体験を支えています。
+
+`google-services.json` とサービスアカウント秘密鍵 JSON は **リポジトリにコミットしないでください**（`.gitignore` 済み）。2つの JSON は同じ Firebase プロジェクトのものを使います。サービスアカウント秘密鍵は Gateway が動く Mac にだけ保存し、Android や QR には渡しません。
+
+### 推奨: Mac のメニューバーアプリで取り込む
+
+1. [Firebase コンソール](https://console.firebase.google.com/) でプロジェクトを作成する。
+2. Android アプリを追加する。パッケージ名は `com.tohutohu.herdrcompanion`。
+3. Android 用の `google-services.json` をダウンロードする。
+4. プロジェクトの設定 → サービスアカウント → 「新しい秘密鍵を生成」でサービスアカウント JSON をダウンロードする。
+5. `Herdr Companion Gateway.app` の「通知 · Firebaseを持ち込む」で、2つの JSON を選んで「取り込む」を押す。
+6. Gateway を再起動し、ペアリング QR を発行し直して Android とペアリングする。
+
+メニューバーアプリは Android に必要な公開設定（API key、App ID、Project ID、Sender ID）だけをペアリング時に渡します。共通配布 APK の再ビルドは不要です。Android 13 以降では、初回起動時に通知の許可も有効にしてください。
+
+### CLI で取り込む場合
+
+Gateway を停止した状態で、同梱またはビルド済みの Gateway に2つのファイルを渡します。
+
+```bash
+herdr-mobile-gateway import-firebase \
+  --service-account "$HOME/Downloads/<project>-firebase-adminsdk-....json" \
+  --android-config "$PWD/android/app/google-services.json"
+```
+
+このコマンドは、サービスアカウントが Android アプリと同じ Firebase プロジェクトに属することを検証し、Gateway の設定へ保存します。通常の CLI / launchd 構成では、サービスアカウントを次の場所に置くとそのまま使えます。
+
+```bash
+mkdir -p "$HOME/.config/herdr-mobile"
+cp "$HOME/Downloads/<project>-firebase-adminsdk-....json" \
+  "$HOME/.config/herdr-mobile/firebase-service-account.json"
+chmod 600 "$HOME/.config/herdr-mobile/firebase-service-account.json"
+```
+
+Gateway を再起動して Android の設定を保存した後、登録確認とテスト通知を実行できます。
+
+```bash
+herdr-mobile-gateway devices
+herdr-mobile-gateway notify-test
+```
+
+Firebase CLI と gcloud でファイルを作る場合の例:
+
+```bash
+PROJECT=herdr-client-android
+firebase apps:create android "Herdr Companion" \
+  --package-name com.tohutohu.herdrcompanion --project "$PROJECT"
+firebase apps:sdkconfig ANDROID <表示された App ID> \
+  --project "$PROJECT" --out android/app/google-services.json
+gcloud iam service-accounts keys create \
+  "$HOME/.config/herdr-mobile/firebase-service-account.json" \
+  --iam-account firebase-adminsdk-fbsvc@"$PROJECT".iam.gserviceaccount.com \
+  --project "$PROJECT"
+```
+
+個人用 APK に Firebase 設定をビルド時に内蔵する従来方式もあります。その場合だけ `android/app/google-services.json` を置き、`-PbundleFirebase=true` を付けてビルドします。共有 APK では、秘密情報を含めず QR ペアリング時にクライアント設定を受け取る方式を推奨します。
+
+## 4. Android アプリ
+
+```bash
+cd android
+./gradlew --console=plain assembleRelease   # app/build/outputs/apk/release/app-release.apk
+./gradlew installRelease                   # 接続中の端末へインストール
+```
+
+通常のAPKビルドは **release版（R8・リソース圧縮ともに有効）** を使います。
+現在はインストール用にdebug署名キーで署名していますが、ビルド自体は最適化済みのrelease版です。
+debug版が明示的に必要な場合だけ `assembleDebug` / `installDebug` を使ってください。
+
+JDK 17 を使ってください（例: `export JAVA_HOME=$(/usr/libexec/java_home -v 17)`）。
+`local.properties` に `sdk.dir` がない場合は Android Studio で一度開くか手動で作成します。
+
+初回起動時は「Scan Mac QR」でMacのQRを読み取るか、Gateway URLと認証トークンを入力し「Test connection」→「Save」。
+Tailscaleを使う場合はMagicDNS名またはTailscale IP（`http://100.x.y.z:8765`）、LANで使う場合はMacのIP（例: `http://192.168.1.20:8765`）、Tunnel経由なら`https://...`のTunnel URLを指定してください。
+
+デバッグビルドは adb から設定を渡せます（日本語 IME で `adb shell input text` が変換されるのを避けるため）。受け口は adb にしか送れない receiver です:
+
+```bash
+adb shell am broadcast -n com.tohutohu.herdrcompanion/.DebugConfigReceiver \
+  --es gateway_url "http://100.x.y.z:8765" --es token "$(herdr-mobile-gateway token)"
+adb shell am start -n com.tohutohu.herdrcompanion/.MainActivity
+```
+Android 13 以降は通知の許可を求められます。
+
+## 開発
+
+```bash
+# Gateway
+cd gateway
+go run ./cmd/herdr-mobile-gateway --debug --log-file ""   # 開発起動（:8765）
+go test ./...
+go test ./internal/providers/... -update                 # fixture の golden を更新
+go vet ./...
+
+# 別の Herdr セッションに向ける
+HERDR_SESSION=mytest go run ./cmd/herdr-mobile-gateway
+
+# 処理できなかったデータの再解析
+go run ./cmd/herdr-mobile-gateway debug replay ~/.local/state/herdr-mobile/errors/2026-09-17.jsonl
+
+# API を叩く
+TOKEN=$(go run ./cmd/herdr-mobile-gateway token)
+curl -H "Authorization: Bearer $TOKEN" localhost:8765/v1/sessions
+
+# Android
+cd android
+./gradlew testDebugUnitTest
+./gradlew assembleDebug
+```
+
+### テストデータ
+
+`gateway/testdata/{claude,codex}/` に実データ由来の fixture（パスは匿名化済み）と、変換結果の golden JSON があります。
+Claude / Codex の仕様変更で dead-letter に記録されたデータは、raw を fixture に追加して adapter を更新してください。
+
+## 制約・既知の事項
+
+- Claude Code の AskUserQuestion / 承認への回答は、構造化 API がないためペインへのキー入力に変換しています（Claude Code 2.1 系で確認）。UI が変わった場合はアプリの「Terminal」から操作できます。
+- Codex の構造化回答は共有 daemon（`codex --remote unix://`）で動くセッションのみです。
+- セッションの identity は Herdr インテグレーションが報告する session id です。インテグレーション未導入のペインは一覧に出ません。
+- 通知の重複防止はメモリ上のみで、Gateway 再起動直後の状態は通知しません。
+- バックグラウンド取得には Gateway が起動していて Android から到達できる必要があります。Android でアプリを「強制停止」している間は FCM 通知が届きません。
+
+## OpenCode（v1 / 公式 v2）
+
+アプリのエージェント選択で **OpenCode** を選びます。Herdr の PATH にある
+`opencode` を起動し、インストール済みのバージョンを使います。
+[公式 v2](https://opencode.ai/v2/docs) は v2.0.9 で API 接続を確認しています。
+Herdr のセッション識別・状態通知には、OpenCode を一度起動した後で
+`herdr integration install opencode` を実行してください。既に導入済みの場合も
+v2 の TUI 連携を含む最新の Herdr integration に更新します。
+
+- 会話は `~/.local/share/opencode/opencode.db` を読み取り専用で参照します。
+  v1 の `session` / `message` / `part` と v2 の `session_v2` / `session_message`
+  を読み分けます。XDG_DATA_HOME と OPENCODE_DB にも対応します。
+- v2 の共有サービスは `~/.local/state/opencode/service.json` から自動検出します。
+  送信、画像・ファイル添付、承認、通常の選択式・自由記述フォームに対応します。
+  条件付きフォームや数値入力など、アプリで表現できないものは端末で回答します。
+- v1 は通常のテキスト送信を Herdr 経由で行います。承認・質問への構造化回答や
+  画像添付には、TUI と同じ v1 サーバーへの接続設定が必要です。
+- v2 でモデルを指定する場合は共有サービスが必要です。モデル一覧を取得すると
+  OpenCode CLI が共有サービスを起動します。v2 では API でモデルを設定した
+  セッションを作り、`--session` で TUI を開きます。
+
+独自の保存先や、既存の v1 サーバーを使う場合は Gateway の private config に
+`opencode` を追加します（以下は例。ほかの設定は保持してください）。
+
+```json
+{
+  "opencode": {
+    "database": "/absolute/path/opencode.db",
+    "binary": "opencode",
+    "serverUrl": "http://127.0.0.1:4096",
+    "serverVersion": 1,
+    "username": "opencode",
+    "password": "your-server-password"
+  }
+}
+```
+
+`serverUrl` を省略すると公式 v2 の共有サービスを検出します。v2 の接続先を明示する
+場合は `serverVersion: 2` を指定します。`stateDir` でサービス登録ファイルの
+ディレクトリも変更できます。`binary` はモデル一覧・バージョン確認に使う実行ファイルで、
+Herdr が起動する `opencode` と同じバージョンを指定します。
+JSON ファイルに保存していた古い v1（SQLite 移行前）は対象外です。
+
+### 設定画面から OpenCode を更新
+
+「Agent updates on Mac」に OpenCode のバージョンと「Check and update」を表示します。
+[公式の `upgrade` コマンド](https://opencode.ai/v2/docs/cli/commands#upgrade)を実行し、
+完了後にバージョンを再取得します。v1 と公式 v2 のどちらも対象です。
+`opencode.binary` を指定している場合は、その実行ファイルを更新します。
+インストール方式を CLI が判定できない場合は、更新出力とエラーを画面に表示します。
+更新中に画面を離れても処理は続き、同じエージェントの重複更新は実行しません。

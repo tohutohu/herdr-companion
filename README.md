@@ -1,112 +1,114 @@
 # Herdr Companion
 
-Mac 上の [Herdr](https://herdr.dev) で動いている Claude Code / Codex / OpenCode のセッションを、Android から確認・操作するためのアプリです。Mac で AI エージェントを走らせたまま、スマホから進捗を確認したり、質問に答えたり、次の指示を送ったりできます。
+Japanese version: [README.ja.md](README.ja.md)
 
-## このアプリの良さ
+Herdr Companion lets you inspect and control Claude Code, Codex, and OpenCode sessions running inside [Herdr](https://herdr.dev) on your Mac from Android. Keep an AI agent running on the Mac while checking its progress, answering questions, and sending the next instruction from your phone.
 
-特に便利なのは、アプリをずっと画面に出しておかなくてもセッションを追えることです。
+## Why this app is useful
 
-- エージェントの完了・質問・承認待ち・エラーを Android の通知で知らせる
-- 通知を受けた時点で会話をバックグラウンド取得し、端末の Room キャッシュへ保存する
-- 通知をタップすると、該当セッションの最新ログをすぐ開ける（ネットワーク状況によっては再試行）
-- 通知のインライン返信から、通常のメッセージをそのまま送れる
-- AskUserQuestion、Codex の `requestUserInput`、承認操作はネイティブ UI で回答できる
-- 画像・ファイルの送信、会話中の画像表示、メッセージ内のファイル参照にも対応
-- アプリから新しいセッションを起動し、作業フォルダやモデルも選べる
+The main benefit is that you can follow a session without keeping the app open on screen.
 
-通知から画面を開くまでの流れは次のとおりです。
+- Android notifications for agent completion, questions, approval requests, and errors
+- The conversation is fetched in the background when a notification arrives and saved to the device's Room cache
+- Tapping a notification opens the relevant session with its latest log ready (with retries when the network is temporarily unavailable)
+- Send ordinary messages directly from the inline reply action in a notification
+- Answer AskUserQuestion, Codex's requestUserInput, and approvals in native UI
+- Send images and files, view images inline, and open file references from messages
+- Start new sessions from the app and choose the working directory and model
+
+The notification-to-screen flow looks like this:
 
 ```text
-Mac上のGatewayがHerdrを監視
-        │ FCM通知
+Gateway on the Mac watches Herdr
+        │ FCM notification
         ▼
-Androidがバックグラウンドで会話を取得 → Roomに保存 → 通知タップで即表示
+Android fetches the conversation in the background → saves it to Room → shows it when tapped
 ```
 
-Firebase のプロジェクト作成とサービスアカウント設定は、正直に言うとこのプロジェクトで一番面倒な部分です。ただし通知を使わない場合でも、閲覧・送信・承認・セッション起動は利用できます。通知を使う場合も、推奨のメニューバーアプリなら設定は一度だけで、共通 APK の再ビルドは必要ありません。
+Firebase project and service-account setup is, honestly, the most cumbersome part of this project. The rest of the app still works without notifications: you can browse, send messages, answer interactions, and start sessions. When notifications are enabled, the recommended menu-bar app only requires a one-time setup, and shared APKs do not need to be rebuilt.
 
-Gateway は Mac 上で動き、会話データをクラウドへ保存する独自 DB は持ちません。Herdr と各エージェントのデータを読み、Android 側に必要な範囲だけキャッシュします。
+The Gateway runs on the Mac and does not keep a separate cloud conversation database. It reads Herdr and each agent's own data, and caches only what Android needs locally.
 
 ```text
-Android ──(Tailscale推奨 / trusted LAN / HTTPS tunnel, HTTP(S) + Bearer)──▶ Herdr Companion Gateway (Mac) ──▶ Herdr / Claude Code / Codex / OpenCode
+Android ──(Tailscale recommended / trusted LAN / HTTPS tunnel, HTTP(S) + Bearer)──▶ Herdr Companion Gateway (Mac) ──▶ Herdr / Claude Code / Codex / OpenCode
 ```
 
-設計の詳細は [docs/architecture.md](docs/architecture.md) を参照してください。
+See [docs/architecture.md](docs/architecture.md) for the detailed design.
 
-## 最短の導入手順
+## Quick start
 
-1. Mac に Herdr と Claude Code / Codex / OpenCode を用意し、必要な Herdr integration を入れる。
-2. Mac で `Herdr Companion Gateway.app` を起動し、Gateway を起動する。
-3. Android アプリの **Scan Mac QR** でメニューバーアプリのペアリング QR を読み取る。
-4. 通知が必要なら、Firebase を設定してから QR を発行し直してペアリングする。
+1. Set up Herdr and the required Herdr integrations for Claude Code, Codex, and/or OpenCode on the Mac.
+2. Install and launch Herdr Companion Gateway.app on the Mac, then start the Gateway.
+3. In the Android app, use **Scan Mac QR** to scan the pairing QR shown by the menu-bar app.
+4. If you want notifications, configure Firebase and pair again with a newly generated QR code.
 
-Gateway と Android の接続には、Mac と Android が同じ tailnet にいる Tailscale を推奨します。信頼できる LAN や HTTPS トンネルも利用できます。Mac のメニューバーアプリの使い方は [macos/README.md](macos/README.md)、DMG の作成・配布は [docs/macos-release.md](docs/macos-release.md) を参照してください。
+Tailscale is recommended for the Mac and Android to reach each other over the same tailnet. A trusted LAN or an HTTPS tunnel also works. See [macos/README.md](macos/README.md) for the Mac menu-bar app and [docs/macos-release.md](docs/macos-release.md) for building and distributing DMGs.
 
-Firebase の秘密鍵と Jev の API キーは任意です。どちらも未設定のままペアリングできます。
+The Firebase service account key and the Jev API key are optional. You can pair and use the app without either one.
 
-## リポジトリ構成
+## Repository layout
 
 ```text
-gateway/   Go 製 Gateway（cmd/herdr-mobile-gateway, internal/...）
-android/   Android アプリとCompose Desktop UI（Kotlin / Compose）
-macos/     Gateway Manager（SwiftUI）とGateway用DMGビルド
-docs/      設計・macOS releaseドキュメント
+gateway/   Go Gateway (cmd/herdr-mobile-gateway, internal/...)
+android/   Android app and Compose Desktop UI (Kotlin / Compose)
+macos/     SwiftUI Gateway Manager and Gateway DMG build scripts
+docs/      architecture and macOS release documentation
 ```
 
-## 前提
+## Prerequisites
 
-| 対象 | 必要なもの |
+| Target | Requirements |
 |---|---|
-| Mac | Go 1.24+、Herdr 0.9+、Claude Code および/または Codex CLI、ネットワーク接続（Tailscale推奨） |
-| 残量表示 | CodexBar（`brew install --cask codexbar`、任意） |
-| Android | Android 10 (API 29) 以上、Macへ到達できるネットワーク（Tailscale推奨） |
-| ビルド | JDK 17、Android SDK（compileSdk 37）|
-| 通知 | Firebase プロジェクト（無料枠で可） |
+| Mac | Go 1.24+, Herdr 0.9+, Claude Code and/or Codex CLI, optionally OpenCode, and network connectivity (Tailscale recommended) |
+| Usage limits | CodexBar (brew install --cask codexbar, optional) |
+| Android | Android 10 (API 29) or newer, with a network route to the Mac (Tailscale recommended) |
+| Building | JDK 17 and Android SDK (compileSdk 37) |
+| Notifications | A Firebase project (the free tier is sufficient) |
 
-## 1. Herdr のセットアップ
+## 1. Set up Herdr
 
-Gateway はペインごとの「どのセッションが動いているか」を Herdr の公式インテグレーションから取得します。**必須**です。
+The Gateway gets the mapping between panes and running sessions from Herdr's official integrations. This is required.
 
 ```bash
 herdr integration install claude
 herdr integration install codex
-# OpenCode を使う場合は、OpenCode を一度起動してから実行
+# If you use OpenCode, start OpenCode once, then run:
 herdr integration install opencode
-herdr integration status   # 利用する integration が installed になっていること
+herdr integration status   # the integrations you use should be installed
 ```
 
-インストール後に起動した Claude Code / Codex から認識されます（既存セッションは一度再起動してください）。
+Sessions started after the integration is installed are recognized. Restart existing sessions once.
 
-### Codex の構造化操作（推奨）
+### Structured Codex operations (recommended)
 
-Codex の承認・requestUserInput・メッセージ送信を構造化 API で行うには、Codex TUI を共有 app-server daemon に接続して起動します。
+For structured approval, requestUserInput, and message operations in Codex, connect the Codex TUI to the shared app-server daemon:
 
 ```bash
-codex app-server daemon start     # 共有 daemon（~/.codex/app-server-control/app-server-control.sock）
-codex --remote unix://            # Herdr のペインで Codex をこの形で起動
+codex app-server daemon start     # shared daemon (~/.codex/app-server-control/app-server-control.sock)
+codex --remote unix://            # start Codex in the Herdr pane this way
 ```
 
-daemon を使わない通常の `codex` でも履歴の閲覧とメッセージ送信（ペイン経由）はできますが、承認・質問への回答はターミナル画面からの操作になります。
+A regular codex process still supports history and message sending through the pane, but approvals and questions must be handled from the terminal unless the shared daemon is used.
 
-## 2. Gateway のセットアップ
+## 2. Set up the Gateway
 
-### メニューバー版（推奨）
+### Menu-bar app (recommended)
 
-配布 DMG を使う場合は、`Herdr Companion Gateway.app` を Applications に入れて起動し、メニューバーのアイコンから Gateway を起動します。表示された接続先を確認して「ペアリングQRを表示」→ Android の「Scan Mac QR」で接続してください。
+With a distributed DMG, drag Herdr Companion Gateway.app into Applications, launch it, and start the Gateway from the menu-bar icon. Confirm the displayed address, then choose **Show pairing QR** and scan it from **Scan Mac QR** in Android.
 
-`Herdr Companion.app`（Compose Desktop UI）も利用する場合は、UI 用 DMG を別途インストールします。Gateway Manager と UI は別アプリです。Firebase の取り込み、ログイン時起動、Gateway の start/stop もメニューバー版で管理できます。詳しくは [macos/README.md](macos/README.md) を参照してください。
+Herdr Companion.app (the Compose Desktop UI) is a separate app and DMG. Install it separately if you want to use it. The menu-bar app manages Firebase import, login-item startup, and Gateway start/stop. See [macos/README.md](macos/README.md) for details.
 
-### CLI / launchd 版
+### CLI / launchd
 
-配布アプリを使わず、Gateway をソースから起動する場合は次の手順です。
+If you do not use the distributed app and want to run the Gateway from source:
 
 ```bash
 cd gateway
 go build -o ~/.local/bin/herdr-mobile-gateway ./cmd/herdr-mobile-gateway
-~/.local/bin/herdr-mobile-gateway token  # 初回実行で設定と認証トークンを生成
+~/.local/bin/herdr-mobile-gateway token  # creates the config and auth token on first run
 ```
 
-`~/.config/herdr-mobile/config.json`（自動生成、パーミッション 600）:
+The generated ~/.config/herdr-mobile/config.json has mode 600:
 
 ```json
 {
@@ -117,98 +119,88 @@ go build -o ~/.local/bin/herdr-mobile-gateway ./cmd/herdr-mobile-gateway
 }
 ```
 
-任意項目: `fcmCredentialsFile`, `herdrSocket`, `claudeConfigDir`, `codexBinary`, `codexDaemonSocket`, `uploadDir`, `workspaceRoots`, `usageCommand`, `usageRefreshMinutes`。
+Optional fields include fcmCredentialsFile, herdrSocket, claudeConfigDir, codexBinary, codexDaemonSocket, uploadDir, workspaceRoots, usageCommand, and usageRefreshMinutes.
 
-`workspaceRoots`（既定: `~/workspace`、なければホーム）は、アプリからフォルダを選択・作成してセッションを起動できる範囲です。
+workspaceRoots (default: ~/workspace, or the home directory if it does not exist) limits the directories where the app can browse, create folders, and start sessions.
 
-### サブスクの残量表示
+### Subscription usage limits
 
-Claude / Codex のプラン上限の消費率をアプリの一覧画面に表示します。Claude Code も Codex も残量を CLI から出せないため、両方のダッシュボードを見に行く CodexBar の CLI を使います。Codex が Luna Reserve（`gpt-reserve`）を返すアカウントでは、その別枠も Limits に表示します。
-
-```bash
-brew install --cask codexbar     # /opt/homebrew/bin/codexbar が入る
-herdr-mobile-gateway usage       # 取得できるか確認
-```
-
-Gateway は既定で 5 分ごとに読み直してキャッシュし、アプリはそれを表示します（カードの更新ボタンで即時再取得）。間隔は `usageRefreshMinutes`、無効化は `usageCommand: "off"` です。CodexBar が入っていなければ機能が無効になるだけで、他の動作には影響しません。
-
-### アプリからのセッション起動
-
-一覧画面の「New session」で、Claude Code / Codex、作業フォルダ（`workspaceRoots` 配下で選択または新規作成）、最初のプロンプトを指定して起動します。
-Gateway は Herdr に新しいワークスペースを作り、`agent.start` でエージェントを起動します。
-エージェントがフォルダ信頼確認ダイアログを出したときだけ、アプリが信頼するか確認します。「Trust」を選ぶと Gateway がダイアログに回答して起動を続け、「Cancel」を選ぶと作成したワークスペースを閉じます。
-Codex の共有 daemon が動いていれば `codex --remote unix://…` で起動します。
-
-Codex では、Herdr インテグレーションのフックを一度「信頼」する必要があります（Codex 起動時に表示される Hooks の確認画面で `t`）。
-
-### 開始前のフォルダ確認（Jev、任意）
-
-Gateway の環境変数 `TYPESAFE_API_KEY`、または `~/.config/herdr-mobile/config.json` の
-`jevApiKey` に TypeSafe のAPIキーを設定し、Gatewayを再起動すると有効になります。
-環境変数が優先されます。launchd ではターミナルの環境変数を継承しないため、
-config.json での設定が簡単です。キーはAndroidへ送られません。
-
-新規セッションで「Start」を押すと、入力した指示と選択フォルダを照合します。
-明確な不一致だけ「Change folder / Start anyway」を表示します。
-未設定・判定不能・通信失敗ではそのまま開始し、指示が空の場合はチェックしません。
-旧Gatewayとの組み合わせでも開始できます。
-
-**有効化すると以下の抜粋をTypeSafe APIへ送信します。**
-
-- 入力した指示とフォルダ名、直下の隠しファイル以外の名前（最大60件）
-- 直下のREADME.md、AGENTS.mdと代表的な構成ファイル（各先頭4KiBまで）
-- 同じ実ディレクトリの直近30日・最大3セッションから、最近の指示3件と最後の報告（各1,000文字まで）
-
-履歴はClaude／Codexの既存の最近のセッション取得範囲内で探します。
-別ディレクトリの会話、画像、ツール結果、ソース本文全体は送信対象にしません。
-ただし、指示や報告・READMEに含まれる情報はそのまま抜粋されるため、
-外部送信できるプロジェクトで利用してください。判定用の本文やAPI応答はログに残しません。
-6,000文字を超える指示は、一部だけで誤判定しないようチェックを省略します。
-Jevの誤判定はあり得るので、開始の禁止やディレクトリの自動変更は行いません。
-
-### 認証トークン
-
-すべての `/v1/*` API は、接続経路にかかわらず `Authorization: Bearer <token>` が必要です。
+The app can show Claude and Codex plan usage on the session list. Neither Claude Code nor Codex exposes these limits directly through the CLI, so the Gateway uses the CodexBar CLI, which reads both dashboards. If a Codex account reports a Luna Reserve (gpt-reserve) allowance, that separate window is shown under Limits too.
 
 ```bash
-herdr-mobile-gateway token            # 表示
-herdr-mobile-gateway token --rotate   # 再発行（アプリ側の設定も更新してください）
+brew install --cask codexbar     # installs /opt/homebrew/bin/codexbar
+herdr-mobile-gateway usage       # verify that usage can be read
 ```
 
-### 接続方法（Tailscale推奨）
+The Gateway refreshes and caches usage every five minutes by default, and the app displays the cached result. The refresh button forces an immediate read. Set usageRefreshMinutes to change the interval or usageCommand: "off" to disable it. Without CodexBar, only this feature is disabled.
 
-Tailscaleを使うと、MacとAndroidが別のネットワークにいてもGatewayを公開インターネットへ直接さらさず接続できます。両方を同じtailnetに入れ、アプリにはMagicDNS名かTailscale IPを設定してください。
+### Starting sessions from the app
+
+From **New session**, choose Claude Code, Codex, or OpenCode, a working directory under workspaceRoots (browse or create one), and the first prompt.
+
+The Gateway creates a Herdr workspace and starts the agent with agent.start. If the agent shows a folder-trust dialog, the app asks whether to trust it. **Trust** answers the dialog and continues; **Cancel** closes the workspace that was created. If the Codex shared daemon is running, the Gateway starts Codex with codex --remote unix://….
+
+Codex requires the Herdr integration hook to be trusted once. Press t on the Hooks confirmation screen shown when Codex starts.
+
+### Pre-flight folder check (Jev, optional)
+
+Set the TypeSafe API key in the Gateway's TYPESAFE_API_KEY environment variable or in jevApiKey inside ~/.config/herdr-mobile/config.json, then restart the Gateway. The environment variable takes precedence. Since launchd does not inherit terminal environment variables, putting the key in the config file is usually easier. The key is never sent to Android.
+
+When you press **Start** for a new session, the check compares the instruction with the selected folder. It only shows **Change folder / Start anyway** for a clear mismatch. If Jev is not configured, cannot decide, or cannot be reached, the session starts normally; an empty instruction skips the check. The check also works with an older Gateway.
+
+**When enabled, the following excerpts are sent to the TypeSafe API:**
+
+- The instruction, folder name, and up to 60 non-hidden names directly inside the folder
+- The first 4 KiB of the root README.md, AGENTS.md, and representative project configuration files
+- From up to three sessions in the same real directory from the last 30 days: the latest three instructions and the last report, up to 1,000 characters each
+
+History is searched only within the recent sessions already available to the Claude/Codex provider. Conversations from other directories, images, tool results, and full source files are not sent. However, text in instructions, reports, and README files is included verbatim in the excerpts, so use this only for projects that may send that information externally. The check input and API response are not written to logs.
+
+Instructions longer than 6,000 characters skip the check to avoid judging from a partial prompt. Jev can be wrong; it never blocks a start or changes the directory automatically.
+
+### Authentication token
+
+Every /v1/* API requires Authorization: Bearer <token> regardless of the network path.
 
 ```bash
-tailscale status              # Mac のホスト名（例: my-mac）を確認
-tailscale ip -4               # 例: 100.101.102.103
+herdr-mobile-gateway token            # print the token
+herdr-mobile-gateway token --rotate   # rotate it (update the app settings too)
 ```
 
-アプリの Gateway URL 例: `http://my-mac.<tailnet名>.ts.net:8765` または `http://100.101.102.103:8765`
+### Network connection (Tailscale recommended)
 
-Tailscaleを使わない場合は、MacとAndroidを同じ信頼できる家庭・社内LANに接続し、MacのIPをGateway URLに設定できます。Macのメニューバーアプリは、Tailscaleが見つからない場合にローカルIPv4も検出します。
+Tailscale lets the Mac and Android connect even when they are on different networks without exposing the Gateway directly to the public internet. Put both devices on the same tailnet and enter the Mac's MagicDNS name or Tailscale IP in the app.
 
-Cloudflare Tunnelなどを使う場合は、Mac上のGatewayを通常どおり起動し、AndroidのSettingsでGateway URLにTunnelの`https://...` URLを入力します。認証トークンは同じGatewayのものを使います。公開経路ではHTTPSのTunnelを使い、平文HTTPをインターネットへ直接公開しないでください。
+```bash
+tailscale status              # find the Mac host name, e.g. my-mac
+tailscale ip -4               # e.g. 100.101.102.103
+```
 
-CLIでTailscale IPだけに待ち受けさせたい場合は次のようにします:
+Example Gateway URLs: http://my-mac.<tailnet-name>.ts.net:8765 or http://100.101.102.103:8765.
+
+Without Tailscale, connect the Mac and Android to the same trusted home or office LAN and enter the Mac's IP. The menu-bar app detects a local IPv4 address when Tailscale is not available.
+
+With Cloudflare Tunnel or another tunnel, run the Gateway normally and enter the tunnel's https://... URL in Android Settings. Use the same Gateway token. Use an HTTPS tunnel on a public route; do not expose plain HTTP directly to the internet.
+
+To bind the CLI Gateway only to the Tailscale IP:
 
 ```bash
 herdr-mobile-gateway serve --listen 100.101.102.103:8765
 ```
 
-（Tailscale上のHTTPはWireGuardで暗号化されます。LANでHTTPを使う場合も、信頼できるネットワーク内に限定してください。インターネットへ直接公開する場合はHTTPSと追加のアクセス制御を用意してください。）
+HTTP over Tailscale is encrypted by WireGuard. Restrict HTTP on a LAN to a trusted network. For direct public exposure, use HTTPS and additional access controls.
 
-### launchd で常駐させる
+### Run it continuously with launchd
 
-Herdr サーバー（ヘッドレス）と Gateway をそれぞれ LaunchAgent にします。`herdr` TUI は起動中のサーバーにアタッチします。
+Run the headless Herdr server and the Gateway as separate LaunchAgents. The herdr TUI attaches to the running server.
 
 ```bash
 mkdir -p ~/Library/LaunchAgents ~/.local/state/herdr-mobile
-# Tailscale（推奨）を使う場合:
+# Tailscale (recommended):
 LISTEN=$(tailscale ip -4):8765
-# Tailscaleを使わない場合は、上の行を次のように置き換える:
+# Without Tailscale, replace the line above with:
 # LISTEN=$(ipconfig getifaddr en0):8765
-# （例: 192.168.1.20:8765）
+# e.g. 192.168.1.20:8765
 sed -e "s#__HOME__#$HOME#g" -e "s#__HERDR__#$(which herdr)#g" \
   gateway/deploy/com.herdr-mobile.herdr-server.plist > ~/Library/LaunchAgents/com.herdr-mobile.herdr-server.plist
 sed -e "s#__HOME__#$HOME#g" -e "s#__LISTEN__#$LISTEN#g" \
@@ -216,37 +208,38 @@ sed -e "s#__HOME__#$HOME#g" -e "s#__LISTEN__#$LISTEN#g" \
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.herdr-mobile.herdr-server.plist
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.herdr-mobile.gateway.plist
 
-# 状態 / 再起動 / 停止
+# status / restart / stop
 launchctl list | grep herdr-mobile
 launchctl kickstart -k gui/$(id -u)/com.herdr-mobile.gateway
 launchctl bootout gui/$(id -u)/com.herdr-mobile.gateway
 ```
 
-Herdr サーバーの plist は PATH を最小にしています。ペインのログインシェルが普段のターミナルと同じ順序で PATH を組み立てるためです（長い PATH を渡すと、古い Homebrew 版 `claude` などが先に見つかることがあります）。
-Herdr サーバーはクラッシュ時のみ自動再起動し、`herdr server stop` による停止は尊重します。
+The Herdr server plist deliberately keeps PATH minimal. Pane login shells build their PATH from the usual terminal environment; a long PATH can cause an older Homebrew claude to be selected first.
 
-ログ: `~/.local/state/herdr-mobile/gateway.log`（JSON、10MB × 3 世代でローテーション）
+The Herdr server automatically restarts only after crashes and respects herdr server stop.
 
-## 3. Firebase（通知）のセットアップ（任意）
+Logs: ~/.local/state/herdr-mobile/gateway.log (JSON, rotated at 10 MB × 3 generations).
 
-通知まで有効にする場合だけ必要です。Firebase の設定は少し手間ですが、Gateway が Mac 上で FCM HTTP v1 を使って通知を送り、Android は通知受信後に会話をバックグラウンド取得します。これが「通知をタップしたら、すでに最新ログが読める」体験を支えています。
+## 3. Firebase (notifications, optional)
 
-`google-services.json` とサービスアカウント秘密鍵 JSON は **リポジトリにコミットしないでください**（`.gitignore` 済み）。2つの JSON は同じ Firebase プロジェクトのものを使います。サービスアカウント秘密鍵は Gateway が動く Mac にだけ保存し、Android や QR には渡しません。
+Firebase is only required if you want push notifications. It is a little cumbersome, but it lets the Gateway send FCM HTTP v1 messages from the Mac while Android fetches the conversation in the background after receiving the push. That is what makes the “tap a notification and the latest log is already there” experience possible.
 
-### 推奨: Mac のメニューバーアプリで取り込む
+Do **not** commit google-services.json or the service-account private-key JSON to the repository (.gitignore already excludes them). Both files must belong to the same Firebase project. Keep the service-account key only on the Mac running the Gateway; it is not sent to Android or included in the QR payload.
 
-1. [Firebase コンソール](https://console.firebase.google.com/) でプロジェクトを作成する。
-2. Android アプリを追加する。パッケージ名は `com.tohutohu.herdrcompanion`。
-3. Android 用の `google-services.json` をダウンロードする。
-4. プロジェクトの設定 → サービスアカウント → 「新しい秘密鍵を生成」でサービスアカウント JSON をダウンロードする。
-5. `Herdr Companion Gateway.app` の「通知 · Firebaseを持ち込む」で、2つの JSON を選んで「取り込む」を押す。
-6. Gateway を再起動し、ペアリング QR を発行し直して Android とペアリングする。
+### Recommended: import from the Mac menu-bar app
 
-メニューバーアプリは Android に必要な公開設定（API key、App ID、Project ID、Sender ID）だけをペアリング時に渡します。共通配布 APK の再ビルドは不要です。Android 13 以降では、初回起動時に通知の許可も有効にしてください。
+1. Create a project in the [Firebase console](https://console.firebase.google.com/).
+2. Add an Android app. The package name is com.tohutohu.herdrcompanion.
+3. Download the Android google-services.json.
+4. In Project settings → Service accounts, choose **Generate new private key** and download the service-account JSON.
+5. In Herdr Companion Gateway.app, open **Notifications · Import Firebase**, select both JSON files, and click **Import**.
+6. Restart the Gateway, generate a new pairing QR, and pair Android again.
 
-### CLI で取り込む場合
+The menu-bar app passes only the public Android settings (API key, App ID, Project ID, and Sender ID) during pairing. Shared APKs do not need to be rebuilt. On Android 13 and newer, allow notifications when Android asks on first launch.
 
-Gateway を停止した状態で、同梱またはビルド済みの Gateway に2つのファイルを渡します。
+### Import from the CLI
+
+Stop the Gateway and pass it both files using the bundled or built Gateway:
 
 ```bash
 herdr-mobile-gateway import-firebase \
@@ -254,7 +247,7 @@ herdr-mobile-gateway import-firebase \
   --android-config "$PWD/android/app/google-services.json"
 ```
 
-このコマンドは、サービスアカウントが Android アプリと同じ Firebase プロジェクトに属することを検証し、Gateway の設定へ保存します。通常の CLI / launchd 構成では、サービスアカウントを次の場所に置くとそのまま使えます。
+The command verifies that both files belong to the same Firebase project and saves the configuration to the Gateway. With the usual CLI/launchd setup, placing the service account at the following path makes it available to the default launchd plist:
 
 ```bash
 mkdir -p "$HOME/.config/herdr-mobile"
@@ -263,20 +256,20 @@ cp "$HOME/Downloads/<project>-firebase-adminsdk-....json" \
 chmod 600 "$HOME/.config/herdr-mobile/firebase-service-account.json"
 ```
 
-Gateway を再起動して Android の設定を保存した後、登録確認とテスト通知を実行できます。
+Restart the Gateway and save the Android connection settings, then verify the registration and send a test notification:
 
 ```bash
 herdr-mobile-gateway devices
 herdr-mobile-gateway notify-test
 ```
 
-Firebase CLI と gcloud でファイルを作る場合の例:
+Example using the Firebase CLI and gcloud:
 
 ```bash
 PROJECT=herdr-client-android
 firebase apps:create android "Herdr Companion" \
   --package-name com.tohutohu.herdrcompanion --project "$PROJECT"
-firebase apps:sdkconfig ANDROID <表示された App ID> \
+firebase apps:sdkconfig ANDROID <App ID from the previous command> \
   --project "$PROJECT" --out android/app/google-services.json
 gcloud iam service-accounts keys create \
   "$HOME/.config/herdr-mobile/firebase-service-account.json" \
@@ -284,52 +277,49 @@ gcloud iam service-accounts keys create \
   --project "$PROJECT"
 ```
 
-個人用 APK に Firebase 設定をビルド時に内蔵する従来方式もあります。その場合だけ `android/app/google-services.json` を置き、`-PbundleFirebase=true` を付けてビルドします。共有 APK では、秘密情報を含めず QR ペアリング時にクライアント設定を受け取る方式を推奨します。
+There is also a legacy personal-APK mode that bundles Firebase settings at build time. Only for that mode, place android/app/google-services.json in the project and build with -PbundleFirebase=true. For shared APKs, use QR pairing to provide the client settings without putting secrets in the APK.
 
-## 4. Android アプリ
+## 4. Android app
 
 ```bash
 cd android
 ./gradlew --console=plain assembleRelease   # app/build/outputs/apk/release/app-release.apk
-./gradlew installRelease                   # 接続中の端末へインストール
+./gradlew installRelease                   # install on a connected device
 ```
 
-通常のAPKビルドは **release版（R8・リソース圧縮ともに有効）** を使います。
-現在はインストール用にdebug署名キーで署名していますが、ビルド自体は最適化済みのrelease版です。
-debug版が明示的に必要な場合だけ `assembleDebug` / `installDebug` を使ってください。
+Use the **release** build for normal APK builds; both R8 and resource shrinking are enabled. Release is currently signed with the debug key so it can be installed directly, but it is still an optimized release build. Use assembleDebug / installDebug only when you explicitly need a debug build.
 
-JDK 17 を使ってください（例: `export JAVA_HOME=$(/usr/libexec/java_home -v 17)`）。
-`local.properties` に `sdk.dir` がない場合は Android Studio で一度開くか手動で作成します。
+Use JDK 17 (for example, export JAVA_HOME=$(/usr/libexec/java_home -v 17)). If local.properties does not contain sdk.dir, open the project once in Android Studio or create it manually.
 
-初回起動時は「Scan Mac QR」でMacのQRを読み取るか、Gateway URLと認証トークンを入力し「Test connection」→「Save」。
-Tailscaleを使う場合はMagicDNS名またはTailscale IP（`http://100.x.y.z:8765`）、LANで使う場合はMacのIP（例: `http://192.168.1.20:8765`）、Tunnel経由なら`https://...`のTunnel URLを指定してください。
+On first launch, scan the Mac QR with **Scan Mac QR**, or enter the Gateway URL and token manually and choose **Test connection** → **Save**. For Tailscale, use a MagicDNS name or Tailscale IP (http://100.x.y.z:8765); on a LAN, use the Mac's IP (for example, http://192.168.1.20:8765); through a tunnel, use the https://... tunnel URL.
 
-デバッグビルドは adb から設定を渡せます（日本語 IME で `adb shell input text` が変換されるのを避けるため）。受け口は adb にしか送れない receiver です:
+A debug build can receive its settings through adb, which avoids Japanese IME conversion when typing a token:
 
 ```bash
 adb shell am broadcast -n com.tohutohu.herdrcompanion/.DebugConfigReceiver \
   --es gateway_url "http://100.x.y.z:8765" --es token "$(herdr-mobile-gateway token)"
 adb shell am start -n com.tohutohu.herdrcompanion/.MainActivity
 ```
-Android 13 以降は通知の許可を求められます。
 
-## 開発
+Android 13 and newer ask for notification permission.
+
+## Development
 
 ```bash
 # Gateway
 cd gateway
-go run ./cmd/herdr-mobile-gateway --debug --log-file ""   # 開発起動（:8765）
+go run ./cmd/herdr-mobile-gateway --debug --log-file ""   # development server (:8765)
 go test ./...
-go test ./internal/providers/... -update                 # fixture の golden を更新
+go test ./internal/providers/... -update                 # update fixture goldens
 go vet ./...
 
-# 別の Herdr セッションに向ける
+# Use a separate Herdr session
 HERDR_SESSION=mytest go run ./cmd/herdr-mobile-gateway
 
-# 処理できなかったデータの再解析
+# Re-parse data that could not be handled
 go run ./cmd/herdr-mobile-gateway debug replay ~/.local/state/herdr-mobile/errors/2026-09-17.jsonl
 
-# API を叩く
+# Call the API
 TOKEN=$(go run ./cmd/herdr-mobile-gateway token)
 curl -H "Authorization: Bearer $TOKEN" localhost:8765/v1/sessions
 
@@ -339,42 +329,35 @@ cd android
 ./gradlew assembleDebug
 ```
 
-### テストデータ
+### Test data
 
-`gateway/testdata/{claude,codex}/` に実データ由来の fixture（パスは匿名化済み）と、変換結果の golden JSON があります。
-Claude / Codex の仕様変更で dead-letter に記録されたデータは、raw を fixture に追加して adapter を更新してください。
+gateway/testdata/{claude,codex}/ contains anonymized real-data fixtures and golden JSON results. When a Claude or Codex format change creates a dead letter, add the raw payload as a fixture and update the adapter.
 
-## 制約・既知の事項
+## Limitations and known behavior
 
-- Claude Code の AskUserQuestion / 承認への回答は、構造化 API がないためペインへのキー入力に変換しています（Claude Code 2.1 系で確認）。UI が変わった場合はアプリの「Terminal」から操作できます。
-- Codex の構造化回答は共有 daemon（`codex --remote unix://`）で動くセッションのみです。
-- セッションの identity は Herdr インテグレーションが報告する session id です。インテグレーション未導入のペインは一覧に出ません。
-- 通知の重複防止はメモリ上のみで、Gateway 再起動直後の状態は通知しません。
-- バックグラウンド取得には Gateway が起動していて Android から到達できる必要があります。Android でアプリを「強制停止」している間は FCM 通知が届きません。
+- Claude Code AskUserQuestion and approval answers are translated into pane key presses because there is no structured API (verified with Claude Code 2.1.x). If the UI changes, use the app's **Terminal** screen.
+- Structured Codex answers work only for sessions running through the shared daemon (codex --remote unix://).
+- Session identity is the session ID reported by the Herdr integration. Panes without an integration do not appear in the list.
+- Notification de-duplication is in memory only, so the Gateway does not notify for the initial observation immediately after a restart.
+- Background fetching requires the Gateway to be running and reachable from Android. FCM notifications are not delivered while the Android app is force-stopped.
 
-## OpenCode（v1 / 公式 v2）
+## OpenCode (v1 / official v2)
 
-アプリのエージェント選択で **OpenCode** を選びます。Herdr の PATH にある
-`opencode` を起動し、インストール済みのバージョンを使います。
-[公式 v2](https://opencode.ai/v2/docs) は v2.0.9 で API 接続を確認しています。
-Herdr のセッション識別・状態通知には、OpenCode を一度起動した後で
-`herdr integration install opencode` を実行してください。既に導入済みの場合も
-v2 の TUI 連携を含む最新の Herdr integration に更新します。
+Choose **OpenCode** in the app's agent picker. The Gateway starts the opencode executable found on Herdr's PATH.
+The [official v2 documentation](https://opencode.ai/v2/docs) was tested with v2.0.9.
+For Herdr session identity and status notifications, start OpenCode once and then run
+herdr integration install opencode. If it is already installed, update it to the latest Herdr integration including v2 TUI support.
 
-- 会話は `~/.local/share/opencode/opencode.db` を読み取り専用で参照します。
-  v1 の `session` / `message` / `part` と v2 の `session_v2` / `session_message`
-  を読み分けます。XDG_DATA_HOME と OPENCODE_DB にも対応します。
-- v2 の共有サービスは `~/.local/state/opencode/service.json` から自動検出します。
-  送信、画像・ファイル添付、承認、通常の選択式・自由記述フォームに対応します。
-  条件付きフォームや数値入力など、アプリで表現できないものは端末で回答します。
-- v1 は通常のテキスト送信を Herdr 経由で行います。承認・質問への構造化回答や
-  画像添付には、TUI と同じ v1 サーバーへの接続設定が必要です。
-- v2 でモデルを指定する場合は共有サービスが必要です。モデル一覧を取得すると
-  OpenCode CLI が共有サービスを起動します。v2 では API でモデルを設定した
-  セッションを作り、`--session` で TUI を開きます。
+- Conversations are read-only from ~/.local/share/opencode/opencode.db.
+  v1 uses session / message / part; v2 uses session_v2 / session_message.
+  XDG_DATA_HOME and OPENCODE_DB are also supported.
+- The v2 shared service is discovered from ~/.local/state/opencode/service.json.
+  Sending, image/file attachments, approvals, and ordinary choice/free-text forms are supported.
+  Conditional forms, numeric inputs, and other unsupported fields fall back to the terminal.
+- v1 uses Herdr for ordinary text sending. Structured approvals/questions and image attachments require a connection to the same v1 server as the TUI.
+- Selecting a model for v2 requires the shared service. Fetching the model list starts the OpenCode CLI shared service. For v2, the Gateway creates a session with the selected model through the API and opens the TUI with --session.
 
-独自の保存先や、既存の v1 サーバーを使う場合は Gateway の private config に
-`opencode` を追加します（以下は例。ほかの設定は保持してください）。
+For a custom database location or an existing v1 server, add opencode to the Gateway's private config (keep the other settings):
 
 ```json
 {
@@ -389,17 +372,12 @@ v2 の TUI 連携を含む最新の Herdr integration に更新します。
 }
 ```
 
-`serverUrl` を省略すると公式 v2 の共有サービスを検出します。v2 の接続先を明示する
-場合は `serverVersion: 2` を指定します。`stateDir` でサービス登録ファイルの
-ディレクトリも変更できます。`binary` はモデル一覧・バージョン確認に使う実行ファイルで、
-Herdr が起動する `opencode` と同じバージョンを指定します。
-JSON ファイルに保存していた古い v1（SQLite 移行前）は対象外です。
+If serverUrl is omitted, the official v2 shared service is discovered. To specify a v2 endpoint explicitly, set serverVersion: 2. Set stateDir to change the service-registration directory. binary is used to list models and check the version; use the same executable version that Herdr starts.
+Old v1 JSON storage from before the SQLite migration is not supported.
 
-### 設定画面から OpenCode を更新
+### Update OpenCode from Settings
 
-「Agent updates on Mac」に OpenCode のバージョンと「Check and update」を表示します。
-[公式の `upgrade` コマンド](https://opencode.ai/v2/docs/cli/commands#upgrade)を実行し、
-完了後にバージョンを再取得します。v1 と公式 v2 のどちらも対象です。
-`opencode.binary` を指定している場合は、その実行ファイルを更新します。
-インストール方式を CLI が判定できない場合は、更新出力とエラーを画面に表示します。
-更新中に画面を離れても処理は続き、同じエージェントの重複更新は実行しません。
+**Agent updates on Mac** shows the OpenCode version and **Check and update**. It runs the official [upgrade command](https://opencode.ai/v2/docs/cli/commands#upgrade), then reads the version again. Both v1 and official v2 are supported.
+If opencode.binary is set, that executable is updated.
+If the CLI cannot determine the installation method, the update output and error are shown.
+Updates continue when you leave the screen, and duplicate updates for the same agent are not started.
