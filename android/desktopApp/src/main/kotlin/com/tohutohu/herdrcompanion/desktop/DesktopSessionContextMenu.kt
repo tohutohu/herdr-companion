@@ -24,7 +24,7 @@ import com.tohutohu.herdrcompanion.ui.sessions.SessionListItemUiState
 fun DesktopSessionContextMenu(
     item: SessionListItemUiState,
     onOpen: () -> Unit,
-    onOpenInSplit: () -> Unit,
+    onSplit: () -> Unit,
     onArchive: () -> Unit,
     onRefresh: () -> Unit,
     onCopyId: () -> Unit,
@@ -54,8 +54,8 @@ fun DesktopSessionContextMenu(
                 onClick = { expanded = false; onOpen() },
             )
             DropdownMenuItem(
-                text = { Text("Open in Split View") },
-                onClick = { expanded = false; onOpenInSplit() },
+                text = { Text("Split") },
+                onClick = { expanded = false; onSplit() },
             )
             DropdownMenuItem(
                 text = { Text("Refresh") },

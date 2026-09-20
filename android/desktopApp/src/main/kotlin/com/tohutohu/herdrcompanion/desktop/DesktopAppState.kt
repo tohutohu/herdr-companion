@@ -103,7 +103,6 @@ class DesktopAppState(
 
     val selectedSessionId: String? get() = selection.selectedId
     val openSessionIds: List<String> get() = openSessionIdsState
-    val isSplitView: Boolean get() = openSessionIdsState.size > 1
     val detail: SessionDetailUiState?
         get() = selectedSessionId?.let(detailsBySession::get)
 
@@ -226,11 +225,13 @@ class DesktopAppState(
         }
     }
 
-    fun selectSession(id: String) {
+    /** Opens a session in the last-focused pane, replacing only that pane. */
+    fun openSession(id: String) {
         if (closed) return
-        if (openSessionIdsState.size == 1 && selection.selectedId == id) return
-        openSessionIdsState.filterNot { it == id }.forEach(::removeDetail)
-        openSessionIdsState = listOf(id)
+        val current = openSessionIdsState
+        val next = openSessionInFocusedPane(current, selectedSessionId, id)
+        current.firstOrNull { it !in next }?.let(::removeDetail)
+        openSessionIdsState = next
         selection.select(id)
         updateSessionRowSelection()
         ensureDetail(id)
@@ -244,7 +245,7 @@ class DesktopAppState(
             return
         }
         if (openSessionIdsState.isEmpty()) {
-            selectSession(id)
+            openSession(id)
             return
         }
         openSessionIdsState = openSessionIdsState + id
@@ -268,14 +269,6 @@ class DesktopAppState(
         if (wasSelected) {
             openSessionIdsState.lastOrNull()?.let(selection::select) ?: selection.clear()
         }
-        updateSessionRowSelection()
-    }
-
-    fun collapseSplitView() {
-        val keep = selectedSessionId ?: openSessionIdsState.lastOrNull() ?: return
-        openSessionIdsState.filterNot { it == keep }.forEach(::removeDetail)
-        openSessionIdsState = listOf(keep)
-        selection.select(keep)
         updateSessionRowSelection()
     }
 
@@ -659,6 +652,21 @@ class DesktopAppState(
         http.connectionPool.evictAll()
         http.dispatcher.executorService.shutdown()
     }
+}
+
+internal fun openSessionInFocusedPane(
+    openSessionIds: List<String>,
+    focusedSessionId: String?,
+    sessionId: String,
+): List<String> {
+    if (sessionId in openSessionIds) return openSessionIds
+    if (openSessionIds.isEmpty()) return listOf(sessionId)
+
+    val focusedIndex = focusedSessionId
+        ?.let(openSessionIds::indexOf)
+        ?.takeIf { it >= 0 }
+        ?: openSessionIds.lastIndex
+    return openSessionIds.toMutableList().also { it[focusedIndex] = sessionId }
 }
 
 private fun MessageDto.toMessage() = Message(

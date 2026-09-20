@@ -264,7 +264,11 @@ private fun FrameWindowScope.DesktopShell(
             HorizontalDivider()
             BoxWithConstraints(Modifier.fillMaxSize()) {
             var sidebarWidth by remember { mutableStateOf(DesktopPreferences.loadSidebarWidth().dp) }
-            val minDetailWidth = if (state.isSplitView) MIN_SPLIT_DETAIL_WIDTH else MIN_DETAIL_WIDTH
+            val minDetailWidth = if (state.openSessionIds.size > 1) {
+                MIN_SPLIT_DETAIL_WIDTH
+            } else {
+                MIN_DETAIL_WIDTH
+            }
             val maxSidebarWidth = (maxWidth * 0.4f)
                 .coerceAtMost((maxWidth - minDetailWidth - 8.dp).coerceAtLeast(MIN_SIDEBAR_WIDTH))
                 .coerceAtLeast(MIN_SIDEBAR_WIDTH)
@@ -287,9 +291,6 @@ private fun FrameWindowScope.DesktopShell(
                     ) {
                         Text("Sessions", style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.weight(1f))
-                        if (state.isSplitView) {
-                            TextButton(onClick = state::collapseSplitView) { Text("Single view") }
-                        }
                         if (query.isNotBlank()) {
                             Text(
                                 "${sessions.size}/${state.sessions.size}",
@@ -332,8 +333,8 @@ private fun FrameWindowScope.DesktopShell(
                         sessionContextMenu = { item, content ->
                             DesktopSessionContextMenu(
                                 item = item,
-                                onOpen = { state.selectSession(item.session.id) },
-                                onOpenInSplit = { state.openSessionInSplit(item.session.id) },
+                                onOpen = { state.openSession(item.session.id) },
+                                onSplit = { state.openSessionInSplit(item.session.id) },
                                 onArchive = {
                                     if (item.session.archived) {
                                         handleListAction(state, SessionListAction.Unarchive(listOf(item.session.toRef())))
@@ -446,7 +447,7 @@ private fun FrameWindowScope.DesktopShell(
             onCreated = { id ->
                 state.closeNewSession()
                 actions.refresh()
-                if (id != null) state.selectSession(id)
+                if (id != null) state.openSession(id)
             },
             onDismiss = state::closeNewSession,
             onError = state::reportError,
@@ -550,17 +551,19 @@ private fun DesktopSessionPane(
                 .padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = "Pane $paneNumber of $paneCount",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            if (paneCount > 1) {
+                Text(
+                    text = "Pane $paneNumber of $paneCount",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Text(
                 text = detail?.session?.headline() ?: sessionId,
                 style = MaterialTheme.typography.titleSmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f).padding(start = 8.dp),
+                modifier = Modifier.weight(1f).padding(start = if (paneCount > 1) 8.dp else 0.dp),
             )
             IconButton(
                 onClick = { state.closeSession(sessionId) },
@@ -602,13 +605,7 @@ private class DesktopActions(
     fun settings() = openSettings()
     fun about() = openAbout()
     fun close() = closeWindow()
-    fun openSession(id: String) = if (state.isSplitView) {
-        state.openSessionInSplit(id)
-    } else {
-        state.selectSession(id)
-    }
-    fun singleView() = state.collapseSplitView()
-    fun hasSplitView() = state.isSplitView
+    fun openSession(id: String) = state.openSession(id)
     fun archive() = state.detail?.session?.let { state.requestArchive(it.toRef()) }
     fun copySelectedSessionId() = copySessionId(state.selectedSessionId)
     fun copySessionId(id: String?) {
@@ -641,7 +638,6 @@ private fun FrameWindowScope.DesktopMenuBar(actions: DesktopActions) {
         Menu("View", mnemonic = 'V') {
             Item("Search Sessions", shortcut = KeyShortcut(Key.K, ctrl = true), onClick = actions::openSearch)
             Item("Refresh", shortcut = KeyShortcut(Key.R, ctrl = true), onClick = actions::refresh)
-            Item("Single Session View", enabled = actions.hasSplitView(), onClick = actions::singleView)
         }
         Menu("Session", mnemonic = 'S') {
             Item("Archive", enabled = actions.hasSelectedSession(), onClick = actions::archive)
@@ -732,11 +728,7 @@ private fun EmptyDetail(state: DesktopAppState) {
 
 private fun handleListAction(state: DesktopAppState, action: SessionListAction) {
     when (action) {
-        is SessionListAction.OpenSession -> if (state.isSplitView) {
-            state.openSessionInSplit(action.sessionId)
-        } else {
-            state.selectSession(action.sessionId)
-        }
+        is SessionListAction.OpenSession -> state.openSession(action.sessionId)
         is SessionListAction.Archive -> action.sessions.firstOrNull()?.let(state::requestArchive)
         is SessionListAction.Unarchive -> action.sessions.firstOrNull()?.let(state::unarchive)
         is SessionListAction.Resume -> state.resume(action.session)
