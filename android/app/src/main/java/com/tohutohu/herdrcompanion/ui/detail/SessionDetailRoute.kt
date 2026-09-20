@@ -51,6 +51,7 @@ fun SessionDetailRoute(
     val error by vm.error.collectAsState()
     val loading by vm.loading.collectAsState()
     val answering by vm.answering.collectAsState()
+    val modeChanging by vm.modeChanging.collectAsState()
     val actions = rememberSessionActions(onChanged = { vm.refresh() })
     actions.Dialogs()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -84,6 +85,7 @@ fun SessionDetailRoute(
         loading = loading,
         attachments = attachments.map(Attachment::toUiState),
         actionBusy = session?.let { actions.busy(it.id) } == true,
+        modeChanging = modeChanging,
     )
 
     SessionDetailScreen(
@@ -110,6 +112,7 @@ fun SessionDetailRoute(
                 is SessionDetailAction.Retry -> vm.retry(action.localId)
                 is SessionDetailAction.Discard -> vm.discard(action.localId)
                 is SessionDetailAction.Respond -> vm.respond(action.response)
+                SessionDetailAction.CycleMode -> vm.cycleMode()
                 SessionDetailAction.Resume -> session?.let { actions.resume(it.toSessionRef()) }
                 SessionDetailAction.Archive -> session?.let { actions.archive(it.toSessionRef()) }
                 SessionDetailAction.Unarchive -> session?.let { actions.unarchive(it.toSessionRef()) }

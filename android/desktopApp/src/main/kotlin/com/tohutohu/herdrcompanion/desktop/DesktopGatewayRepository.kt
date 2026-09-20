@@ -20,4 +20,6 @@ class DesktopGatewayRepository(private val api: GatewayApi) {
         api.sendMessage(id, text, uploads)
 
     suspend fun respond(id: String, response: InteractionResponseDto) = api.respond(id, response)
+
+    suspend fun cycleMode(id: String) = api.cycleMode(id)
 }

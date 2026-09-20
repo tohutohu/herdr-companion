@@ -753,6 +753,7 @@ private fun handleDetailAction(
         is SessionDetailAction.Retry -> state.retry(sessionId, action.localId)
         is SessionDetailAction.Discard -> state.discard(sessionId, action.localId)
         is SessionDetailAction.Respond -> state.respond(sessionId, action.response)
+        SessionDetailAction.CycleMode -> state.cycleMode(sessionId)
         SessionDetailAction.Archive -> state.detailFor(sessionId)?.session?.let { state.requestArchive(it.toRef()) }
         SessionDetailAction.Unarchive -> state.detailFor(sessionId)?.session?.let { state.unarchive(it.toRef()) }
         SessionDetailAction.Resume -> state.detailFor(sessionId)?.session?.let { state.resume(it.toRef()) }

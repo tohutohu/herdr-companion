@@ -96,6 +96,10 @@ class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidV
     private val _answering = MutableStateFlow(false)
     val answering = _answering.asStateFlow()
 
+    /** A live agent TUI is moving to its next available session mode. */
+    private val _modeChanging = MutableStateFlow(false)
+    val modeChanging = _modeChanging.asStateFlow()
+
     private var fullSyncDone = false
 
     /**
@@ -161,6 +165,24 @@ class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidV
                 _error.value = "Answer failed: ${e.message}"
             } finally {
                 _answering.value = false
+            }
+        }
+    }
+
+    fun cycleMode() {
+        if (_modeChanging.value) return
+        viewModelScope.launch {
+            _modeChanging.value = true
+            try {
+                repo.cycleMode(sessionId)
+                // The mode is reported by the provider's next transcript
+                // snapshot; give its TUI a moment to process the shortcut.
+                delay(300)
+                refresh()
+            } catch (e: Exception) {
+                _error.value = "Mode change failed: ${e.message}"
+            } finally {
+                _modeChanging.value = false
             }
         }
     }

@@ -107,6 +107,10 @@ class GatewayApi(
         post(url("v1", "sessions", id, "respond"), json.encodeToString(response).toRequestBody(jsonType))
     }
 
+    suspend fun cycleMode(id: String) {
+        post(url("v1", "sessions", id, "mode"), ByteArray(0).toRequestBody(jsonType))
+    }
+
     /** Uploads one attachment and returns its upload id. */
     suspend fun upload(bytes: ByteArray, contentType: String, filename: String): String {
         val req = request(url("v1", "uploads"))

@@ -127,6 +127,16 @@ class GatewayApiTest {
     }
 
     @Test
+    fun `セッションのモード変更は専用APIを呼ぶ`() = runBlocking {
+        server.enqueue(MockResponse.Builder().code(202).body("""{"ok":true}""").build())
+        api.cycleMode("claude:s1")
+        val req = server.takeRequest()
+        assertEquals("POST", req.method)
+        assertEquals("/v1/sessions/claude:s1/mode", req.target)
+        assertEquals("Bearer secret", req.headers["Authorization"])
+    }
+
+    @Test
     fun `アップロードは本文の種別と元のファイル名を送る`() = runBlocking {
         server.enqueue(MockResponse.Builder().code(201).body("""{"id":"abc","name":"売上_レポート.csv"}""").build())
         assertEquals("abc", api.upload("col1\n".toByteArray(), "text/csv", "売上 レポート.csv"))

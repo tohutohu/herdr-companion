@@ -93,6 +93,8 @@ class SessionRepository(
     suspend fun respond(sessionId: String, response: InteractionResponseDto) =
         api.respond(sessionId, response)
 
+    suspend fun cycleMode(sessionId: String) = api.cycleMode(sessionId)
+
     private fun MessageDto.toEntity(sessionId: String, position: Int) = MessageEntity(
         sessionId = sessionId,
         id = id,

@@ -253,6 +253,7 @@ fun SessionDetailScreen(
                 actions = {
                     ContextGauge(session?.contextUsedPercent, onClick = { detailsOpen = !detailsOpen })
                     session?.let { s ->
+                        val modeChangeSupported = s.provider == "claude" || s.provider == "codex"
                         Box {
                             IconButton(onClick = { menu = true }) {
                                 Icon(Icons.Default.MoreVert, contentDescription = "Session actions")
@@ -267,6 +268,16 @@ fun SessionDetailScreen(
                                         onAction(SessionDetailAction.OpenTerminal)
                                     },
                                 )
+                                if (modeChangeSupported) {
+                                    DropdownMenuItem(
+                                        text = { Text("Change mode") },
+                                        enabled = s.live && s.paneId != null && !state.actionBusy && !state.modeChanging,
+                                        onClick = {
+                                            menu = false
+                                            onAction(SessionDetailAction.CycleMode)
+                                        },
+                                    )
+                                }
                                 SessionActionMenuItems(
                                     s = s.toSessionRef(),
                                     onResume = { onAction(SessionDetailAction.Resume) },
