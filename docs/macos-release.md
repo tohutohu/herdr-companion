@@ -166,14 +166,18 @@ Gatewayも使う場合は、別途`Herdr-Mobile-x.y.z.dmg`を開いて`Herdr Mob
 
 ## GitHub Actions / GitHub Release
 
-[`.github/workflows/macos-release.yml`](../.github/workflows/macos-release.yml)は`v*` tag pushまたはmanual dispatchで動きます。`macos-14` arm64 runner上で、JDK 17、Gradle cache、Go 1.24、Android/shared regression、Gateway test/vet、temporary keychain、2つのrelease DMG生成、verification、artifact uploadを順に実行します。tag push時は次の4ファイルをGitHub Releaseへ添付します。
+[`.github/workflows/macos-release.yml`](../.github/workflows/macos-release.yml)は`v*` tag pushまたはmanual dispatchで動きます。`macos-14` arm64 runner上で、JDK 17、Gradle cache、Go 1.24、Android/shared regression、Gateway test/vet、release APK生成、temporary keychain、2つのrelease DMG生成、verification、artifact uploadを順に実行します。tag push時は次の6ファイルをGitHub Releaseへ添付します。
 
 ```text
 Herdr-x.y.z.dmg
 Herdr-x.y.z.dmg.sha256
 Herdr-Mobile-x.y.z.dmg
 Herdr-Mobile-x.y.z.dmg.sha256
+Herdr-Mobile-Android-x.y.z.apk
+Herdr-Mobile-Android-x.y.z.apk.sha256
 ```
+
+Android APKは`assembleRelease`で生成し、R8とリソース圧縮を有効にした状態で配布します。現在のプロジェクト設定ではreleaseもdebug署名キーを使うため、Play Store提出用ではなく、直接インストールできる共有APKです。Firebase設定は内蔵せず、Macとのペアリング時に取り込みます。
 
 CIへ設定するsecret名:
 

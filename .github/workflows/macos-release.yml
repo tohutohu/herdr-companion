@@ -1,4 +1,4 @@
-name: macOS release
+name: Release
 
 on:
   push:
@@ -36,6 +36,26 @@ jobs:
         with:
           go-version: "1.24.x"
 
+      - name: Read release metadata
+        id: release
+        shell: bash
+        run: |
+          VERSION="$(awk -F= '$1 == "version" { print $2; exit }' version.properties)"
+          BUILD="${GITHUB_RUN_NUMBER:-$(awk -F= '$1 == "build" { print $2; exit }' version.properties)}"
+
+          if [[ -z "$VERSION" || -z "$BUILD" ]]; then
+            echo "version.properties must define version and build." >&2
+            exit 1
+          fi
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "${GITHUB_REF_NAME#v}" != "$VERSION" ]]; then
+            echo "Git tag $GITHUB_REF_NAME does not match version.properties ($VERSION)." >&2
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
+          echo "Release version: $VERSION (build $BUILD)"
+
       - name: Run Android and shared regression checks
         working-directory: android
         run: ./gradlew --console=plain test assembleDebug
@@ -45,6 +65,23 @@ jobs:
         run: |
           env -u GOROOT go test ./...
           env -u GOROOT go vet ./...
+
+      - name: Build Android release APK
+        working-directory: android
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          BUILD: ${{ steps.release.outputs.build }}
+        run: |
+          ./gradlew --console=plain :app:assembleRelease \
+            "-Pherdr.version=$VERSION" \
+            "-Pherdr.build=$BUILD"
+
+          mkdir -p ../dist
+          APK="app/build/outputs/apk/release/app-release.apk"
+          OUTPUT="../dist/Herdr-Mobile-Android-$VERSION.apk"
+          [[ -f "$APK" ]] || { echo "Missing release APK: $APK" >&2; exit 1; }
+          cp "$APK" "$OUTPUT"
+          (cd ../dist && shasum -a 256 "$(basename "$OUTPUT")" > "$(basename "$OUTPUT").sha256")
 
       - name: Import Developer ID certificate
         env:
@@ -87,27 +124,38 @@ jobs:
       - name: Build and verify separate macOS DMGs
         run: ./scripts/build-macos-release.sh
 
-      - name: Upload macOS artifacts
+      - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Herdr-macos-${{ github.ref_name }}
+          name: Herdr-release-${{ github.ref_name }}
           if-no-files-found: error
           path: |
             dist/Herdr-*.dmg
             dist/Herdr-*.dmg.sha256
+            dist/Herdr-*.apk
+            dist/Herdr-*.apk.sha256
 
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION="$(awk -F= '$1 == "version" { print $2; exit }' version.properties)"
-          gh release create "$GITHUB_REF_NAME" \
-            "dist/Herdr-$VERSION.dmg" \
-            "dist/Herdr-$VERSION.dmg.sha256" \
-            "dist/Herdr-Mobile-$VERSION.dmg" \
-            "dist/Herdr-Mobile-$VERSION.dmg.sha256" \
-            --verify-tag --generate-notes
+          VERSION="${{ steps.release.outputs.version }}"
+          ASSETS=(
+            "dist/Herdr-$VERSION.dmg"
+            "dist/Herdr-$VERSION.dmg.sha256"
+            "dist/Herdr-Mobile-$VERSION.dmg"
+            "dist/Herdr-Mobile-$VERSION.dmg.sha256"
+            "dist/Herdr-Mobile-Android-$VERSION.apk"
+            "dist/Herdr-Mobile-Android-$VERSION.apk.sha256"
+          )
+
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${ASSETS[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${ASSETS[@]}" \
+              --verify-tag --generate-notes
+          fi
 
       - name: Delete temporary keychain
         if: always()
