@@ -49,7 +49,7 @@ dependencies {
 
 compose.desktop {
     application {
-        mainClass = "com.tohutohu.herdrmobile.desktop.MainKt"
+        mainClass = "com.tohutohu.herdrcompanion.desktop.MainKt"
 
         nativeDistributions {
             targetFormats(TargetFormat.Dmg)

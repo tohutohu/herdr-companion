@@ -400,7 +400,7 @@ struct Panel: View {
                 GroupBox("通知 · Firebaseを持ち込む") {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(model.firebaseProject.map { "設定済み: \($0)" } ?? "未設定でも閲覧・操作は利用できます。")
-                        Text("同じFirebaseプロジェクトの2ファイルを選びます。秘密鍵はこのMacだけに保存します。Androidのパッケージ名: com.tohutohu.herdrmobile")
+                        Text("同じFirebaseプロジェクトの2ファイルを選びます。秘密鍵はこのMacだけに保存します。Androidのパッケージ名: com.tohutohu.herdrcompanion")
                             .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                         Button(model.serviceAccount?.lastPathComponent ?? "① サービスアカウントJSONを選択") { model.selectJSON(service: true) }
                         Button(model.androidConfig?.lastPathComponent ?? "② google-services.jsonを選択") { model.selectJSON(service: false) }

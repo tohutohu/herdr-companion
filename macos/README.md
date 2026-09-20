@@ -20,7 +20,7 @@ QR読み取りはGoogle Play servicesを使用します。初回はスキャナ�
 
 ## 通知を有効にする場合（任意）
 
-1. 自分のFirebaseプロジェクトでAndroidアプリを登録します。パッケージ名は **`com.tohutohu.herdrmobile`**。
+1. 自分のFirebaseプロジェクトでAndroidアプリを登録します。パッケージ名は **`com.tohutohu.herdrcompanion`**。
 2. Android用`google-services.json`と、同じプロジェクトのサービスアカウント秘密鍵JSONをダウンロードします。FCM HTTP v1 APIと送信権限を有効にします。
 3. メニューバーの「通知」で2ファイルを選び「取り込む」。
 4. QRを発行し、Androidをペアリングします。配布APKの再ビルドは不要です。

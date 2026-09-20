@@ -132,9 +132,9 @@ func firebaseOptions(key, android []byte) (*config.FirebaseAndroid, error) {
 		return nil, errors.New("unsupported service-account token endpoint")
 	}
 	for _, c := range doc.Clients {
-		if c.Info.Android.Package == "com.tohutohu.herdrmobile" && c.Info.AppID != "" && len(c.Keys) > 0 && c.Keys[0].Key != "" && doc.Project.Number != "" {
+		if c.Info.Android.Package == "com.tohutohu.herdrcompanion" && c.Info.AppID != "" && len(c.Keys) > 0 && c.Keys[0].Key != "" && doc.Project.Number != "" {
 			return &config.FirebaseAndroid{APIKey: c.Keys[0].Key, ApplicationID: c.Info.AppID, ProjectID: doc.Project.ID, SenderID: doc.Project.Number}, nil
 		}
 	}
-	return nil, errors.New("register an Android app with package com.tohutohu.herdrmobile and download google-services.json")
+	return nil, errors.New("register an Android app with package com.tohutohu.herdrcompanion and download google-services.json")
 }

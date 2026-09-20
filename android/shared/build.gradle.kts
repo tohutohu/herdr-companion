@@ -10,7 +10,7 @@ plugins {
 
 kotlin {
     android {
-        namespace = "com.tohutohu.herdrmobile.shared"
+        namespace = "com.tohutohu.herdrcompanion.shared"
         compileSdk = 37
         minSdk = 29
         compilerOptions {

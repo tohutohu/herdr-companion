@@ -193,7 +193,7 @@ Herdr サーバーはクラッシュ時のみ自動再起動し、`herdr server 
 秘密情報（`google-services.json`、サービスアカウント JSON）は **リポジトリにコミットしないでください**（`.gitignore` 済み）。
 
 1. [Firebase コンソール](https://console.firebase.google.com/) で新規プロジェクトを作成
-2. Android アプリを追加（パッケージ名 `com.tohutohu.herdrmobile`）し、`google-services.json` を `android/app/google-services.json` に置く
+2. Android アプリを追加（パッケージ名 `com.tohutohu.herdrcompanion`）し、`google-services.json` を `android/app/google-services.json` に置く
 3. プロジェクトの設定 → サービスアカウント → 「新しい秘密鍵を生成」で JSON をダウンロードし、Mac に置く
    ```bash
    mv ~/Downloads/<project>-firebase-adminsdk-*.json ~/.config/herdr-mobile/firebase-service-account.json
@@ -213,7 +213,7 @@ CLI で行う場合（firebase CLI と gcloud にログイン済みのとき）:
 
 ```bash
 PROJECT=herdr-client-android
-firebase apps:create android "Herdr Mobile" --package-name com.tohutohu.herdrmobile --project $PROJECT
+firebase apps:create android "Herdr Mobile" --package-name com.tohutohu.herdrcompanion --project $PROJECT
 firebase apps:sdkconfig ANDROID <表示された App ID> --project $PROJECT --out android/app/google-services.json
 gcloud iam service-accounts keys create ~/.config/herdr-mobile/firebase-service-account.json \
   --iam-account firebase-adminsdk-fbsvc@$PROJECT.iam.gserviceaccount.com --project $PROJECT
@@ -244,9 +244,9 @@ JDK 17 を使ってください（例: `export JAVA_HOME=$(/usr/libexec/java_hom
 デバッグビルドは adb から設定を渡せます（日本語 IME で `adb shell input text` が変換されるのを避けるため）。受け口は adb にしか送れない receiver です:
 
 ```bash
-adb shell am broadcast -n com.tohutohu.herdrmobile/.DebugConfigReceiver \
+adb shell am broadcast -n com.tohutohu.herdrcompanion/.DebugConfigReceiver \
   --es gateway_url "http://100.x.y.z:8765" --es token "$(herdr-mobile-gateway token)"
-adb shell am start -n com.tohutohu.herdrmobile/.MainActivity
+adb shell am start -n com.tohutohu.herdrcompanion/.MainActivity
 ```
 Android 13 以降は通知の許可を求められます。
 

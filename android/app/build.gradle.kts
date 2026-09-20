@@ -27,11 +27,11 @@ if (providers.gradleProperty("bundleFirebase").orNull == "true" && file("google-
 }
 
 android {
-    namespace = "com.tohutohu.herdrmobile"
+    namespace = "com.tohutohu.herdrcompanion"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.tohutohu.herdrmobile"
+        applicationId = "com.tohutohu.herdrcompanion"
         minSdk = 29
         targetSdk = 36
         versionCode = herdrBuild.toIntOrNull()?.takeIf { it > 0 }
