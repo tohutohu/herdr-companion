@@ -114,6 +114,13 @@ type Provider interface {
 	Respond(ctx context.Context, nativeID string, live *Live, r model.InteractionResponse) error
 }
 
+// ModeChanger is an optional capability for providers whose live TUI can move
+// to its next session mode. Keeping this outside Provider lets providers that
+// do not expose a safe mode switch remain unchanged.
+type ModeChanger interface {
+	CycleMode(ctx context.Context, nativeID string, live *Live) error
+}
+
 // ImageURL builds the gateway URL for an inline image of a message.
 func ImageURL(sessionID, messageID string, index int) string {
 	return "/v1/sessions/" + sessionID + "/messages/" + messageID + "/images/" + itoa(index)

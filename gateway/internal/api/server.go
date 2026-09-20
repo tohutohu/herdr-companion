@@ -80,6 +80,7 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("GET /v1/sessions/{id}/messages", s.getMessages)
 	api.HandleFunc("POST /v1/sessions/{id}/messages", s.postMessage)
 	api.HandleFunc("POST /v1/sessions/{id}/respond", s.respond)
+	api.HandleFunc("POST /v1/sessions/{id}/mode", s.cycleMode)
 	api.HandleFunc("GET /v1/sessions/{id}/messages/{mid}/images/{n}", s.getImage)
 	api.HandleFunc("GET /v1/sessions/{id}/files", s.listFiles)
 	api.HandleFunc("GET /v1/sessions/{id}/files/content", s.fileContent)
@@ -322,6 +323,27 @@ func (s *Server) respond(w http.ResponseWriter, r *http.Request) {
 			s.Sink.Record(provider, id, kind, "respond: "+err.Error(), req)
 		}
 		s.fail(w, r, id, "respond", err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
+}
+
+// cycleMode delegates to the provider's own live-TUI mode switch. The
+// provider decides which key or structured operation is safe for its agent.
+func (s *Server) cycleMode(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	res, err := s.Sessions.Resolve(r.Context(), id)
+	if err != nil {
+		s.fail(w, r, id, "cycle_mode", err)
+		return
+	}
+	changer, ok := res.Provider.(providers.ModeChanger)
+	if !ok {
+		s.fail(w, r, id, "cycle_mode", providers.ErrUnsupported)
+		return
+	}
+	if err := changer.CycleMode(r.Context(), res.NativeID, res.Live); err != nil {
+		s.fail(w, r, id, "cycle_mode", err)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]bool{"ok": true})

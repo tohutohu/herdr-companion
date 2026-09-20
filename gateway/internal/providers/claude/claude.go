@@ -230,6 +230,16 @@ func (p *Provider) Send(ctx context.Context, nativeID string, live *providers.Li
 	return p.term.Prompt(ctx, live.PaneID, text)
 }
 
+// CycleMode uses Claude Code's built-in next-mode shortcut. The TUI owns the
+// available mode list, so this remains compatible with account and version
+// specific permission modes without duplicating that list in the gateway.
+func (p *Provider) CycleMode(ctx context.Context, nativeID string, live *providers.Live) error {
+	if live == nil {
+		return providers.ErrNotLive
+	}
+	return p.term.SendKeys(ctx, live.PaneID, "shift+tab")
+}
+
 func (p *Provider) wait(ctx context.Context) error {
 	select {
 	case <-ctx.Done():

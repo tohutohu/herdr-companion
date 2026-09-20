@@ -354,10 +354,16 @@ func (f *fakeServer) callList() []string {
 	return append([]string(nil), f.calls...)
 }
 
-type fakeTerm struct{ prompts []string }
+type fakeTerm struct {
+	prompts []string
+	keys    []string
+}
 
-func (f *fakeTerm) SendKeys(context.Context, string, ...string) error { return nil }
-func (f *fakeTerm) SendText(context.Context, string, string) error    { return nil }
+func (f *fakeTerm) SendKeys(_ context.Context, _ string, keys ...string) error {
+	f.keys = append(f.keys, keys...)
+	return nil
+}
+func (f *fakeTerm) SendText(context.Context, string, string) error { return nil }
 func (f *fakeTerm) Prompt(_ context.Context, _ string, text string) error {
 	f.prompts = append(f.prompts, text)
 	return nil
@@ -445,6 +451,21 @@ func TestDaemon接続時は構造化APIで送信と承認を行う(t *testing.T)
 	calls = f.callList()
 	if last := calls[len(calls)-1]; !strings.Contains(last, `{"text":"読んで\n/tmp/up/notes.txt","type":"text"}`) {
 		t.Errorf("last call = %s", last)
+	}
+}
+
+func Testモード変更は次のモードキーをペインへ送る(t *testing.T) {
+	term := &fakeTerm{}
+	p := New("codex", "/nonexistent.sock", term, deadletter.Nop{})
+	live := &providers.Live{PaneID: "w1:p1"}
+	if err := p.CycleMode(context.Background(), "thread-000001", live); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(term.keys, ","); got != "shift+tab" {
+		t.Errorf("keys = %q", got)
+	}
+	if err := p.CycleMode(context.Background(), "thread-000001", nil); err != providers.ErrNotLive {
+		t.Errorf("offline err = %v", err)
 	}
 }
 

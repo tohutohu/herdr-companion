@@ -356,6 +356,16 @@ func (p *Provider) Send(ctx context.Context, nativeID string, live *providers.Li
 	return p.term.Prompt(ctx, live.PaneID, strings.TrimSpace(text))
 }
 
+// CycleMode uses Codex's live TUI shortcut. This lets Codex choose the next
+// available permission/collaboration mode, including any modes constrained by
+// the current account or configuration.
+func (p *Provider) CycleMode(ctx context.Context, nativeID string, live *providers.Live) error {
+	if live == nil {
+		return providers.ErrNotLive
+	}
+	return p.term.SendKeys(ctx, live.PaneID, "shift+tab")
+}
+
 func (p *Provider) sendStructured(ctx context.Context, d *daemonConn, id string, in model.Input) error {
 	var input []map[string]any
 	// Only images have a structured form; other attachments ride along as paths.

@@ -85,10 +85,11 @@ func (f *fakeHerdr) CloseWorkspace(_ context.Context, ws string) error {
 }
 
 type fakeProvider struct {
-	root      string
-	fileRoots []string
-	sent      []model.Input
-	resp      []model.InteractionResponse
+	root        string
+	fileRoots   []string
+	sent        []model.Input
+	resp        []model.InteractionResponse
+	modeChanges int
 	// sendHook, when set, runs inside Send before the input is recorded.
 	sendHook func(ctx context.Context)
 }
@@ -144,6 +145,13 @@ func (p *fakeProvider) Models(context.Context) (providers.ModelCatalog, error) {
 }
 func (p *fakeProvider) Respond(_ context.Context, id string, live *providers.Live, r model.InteractionResponse) error {
 	p.resp = append(p.resp, r)
+	return nil
+}
+func (p *fakeProvider) CycleMode(_ context.Context, _ string, live *providers.Live) error {
+	if live == nil {
+		return providers.ErrNotLive
+	}
+	p.modeChanges++
 	return nil
 }
 
@@ -466,6 +474,18 @@ func Testターミナルの読み取りと許可されたキー入力ができ�
 	resp, _ = do(t, ts, tok, "GET", "/v1/sessions/fake:old/terminal", nil, "")
 	if resp.StatusCode != http.StatusConflict {
 		t.Errorf("offline terminal status = %d", resp.StatusCode)
+	}
+}
+
+func Testセッションのモードを変更できる(t *testing.T) {
+	ts, fp, _, tok := newTestServer(t)
+	resp, _ := do(t, ts, tok, "POST", "/v1/sessions/fake:s1/mode", nil, "")
+	if resp.StatusCode != http.StatusAccepted || fp.modeChanges != 1 {
+		t.Errorf("status = %d, mode changes = %d", resp.StatusCode, fp.modeChanges)
+	}
+	resp, _ = do(t, ts, tok, "POST", "/v1/sessions/fake:old/mode", nil, "")
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("offline status = %d", resp.StatusCode)
 	}
 }
 

@@ -364,6 +364,7 @@ whole thing off, and `herdr-mobile-gateway usage` prints one read.
 | GET | `/v1/sessions/{id}/messages?after=` | `{session, messages}` |
 | POST | `/v1/sessions/{id}/messages` | `{text, uploads[]}` |
 | POST | `/v1/sessions/{id}/respond` | `{interactionId, answers{qid:{selected[],text}}, decision}` |
+| POST | `/v1/sessions/{id}/mode` | advance the live provider TUI to its next available mode |
 | GET | `/v1/sessions/{id}/messages/{mid}/images/{n}` | inline image bytes |
 | GET | `/v1/sessions/{id}/files?path=` | directory listing |
 | GET | `/v1/sessions/{id}/files/content?path=` | file bytes |

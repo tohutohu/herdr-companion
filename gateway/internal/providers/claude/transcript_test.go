@@ -376,6 +376,21 @@ func TestProviderはtranscriptを探して承認をペインへ送る(t *testing
 	}
 }
 
+func Testモード変更は次のモードキーをペインへ送る(t *testing.T) {
+	term := &fakeTerminal{}
+	p := New(t.TempDir(), term, deadletter.Nop{})
+	live := &providers.Live{PaneID: "w1:p1"}
+	if err := p.CycleMode(context.Background(), "session", live); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(term.calls, "|"); got != "keys:shift+tab" {
+		t.Errorf("calls = %q", got)
+	}
+	if err := p.CycleMode(context.Background(), "session", nil); err != providers.ErrNotLive {
+		t.Errorf("offline err = %v", err)
+	}
+}
+
 func Test画像はパスを個別にブラケットペーストしてから本文を送信する(t *testing.T) {
 	term := &fakeTerminal{}
 	p := New(t.TempDir(), term, deadletter.Nop{})
