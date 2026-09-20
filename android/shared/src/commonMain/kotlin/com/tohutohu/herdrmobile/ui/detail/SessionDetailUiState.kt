@@ -29,6 +29,8 @@ data class SessionDetailUiState(
     val session: SessionUiModel?,
     val messages: List<Message>,
     val pending: List<PendingMessageUiState>,
+    /** Stable keys for messages that replace an optimistic pending row. */
+    val messageKeys: Map<String, String> = emptyMap(),
     val error: String?,
     val answering: Boolean,
     val attachments: List<AttachmentUiState> = emptyList(),

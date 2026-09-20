@@ -18,10 +18,25 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.scan
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 private const val POLL_MS = 3_000L
+
+data class SessionMessagePresentation(
+    val messages: List<Message>,
+    val pending: List<PendingMessage>,
+    val messageKeys: Map<String, String>,
+)
+
+private data class RawMessagePresentation(
+    val pending: List<PendingMessage>,
+    val messageKeys: Map<String, String>,
+    val messageIds: Set<String>,
+    val messages: List<Message>,
+)
 
 class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidViewModel(app) {
     private val repo = app.container.repository
@@ -33,19 +48,40 @@ class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidV
         repo.observeMessages(sessionId).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /**
-     * Messages sent from the app that the conversation does not show yet,
-     * oldest first. One the agent has queued is shown by the conversation
-     * itself (marked as queued), so it is left out here.
+     * Keeps the local list-item key after a pending message arrives from the
+     * gateway. The outbox can forget the pending row immediately, but the
+     * visible row must keep its identity or animateItem treats it as a new
+     * message and briefly fades it out and back in. The pending portion is
+     * oldest first; once the agent queues it, the conversation's queued row
+     * replaces it.
      */
-    val pending: StateFlow<List<PendingMessage>> =
+    val messagePresentation: StateFlow<SessionMessagePresentation> =
         combine(messages, outbox.observe(sessionId)) { m, p ->
             val found = matchPending(p, m)
-            p.filter { it.localId !in found }
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    init {
-        viewModelScope.launch { messages.collect { outbox.settle(sessionId, it) } }
-    }
+            RawMessagePresentation(
+                pending = p.filter { it.localId !in found },
+                messageKeys = found.entries.associate { (localId, message) ->
+                    message.id to "pending:$localId"
+                },
+                messageIds = m.mapTo(HashSet()) { it.id },
+                messages = m,
+            )
+        }.scan(SessionMessagePresentation(emptyList(), emptyList(), emptyMap())) { previous, current ->
+            SessionMessagePresentation(
+                messages = current.messages,
+                pending = current.pending,
+                // Keep aliases for messages still in the conversation. This
+                // survives the outbox removing the matched pending row.
+                messageKeys = previous.messageKeys.filterKeys { it in current.messageIds } + current.messageKeys,
+            )
+        // Settle after the match has been folded so its item-key alias is
+        // recorded before the outbox removes the pending row.
+        }.onEach { outbox.settle(sessionId, it.messages) }
+            .stateIn(
+                viewModelScope,
+                SharingStarted.WhileSubscribed(5_000),
+                SessionMessagePresentation(emptyList(), emptyList(), emptyMap()),
+            )
 
     private val _error = MutableStateFlow<String?>(null)
     val error = _error.asStateFlow()

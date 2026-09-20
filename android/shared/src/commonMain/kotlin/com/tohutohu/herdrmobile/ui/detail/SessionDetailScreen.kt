@@ -358,7 +358,7 @@ fun SessionDetailScreen(
                             onDiscard = { onAction(SessionDetailAction.Discard(p.localId)) },
                         )
                     }
-                    itemsIndexed(messages.asReversed(), key = { _, m -> m.id }) { r, m ->
+                    itemsIndexed(messages.asReversed(), key = { _, m -> state.messageKeys[m.id] ?: "message:${m.id}" }) { r, m ->
                         val i = messages.lastIndex - r
                         MessageItem(
                             modifier = if (settled) Modifier.animateItem() else Modifier,

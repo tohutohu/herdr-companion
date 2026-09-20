@@ -47,9 +47,8 @@ fun SessionDetailRoute(
     }
     val api = context.container.api
     val session by vm.session.collectAsState()
-    val messages by vm.messages.collectAsState()
+    val messagePresentation by vm.messagePresentation.collectAsState()
     val error by vm.error.collectAsState()
-    val pending by vm.pending.collectAsState()
     val answering by vm.answering.collectAsState()
     val actions = rememberSessionActions(onChanged = { vm.refresh() })
     actions.Dialogs()
@@ -76,8 +75,9 @@ fun SessionDetailRoute(
     val uiState = SessionDetailUiState(
         sessionId = sessionId,
         session = session?.toUiModel(),
-        messages = messages,
-        pending = pending.map(PendingMessage::toUiState),
+        messages = messagePresentation.messages,
+        pending = messagePresentation.pending.map(PendingMessage::toUiState),
+        messageKeys = messagePresentation.messageKeys,
         error = error,
         answering = answering,
         attachments = attachments.map(Attachment::toUiState),
