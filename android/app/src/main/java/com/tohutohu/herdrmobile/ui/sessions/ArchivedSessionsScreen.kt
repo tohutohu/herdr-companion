@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -25,9 +26,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.tohutohu.herdrmobile.container
@@ -55,7 +58,14 @@ fun ArchivedSessionsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
     var sessions by remember { mutableStateOf<List<SessionDto>?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var refreshing by remember { mutableStateOf(false) }
+    var searchOpen by rememberSaveable { mutableStateOf(false) }
+    var query by rememberSaveable { mutableStateOf("") }
+    val searchFocusRequester = remember { FocusRequester() }
     val snackbar = remember { SnackbarHostState() }
+
+    LaunchedEffect(searchOpen) {
+        if (searchOpen) searchFocusRequester.requestFocus()
+    }
 
     suspend fun load() {
         try {
@@ -70,13 +80,14 @@ fun ArchivedSessionsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
     actions.Dialogs()
     LaunchedEffect(Unit) { load() }
 
-    val rows = remember(sessions) {
+    val allRows = remember(sessions) {
         val now = System.currentTimeMillis()
         sessions.orEmpty().map {
             val entity = it.toEntity(now, listed = false)
             SessionListItemUiState(entity.toUiModel(), DateUtils.getRelativeTimeSpanString(entity.updatedAt).toString())
         }
     }
+    val rows = remember(allRows, query) { allRows.filter { it.session.matchesSessionSearch(query) } }
     val selection = rememberSessionSelection()
     val refs = remember(rows) { rows.map { it.session.toSessionRef() } }
     LaunchedEffect(refs) { selection.keepOnly(refs.map { it.id }) }
@@ -100,12 +111,31 @@ fun ArchivedSessionsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
                     )
                 },
             ) {
-                TopAppBar(
-                    navigationIcon = {
-                        IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
-                    },
-                    title = { Text("Archived") },
-                )
+                if (searchOpen) {
+                    SessionSearchTopBar(
+                        query = query,
+                        focusRequester = searchFocusRequester,
+                        onQueryChange = { query = it },
+                        onClose = {
+                            query = ""
+                            searchOpen = false
+                        },
+                    )
+                } else {
+                    TopAppBar(
+                        navigationIcon = {
+                            IconButton(onClick = onBack) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                            }
+                        },
+                        title = { Text("Archived") },
+                        actions = {
+                            IconButton(onClick = { searchOpen = true }) {
+                                Icon(Icons.Default.Search, contentDescription = "Search sessions")
+                            }
+                        },
+                    )
+                }
             }
         },
         snackbarHost = { SnackbarHost(snackbar) },
@@ -128,10 +158,14 @@ fun ArchivedSessionsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
                             Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.animateItem().padding(16.dp))
                         }
                     }
-                    if (sessions?.isEmpty() == true) {
+                    if (sessions != null && rows.isEmpty()) {
                         item(key = "empty") {
                             Text(
-                                "No archived sessions. Swipe a session sideways or long press it to archive.",
+                                if (query.isBlank()) {
+                                    "No archived sessions. Swipe a session sideways or long press it to archive."
+                                } else {
+                                    "No matching sessions."
+                                },
                                 modifier = Modifier.animateItem().padding(16.dp),
                             )
                         }

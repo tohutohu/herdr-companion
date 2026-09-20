@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -53,10 +54,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -87,7 +90,15 @@ fun SessionListScreen(
     showTopBar: Boolean = true,
     showNewSessionFab: Boolean = true,
 ) {
-    val sessions = state.sessions
+    var searchOpen by rememberSaveable { mutableStateOf(false) }
+    var query by rememberSaveable { mutableStateOf("") }
+    val searchFocusRequester = remember { FocusRequester() }
+    LaunchedEffect(searchOpen) {
+        if (searchOpen) searchFocusRequester.requestFocus()
+    }
+
+    val sessions = state.sessions.filterSessionSearch(query)
+    val pendingStarts = state.pendingStarts.filter { it.matchesSessionSearch(query) }
     val refs = remember(sessions) { sessions.map { it.session.toSessionRef() } }
     LaunchedEffect(refs) { selection.keepOnly(refs.map { it.id }) }
 
@@ -121,17 +132,32 @@ fun SessionListScreen(
                     },
                 ) {
                     if (showTopBar) {
-                        TopAppBar(
-                            title = { Text("Sessions") },
-                            actions = {
-                                IconButton(onClick = { onAction(SessionListAction.OpenArchived) }) {
-                                    Icon(Icons.Default.Inventory2, contentDescription = "Archived sessions")
-                                }
-                                IconButton(onClick = { onAction(SessionListAction.OpenSettings) }) {
-                                    Icon(Icons.Default.Settings, contentDescription = "Settings")
-                                }
-                            },
-                        )
+                        if (searchOpen) {
+                            SessionSearchTopBar(
+                                query = query,
+                                focusRequester = searchFocusRequester,
+                                onQueryChange = { query = it },
+                                onClose = {
+                                    query = ""
+                                    searchOpen = false
+                                },
+                            )
+                        } else {
+                            TopAppBar(
+                                title = { Text("Sessions") },
+                                actions = {
+                                    IconButton(onClick = { searchOpen = true }) {
+                                        Icon(Icons.Default.Search, contentDescription = "Search sessions")
+                                    }
+                                    IconButton(onClick = { onAction(SessionListAction.OpenArchived) }) {
+                                        Icon(Icons.Default.Inventory2, contentDescription = "Archived sessions")
+                                    }
+                                    IconButton(onClick = { onAction(SessionListAction.OpenSettings) }) {
+                                        Icon(Icons.Default.Settings, contentDescription = "Settings")
+                                    }
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -180,15 +206,15 @@ fun SessionListScreen(
                             LinearProgressIndicator(Modifier.fillMaxWidth().animateItem())
                         }
                     }
-                    if (state.isLoaded && sessions.isEmpty() && state.pendingStarts.isEmpty() && state.error == null) {
+                    if (state.isLoaded && sessions.isEmpty() && pendingStarts.isEmpty() && state.error == null) {
                         item(key = "empty") {
                             Text(
-                                state.emptyMessage,
+                                if (query.isBlank()) state.emptyMessage else "No matching sessions.",
                                 modifier = Modifier.animateItem().padding(16.dp),
                             )
                         }
                     }
-                    items(state.pendingStarts, key = { "starting:${it.id}" }) { entry ->
+                    items(pendingStarts, key = { "starting:${it.id}" }) { entry ->
                         Column(
                             Modifier
                                 .animateItem()
