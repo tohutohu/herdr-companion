@@ -44,15 +44,13 @@ import kotlinx.coroutines.flow.drop
  * list's item animation takes it from there.
  *
  * [engaged] reports whether the action owns the row right now (running or
- * waiting for its confirmation); [isEngaged] reads the same thing outside
- * composition, right after [onSwipe] returns.
+ * waiting for its confirmation).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SwipeableSessionRow(
     action: SwipeAction,
     engaged: Boolean,
-    isEngaged: () -> Boolean,
     enabled: Boolean,
     onSwipe: () -> Unit,
     modifier: Modifier = Modifier,
@@ -80,7 +78,6 @@ internal fun SwipeableSessionRow(
     LaunchedEffect(state.currentValue) {
         if (state.currentValue == SwipeToDismissBoxValue.Settled) return@LaunchedEffect
         onSwipe()
-        if (!isEngaged()) state.reset()
     }
     // The action let go of the row (or its confirmation was canceled) and it
     // is still listed: slide back. targetValue matters while the dismiss

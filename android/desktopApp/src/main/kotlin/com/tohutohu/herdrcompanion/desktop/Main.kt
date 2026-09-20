@@ -314,6 +314,8 @@ private fun FrameWindowScope.DesktopShell(
                                 "No sessions match \"$query\"."
                             },
                             busySessionIds = state.busySessionIds,
+                            engagedSessionIds = state.busySessionIds +
+                                (state.archiveConfirmation?.id?.let { setOf(it) } ?: emptySet()),
                         ),
                         showTopBar = false,
                         showNewSessionFab = false,
