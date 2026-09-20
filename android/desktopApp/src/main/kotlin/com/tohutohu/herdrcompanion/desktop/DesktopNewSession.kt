@@ -200,7 +200,7 @@ fun DesktopNewSessionWindow(
         title = "New Session",
         state = rememberDialogState(width = 900.dp, height = 720.dp),
         resizable = true,
-        onPreviewKeyEvent = { event ->
+        onKeyEvent = { event ->
             if (event.type == KeyEventType.KeyDown && event.key == Key.Escape) {
                 onDismiss()
                 true
@@ -210,8 +210,6 @@ fun DesktopNewSessionWindow(
         },
     ) {
         LaunchedEffect(Unit) {
-            window.toFront()
-            window.requestFocus()
             promptFocusRequester.requestFocus()
         }
         Surface(Modifier.fillMaxSize()) {
