@@ -273,7 +273,6 @@ fun LazyItemScope.SessionItem(
                 action = swipeActionFor(ref),
                 engaged = engaged,
                 isEngaged = { engaged },
-                busy = busy,
                 enabled = !selection.active,
                 onSwipe = { if (ref.archived) onUnarchive(ref) else onArchive(ref) },
             ) {

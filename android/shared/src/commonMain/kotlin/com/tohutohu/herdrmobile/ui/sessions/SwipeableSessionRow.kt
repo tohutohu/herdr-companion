@@ -17,7 +17,6 @@ import androidx.compose.material.icons.filled.StopCircle
 import androidx.compose.material.icons.filled.Unarchive
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxDefaults
@@ -46,7 +45,7 @@ import kotlinx.coroutines.flow.drop
  *
  * [engaged] reports whether the action owns the row right now (running or
  * waiting for its confirmation); [isEngaged] reads the same thing outside
- * composition, right after [onSwipe] returns. [busy] shows progress.
+ * composition, right after [onSwipe] returns.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -54,7 +53,6 @@ internal fun SwipeableSessionRow(
     action: SwipeAction,
     engaged: Boolean,
     isEngaged: () -> Boolean,
-    busy: Boolean,
     enabled: Boolean,
     onSwipe: () -> Unit,
     modifier: Modifier = Modifier,
@@ -100,7 +98,6 @@ internal fun SwipeableSessionRow(
                 action,
                 reached = state.targetValue != SwipeToDismissBoxValue.Settled,
                 direction = state.dismissDirection,
-                busy = busy,
             )
         },
     ) {
@@ -109,7 +106,7 @@ internal fun SwipeableSessionRow(
 }
 
 @Composable
-private fun SwipeBackground(action: SwipeAction, reached: Boolean, direction: SwipeToDismissBoxValue, busy: Boolean) {
+private fun SwipeBackground(action: SwipeAction, reached: Boolean, direction: SwipeToDismissBoxValue) {
     val scheme = MaterialTheme.colorScheme
     val (container, onContainer) = when (action) {
         SwipeAction.ARCHIVE -> scheme.tertiaryContainer to scheme.onTertiaryContainer
@@ -152,6 +149,5 @@ private fun SwipeBackground(action: SwipeAction, reached: Boolean, direction: Sw
                 Text(action.label, color = tint, style = MaterialTheme.typography.labelLarge)
             }
         }
-        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.BottomCenter))
     }
 }
