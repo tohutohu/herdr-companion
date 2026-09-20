@@ -81,7 +81,7 @@ fi
 
 DIST="$ROOT/dist"
 mkdir -p "$DIST"
-rm -rf "$DIST/Herdr.app" "$DIST/Herdr Mobile.app"
+rm -rf "$DIST/Herdr.app" "$DIST/Herdr Companion.app"
 ditto "$UI_APP" "$DIST/Herdr.app"
 
 "$ROOT/scripts/package-ui-dmg.sh" \
@@ -97,9 +97,9 @@ if (( NOTARY_COUNT == 3 )); then
   xcrun stapler validate "$DIST/Herdr-$VERSION.dmg"
 fi
 
-HERDR_VERSION="$VERSION" HERDR_BUILD="$BUILD" DMG_OUTPUT="$DIST/Herdr-Mobile-$VERSION.dmg" \
+HERDR_VERSION="$VERSION" HERDR_BUILD="$BUILD" DMG_OUTPUT="$DIST/Herdr-Companion-$VERSION.dmg" \
   bash "$ROOT/macos/scripts/build-dmg.sh"
-ditto "$ROOT/macos/build/Herdr Mobile.app" "$DIST/Herdr Mobile.app"
+ditto "$ROOT/macos/build/Herdr Companion.app" "$DIST/Herdr Companion.app"
 
 REQUIRE_SIGNED=0
 if [[ -n "${MACOS_SIGNING_IDENTITY:-}" && "${MACOS_SIGNING_IDENTITY}" != "-" ]]; then
@@ -116,10 +116,10 @@ REQUIRE_SIGNED="$REQUIRE_SIGNED" EXPECT_NOTARIZED="$EXPECT_NOTARIZED" ALLOW_UNSI
   "$DIST/Herdr.app" "$DIST/Herdr-$VERSION.dmg"
 REQUIRE_SIGNED="$REQUIRE_SIGNED" EXPECT_NOTARIZED="$EXPECT_NOTARIZED" ALLOW_UNSIGNED="$ALLOW_UNSIGNED" \
   "$ROOT/scripts/verify-macos-release.sh" \
-  "$DIST/Herdr Mobile.app" "$DIST/Herdr-Mobile-$VERSION.dmg"
+  "$DIST/Herdr Companion.app" "$DIST/Herdr-Companion-$VERSION.dmg"
 
 echo "Release artifacts:"
-du -sh "$DIST/Herdr.app" "$DIST/Herdr Mobile.app" \
-  "$DIST/Herdr-$VERSION.dmg" "$DIST/Herdr-Mobile-$VERSION.dmg"
+du -sh "$DIST/Herdr.app" "$DIST/Herdr Companion.app" \
+  "$DIST/Herdr-$VERSION.dmg" "$DIST/Herdr-Companion-$VERSION.dmg"
 echo "SHA-256: $DIST/Herdr-$VERSION.dmg.sha256"
-echo "SHA-256: $DIST/Herdr-Mobile-$VERSION.dmg.sha256"
+echo "SHA-256: $DIST/Herdr-Companion-$VERSION.dmg.sha256"

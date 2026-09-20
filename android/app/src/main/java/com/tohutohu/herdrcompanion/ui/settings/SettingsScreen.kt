@@ -75,7 +75,7 @@ fun SettingsScreen(onDone: () -> Unit) {
         AlertDialog(
             onDismissRequest = {},
             title = { Text("Connection saved") },
-            text = { Text("Close and reopen Herdr Mobile to apply this connection and its notification settings. The previous conversation cache will be cleared.") },
+            text = { Text("Close and reopen Herdr Companion to apply this connection and its notification settings. The previous conversation cache will be cleared.") },
             confirmButton = { TextButton(onClick = {
                 (context as? Activity)?.finishAndRemoveTask()
                 exitProcess(0)
@@ -118,7 +118,7 @@ fun SettingsScreen(onDone: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                "Connect to herdr-mobile-gateway on your Mac over Tailscale.",
+                "Connect to herdr-mobile-gateway on your Mac. Tailscale is recommended; a trusted local network also works.",
                 style = MaterialTheme.typography.bodyMedium,
             )
             Text("Appearance", style = MaterialTheme.typography.titleMedium)
@@ -159,12 +159,12 @@ fun SettingsScreen(onDone: () -> Unit) {
                     } finally { busy = false }
                 }
             }) { Text("Scan Mac QR") }
-            Text("On the Mac: Herdr Mobile → ペアリングQRを表示. No Firebase or Jev key is required for pairing.", style = MaterialTheme.typography.bodySmall)
+            Text("On the Mac: Herdr Companion → ペアリングQRを表示. Tailscale is recommended, but pairing also works on a trusted local network. No Firebase or Jev key is required.", style = MaterialTheme.typography.bodySmall)
             OutlinedTextField(
                 value = url,
                 onValueChange = { url = it },
                 label = { Text("Gateway URL") },
-                placeholder = { Text("http://my-mac.tailnet-name.ts.net:8765") },
+                placeholder = { Text("http://my-mac.local:8765") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false),
                 modifier = Modifier.fillMaxWidth(),

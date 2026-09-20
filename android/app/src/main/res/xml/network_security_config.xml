@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The gateway is reached over Tailscale (WireGuard-encrypted), usually as
-     plain HTTP on a tailnet hostname or 100.x address. -->
+<!-- The gateway may be reached over Tailscale or a trusted local network.
+     Tailscale is recommended when using plain HTTP outside the LAN. -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="true">
         <trust-anchors>

@@ -15,7 +15,7 @@
     <array>
         <string>__HOME__/.local/bin/herdr-mobile-gateway</string>
         <string>serve</string>
-        <!-- Bind to the Tailscale address only (replace __LISTEN__, e.g. 100.x.y.z:8765). -->
+        <!-- Bind to a reachable private address (Tailscale is recommended; replace __LISTEN__). -->
         <string>--listen</string>
         <string>__LISTEN__</string>
     </array>

@@ -1,4 +1,4 @@
-# Herdr Mobile
+# Herdr Companion
 
 Mac 上の [Herdr](https://herdr.dev) で動いている Claude Code / Codex / OpenCode（v1・公式 v2）のセッションを、Android から確認・操作するためのアプリです。
 
@@ -11,7 +11,7 @@ Mac 上の [Herdr](https://herdr.dev) で動いている Claude Code / Codex / O
 - アプリから新しいセッションを起動（Claude Code / Codex / OpenCode、フォルダの選択・新規作成）
 
 ```text
-Android ──(Tailscale, HTTP + Bearer)──▶ herdr-mobile-gateway (Mac) ──▶ Herdr / Claude Code / Codex
+Android ──(Tailscale推奨 / trusted LAN, HTTP + Bearer)──▶ herdr-mobile-gateway (Mac) ──▶ Herdr / Claude Code / Codex
 ```
 
 設計の詳細は [docs/architecture.md](docs/architecture.md) を参照してください。
@@ -20,7 +20,7 @@ Gateway は独自の会話 DB を持たず、Herdr と各エージェント自�
 ## Macのメニューバーアプリから始める
 
 [macos/README.md](macos/README.md)にDMGの作成・導入手順があります。メニューバーからGatewayを起動し、Androidの「Scan Mac QR」で接続できます。
-Compose Desktop UIの配布（`Herdr.app`）と、SwiftUI Gateway Manager + Go Gatewayの配布（`Herdr Mobile.app`）は別アプリ・別DMGです。詳細は[macOS release guide](docs/macos-release.md)を参照してください。
+Compose Desktop UIの配布（`Herdr.app`）と、SwiftUI Gateway Manager + Go Gatewayの配布（`Herdr Companion.app`）は別アプリ・別DMGです。詳細は[macOS release guide](docs/macos-release.md)を参照してください。
 Firebase秘密鍵・Jevキーはどちらも任意です。未設定でも閲覧・送信・承認・セッション起動を利用できます。
 通知を使う場合は、Mac画面でサービスアカウントJSONと`google-services.json`を取り込んでからペアリングしてください。Androidの再ビルドは不要です。
 以下は従来のCLIによるセットアップ手順です。
@@ -38,9 +38,9 @@ docs/      設計・macOS releaseドキュメント
 
 | 対象 | 必要なもの |
 |---|---|
-| Mac | Go 1.24+、Herdr 0.9+、Claude Code および/または Codex CLI、Tailscale |
+| Mac | Go 1.24+、Herdr 0.9+、Claude Code および/または Codex CLI、ネットワーク接続（Tailscale推奨） |
 | 残量表示 | CodexBar（`brew install --cask codexbar`、任意） |
-| Android | Android 10 (API 29) 以上、Tailscale アプリ（同じ tailnet にログイン） |
+| Android | Android 10 (API 29) 以上、Macへ到達できるネットワーク（Tailscale推奨） |
 | ビルド | JDK 17、Android SDK（compileSdk 37）|
 | 通知 | Firebase プロジェクト（無料枠で可） |
 
@@ -137,16 +137,16 @@ Jevの誤判定はあり得るので、開始の禁止やディレクトリの�
 
 ### 認証トークン
 
-すべての `/v1/*` API は `Authorization: Bearer <token>` が必要です。Tailscale 内でも省略できません。
+すべての `/v1/*` API は、接続経路にかかわらず `Authorization: Bearer <token>` が必要です。
 
 ```bash
 herdr-mobile-gateway token            # 表示
 herdr-mobile-gateway token --rotate   # 再発行（アプリ側の設定も更新してください）
 ```
 
-### Tailscale hostname
+### 接続方法（Tailscale推奨）
 
-Gateway を public internet に公開する必要はありません。Mac と Android を同じ tailnet に入れ、アプリには MagicDNS 名か Tailscale IP を設定します。
+Tailscaleを使うと、MacとAndroidが別のネットワークにいてもGatewayを公開インターネットへ直接さらさず接続できます。両方を同じtailnetに入れ、アプリにはMagicDNS名かTailscale IPを設定してください。
 
 ```bash
 tailscale status              # Mac のホスト名（例: my-mac）を確認
@@ -155,13 +155,15 @@ tailscale ip -4               # 例: 100.101.102.103
 
 アプリの Gateway URL 例: `http://my-mac.<tailnet名>.ts.net:8765` または `http://100.101.102.103:8765`
 
-Tailscale 以外から到達させたくない場合は、Tailscale IP だけで待ち受けます:
+Tailscaleを使わない場合は、MacとAndroidを同じ信頼できる家庭・社内LANに接続し、MacのプライベートIPv4（`192.168.x.x`、`10.x.x.x`、`172.16.x.x`〜`172.31.x.x`）をGateway URLに設定できます。Macのメニューバーアプリは、Tailscaleが見つからない場合にローカルIPv4も検出します。
+
+CLIでTailscale IPだけに待ち受けさせたい場合は次のようにします:
 
 ```bash
 herdr-mobile-gateway serve --listen 100.101.102.103:8765
 ```
 
-（通信は WireGuard で暗号化されるため、アプリは tailnet 上の平文 HTTP を許可しています。）
+（Tailscale上のHTTPはWireGuardで暗号化されます。LANでHTTPを使う場合も、信頼できるネットワーク内に限定してください。インターネットへ直接公開する場合はHTTPSと追加のアクセス制御を用意してください。）
 
 ### launchd で常駐させる
 
@@ -169,7 +171,11 @@ Herdr サーバー（ヘッドレス）と Gateway をそれぞれ LaunchAgent �
 
 ```bash
 mkdir -p ~/Library/LaunchAgents ~/.local/state/herdr-mobile
+# Tailscale（推奨）を使う場合:
 LISTEN=$(tailscale ip -4):8765
+# Tailscaleを使わない場合は、上の行を次のように置き換える:
+# LISTEN=$(ipconfig getifaddr en0):8765
+# （例: 192.168.1.20:8765）
 sed -e "s#__HOME__#$HOME#g" -e "s#__HERDR__#$(which herdr)#g" \
   gateway/deploy/com.herdr-mobile.herdr-server.plist > ~/Library/LaunchAgents/com.herdr-mobile.herdr-server.plist
 sed -e "s#__HOME__#$HOME#g" -e "s#__LISTEN__#$LISTEN#g" \
@@ -213,7 +219,7 @@ CLI で行う場合（firebase CLI と gcloud にログイン済みのとき）:
 
 ```bash
 PROJECT=herdr-client-android
-firebase apps:create android "Herdr Mobile" --package-name com.tohutohu.herdrcompanion --project $PROJECT
+firebase apps:create android "Herdr Companion" --package-name com.tohutohu.herdrcompanion --project $PROJECT
 firebase apps:sdkconfig ANDROID <表示された App ID> --project $PROJECT --out android/app/google-services.json
 gcloud iam service-accounts keys create ~/.config/herdr-mobile/firebase-service-account.json \
   --iam-account firebase-adminsdk-fbsvc@$PROJECT.iam.gserviceaccount.com --project $PROJECT
@@ -239,7 +245,7 @@ JDK 17 を使ってください（例: `export JAVA_HOME=$(/usr/libexec/java_hom
 `local.properties` に `sdk.dir` がない場合は Android Studio で一度開くか手動で作成します。
 
 初回起動時は「Scan Mac QR」でMacのQRを読み取るか、Gateway URLと認証トークンを入力し「Test connection」→「Save」。
-スマホで MagicDNS 名が引けない場合は Tailscale IP（`http://100.x.y.z:8765`）を使ってください。
+Tailscaleを使う場合はMagicDNS名またはTailscale IP（`http://100.x.y.z:8765`）、LANで使う場合はMacのプライベートIP（例: `http://192.168.1.20:8765`）を指定してください。
 
 デバッグビルドは adb から設定を渡せます（日本語 IME で `adb shell input text` が変換されるのを避けるため）。受け口は adb にしか送れない receiver です:
 

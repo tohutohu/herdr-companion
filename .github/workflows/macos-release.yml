@@ -78,7 +78,7 @@ jobs:
 
           mkdir -p ../dist
           APK="app/build/outputs/apk/release/app-release.apk"
-          OUTPUT="../dist/Herdr-Mobile-Android-$VERSION.apk"
+          OUTPUT="../dist/Herdr-Companion-Android-$VERSION.apk"
           [[ -f "$APK" ]] || { echo "Missing release APK: $APK" >&2; exit 1; }
           cp "$APK" "$OUTPUT"
           (cd ../dist && shasum -a 256 "$(basename "$OUTPUT")" > "$(basename "$OUTPUT").sha256")
@@ -144,10 +144,10 @@ jobs:
           ASSETS=(
             "dist/Herdr-$VERSION.dmg"
             "dist/Herdr-$VERSION.dmg.sha256"
-            "dist/Herdr-Mobile-$VERSION.dmg"
-            "dist/Herdr-Mobile-$VERSION.dmg.sha256"
-            "dist/Herdr-Mobile-Android-$VERSION.apk"
-            "dist/Herdr-Mobile-Android-$VERSION.apk.sha256"
+            "dist/Herdr-Companion-$VERSION.dmg"
+            "dist/Herdr-Companion-$VERSION.dmg.sha256"
+            "dist/Herdr-Companion-Android-$VERSION.apk"
+            "dist/Herdr-Companion-Android-$VERSION.apk.sha256"
           )
 
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then

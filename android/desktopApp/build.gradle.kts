@@ -64,7 +64,7 @@ compose.desktop {
                 packageName = "Herdr"
                 packageVersion = herdrVersion
                 packageBuildVersion = herdrBuild
-                bundleID = "com.tohutohu.herdrmobile.desktop"
+                bundleID = "com.tohutohu.herdrcompanion.desktop"
                 minimumSystemVersion = "13.0"
                 iconFile.set(rootProject.projectDir.parentFile.resolve("macos/assets/Herdr.icns"))
 

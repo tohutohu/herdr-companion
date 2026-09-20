@@ -141,7 +141,7 @@ class DesktopAppState(
     fun startGateway() {
         if (closed) return
         if (!DesktopPlatformActions.requestGatewayStart()) {
-            reportError("Could not open the Herdr Mobile Gateway manager.")
+            reportError("Could not open the Herdr Companion Gateway manager.")
             return
         }
         gatewayStartJob?.cancel()

@@ -1,11 +1,11 @@
 # Architecture
 
-Herdr Mobile lets an Android phone follow and answer Claude Code / Codex / OpenCode
+Herdr Companion lets an Android phone follow and answer Claude Code / Codex / OpenCode
 sessions that run inside [Herdr](https://herdr.dev) on a Mac.
 
 ```text
 Android (Compose, Room, WorkManager, FCM)
-   │  HTTP + Bearer token, over Tailscale
+   │  HTTP + Bearer token, over Tailscale or a trusted LAN
    ▼
 herdr-mobile-gateway (Go, on the Mac)
    ├─ Herdr socket API ── which pane runs which native session, agent status,

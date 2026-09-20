@@ -1,15 +1,15 @@
-# Herdr Mobile for Mac
+# Herdr Companion for Mac
 
 macOS 13以降のメニューバーアプリです。Go Gatewayを同梱し、起動・停止、Firebase設定の取り込み、任意のJevキー設定、AndroidとのQRペアリング、ログイン時起動を管理します。
 
-これはCompose Desktop UI（`Herdr.app`）とは別アプリです。UIとGatewayをまとめて使う場合も、`Herdr-x.y.z.dmg`と`Herdr-Mobile-x.y.z.dmg`をそれぞれインストールします。releaseの全手順は[macOS release guide](../docs/macos-release.md)を参照してください。
+これはCompose Desktop UI（`Herdr.app`）とは別アプリです。UIとGatewayをまとめて使う場合も、`Herdr-x.y.z.dmg`と`Herdr-Companion-x.y.z.dmg`をそれぞれインストールします。releaseの全手順は[macOS release guide](../docs/macos-release.md)を参照してください。
 
 ## 使い方
 
-1. MacとAndroidにTailscaleを用意し、同じtailnetに接続します。
+1. Tailscale（推奨）をMacとAndroidに用意して同じtailnetへ接続するか、両方を同じ信頼できるローカルネットワークへ接続します。
 2. MacのHerdrとClaude Code／Codexをセットアップします。Herdrのintegration設定は[ルートREADME](../README.md#1-herdr-のセットアップ)を参照してください。
-3. Gateway DMGを開き、`Herdr Mobile.app`をApplicationsへドラッグして起動します。Compose UIを使う場合はUI DMGの`Herdr.app`も別途Applicationsへ入れます。
-4. メニューバーのターミナルアイコンを開き、Tailscale IPv4とポートを確認して「Gatewayを起動」。UI側がオフラインの場合は、UIの接続画面またはSettingsからGateway managerを起動できます。
+3. Gateway DMGを開き、`Herdr Companion.app`をApplicationsへドラッグして起動します。Compose UIを使う場合はUI DMGの`Herdr.app`も別途Applicationsへ入れます。
+4. メニューバーのターミナルアイコンを開き、Tailscale IPv4またはローカルネットワークのIPv4とポートを確認して「Gatewayを起動」。UI側がオフラインの場合は、UIの接続画面またはSettingsからGateway managerを起動できます。
 5. 「ペアリングQRを表示」→ Androidの設定で「Scan Mac QR」→ 接続先を確認して「Pair」。
 
 **Firebaseの秘密鍵もJevのキーも不要で起動・ペアリングできます。** 閲覧・送信・承認・セッション起動は通常どおり使えます。Firebase未設定ではプッシュ通知、Jev未設定では開始前のフォルダ確認だけが無効になります。
@@ -57,10 +57,10 @@ Xcode Command Line Tools（Swift）、Go、JDK 17、arm64 macOSが必要です�
 
 ```text
 dist/Herdr-x.y.z.dmg
-dist/Herdr-Mobile-x.y.z.dmg
+dist/Herdr-Companion-x.y.z.dmg
 ```
 
-Gateway Managerだけを開発用に作る場合は、従来の次のコマンドも利用できます。`macos/build/Herdr-Mobile-$(uname -m).dmg`が出力されます。
+Gateway Managerだけを開発用に作る場合は、従来の次のコマンドも利用できます。`macos/build/Herdr-Companion-$(uname -m).dmg`が出力されます。
 
 ```bash
 bash macos/scripts/build-dmg.sh
@@ -71,11 +71,11 @@ bash macos/scripts/build-dmg.sh
 ## ペアリング仕様
 
 - 認証済み`POST /v1/pairing`で256bitのランダムコードを発行。5分有効、1回のみ交換可能。
-- QRは`herdr-mobile://pair?url=<Tailscale HTTP origin>#<code>`。アプリ内のスキャナーで読みます。
+- QRは`herdr-companion://pair?url=<private HTTP origin>#<code>`。アプリ内のスキャナーで読みます。TailscaleのHTTP originを推奨しますが、同じ信頼できるLANのアドレスも使えます。
 - コードは`POST /pair`の本文で送り、長期Bearer tokenと任意のFirebaseクライアント設定を受け取ります。
 - 新QRの発行、無効化、Gateway再起動、Bearer token変更で以前のコードを無効化します。
-- 公開ホスト、パス付きURL、短いコードを拒否し、交換時のリダイレクトを追いません。
-- ペアリング先はTailscale IPv4限定です。HTTP区間はTailscaleによる暗号化を前提とします。
+- 公開ホスト、パス付きURL、短いコードを拒否し、交換時のリダイレクトを追いません。QRペアリングではTailscale、プライベートIPv4、またはローカルDNS名を使えます。
+- TailscaleのHTTP区間はWireGuardで暗号化されます。LANでHTTPを使う場合は信頼できるネットワークに限定し、インターネットへ直接公開しないでください。
 - 現段階では既存の共有Bearer tokenを渡します。端末単位の権限・失効には未対応です。
 
 ## 検証範囲
@@ -85,17 +85,17 @@ Goのペアリング有効期限・一度限り・並行交換・認証・鍵な
 ## このMacの運用・更新
 
 このMacはLaunchAgent版Gatewayからメニューバー版へ移行済みです。
-`/Applications/Herdr Mobile.app`をログイン時に開き、同梱Gatewayを自動起動します。
-接続先は移行前と同じ`100.99.15.34:8765`で、認証トークン・登録端末・Firebase秘密鍵・Jevキーをdesktop設定へ引き継いでいます。
+`/Applications/Herdr Companion.app`をログイン時に開き、同梱Gatewayを自動起動します。
+接続先は移行前の設定（このMacではTailscaleの`100.99.15.34:8765`）を引き継ぎ、認証トークン・登録端末・Firebase秘密鍵・Jevキーをdesktop設定へ移します。別の環境では、メニューバーの接続先アドレス設定に合わせます。
 HerdrサーバーのLaunchAgentは引き続き必要です。
 
 Gatewayを更新するときは、メニューバーアプリを終了し、ビルドと置き換え後に開き直します。
 
 ```bash
-osascript -e 'tell application id "com.tohutohu.herdrmobile.mac" to quit'
+osascript -e 'tell application id "com.tohutohu.herdrcompanion.mac" to quit'
 bash macos/scripts/build-dmg.sh
-ditto "macos/build/Herdr Mobile.app" "/Applications/Herdr Mobile.app"
-open "/Applications/Herdr Mobile.app"
+ditto "macos/build/Herdr Companion.app" "/Applications/Herdr Companion.app"
+open "/Applications/Herdr Companion.app"
 ```
 
 終了後は子Gatewayの停止を確認してから置き換えます。旧GatewayのLaunchAgentは再登録しません。
@@ -104,5 +104,5 @@ CLIで診断するときも同じ実装・設定を使います。
 ```bash
 HERDR_MOBILE_CONFIG="$HOME/.config/herdr-mobile/desktop/config.json" \
 HERDR_MOBILE_STATE_DIR="$HOME/.local/state/herdr-mobile/desktop" \
-  "/Applications/Herdr Mobile.app/Contents/Resources/herdr-mobile-gateway" devices
+  "/Applications/Herdr Companion.app/Contents/Resources/herdr-mobile-gateway" devices
 ```

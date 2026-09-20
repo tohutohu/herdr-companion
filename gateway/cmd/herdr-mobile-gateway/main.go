@@ -1,5 +1,5 @@
 // Command herdr-mobile-gateway serves Herdr-managed Claude Code / Codex
-// sessions to the Herdr Mobile Android app.
+// sessions to the Herdr Companion Android app.
 package main
 
 import (
@@ -34,7 +34,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/usage"
 )
 
-const helpText = `herdr-mobile-gateway — Herdr Mobile gateway
+const helpText = `herdr-mobile-gateway — Herdr Companion gateway
 
 Usage:
   herdr-mobile-gateway [serve] [flags]     run the gateway (default)
@@ -91,7 +91,7 @@ func main() {
 
 func serve(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	listen := fs.String("listen", "", "listen address (overrides config), e.g. 100.x.y.z:8765")
+	listen := fs.String("listen", "", "listen address (overrides config), e.g. 100.x.y.z:8765 or 192.168.1.20:8765")
 	debug := fs.Bool("debug", false, "debug logging")
 	parentPID := fs.Int("parent-pid", 0, "exit when the owning desktop process exits")
 	logFile := fs.String("log-file", filepath.Join(config.StateDir(), "gateway.log"), "log file (empty: stdout only)")
@@ -274,7 +274,7 @@ func notifyTestCmd() error {
 		"gatewayId": config.GatewayID(store.Get().AuthToken),
 		"sessionId": "test:notification",
 		"status":    "completed",
-		"title":     "Herdr Mobile test",
+		"title":     "Herdr Companion test",
 		"body":      "Push notifications are working.",
 	}
 	for _, d := range devices {

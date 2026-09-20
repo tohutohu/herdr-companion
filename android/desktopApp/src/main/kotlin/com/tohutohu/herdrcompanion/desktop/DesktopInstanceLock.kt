@@ -24,7 +24,7 @@ internal class DesktopInstanceLock private constructor(
     }
 
     companion object {
-        private const val BUNDLE_ID = "com.tohutohu.herdrmobile.desktop"
+        private const val BUNDLE_ID = "com.tohutohu.herdrcompanion.desktop"
 
         fun tryAcquire(home: Path = defaultHome()): DesktopInstanceLock? {
             val directory = home.resolve("Library/Application Support/Herdr")

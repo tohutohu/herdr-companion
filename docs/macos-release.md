@@ -4,10 +4,10 @@
 
 | 配布物 | 内容 | Bundle ID |
 | --- | --- | --- |
-| `Herdr.app` / `Herdr-x.y.z.dmg` | Compose Multiplatform UI、同梱JRE | `com.tohutohu.herdrmobile.desktop` |
-| `Herdr Mobile.app` / `Herdr-Mobile-x.y.z.dmg` | SwiftUI Gateway Manager、同梱Go Gateway | `com.tohutohu.herdrmobile.mac` |
+| `Herdr.app` / `Herdr-x.y.z.dmg` | Compose Multiplatform UI、同梱JRE | `com.tohutohu.herdrcompanion.desktop` |
+| `Herdr Companion.app` / `Herdr-Companion-x.y.z.dmg` | SwiftUI Gateway Manager、同梱Go Gateway | `com.tohutohu.herdrcompanion.mac` |
 
-`Herdr.app`はGatewayを内包せず、既存の`Herdr Mobile.app`が起動したGatewayへ接続します。Gatewayが不要な利用者はUI DMGだけ、DesktopからMac上のセッションへ接続する利用者は2つのDMGを個別にインストールできます。
+`Herdr.app`はGatewayを内包せず、既存の`Herdr Companion.app`が起動したGatewayへ接続します。Gatewayが不要な利用者はUI DMGだけ、DesktopからMac上のセッションへ接続する利用者は2つのDMGを個別にインストールできます。
 
 ## 固定しているビルド条件
 
@@ -44,12 +44,12 @@ build=1
 dist/Herdr.app
 dist/Herdr-1.0.0.dmg
 dist/Herdr-1.0.0.dmg.sha256
-dist/Herdr Mobile.app
-dist/Herdr-Mobile-1.0.0.dmg
-dist/Herdr-Mobile-1.0.0.dmg.sha256
+dist/Herdr Companion.app
+dist/Herdr-Companion-1.0.0.dmg
+dist/Herdr-Companion-1.0.0.dmg.sha256
 ```
 
-UIはComposeの`createReleaseDistributable`でJRE同梱のoptimized app imageを生成します。最終UI DMGには`Herdr.app`と`Applications`ショートカットだけを入れ、Gateway DMGには`Herdr Mobile.app`と同じショートカットだけを入れます。
+UIはComposeの`createReleaseDistributable`でJRE同梱のoptimized app imageを生成します。最終UI DMGには`Herdr.app`と`Applications`ショートカットだけを入れ、Gateway DMGには`Herdr Companion.app`と同じショートカットだけを入れます。
 
 ### Composeの公式タスク
 
@@ -138,7 +138,7 @@ REQUIRE_SIGNED=1 EXPECT_NOTARIZED=1 \
 
 REQUIRE_SIGNED=1 EXPECT_NOTARIZED=1 \
   ./scripts/verify-macos-release.sh \
-  'dist/Herdr Mobile.app' dist/Herdr-Mobile-1.0.0.dmg
+  'dist/Herdr Companion.app' dist/Herdr-Companion-1.0.0.dmg
 ```
 
 ローカルunsigned buildの確認には`ALLOW_UNSIGNED=1`を指定できます。`spctl`が通らないことはunsigned buildでは想定内であり、Gatekeeper回避をインストール手順にはしません。
@@ -149,10 +149,10 @@ IDEや`Gradle run`ではなく、生成したbundleを直接起動します。
 
 ```bash
 open dist/Herdr.app
-open 'dist/Herdr Mobile.app'
+open 'dist/Herdr Companion.app'
 ```
 
-UIだけを先に入れた場合、Gateway設定が存在しないとUIは設定案内を表示します。設定画面または接続画面の`Start Gateway manager`から、別アプリの`Herdr Mobile.app`へ起動要求を送れます。managerが設定を作成・Gatewayを起動すると、UIは設定を再読込して接続します。GatewayはUIへ隠れて同梱しません。設定は`~/.config/herdr-mobile/desktop/config.json`、ログと状態は`~/.local/state/herdr-mobile/desktop/`です。
+UIだけを先に入れた場合、Gateway設定が存在しないとUIは設定案内を表示します。設定画面または接続画面の`Start Gateway manager`から、別アプリの`Herdr Companion.app`へ起動要求を送れます。managerが設定を作成・Gatewayを起動すると、UIは設定を再読込して接続します。GatewayはUIへ隠れて同梱しません。設定は`~/.config/herdr-mobile/desktop/config.json`、ログと状態は`~/.local/state/herdr-mobile/desktop/`です。
 
 ## インストール手順
 
@@ -162,7 +162,7 @@ UIだけの場合:
 2. `Herdr.app`を`Applications`へドラッグする
 3. `Herdr`を起動する
 
-Gatewayも使う場合は、別途`Herdr-Mobile-x.y.z.dmg`を開いて`Herdr Mobile.app`を`Applications`へドラッグし、先に起動します。Developer ID署名とnotarization済みのreleaseでは、右クリックの「開く」や`xattr -d com.apple.quarantine`は通常手順にしません。
+Gatewayも使う場合は、別途`Herdr-Companion-x.y.z.dmg`を開いて`Herdr Companion.app`を`Applications`へドラッグし、先に起動します。Developer ID署名とnotarization済みのreleaseでは、右クリックの「開く」や`xattr -d com.apple.quarantine`は通常手順にしません。
 
 ## GitHub Actions / GitHub Release
 
@@ -171,10 +171,10 @@ Gatewayも使う場合は、別途`Herdr-Mobile-x.y.z.dmg`を開いて`Herdr Mob
 ```text
 Herdr-x.y.z.dmg
 Herdr-x.y.z.dmg.sha256
-Herdr-Mobile-x.y.z.dmg
-Herdr-Mobile-x.y.z.dmg.sha256
-Herdr-Mobile-Android-x.y.z.apk
-Herdr-Mobile-Android-x.y.z.apk.sha256
+Herdr-Companion-x.y.z.dmg
+Herdr-Companion-x.y.z.dmg.sha256
+Herdr-Companion-Android-x.y.z.apk
+Herdr-Companion-Android-x.y.z.apk.sha256
 ```
 
 Android APKは`assembleRelease`で生成し、R8とリソース圧縮を有効にした状態で配布します。現在のプロジェクト設定ではreleaseもdebug署名キーを使うため、Play Store提出用ではなく、直接インストールできる共有APKです。Firebase設定は内蔵せず、Macとのペアリング時に取り込みます。
@@ -213,7 +213,7 @@ tag名と`version.properties`が一致しないreleaseはwrapperが停止しま�
 実装済みのruntime連携は次のとおりです。
 
 1. Gateway ManagerがGatewayの唯一のprocess ownerとしてstart/stopを実行する
-2. UIから`herdr-mobile://gateway/start`でmanagerへ起動要求を送る
+2. UIから`herdr-companion://gateway/start`でmanagerへ起動要求を送る
 3. managerは`/healthz`でGateway readinessを確認する
 4. UIとmanagerの両方でper-user instance lockを取得する
 5. login itemは`SMAppService.mainApp`で管理し、承認待ち状態からSystem Settingsを開ける

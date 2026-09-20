@@ -179,7 +179,7 @@ func (c *rpcClient) respond(ctx context.Context, id json.RawMessage, result any)
 
 func (c *rpcClient) initialize(ctx context.Context) error {
 	params := map[string]any{
-		"clientInfo":   map[string]string{"name": "herdr_mobile", "title": "Herdr Mobile Gateway", "version": "0.1.0"},
+		"clientInfo":   map[string]string{"name": "herdr_mobile", "title": "Herdr Companion Gateway", "version": "0.1.0"},
 		"capabilities": map[string]any{"experimentalApi": true},
 	}
 	if err := c.call(ctx, "initialize", params, nil); err != nil {

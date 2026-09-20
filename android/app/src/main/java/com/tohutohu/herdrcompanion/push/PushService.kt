@@ -38,7 +38,7 @@ class PushService : FirebaseMessagingService() {
             this,
             sessionId = sessionId,
             status = status,
-            title = data["title"] ?: "Herdr Mobile",
+            title = data["title"] ?: "Herdr Companion",
             body = data["body"].orEmpty(),
             canSend = data["canSend"] == "true",
         )

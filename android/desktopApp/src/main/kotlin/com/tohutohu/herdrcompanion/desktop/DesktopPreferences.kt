@@ -66,7 +66,7 @@ internal fun windowIntersectsAnyScreen(snapshot: DesktopWindowSnapshot, screens:
 }
 
 object DesktopPreferences {
-    private const val NODE = "com.tohutohu.herdrmobile.desktop"
+    private const val NODE = "com.tohutohu.herdrcompanion.desktop"
     private const val WINDOW_KEY = "window"
     private const val SIDEBAR_KEY = "sidebarWidth"
     private const val NOTIFICATIONS_KEY = "notificationsEnabled"
