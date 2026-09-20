@@ -29,7 +29,7 @@ data class PairingInvitation(val gateway: HttpUrl, val code: String) {
             // network. Tailscale is recommended, but a trusted home/office LAN
             // should work without installing it on both devices.
             require(gateway.scheme == "http" && isPrivateGatewayHost(gateway.host)) {
-                "Pairing requires a Tailscale or private-network address"
+                "QR pairing supports a Tailscale or private-network address"
             }
             val code = uri.fragment.orEmpty()
             require(code.matches(Regex("[0-9a-f]{64}"))) { "Invalid pairing code" }
