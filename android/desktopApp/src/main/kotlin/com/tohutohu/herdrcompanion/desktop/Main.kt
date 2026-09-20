@@ -7,6 +7,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -46,6 +47,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -264,12 +266,7 @@ private fun FrameWindowScope.DesktopShell(
             HorizontalDivider()
             BoxWithConstraints(Modifier.fillMaxSize()) {
             var sidebarWidth by remember { mutableStateOf(DesktopPreferences.loadSidebarWidth().dp) }
-            val detailPaneCount = state.openSessionIds.size.coerceAtLeast(1)
-            val minDetailWidth = if (detailPaneCount > 1) {
-                MIN_SPLIT_DETAIL_WIDTH * detailPaneCount + 1.dp
-            } else {
-                MIN_DETAIL_WIDTH
-            }
+            val minDetailWidth = if (state.isSplitView) MIN_SPLIT_DETAIL_WIDTH else MIN_DETAIL_WIDTH
             val maxSidebarWidth = (maxWidth * 0.4f)
                 .coerceAtMost((maxWidth - minDetailWidth - 8.dp).coerceAtLeast(MIN_SIDEBAR_WIDTH))
                 .coerceAtLeast(MIN_SIDEBAR_WIDTH)
@@ -383,7 +380,12 @@ private fun FrameWindowScope.DesktopShell(
                     if (detailIds.isEmpty()) {
                         EmptyDetail(state)
                     } else {
-                        Row(Modifier.fillMaxSize()) {
+                        val paneScrollState = rememberScrollState()
+                        Row(
+                            Modifier
+                                .fillMaxSize()
+                                .horizontalScroll(paneScrollState),
+                        ) {
                             detailIds.forEachIndexed { index, id ->
                                 if (index > 0) {
                                     VerticalDivider(Modifier.fillMaxHeight().width(1.dp))
@@ -391,9 +393,8 @@ private fun FrameWindowScope.DesktopShell(
                                 key(id) {
                                     Box(
                                         Modifier
-                                            .weight(1f)
                                             .fillMaxHeight()
-                                            .widthIn(min = if (detailIds.size > 1) MIN_SPLIT_DETAIL_WIDTH else MIN_DETAIL_WIDTH),
+                                            .width(if (detailIds.size > 1) MIN_SPLIT_DETAIL_WIDTH else MIN_DETAIL_WIDTH),
                                     ) {
                                         DesktopSessionPane(
                                             state = state,

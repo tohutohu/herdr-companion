@@ -39,7 +39,6 @@ import java.util.logging.Logger
 private const val LIST_POLL_MS = 5_000L
 private const val DETAIL_POLL_MS = 3_000L
 private const val MAX_UPLOAD_BYTES = 20 * 1024 * 1024
-const val MAX_DESKTOP_DETAIL_PANES = 2
 
 /** Selection is intentionally separate from the Android navigation back stack. */
 class DesktopSelectionState {
@@ -237,15 +236,11 @@ class DesktopAppState(
         ensureDetail(id)
     }
 
-    /** Adds a session to the second Desktop detail pane, or focuses it if it is already open. */
+    /** Adds a session to the Desktop split view, or focuses it if it is already open. */
     fun openSessionInSplit(id: String) {
         if (closed) return
         if (id in openSessionIdsState) {
             focusSession(id)
-            return
-        }
-        if (openSessionIdsState.size >= MAX_DESKTOP_DETAIL_PANES) {
-            reportError("Split view supports two sessions. Close a pane first.")
             return
         }
         if (openSessionIdsState.isEmpty()) {
