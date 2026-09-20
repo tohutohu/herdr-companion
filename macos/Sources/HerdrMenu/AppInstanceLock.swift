@@ -13,7 +13,7 @@ final class AppInstanceLock {
     func acquire() -> Bool {
         guard descriptor == -1 else { return true }
         let directory = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Herdr Companion", isDirectory: true)
+            .appendingPathComponent("Library/Application Support/Herdr Companion Gateway", isDirectory: true)
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         } catch {
@@ -32,7 +32,7 @@ final class AppInstanceLock {
 
     func activateExisting() {
         let apps = NSRunningApplication.runningApplications(
-            withBundleIdentifier: "com.tohutohu.herdrcompanion.mac"
+            withBundleIdentifier: "com.tohutohu.herdrcompanion.gateway"
         )
         apps.first(where: { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier })?.activate(
             options: [.activateAllWindows, .activateIgnoringOtherApps]

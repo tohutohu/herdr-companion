@@ -64,7 +64,7 @@ object DesktopConnectionConfig {
                 baseUrl = explicitUrl ?: "http://127.0.0.1:$defaultPort",
                 token = "",
                 configPath = null,
-                configIssue = "Gateway config not found. Start the macOS Gateway manager first.",
+                configIssue = "Gateway config not found. Start Herdr Companion Gateway first.",
             )
         }
 

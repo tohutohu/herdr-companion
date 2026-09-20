@@ -54,14 +54,14 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Dmg)
             modules("java.instrument", "java.prefs", "jdk.unsupported")
-            packageName = "Herdr"
+            packageName = "Herdr Companion"
             packageVersion = herdrVersion
             description = "Desktop client for Herdr coding-agent sessions"
             vendor = "Tohuto H.U."
             copyright = "Copyright © 2026 Tohuto H.U."
 
             macOS {
-                packageName = "Herdr"
+                packageName = "Herdr Companion"
                 packageVersion = herdrVersion
                 packageBuildVersion = herdrBuild
                 bundleID = "com.tohutohu.herdrcompanion.desktop"

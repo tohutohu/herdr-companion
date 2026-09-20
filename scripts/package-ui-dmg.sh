@@ -21,9 +21,9 @@ trap 'rm -rf "$STAGING"' EXIT
 
 mkdir -p "$(dirname "$DMG")"
 rm -f "$DMG" "$DMG.sha256"
-ditto "$APP" "$STAGING/Herdr.app"
+ditto "$APP" "$STAGING/Herdr Companion.app"
 ln -s /Applications "$STAGING/Applications"
-hdiutil create -volname Herdr -srcfolder "$STAGING" -ov -format UDZO "$DMG"
+hdiutil create -volname "Herdr Companion" -srcfolder "$STAGING" -ov -format UDZO "$DMG"
 
 (
   cd "$(dirname "$DMG")"

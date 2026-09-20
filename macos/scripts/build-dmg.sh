@@ -8,7 +8,7 @@ VERSION="$(awk -F= '$1 == "version" { print $2; exit }' "$VERSION_FILE")"
 BUILD="$(awk -F= '$1 == "build" { print $2; exit }' "$VERSION_FILE")"
 VERSION="${HERDR_VERSION:-$VERSION}"
 BUILD="${HERDR_BUILD:-$BUILD}"
-APP="$OUTPUT/Herdr Companion.app"
+APP="$OUTPUT/Herdr Companion Gateway.app"
 DMG_OUTPUT="${DMG_OUTPUT:-}"
 
 if [[ ! "$VERSION" =~ ^[1-9][0-9]*(\.[0-9]+){0,2}$ ]]; then
@@ -26,7 +26,7 @@ if [[ ! -f "$ROOT/macos/assets/Herdr.icns" ]]; then
 fi
 
 if pgrep -f "$APP/Contents/MacOS/HerdrMenu" >/dev/null; then
-  echo "Quit Herdr Companion before rebuilding; replacing a running app invalidates its code signature." >&2
+  echo "Quit Herdr Companion Gateway before rebuilding; replacing a running app invalidates its code signature." >&2
   exit 1
 fi
 
@@ -65,15 +65,15 @@ if [[ -n "$DMG_OUTPUT" ]]; then
 else
   # Keep the historical companion-only output for direct Gateway development.
   ARCH="$(uname -m)"
-  DMG="$OUTPUT/Herdr-Companion-$ARCH.dmg"
+  DMG="$OUTPUT/Herdr-Companion-Gateway-$ARCH.dmg"
 fi
-VOLUME_NAME="Herdr Companion"
+VOLUME_NAME="Herdr Companion Gateway"
 mkdir -p "$(dirname "$DMG")"
 rm -f "$DMG" "$DMG.sha256"
 
 STAGING="$(mktemp -d "${TMPDIR:-/tmp}/herdr-dmg.XXXXXX")"
 trap 'rm -rf "$STAGING"' EXIT
-ditto "$APP" "$STAGING/Herdr Companion.app"
+ditto "$APP" "$STAGING/Herdr Companion Gateway.app"
 ln -s /Applications "$STAGING/Applications"
 hdiutil create -volname "$VOLUME_NAME" -srcfolder "$STAGING" -ov -format UDZO "$DMG"
 

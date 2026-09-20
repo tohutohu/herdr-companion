@@ -103,7 +103,7 @@ fun main() {
             )
             Window(
                 onCloseRequest = ::exitApplication,
-                title = "Herdr",
+                title = "Herdr Companion",
                 state = windowState,
             ) {
                 window.minimumSize = java.awt.Dimension(880, 560)
@@ -193,7 +193,7 @@ private fun FrameWindowScope.DesktopShell(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text("Herdr", style = MaterialTheme.typography.headlineSmall)
+            Text("Herdr Companion", style = MaterialTheme.typography.headlineSmall)
             ConnectionIndicator(state.connectionState, state.connectionLabel)
             Spacer(Modifier.weight(1f))
             OutlinedTextField(
@@ -416,8 +416,8 @@ private fun FrameWindowScope.DesktopShell(
     if (aboutOpen) {
         AlertDialog(
             onDismissRequest = { aboutOpen = false },
-            title = { Text("About Herdr") },
-            text = { Text("Herdr Desktop\nCompose Multiplatform client for the local Herdr Gateway.") },
+            title = { Text("About Herdr Companion") },
+            text = { Text("Herdr Companion\nCompose Multiplatform client for the Herdr Companion Gateway.") },
             confirmButton = { TextButton(onClick = { aboutOpen = false }) { Text("OK") } },
         )
     }
@@ -457,8 +457,8 @@ private class DesktopActions(
 @Composable
 private fun FrameWindowScope.DesktopMenuBar(actions: DesktopActions) {
     MenuBar {
-        Menu("Herdr", mnemonic = 'H') {
-            Item("About Herdr", onClick = actions::about)
+        Menu("Herdr Companion", mnemonic = 'H') {
+            Item("About Herdr Companion", onClick = actions::about)
             Item("Settings…", shortcut = KeyShortcut(Key.Comma, ctrl = true), onClick = actions::settings)
             Separator()
             Item("Close Window", shortcut = KeyShortcut(Key.W, ctrl = true), onClick = actions::close)
@@ -545,7 +545,7 @@ private fun EmptyDetail(state: DesktopAppState) {
                 if (state.connectionState == DesktopConnectionState.OFFLINE ||
                     state.connectionState == DesktopConnectionState.RECONNECTING
                 ) {
-                    Button(onClick = state::startGateway) { Text("Start Gateway manager") }
+                    Button(onClick = state::startGateway) { Text("Start Herdr Companion Gateway") }
                 }
             }
         } else {
@@ -566,7 +566,7 @@ private fun handleListAction(state: DesktopAppState, action: SessionListAction) 
         SessionListAction.OpenNewSession -> state.openNewSession()
         SessionListAction.Refresh -> state.refreshSessions(userInitiated = true)
         SessionListAction.OpenArchived -> state.reportError("Archived session browsing is not yet available on Desktop.")
-        SessionListAction.OpenSettings -> state.reportError("Use the Herdr menu's Settings item for Desktop connection status.")
+        SessionListAction.OpenSettings -> state.reportError("Use the Herdr Companion menu's Settings item for Desktop connection status.")
         is SessionListAction.OpenStarting -> state.reportError("Session startup is handled in the New Session window.")
     }
 }

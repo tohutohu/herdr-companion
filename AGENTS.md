@@ -12,7 +12,7 @@ go test ./...                                  # must pass
 go test ./internal/providers/... -update       # regenerate golden JSON after intended parser changes
 go vet ./...
 env -u GOROOT go test ./...                    # avoid inherited GOROOT/toolchain mismatch
-# Production updates: rebuild the Mac app, replace /Applications/Herdr Companion.app, reopen it.
+# Production updates: rebuild the Mac Gateway app, replace /Applications/Herdr Companion Gateway.app, reopen it.
 herdr-mobile-gateway token | devices | usage | notify-test | debug replay FILE
 
 # Android (JDK 17 required; the default `java` is 24)
@@ -42,15 +42,15 @@ Screens are shown with Navigation 3 (`ui/AppNavigation.kt`): the back stack is a
 | What | How | Notes |
 |---|---|---|
 | Herdr server | LaunchAgent `com.herdr-mobile.herdr-server` | from `gateway/deploy/*.plist` (placeholders replaced with `sed`, see README) |
-| Gateway | `/Applications/Herdr Companion.app` (menu-bar app, login item) | bundled child process; `100.99.15.34:8765` |
+| Gateway | `/Applications/Herdr Companion Gateway.app` (menu-bar app, login item) | bundled child process; `100.99.15.34:8765` |
 
 ```bash
 launchctl list | grep herdr-mobile
 # Gateway updates (quit the menu-bar app before replacing its signed bundle):
-osascript -e 'tell application id "com.tohutohu.herdrcompanion.mac" to quit'
+osascript -e 'tell application id "com.tohutohu.herdrcompanion.gateway" to quit'
 bash macos/scripts/build-dmg.sh
-ditto "macos/build/Herdr Companion.app" "/Applications/Herdr Companion.app"
-open "/Applications/Herdr Companion.app"
+ditto "macos/build/Herdr Companion Gateway.app" "/Applications/Herdr Companion Gateway.app"
+open "/Applications/Herdr Companion Gateway.app"
 ```
 
 - Keep the Herdr server plist `PATH` minimal (`/usr/bin:/bin:/usr/sbin:/sbin`). With a long PATH, pane login shells put `/opt/homebrew/bin` first and start an old Homebrew `claude` (2.1.1), which rejects `~/.claude/settings.json`.
@@ -97,7 +97,7 @@ open "/Applications/Herdr Companion.app"
 - Real phone: Pixel 7a over USB. It reaches the gateway via Tailscale IP `100.99.15.34`; the MagicDNS name doesn't resolve on the phone.
 - `adb shell input text` goes through the phone's Japanese IME and gets converted. Configure debug builds with the DUMP-guarded receiver (only adb can send it), then launch the app:
   ```bash
-  adb shell am broadcast -n com.tohutohu.herdrcompanion/.DebugConfigReceiver --es gateway_url http://100.99.15.34:8765 --es token "$(HERDR_MOBILE_CONFIG="$HOME/.config/herdr-mobile/desktop/config.json" "/Applications/Herdr Companion.app/Contents/Resources/herdr-mobile-gateway" token)"
+  adb shell am broadcast -n com.tohutohu.herdrcompanion/.DebugConfigReceiver --es gateway_url http://100.99.15.34:8765 --es token "$(HERDR_MOBILE_CONFIG="$HOME/.config/herdr-mobile/desktop/config.json" "/Applications/Herdr Companion Gateway.app/Contents/Resources/herdr-mobile-gateway" token)"
   adb shell am start -n com.tohutohu.herdrcompanion/.MainActivity
   ```
 - Automating the user's phone is risky: taps landed in Developer options once and toggled "Pointer location". Before tapping, check `adb shell dumpsys window | grep mCurrentFocus` is the app, and find coordinates with `uiautomator dump`.

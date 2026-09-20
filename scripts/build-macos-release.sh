@@ -73,7 +73,7 @@ fi
   ./gradlew "${GRADLE_ARGS[@]}"
 )
 
-UI_APP="$(find "$ROOT/android/desktopApp/build/compose/binaries" -type d -name 'Herdr.app' -print | sort | tail -n 1)"
+UI_APP="$(find "$ROOT/android/desktopApp/build/compose/binaries" -type d -name 'Herdr Companion.app' -print | sort | tail -n 1)"
 if [[ -z "$UI_APP" || ! -d "$UI_APP" ]]; then
   echo "Compose release app was not found under desktopApp/build/compose/binaries." >&2
   exit 1
@@ -81,25 +81,25 @@ fi
 
 DIST="$ROOT/dist"
 mkdir -p "$DIST"
-rm -rf "$DIST/Herdr.app" "$DIST/Herdr Companion.app"
-ditto "$UI_APP" "$DIST/Herdr.app"
+rm -rf "$DIST/Herdr Companion.app" "$DIST/Herdr Companion Gateway.app"
+ditto "$UI_APP" "$DIST/Herdr Companion.app"
 
 "$ROOT/scripts/package-ui-dmg.sh" \
-  "$DIST/Herdr.app" "$VERSION" "$DIST/Herdr-$VERSION.dmg"
+  "$DIST/Herdr Companion.app" "$VERSION" "$DIST/Herdr-Companion-$VERSION.dmg"
 
 if (( NOTARY_COUNT == 3 )); then
-  xcrun notarytool submit "$DIST/Herdr-$VERSION.dmg" \
+  xcrun notarytool submit "$DIST/Herdr-Companion-$VERSION.dmg" \
     --apple-id "$APPLE_ID" \
     --password "$APPLE_APP_SPECIFIC_PASSWORD" \
     --team-id "$APPLE_TEAM_ID" \
     --wait
-  xcrun stapler staple "$DIST/Herdr-$VERSION.dmg"
-  xcrun stapler validate "$DIST/Herdr-$VERSION.dmg"
+  xcrun stapler staple "$DIST/Herdr-Companion-$VERSION.dmg"
+  xcrun stapler validate "$DIST/Herdr-Companion-$VERSION.dmg"
 fi
 
-HERDR_VERSION="$VERSION" HERDR_BUILD="$BUILD" DMG_OUTPUT="$DIST/Herdr-Companion-$VERSION.dmg" \
+HERDR_VERSION="$VERSION" HERDR_BUILD="$BUILD" DMG_OUTPUT="$DIST/Herdr-Companion-Gateway-$VERSION.dmg" \
   bash "$ROOT/macos/scripts/build-dmg.sh"
-ditto "$ROOT/macos/build/Herdr Companion.app" "$DIST/Herdr Companion.app"
+ditto "$ROOT/macos/build/Herdr Companion Gateway.app" "$DIST/Herdr Companion Gateway.app"
 
 REQUIRE_SIGNED=0
 if [[ -n "${MACOS_SIGNING_IDENTITY:-}" && "${MACOS_SIGNING_IDENTITY}" != "-" ]]; then
@@ -113,13 +113,13 @@ ALLOW_UNSIGNED=0
 [[ "$REQUIRE_SIGNED" == 0 ]] && ALLOW_UNSIGNED=1
 REQUIRE_SIGNED="$REQUIRE_SIGNED" EXPECT_NOTARIZED="$EXPECT_NOTARIZED" ALLOW_UNSIGNED="$ALLOW_UNSIGNED" \
   "$ROOT/scripts/verify-macos-release.sh" \
-  "$DIST/Herdr.app" "$DIST/Herdr-$VERSION.dmg"
+  "$DIST/Herdr Companion.app" "$DIST/Herdr-Companion-$VERSION.dmg"
 REQUIRE_SIGNED="$REQUIRE_SIGNED" EXPECT_NOTARIZED="$EXPECT_NOTARIZED" ALLOW_UNSIGNED="$ALLOW_UNSIGNED" \
   "$ROOT/scripts/verify-macos-release.sh" \
-  "$DIST/Herdr Companion.app" "$DIST/Herdr-Companion-$VERSION.dmg"
+  "$DIST/Herdr Companion Gateway.app" "$DIST/Herdr-Companion-Gateway-$VERSION.dmg"
 
 echo "Release artifacts:"
-du -sh "$DIST/Herdr.app" "$DIST/Herdr Companion.app" \
-  "$DIST/Herdr-$VERSION.dmg" "$DIST/Herdr-Companion-$VERSION.dmg"
-echo "SHA-256: $DIST/Herdr-$VERSION.dmg.sha256"
+du -sh "$DIST/Herdr Companion.app" "$DIST/Herdr Companion Gateway.app" \
+  "$DIST/Herdr-Companion-$VERSION.dmg" "$DIST/Herdr-Companion-Gateway-$VERSION.dmg"
 echo "SHA-256: $DIST/Herdr-Companion-$VERSION.dmg.sha256"
+echo "SHA-256: $DIST/Herdr-Companion-Gateway-$VERSION.dmg.sha256"

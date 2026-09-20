@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>CFBundleIdentifier</key><string>com.tohutohu.herdrcompanion.mac</string>
-<key>CFBundleName</key><string>Herdr Companion</string>
-<key>CFBundleDisplayName</key><string>Herdr Companion</string>
+<key>CFBundleIdentifier</key><string>com.tohutohu.herdrcompanion.gateway</string>
+<key>CFBundleName</key><string>Herdr Companion Gateway</string>
+<key>CFBundleDisplayName</key><string>Herdr Companion Gateway</string>
 <key>CFBundleExecutable</key><string>HerdrMenu</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>__HERDR_VERSION__</string>
@@ -13,7 +13,7 @@
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>
 <key>CFBundleURLTypes</key><array><dict>
-<key>CFBundleURLName</key><string>com.tohutohu.herdrcompanion.mac.commands</string>
+<key>CFBundleURLName</key><string>com.tohutohu.herdrcompanion.gateway.commands</string>
 <key>CFBundleURLSchemes</key><array><string>herdr-companion</string></array>
 </dict></array>
 <key>NSAppTransportSecurity</key><dict><key>NSAllowsArbitraryLoads</key><true/></dict>

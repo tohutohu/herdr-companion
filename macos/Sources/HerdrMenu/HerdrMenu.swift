@@ -19,7 +19,7 @@ struct HerdrMenuApp: App {
         _model = StateObject(wrappedValue: owner)
     }
     var body: some Scene {
-        MenuBarExtra("Herdr Companion", systemImage: "terminal") {
+        MenuBarExtra("Herdr Companion Gateway", systemImage: "terminal") {
             Panel(model: model)
         }.menuBarExtraStyle(.window)
     }
@@ -72,7 +72,7 @@ struct SetupError: LocalizedError {
     @Published var loginEnabled = false
     @Published var loginNeedsApproval = false
     @Published var loginStatus = ""
-    @Published var diagnostics = "Tailscale（推奨）または同じローカルネットワークで接続できます。"
+    @Published var diagnostics = "Tailscale（推奨）、同じローカルネットワーク、またはHTTPSトンネルで接続できます。"
     private var child: Process?
     private var timer: Timer?
     private var quitObserver: NSObjectProtocol?
@@ -137,10 +137,10 @@ struct SetupError: LocalizedError {
     func validAddress(_ input: String) -> Bool {
         let value = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard value == input, !value.isEmpty, value.count <= 253 else { return false }
-        if let octets = ipv4Octets(value) { return isPrivateIPv4(octets) }
+        if ipv4Octets(value) != nil { return true }
 
         let labels = value.split(separator: ".", omittingEmptySubsequences: false)
-        guard labels.count >= 2, value.hasSuffix(".local") || value.hasSuffix(".home.arpa") || value.hasSuffix(".ts.net") else { return false }
+        guard !labels.isEmpty else { return false }
         return labels.allSatisfy { label in
             !label.isEmpty && label.count <= 63 &&
                 label.first != "-" && label.last != "-" &&
@@ -216,7 +216,7 @@ struct SetupError: LocalizedError {
             diagnostics = "ローカルネットワーク: \(value)\nTailscale（推奨）を使う場合はMacとAndroidを同じtailnetに接続します。"
             return
         }
-        diagnostics = "接続先アドレスを入力してください。Tailscale（推奨）またはMacとAndroidが同じローカルネットワークで使えます。"
+        diagnostics = "接続先アドレスを入力してください。Tailscale（推奨）、同じローカルネットワーク、またはHTTPSトンネルを利用できます。"
     }
 
     private func detectLocalIPv4() async -> String? {
@@ -417,7 +417,7 @@ struct Panel: View {
                 HStack {
                     Image(systemName: "terminal.fill").font(.title)
                     VStack(alignment: .leading) {
-                        Text("Herdr Companion").font(.headline)
+                        Text("Herdr Companion Gateway").font(.headline)
                         Label(model.status, systemImage: model.running ? "circle.fill" : "circle")
                             .foregroundStyle(model.running ? .green : .secondary).font(.caption)
                     }
@@ -426,7 +426,7 @@ struct Panel: View {
                 }
                 GroupBox("Macへの接続") {
                     VStack(alignment: .leading, spacing: 8) {
-                        TextField("接続先アドレス（Tailscale / ローカルIP / ホスト名）", text: $model.address).disabled(model.running || model.busy)
+                        TextField("接続先アドレス（IP / ホスト名）", text: $model.address).disabled(model.running || model.busy)
                         TextField("ポート", text: $model.port).disabled(model.running || model.busy)
                         Text(model.diagnostics).font(.caption).foregroundStyle(.secondary)
                         HStack {
@@ -452,7 +452,7 @@ struct Panel: View {
                 }
                 GroupBox("Androidとペアリング") {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Androidの設定 →「Scan Mac QR」で読み取ります。Tailscale（推奨）またはMacとAndroidが同じローカルネットワークに接続されていることを確認してください。")
+                        Text("Androidの設定 →「Scan Mac QR」で読み取ります。Tailscale（推奨）または同じローカルネットワークを使えます。HTTPSトンネルを使う場合はAndroid側のGateway URLにTunnel URLを入力してください。")
                             .font(.caption).foregroundStyle(.secondary)
                         Button("ペアリングQRを表示") { model.perform { try await model.createQR() } }.disabled(!model.running)
                         if let qr = model.qr, let expires = model.expires {

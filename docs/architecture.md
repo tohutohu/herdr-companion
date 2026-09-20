@@ -5,9 +5,9 @@ sessions that run inside [Herdr](https://herdr.dev) on a Mac.
 
 ```text
 Android (Compose, Room, WorkManager, FCM)
-   │  HTTP + Bearer token, over Tailscale or a trusted LAN
+   │  HTTP(S) + Bearer token, over Tailscale, a trusted LAN, or a tunnel
    ▼
-herdr-mobile-gateway (Go, on the Mac)
+Herdr Companion Gateway (Go, on the Mac)
    ├─ Herdr socket API ── which pane runs which native session, agent status,
    │                      pane.read / send_keys / send_text / agent.prompt
    ├─ Claude adapter ──── ~/.claude/projects/*/<session>.jsonl (+ PTY for dialogs)

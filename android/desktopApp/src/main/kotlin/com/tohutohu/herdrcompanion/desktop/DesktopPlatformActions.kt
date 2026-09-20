@@ -10,7 +10,7 @@ import java.nio.file.Paths
 
 /** Small Desktop-only bridge for operations that should not enter commonMain. */
 object DesktopPlatformActions {
-    private const val GATEWAY_MANAGER_BUNDLE_ID = "com.tohutohu.herdrcompanion.mac"
+    private const val GATEWAY_MANAGER_BUNDLE_ID = "com.tohutohu.herdrcompanion.gateway"
 
     fun copyText(text: String): Boolean = runCatching {
         Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null)

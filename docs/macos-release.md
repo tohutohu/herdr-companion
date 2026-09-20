@@ -4,10 +4,10 @@
 
 | 配布物 | 内容 | Bundle ID |
 | --- | --- | --- |
-| `Herdr.app` / `Herdr-x.y.z.dmg` | Compose Multiplatform UI、同梱JRE | `com.tohutohu.herdrcompanion.desktop` |
-| `Herdr Companion.app` / `Herdr-Companion-x.y.z.dmg` | SwiftUI Gateway Manager、同梱Go Gateway | `com.tohutohu.herdrcompanion.mac` |
+| `Herdr Companion.app` / `Herdr-Companion-x.y.z.dmg` | Compose Multiplatform UI、同梱JRE | `com.tohutohu.herdrcompanion.desktop` |
+| `Herdr Companion Gateway.app` / `Herdr-Companion-Gateway-x.y.z.dmg` | SwiftUI Gateway Manager、同梱Herdr Companion Gateway | `com.tohutohu.herdrcompanion.gateway` |
 
-`Herdr.app`はGatewayを内包せず、既存の`Herdr Companion.app`が起動したGatewayへ接続します。Gatewayが不要な利用者はUI DMGだけ、DesktopからMac上のセッションへ接続する利用者は2つのDMGを個別にインストールできます。
+`Herdr Companion.app`はGatewayを内包せず、既存の`Herdr Companion Gateway.app`が起動したGatewayへ接続します。Gatewayが不要な利用者はUI DMGだけ、DesktopからMac上のセッションへ接続する利用者は2つのDMGを個別にインストールできます。
 
 ## 固定しているビルド条件
 
@@ -41,15 +41,15 @@ build=1
 生成物:
 
 ```text
-dist/Herdr.app
-dist/Herdr-1.0.0.dmg
-dist/Herdr-1.0.0.dmg.sha256
 dist/Herdr Companion.app
 dist/Herdr-Companion-1.0.0.dmg
 dist/Herdr-Companion-1.0.0.dmg.sha256
+dist/Herdr Companion Gateway.app
+dist/Herdr-Companion-Gateway-1.0.0.dmg
+dist/Herdr-Companion-Gateway-1.0.0.dmg.sha256
 ```
 
-UIはComposeの`createReleaseDistributable`でJRE同梱のoptimized app imageを生成します。最終UI DMGには`Herdr.app`と`Applications`ショートカットだけを入れ、Gateway DMGには`Herdr Companion.app`と同じショートカットだけを入れます。
+UIはComposeの`createReleaseDistributable`でJRE同梱のoptimized app imageを生成します。最終UI DMGには`Herdr Companion.app`と`Applications`ショートカットだけを入れ、Gateway DMGには`Herdr Companion Gateway.app`と同じショートカットだけを入れます。
 
 ### Composeの公式タスク
 
@@ -134,11 +134,11 @@ release wrapperは各DMGについて次を実行します。
 ```bash
 REQUIRE_SIGNED=1 EXPECT_NOTARIZED=1 \
   ./scripts/verify-macos-release.sh \
-  dist/Herdr.app dist/Herdr-1.0.0.dmg
+  'dist/Herdr Companion.app' dist/Herdr-Companion-1.0.0.dmg
 
 REQUIRE_SIGNED=1 EXPECT_NOTARIZED=1 \
   ./scripts/verify-macos-release.sh \
-  'dist/Herdr Companion.app' dist/Herdr-Companion-1.0.0.dmg
+  'dist/Herdr Companion Gateway.app' dist/Herdr-Companion-Gateway-1.0.0.dmg
 ```
 
 ローカルunsigned buildの確認には`ALLOW_UNSIGNED=1`を指定できます。`spctl`が通らないことはunsigned buildでは想定内であり、Gatekeeper回避をインストール手順にはしません。
@@ -148,31 +148,31 @@ REQUIRE_SIGNED=1 EXPECT_NOTARIZED=1 \
 IDEや`Gradle run`ではなく、生成したbundleを直接起動します。
 
 ```bash
-open dist/Herdr.app
 open 'dist/Herdr Companion.app'
+open 'dist/Herdr Companion Gateway.app'
 ```
 
-UIだけを先に入れた場合、Gateway設定が存在しないとUIは設定案内を表示します。設定画面または接続画面の`Start Gateway manager`から、別アプリの`Herdr Companion.app`へ起動要求を送れます。managerが設定を作成・Gatewayを起動すると、UIは設定を再読込して接続します。GatewayはUIへ隠れて同梱しません。設定は`~/.config/herdr-mobile/desktop/config.json`、ログと状態は`~/.local/state/herdr-mobile/desktop/`です。
+UIだけを先に入れた場合、Gateway設定が存在しないとUIは設定案内を表示します。設定画面または接続画面の`Start Gateway manager`から、別アプリの`Herdr Companion Gateway.app`へ起動要求を送れます。managerが設定を作成・Gatewayを起動すると、UIは設定を再読込して接続します。GatewayはUIへ隠れて同梱しません。設定は`~/.config/herdr-mobile/desktop/config.json`、ログと状態は`~/.local/state/herdr-mobile/desktop/`です。
 
 ## インストール手順
 
 UIだけの場合:
 
-1. `Herdr-x.y.z.dmg`を開く
-2. `Herdr.app`を`Applications`へドラッグする
-3. `Herdr`を起動する
+1. `Herdr-Companion-x.y.z.dmg`を開く
+2. `Herdr Companion.app`を`Applications`へドラッグする
+3. `Herdr Companion`を起動する
 
-Gatewayも使う場合は、別途`Herdr-Companion-x.y.z.dmg`を開いて`Herdr Companion.app`を`Applications`へドラッグし、先に起動します。Developer ID署名とnotarization済みのreleaseでは、右クリックの「開く」や`xattr -d com.apple.quarantine`は通常手順にしません。
+Gatewayも使う場合は、別途`Herdr-Companion-Gateway-x.y.z.dmg`を開いて`Herdr Companion Gateway.app`を`Applications`へドラッグし、先に起動します。Developer ID署名とnotarization済みのreleaseでは、右クリックの「開く」や`xattr -d com.apple.quarantine`は通常手順にしません。
 
 ## GitHub Actions / GitHub Release
 
 [`.github/workflows/macos-release.yml`](../.github/workflows/macos-release.yml)は`v*` tag pushまたはmanual dispatchで動きます。`macos-14` arm64 runner上で、JDK 17、Gradle cache、Go 1.24、Android/shared regression、Gateway test/vet、release APK生成、temporary keychain、2つのrelease DMG生成、verification、artifact uploadを順に実行します。tag push時は次の6ファイルをGitHub Releaseへ添付します。
 
 ```text
-Herdr-x.y.z.dmg
-Herdr-x.y.z.dmg.sha256
 Herdr-Companion-x.y.z.dmg
 Herdr-Companion-x.y.z.dmg.sha256
+Herdr-Companion-Gateway-x.y.z.dmg
+Herdr-Companion-Gateway-x.y.z.dmg.sha256
 Herdr-Companion-Android-x.y.z.apk
 Herdr-Companion-Android-x.y.z.apk.sha256
 ```

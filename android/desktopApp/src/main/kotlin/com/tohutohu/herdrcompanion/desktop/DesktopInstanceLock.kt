@@ -27,7 +27,7 @@ internal class DesktopInstanceLock private constructor(
         private const val BUNDLE_ID = "com.tohutohu.herdrcompanion.desktop"
 
         fun tryAcquire(home: Path = defaultHome()): DesktopInstanceLock? {
-            val directory = home.resolve("Library/Application Support/Herdr")
+            val directory = home.resolve("Library/Application Support/Herdr Companion")
             runCatching { Files.createDirectories(directory) }.getOrNull() ?: return null
             val channel = runCatching {
                 FileChannel.open(directory.resolve("instance.lock"), CREATE, WRITE)

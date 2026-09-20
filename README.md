@@ -11,7 +11,7 @@ Mac 上の [Herdr](https://herdr.dev) で動いている Claude Code / Codex / O
 - アプリから新しいセッションを起動（Claude Code / Codex / OpenCode、フォルダの選択・新規作成）
 
 ```text
-Android ──(Tailscale推奨 / trusted LAN, HTTP + Bearer)──▶ herdr-mobile-gateway (Mac) ──▶ Herdr / Claude Code / Codex
+Android ──(Tailscale推奨 / trusted LAN / HTTPS tunnel, HTTP(S) + Bearer)──▶ Herdr Companion Gateway (Mac) ──▶ Herdr / Claude Code / Codex
 ```
 
 設計の詳細は [docs/architecture.md](docs/architecture.md) を参照してください。
@@ -19,8 +19,8 @@ Gateway は独自の会話 DB を持たず、Herdr と各エージェント自�
 
 ## Macのメニューバーアプリから始める
 
-[macos/README.md](macos/README.md)にDMGの作成・導入手順があります。メニューバーからGatewayを起動し、Androidの「Scan Mac QR」で接続できます。
-Compose Desktop UIの配布（`Herdr.app`）と、SwiftUI Gateway Manager + Go Gatewayの配布（`Herdr Companion.app`）は別アプリ・別DMGです。詳細は[macOS release guide](docs/macos-release.md)を参照してください。
+[macos/README.md](macos/README.md)にDMGの作成・導入手順があります。メニューバーからHerdr Companion Gatewayを起動し、Androidの「Scan Mac QR」で接続できます。
+Compose Desktop UIの配布（`Herdr Companion.app`）と、SwiftUI Gateway Manager + Go Gatewayの配布（`Herdr Companion Gateway.app`）は別アプリ・別DMGです。詳細は[macOS release guide](docs/macos-release.md)を参照してください。
 Firebase秘密鍵・Jevキーはどちらも任意です。未設定でも閲覧・送信・承認・セッション起動を利用できます。
 通知を使う場合は、Mac画面でサービスアカウントJSONと`google-services.json`を取り込んでからペアリングしてください。Androidの再ビルドは不要です。
 以下は従来のCLIによるセットアップ手順です。
@@ -155,7 +155,9 @@ tailscale ip -4               # 例: 100.101.102.103
 
 アプリの Gateway URL 例: `http://my-mac.<tailnet名>.ts.net:8765` または `http://100.101.102.103:8765`
 
-Tailscaleを使わない場合は、MacとAndroidを同じ信頼できる家庭・社内LANに接続し、MacのプライベートIPv4（`192.168.x.x`、`10.x.x.x`、`172.16.x.x`〜`172.31.x.x`）をGateway URLに設定できます。Macのメニューバーアプリは、Tailscaleが見つからない場合にローカルIPv4も検出します。
+Tailscaleを使わない場合は、MacとAndroidを同じ信頼できる家庭・社内LANに接続し、MacのIPをGateway URLに設定できます。Macのメニューバーアプリは、Tailscaleが見つからない場合にローカルIPv4も検出します。
+
+Cloudflare Tunnelなどを使う場合は、Mac上のGatewayを通常どおり起動し、AndroidのSettingsでGateway URLにTunnelの`https://...` URLを入力します。認証トークンは同じGatewayのものを使います。公開経路ではHTTPSのTunnelを使い、平文HTTPをインターネットへ直接公開しないでください。
 
 CLIでTailscale IPだけに待ち受けさせたい場合は次のようにします:
 
@@ -245,7 +247,7 @@ JDK 17 を使ってください（例: `export JAVA_HOME=$(/usr/libexec/java_hom
 `local.properties` に `sdk.dir` がない場合は Android Studio で一度開くか手動で作成します。
 
 初回起動時は「Scan Mac QR」でMacのQRを読み取るか、Gateway URLと認証トークンを入力し「Test connection」→「Save」。
-Tailscaleを使う場合はMagicDNS名またはTailscale IP（`http://100.x.y.z:8765`）、LANで使う場合はMacのプライベートIP（例: `http://192.168.1.20:8765`）を指定してください。
+Tailscaleを使う場合はMagicDNS名またはTailscale IP（`http://100.x.y.z:8765`）、LANで使う場合はMacのIP（例: `http://192.168.1.20:8765`）、Tunnel経由なら`https://...`のTunnel URLを指定してください。
 
 デバッグビルドは adb から設定を渡せます（日本語 IME で `adb shell input text` が変換されるのを避けるため）。受け口は adb にしか送れない receiver です:
 
