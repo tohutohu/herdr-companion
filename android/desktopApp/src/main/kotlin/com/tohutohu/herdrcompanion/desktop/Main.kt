@@ -7,7 +7,6 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -47,7 +46,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -375,26 +373,45 @@ private fun FrameWindowScope.DesktopShell(
                         )
                         .pointerHoverIcon(PointerIcon(Cursor.getPredefinedCursor(Cursor.E_RESIZE_CURSOR))),
                 )
-                Box(Modifier.weight(1f).fillMaxHeight().widthIn(min = minDetailWidth)) {
+                BoxWithConstraints(
+                    Modifier.weight(1f).fillMaxHeight().widthIn(min = minDetailWidth),
+                ) {
                     val detailIds = state.openSessionIds
                     if (detailIds.isEmpty()) {
                         EmptyDetail(state)
                     } else {
-                        val paneScrollState = rememberScrollState()
-                        Row(
-                            Modifier
-                                .fillMaxSize()
-                                .horizontalScroll(paneScrollState),
-                        ) {
+                        val paneCount = detailIds.size
+                        var paneWeights by remember { mutableStateOf(emptyList<Float>()) }
+                        val weights = paneWeights.takeIf { it.size == paneCount }
+                            ?: equalPaneWeights(paneCount)
+                        LaunchedEffect(paneCount) {
+                            paneWeights = equalPaneWeights(paneCount)
+                        }
+                        val dividerWidth = 8.dp
+                        val paneWidth = (maxWidth - dividerWidth * (paneCount - 1)).coerceAtLeast(0.dp)
+                        val density = androidx.compose.ui.platform.LocalDensity.current
+                        Row(Modifier.fillMaxSize()) {
                             detailIds.forEachIndexed { index, id ->
                                 if (index > 0) {
-                                    VerticalDivider(Modifier.fillMaxHeight().width(1.dp))
+                                    DesktopPaneDivider(
+                                        onDrag = { deltaPx ->
+                                            val current = paneWeights.takeIf { it.size == paneCount }
+                                                ?: equalPaneWeights(paneCount)
+                                            paneWeights = adjustPaneDividerWeights(
+                                                current = current,
+                                                dividerIndex = index - 1,
+                                                deltaPx = deltaPx,
+                                                paneWidthPx = with(density) { paneWidth.toPx() },
+                                                minimumPaneWidthPx = with(density) { MIN_SPLIT_DETAIL_WIDTH.toPx() },
+                                            )
+                                        },
+                                    )
                                 }
                                 key(id) {
                                     Box(
                                         Modifier
+                                            .weight(weights[index])
                                             .fillMaxHeight()
-                                            .width(if (detailIds.size > 1) MIN_SPLIT_DETAIL_WIDTH else MIN_DETAIL_WIDTH),
                                     ) {
                                         DesktopSessionPane(
                                             state = state,
@@ -455,6 +472,53 @@ private fun FrameWindowScope.DesktopShell(
             confirmButton = { TextButton(onClick = { aboutOpen = false }) { Text("OK") } },
         )
     }
+}
+
+@Composable
+private fun DesktopPaneDivider(onDrag: (Float) -> Unit) {
+    val dragState = rememberDraggableState { deltaPx -> onDrag(deltaPx) }
+    Box(
+        modifier = Modifier
+            .width(8.dp)
+            .fillMaxHeight()
+            .draggable(
+                orientation = Orientation.Horizontal,
+                state = dragState,
+            )
+            .pointerHoverIcon(PointerIcon(Cursor.getPredefinedCursor(Cursor.E_RESIZE_CURSOR))),
+        contentAlignment = Alignment.Center,
+    ) {
+        VerticalDivider(Modifier.fillMaxHeight().width(1.dp))
+    }
+}
+
+internal fun equalPaneWeights(paneCount: Int): List<Float> =
+    List(paneCount.coerceAtLeast(0)) { 1f }
+
+internal fun adjustPaneDividerWeights(
+    current: List<Float>,
+    dividerIndex: Int,
+    deltaPx: Float,
+    paneWidthPx: Float,
+    minimumPaneWidthPx: Float,
+): List<Float> {
+    if (dividerIndex !in 0 until current.lastIndex || paneWidthPx <= 0f) return current
+    val totalWeight = current.sum()
+    val pairWeight = current[dividerIndex] + current[dividerIndex + 1]
+    if (totalWeight <= 0f || pairWeight <= 0f) return current
+
+    val pairWidthPx = paneWidthPx * pairWeight / totalWeight
+    if (pairWidthPx <= 0f) return current
+    val leftWidthPx = paneWidthPx * current[dividerIndex] / totalWeight
+    val minimumWidthPx = minimumPaneWidthPx.coerceAtMost(pairWidthPx / 2f)
+    val newLeftWidthPx = (leftWidthPx + deltaPx).coerceIn(
+        minimumWidthPx,
+        pairWidthPx - minimumWidthPx,
+    )
+    val updated = current.toMutableList()
+    updated[dividerIndex] = pairWeight * newLeftWidthPx / pairWidthPx
+    updated[dividerIndex + 1] = pairWeight - updated[dividerIndex]
+    return updated
 }
 
 @Composable
