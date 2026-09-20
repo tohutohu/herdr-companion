@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.StopCircle
 import androidx.compose.material.icons.filled.Unarchive
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxDefaults
@@ -51,6 +52,7 @@ import kotlinx.coroutines.flow.drop
 internal fun SwipeableSessionRow(
     action: SwipeAction,
     engaged: Boolean,
+    busy: Boolean,
     enabled: Boolean,
     onSwipe: () -> Unit,
     modifier: Modifier = Modifier,
@@ -73,10 +75,11 @@ internal fun SwipeableSessionRow(
             }
         }
     }
-    // Settled off screen: hand the row to the action, or slide back if it
-    // declined it (e.g. the same session is already being changed).
-    LaunchedEffect(state.currentValue) {
-        if (state.currentValue == SwipeToDismissBoxValue.Settled) return@LaunchedEffect
+    // Fully dismissed: hand the row to the action. Waiting for settledValue
+    // lets SwipeToDismissBox animate from the threshold to the full-width
+    // dismiss anchor before the action engages the row.
+    LaunchedEffect(state.settledValue) {
+        if (state.settledValue == SwipeToDismissBoxValue.Settled) return@LaunchedEffect
         onSwipe()
     }
     // The action let go of the row (or its confirmation was canceled) and it
@@ -95,6 +98,7 @@ internal fun SwipeableSessionRow(
                 action,
                 reached = state.targetValue != SwipeToDismissBoxValue.Settled,
                 direction = state.dismissDirection,
+                busy = busy,
             )
         },
     ) {
@@ -103,7 +107,12 @@ internal fun SwipeableSessionRow(
 }
 
 @Composable
-private fun SwipeBackground(action: SwipeAction, reached: Boolean, direction: SwipeToDismissBoxValue) {
+private fun SwipeBackground(
+    action: SwipeAction,
+    reached: Boolean,
+    direction: SwipeToDismissBoxValue,
+    busy: Boolean,
+) {
     val scheme = MaterialTheme.colorScheme
     val (container, onContainer) = when (action) {
         SwipeAction.ARCHIVE -> scheme.tertiaryContainer to scheme.onTertiaryContainer
@@ -146,5 +155,6 @@ private fun SwipeBackground(action: SwipeAction, reached: Boolean, direction: Sw
                 Text(action.label, color = tint, style = MaterialTheme.typography.labelLarge)
             }
         }
+        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.BottomCenter))
     }
 }

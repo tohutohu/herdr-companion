@@ -272,13 +272,13 @@ fun LazyItemScope.SessionItem(
             SwipeableSessionRow(
                 action = swipeActionFor(ref),
                 engaged = engaged,
+                busy = busy,
                 enabled = !selection.active,
                 onSwipe = { if (ref.archived) onUnarchive(ref) else onArchive(ref) },
             ) {
                 SessionRow(
                     s = s,
                     relativeUpdatedAt = item.relativeUpdatedAt,
-                    busy = busy,
                     selected = item.selected || selection.contains(s.id),
                     selecting = selection.active,
                     onClick = { if (selection.active) selection.toggle(s.id) else onOpen(s.id) },
@@ -308,7 +308,6 @@ fun SwitchingTopBar(selecting: Boolean, selectionBar: @Composable () -> Unit, ba
 internal fun SessionRow(
     s: SessionUiModel,
     relativeUpdatedAt: String,
-    busy: Boolean,
     selected: Boolean,
     selecting: Boolean,
     onClick: () -> Unit,
@@ -406,6 +405,5 @@ internal fun SessionRow(
                 )
             }
         }
-        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.BottomCenter))
     }
 }
