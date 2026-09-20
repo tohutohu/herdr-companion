@@ -28,6 +28,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -91,15 +93,20 @@ private val HTML_EXTENSIONS = setOf("htm", "html")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FileViewerScreen(sessionId: String, path: String, line: Int, onBack: () -> Unit) {
-    val api = LocalContext.current.container.api
+    val context = LocalContext.current
+    val api = context.container.api
+    val downloads = context.container.downloads
+    val downloadState by remember(sessionId, path) { downloads.state(sessionId, path) }.collectAsState()
+    var info by remember(sessionId, path) { mutableStateOf<FileInfoDto?>(null) }
     var state by remember(sessionId, path) { mutableStateOf<FileState>(FileState.Loading) }
     LaunchedEffect(sessionId, path) {
         state = try {
-            val info = api.fileStat(sessionId, path)
-            if (displayType(info).let { it.startsWith("video/") || it.startsWith("audio/") || it == "application/ogg" }) {
-                FileState.Media(info)
-            } else if (!info.previewable) {
-                FileState.Download(info)
+            val loaded = api.fileStat(sessionId, path)
+            info = loaded
+            if (displayType(loaded).let { it.startsWith("video/") || it.startsWith("audio/") || it == "application/ogg" }) {
+                FileState.Media(loaded)
+            } else if (!loaded.previewable) {
+                FileState.Download(loaded)
             } else {
                 val (type, bytes) = api.fileContent(sessionId, path)
                 when {
@@ -107,9 +114,9 @@ fun FileViewerScreen(sessionId: String, path: String, line: Int, onBack: () -> U
                     type.startsWith("text/") -> FileState.Text(
                         lines = bytes.decodeToString().lines().take(MAX_LINES),
                         markdown = isMarkdownFile(path) || type.substringBefore(';').equals("text/markdown", ignoreCase = true),
-                        htmlInfo = info.takeIf { isHtmlFile(path) },
+                        htmlInfo = loaded.takeIf { isHtmlFile(path) },
                     )
-                    else -> FileState.Download(info)
+                    else -> FileState.Download(loaded)
                 }
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
@@ -127,6 +134,13 @@ fun FileViewerScreen(sessionId: String, path: String, line: Int, onBack: () -> U
                 },
                 title = {
                     Text(path.substringAfterLast('/'), maxLines = 1)
+                },
+                actions = {
+                    FileDownloadAction(
+                        available = info != null,
+                        state = downloadState,
+                        onDownload = { info?.let { downloads.start(sessionId, it.path, it.name, it.size) } },
+                    )
                 },
             )
         },
@@ -150,6 +164,24 @@ fun FileViewerScreen(sessionId: String, path: String, line: Int, onBack: () -> U
                     is FileState.Download -> Box(Modifier.padding(bottom = bottom)) { DownloadView(sessionId, s.info) }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun FileDownloadAction(available: Boolean, state: DownloadState, onDownload: () -> Unit) {
+    if (!available) return
+    IconButton(onClick = onDownload, enabled = state !is DownloadState.Running) {
+        when (state) {
+            is DownloadState.Running -> CircularProgressIndicator(
+                strokeWidth = 2.dp,
+                modifier = Modifier.size(20.dp),
+            )
+            is DownloadState.Done -> Icon(Icons.Default.Check, contentDescription = "Saved to Downloads")
+            else -> Icon(
+                Icons.Default.Download,
+                contentDescription = if (state is DownloadState.Failed) "Retry download" else "Download file",
+            )
         }
     }
 }
