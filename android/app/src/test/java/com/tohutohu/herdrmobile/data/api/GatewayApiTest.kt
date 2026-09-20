@@ -11,6 +11,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.io.ByteArrayOutputStream
 
 class GatewayApiTest {
     private val server = MockWebServer()
@@ -35,6 +36,34 @@ class GatewayApiTest {
         assertEquals("claude:s/1", request.url.pathSegments[2])
         assertEquals("Bearer secret", request.header("Authorization"))
         assertTrue(!request.url.toString().contains("secret"))
+    }
+
+    @Test
+    fun `画像URLを認証付きでストリームしレスポンス情報を返す`() = runBlocking {
+        server.enqueue(
+            MockResponse.Builder()
+                .addHeader("Content-Type", "image/png; charset=binary")
+                .body("png")
+                .build(),
+        )
+        val out = ByteArrayOutputStream()
+        var headers: DownloadMetadata? = null
+        var progress = 0L
+        val metadata = api.downloadUrl(
+            "/v1/sessions/claude:s1/messages/m1/images/0",
+            out,
+            onHeaders = { headers = it },
+            onProgress = { progress = it },
+        )
+
+        val req = server.takeRequest()
+        assertEquals("/v1/sessions/claude:s1/messages/m1/images/0", req.target)
+        assertEquals("Bearer secret", req.headers["Authorization"])
+        assertEquals("image/png", metadata.mimeType)
+        assertEquals(3L, metadata.contentLength)
+        assertEquals(metadata, headers)
+        assertEquals(3L, progress)
+        assertEquals("png", out.toString())
     }
 
     @Test

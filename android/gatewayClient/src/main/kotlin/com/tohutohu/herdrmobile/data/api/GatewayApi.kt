@@ -20,6 +20,11 @@ import java.util.concurrent.TimeUnit
 
 class GatewayException(val code: Int, message: String) : IOException(message)
 
+data class DownloadMetadata(
+    val mimeType: String,
+    val contentLength: Long,
+)
+
 /** Thin OkHttp client for the gateway HTTP API, shared by Android and Desktop JVM. */
 class GatewayApi(
     private val http: OkHttpClient,
@@ -175,6 +180,50 @@ class GatewayApi(
                     onProgress(total)
                 }
             }
+        }
+    }
+
+    /** Streams an authenticated gateway URL and reports its response metadata. */
+    suspend fun downloadUrl(
+        rawUrl: String,
+        out: OutputStream,
+        onHeaders: (DownloadMetadata) -> Unit,
+        onProgress: (Long) -> Unit,
+    ): DownloadMetadata = withContext(Dispatchers.IO) {
+        val target = absolute(rawUrl).toHttpUrlOrNull()
+            ?: throw GatewayException(0, "Invalid download URL")
+        val gateway = base()
+        if (target.scheme != gateway.scheme || target.host != gateway.host || target.port != gateway.port) {
+            throw GatewayException(0, "Download URL is not from the configured gateway")
+        }
+        val req = request(target).get().build()
+        http.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) {
+                val body = resp.body.string()
+                val msg = runCatching { json.decodeFromString<ErrorResponse>(body).error }.getOrNull()
+                    ?: "HTTP ${resp.code}"
+                throw GatewayException(resp.code, msg)
+            }
+            val metadata = DownloadMetadata(
+                mimeType = resp.header("Content-Type")?.substringBefore(';')?.trim()
+                    ?.takeIf { it.isNotEmpty() }
+                    ?: "application/octet-stream",
+                contentLength = resp.body.contentLength().coerceAtLeast(0),
+            )
+            onHeaders(metadata)
+            resp.body.byteStream().use { input ->
+                val buf = ByteArray(64 * 1024)
+                var total = 0L
+                while (true) {
+                    ensureActive()
+                    val n = input.read(buf)
+                    if (n < 0) break
+                    out.write(buf, 0, n)
+                    total += n
+                    onProgress(total)
+                }
+            }
+            metadata
         }
     }
 
