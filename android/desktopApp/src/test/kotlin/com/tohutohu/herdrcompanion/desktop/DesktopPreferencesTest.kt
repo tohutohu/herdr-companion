@@ -1,5 +1,7 @@
 package com.tohutohu.herdrcompanion.desktop
 
+import com.tohutohu.herdrcompanion.data.AgentPreset
+import com.tohutohu.herdrcompanion.data.AgentPresets
 import java.awt.Rectangle
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -42,5 +44,25 @@ class DesktopPreferencesTest {
                 listOf(display),
             ),
         )
+    }
+
+    @Test
+    fun `shortcut preferences preserve order and remove duplicate paths`() {
+        val encoded = encodeLines(listOf("/work/a", "", "/work/b", "/work/a"))
+
+        assertEquals("/work/a\n/work/b", encoded)
+        assertEquals(listOf("/work/a", "/work/b"), decodeLines(encoded))
+        assertEquals(emptyList(), decodeLines(null))
+    }
+
+    @Test
+    fun `agent preset preferences round trip and invalid data starts empty`() {
+        val value = AgentPresets(
+            presets = listOf(AgentPreset("codex", "gpt-6-astra", "high", "Astra", "High")),
+            lastUsed = AgentPreset("claude", model = "sonnet"),
+        )
+
+        assertEquals(value, decodeAgentPresets(encodeAgentPresets(value)))
+        assertEquals(AgentPresets(), decodeAgentPresets("not json"))
     }
 }

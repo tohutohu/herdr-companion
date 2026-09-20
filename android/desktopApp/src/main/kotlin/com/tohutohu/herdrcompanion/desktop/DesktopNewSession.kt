@@ -26,7 +26,12 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogWindow
 import androidx.compose.ui.window.rememberDialogState
-import com.tohutohu.herdrcompanion.data.DirectoryShortcuts
+import com.tohutohu.herdrcompanion.data.AgentPreset
+import com.tohutohu.herdrcompanion.data.AgentPresets
+import com.tohutohu.herdrcompanion.data.lastUsedDirectory
+import com.tohutohu.herdrcompanion.data.pushRecent
+import com.tohutohu.herdrcompanion.data.toggleFavorite
+import com.tohutohu.herdrcompanion.data.togglePreset
 import com.tohutohu.herdrcompanion.data.api.DirListingDto
 import com.tohutohu.herdrcompanion.data.api.GatewayApi
 import com.tohutohu.herdrcompanion.data.api.ModelsResponse
@@ -37,7 +42,9 @@ import com.tohutohu.herdrcompanion.ui.newsession.NewSessionScreen
 import com.tohutohu.herdrcompanion.ui.newsession.NewSessionUiState
 import com.tohutohu.herdrcompanion.ui.newsession.PendingNewSessionStart
 import com.tohutohu.herdrcompanion.ui.newsession.agentPreset
+import com.tohutohu.herdrcompanion.ui.newsession.effortsFor
 import com.tohutohu.herdrcompanion.ui.newsession.needsDirectoryConfirmation
+import com.tohutohu.herdrcompanion.ui.newsession.withKnownNames
 import kotlinx.coroutines.launch
 
 @Composable
@@ -49,6 +56,8 @@ fun DesktopNewSessionWindow(
 ) {
     val scope = rememberCoroutineScope()
     val promptFocusRequester = remember { FocusRequester() }
+    var shortcuts by remember { mutableStateOf(DesktopPreferences.loadDirectoryShortcuts()) }
+    var presets by remember { mutableStateOf(DesktopPreferences.loadAgentPresets()) }
     var provider by rememberSaveable { mutableStateOf("claude") }
     var path by rememberSaveable { mutableStateOf("") }
     var listing by remember { mutableStateOf<DirListingDto?>(null) }
@@ -89,9 +98,15 @@ fun DesktopNewSessionWindow(
         if (result.trustRequired) trustRequest = result else onCreated(result.sessionId)
     }
 
-    fun start(request: StartSessionRequest) {
+    fun start(request: StartSessionRequest, preset: AgentPreset) {
         if (starting) return
         starting = true
+        // Match Android: remember what was actually started, including the
+        // last-used selection even when it is not one of the favorites.
+        shortcuts = shortcuts.copy(recents = pushRecent(shortcuts.recents, request.cwd))
+        DesktopPreferences.saveDirectoryShortcuts(shortcuts)
+        presets = presets.copy(lastUsed = preset)
+        DesktopPreferences.saveAgentPresets(presets)
         scope.launch {
             try {
                 finish(api.startSession(request))
@@ -123,7 +138,14 @@ fun DesktopNewSessionWindow(
         }
     }
 
-    LaunchedEffect(Unit) { load(null) }
+    LaunchedEffect(Unit) {
+        presets.lastUsed?.let {
+            provider = it.provider
+            model = it.model
+            effort = it.effort
+        }
+        load(lastUsedDirectory(shortcuts).ifEmpty { null })
+    }
     LaunchedEffect(provider) {
         catalog = ModelsResponse()
         modelsError = null
@@ -137,7 +159,10 @@ fun DesktopNewSessionWindow(
         }
     }
 
-    val currentPreset = agentPreset(provider, model, effort, catalog)
+    val currentPreset = withKnownNames(
+        agentPreset(provider, model, effort, catalog),
+        presets.presets + listOfNotNull(presets.lastUsed),
+    )
     val state = NewSessionUiState(
         provider = provider,
         path = path,
@@ -154,10 +179,10 @@ fun DesktopNewSessionWindow(
         effort = effort,
         catalog = catalog,
         modelsError = modelsError,
-        shortcuts = DirectoryShortcuts(),
-        savedPresets = emptyList(),
+        shortcuts = shortcuts,
+        savedPresets = presets.presets,
         currentPreset = currentPreset,
-        favorite = false,
+        favorite = presets.presets.any { it.key == currentPreset.key },
     )
 
     if (trustRequest != null) {
@@ -212,7 +237,10 @@ fun DesktopNewSessionWindow(
                     when (action) {
                         NewSessionAction.Back -> onDismiss()
                         is NewSessionAction.SetProvider -> provider = action.provider
-                        is NewSessionAction.SetModel -> model = action.model
+                        is NewSessionAction.SetModel -> {
+                            model = action.model
+                            if (effortsFor(catalog, action.model).none { it.id == effort }) effort = ""
+                        }
                         is NewSessionAction.SetEffort -> effort = action.effort
                         is NewSessionAction.SetPrompt -> prompt = action.prompt
                         is NewSessionAction.SelectPreset -> {
@@ -220,10 +248,22 @@ fun DesktopNewSessionWindow(
                             model = action.preset.model
                             effort = action.preset.effort
                         }
-                        is NewSessionAction.ReorderPresets,
-                        is NewSessionAction.ReorderFavoriteDirectories,
-                        NewSessionAction.ToggleFavorite,
-                        NewSessionAction.ToggleFavoriteDirectory -> Unit
+                        is NewSessionAction.ReorderPresets -> {
+                            presets = presets.copy(presets = action.presets)
+                            DesktopPreferences.saveAgentPresets(presets)
+                        }
+                        is NewSessionAction.ReorderFavoriteDirectories -> {
+                            shortcuts = shortcuts.copy(favorites = action.paths)
+                            DesktopPreferences.saveDirectoryShortcuts(shortcuts)
+                        }
+                        NewSessionAction.ToggleFavorite -> {
+                            presets = presets.copy(presets = togglePreset(presets.presets, currentPreset))
+                            DesktopPreferences.saveAgentPresets(presets)
+                        }
+                        NewSessionAction.ToggleFavoriteDirectory -> {
+                            shortcuts = shortcuts.copy(favorites = toggleFavorite(shortcuts.favorites, path))
+                            DesktopPreferences.saveDirectoryShortcuts(shortcuts)
+                        }
                         NewSessionAction.CustomizeAgent -> showPicker = true
                         is NewSessionAction.OpenDirectory -> scope.launch { load(action.path) }
                         NewSessionAction.OpenParent -> scope.launch { load(listing?.parent) }
@@ -245,7 +285,7 @@ fun DesktopNewSessionWindow(
                         NewSessionAction.StartAnyway -> {
                             pendingStart?.let {
                                 pendingStart = null
-                                start(it.request)
+                                start(it.request, it.preset)
                             }
                         }
                         NewSessionAction.ChangeFolder -> pendingStart = null
@@ -265,7 +305,7 @@ fun DesktopNewSessionWindow(
                                         if (needsDirectoryConfirmation(request) { api.checkDirectory(it.cwd, it.prompt) }) {
                                             pendingStart = PendingNewSessionStart(request, currentPreset)
                                         } else {
-                                            start(request)
+                                            start(request, currentPreset)
                                         }
                                     } finally {
                                         checking = false

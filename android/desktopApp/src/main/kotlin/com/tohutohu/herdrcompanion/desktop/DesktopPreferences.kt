@@ -3,6 +3,9 @@ package com.tohutohu.herdrcompanion.desktop
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.WindowPlacement
+import com.tohutohu.herdrcompanion.data.AgentPresets
+import com.tohutohu.herdrcompanion.data.DirectoryShortcuts
+import kotlinx.serialization.json.Json
 import java.awt.Frame
 import java.awt.GraphicsEnvironment
 import java.awt.Rectangle
@@ -70,6 +73,9 @@ object DesktopPreferences {
     private const val WINDOW_KEY = "window"
     private const val SIDEBAR_KEY = "sidebarWidth"
     private const val NOTIFICATIONS_KEY = "notificationsEnabled"
+    private const val DIRECTORY_FAVORITES_KEY = "directoryFavorites"
+    private const val DIRECTORY_RECENTS_KEY = "directoryRecents"
+    private const val AGENT_PRESETS_KEY = "agentPresets"
 
     private val store: Preferences
         get() = Preferences.userRoot().node(NODE)
@@ -110,6 +116,23 @@ object DesktopPreferences {
         store.putFloat(SIDEBAR_KEY, width.coerceIn(MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH))
     }
 
+    /** New-session shortcuts are local Desktop preferences, not Gateway data. */
+    fun loadDirectoryShortcuts(): DirectoryShortcuts = DirectoryShortcuts(
+        favorites = decodeLines(store.get(DIRECTORY_FAVORITES_KEY, null)),
+        recents = decodeLines(store.get(DIRECTORY_RECENTS_KEY, null)),
+    )
+
+    fun saveDirectoryShortcuts(shortcuts: DirectoryShortcuts) {
+        store.put(DIRECTORY_FAVORITES_KEY, encodeLines(shortcuts.favorites))
+        store.put(DIRECTORY_RECENTS_KEY, encodeLines(shortcuts.recents))
+    }
+
+    fun loadAgentPresets(): AgentPresets = decodeAgentPresets(store.get(AGENT_PRESETS_KEY, null))
+
+    fun saveAgentPresets(presets: AgentPresets) {
+        store.put(AGENT_PRESETS_KEY, encodeAgentPresets(presets))
+    }
+
     var notificationsEnabled: Boolean
         get() = store.getBoolean(NOTIFICATIONS_KEY, true)
         set(value) { store.putBoolean(NOTIFICATIONS_KEY, value) }
@@ -118,6 +141,20 @@ object DesktopPreferences {
         store.remove(WINDOW_KEY)
     }
 }
+
+/** Newline is sufficient here: the values are absolute filesystem paths. */
+internal fun encodeLines(values: List<String>): String =
+    values.filter { it.isNotEmpty() }.distinct().joinToString("\n")
+
+internal fun decodeLines(value: String?): List<String> =
+    value.orEmpty().split('\n').filter { it.isNotEmpty() }.distinct()
+
+internal fun decodeAgentPresets(value: String?): AgentPresets =
+    value?.let { runCatching { json.decodeFromString<AgentPresets>(it) }.getOrNull() } ?: AgentPresets()
+
+internal fun encodeAgentPresets(value: AgentPresets): String = json.encodeToString(value)
+
+private val json = Json { ignoreUnknownKeys = true }
 
 fun DesktopWindowSnapshot.position(): WindowPosition = if (x != null && y != null) {
     WindowPosition.Absolute(x.dp, y.dp)
