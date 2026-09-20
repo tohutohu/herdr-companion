@@ -1,29 +1,48 @@
 # Herdr Companion
 
-Mac 上の [Herdr](https://herdr.dev) で動いている Claude Code / Codex / OpenCode（v1・公式 v2）のセッションを、Android から確認・操作するためのアプリです。
+Mac 上の [Herdr](https://herdr.dev) で動いている Claude Code / Codex / OpenCode のセッションを、Android から確認・操作するためのアプリです。Mac で AI エージェントを走らせたまま、スマホから進捗を確認したり、質問に答えたり、次の指示を送ったりできます。
 
-- 完了・質問・承認待ちで Android に通知（タップで該当セッションへ）
-- 通知受信時にログを先読みして Room に保存（開いた瞬間に読める）
-- AskUserQuestion / Codex requestUserInput / 承認をネイティブ UI で回答
-- 会話中の画像のインライン表示、Android からの画像・ファイル送信
-- メッセージ内のファイル参照をタップしてファイルを表示
-- 非対応のダイアログは簡易ターミナル（`pane.read` + キー入力）で操作
-- アプリから新しいセッションを起動（Claude Code / Codex / OpenCode、フォルダの選択・新規作成）
+## このアプリの良さ
+
+特に便利なのは、アプリをずっと画面に出しておかなくてもセッションを追えることです。
+
+- エージェントの完了・質問・承認待ち・エラーを Android の通知で知らせる
+- 通知を受けた時点で会話をバックグラウンド取得し、端末の Room キャッシュへ保存する
+- 通知をタップすると、該当セッションの最新ログをすぐ開ける（ネットワーク状況によっては再試行）
+- 通知のインライン返信から、通常のメッセージをそのまま送れる
+- AskUserQuestion、Codex の `requestUserInput`、承認操作はネイティブ UI で回答できる
+- 画像・ファイルの送信、会話中の画像表示、メッセージ内のファイル参照にも対応
+- アプリから新しいセッションを起動し、作業フォルダやモデルも選べる
+
+通知から画面を開くまでの流れは次のとおりです。
 
 ```text
-Android ──(Tailscale推奨 / trusted LAN / HTTPS tunnel, HTTP(S) + Bearer)──▶ Herdr Companion Gateway (Mac) ──▶ Herdr / Claude Code / Codex
+Mac上のGatewayがHerdrを監視
+        │ FCM通知
+        ▼
+Androidがバックグラウンドで会話を取得 → Roomに保存 → 通知タップで即表示
+```
+
+Firebase のプロジェクト作成とサービスアカウント設定は、正直に言うとこのプロジェクトで一番面倒な部分です。ただし通知を使わない場合でも、閲覧・送信・承認・セッション起動は利用できます。通知を使う場合も、推奨のメニューバーアプリなら設定は一度だけで、共通 APK の再ビルドは必要ありません。
+
+Gateway は Mac 上で動き、会話データをクラウドへ保存する独自 DB は持ちません。Herdr と各エージェントのデータを読み、Android 側に必要な範囲だけキャッシュします。
+
+```text
+Android ──(Tailscale推奨 / trusted LAN / HTTPS tunnel, HTTP(S) + Bearer)──▶ Herdr Companion Gateway (Mac) ──▶ Herdr / Claude Code / Codex / OpenCode
 ```
 
 設計の詳細は [docs/architecture.md](docs/architecture.md) を参照してください。
-Gateway は独自の会話 DB を持たず、Herdr と各エージェント自身のデータを都度読みます。
 
-## Macのメニューバーアプリから始める
+## 最短の導入手順
 
-[macos/README.md](macos/README.md)にDMGの作成・導入手順があります。メニューバーからHerdr Companion Gatewayを起動し、Androidの「Scan Mac QR」で接続できます。
-Compose Desktop UIの配布（`Herdr Companion.app`）と、SwiftUI Gateway Manager + Go Gatewayの配布（`Herdr Companion Gateway.app`）は別アプリ・別DMGです。詳細は[macOS release guide](docs/macos-release.md)を参照してください。
-Firebase秘密鍵・Jevキーはどちらも任意です。未設定でも閲覧・送信・承認・セッション起動を利用できます。
-通知を使う場合は、Mac画面でサービスアカウントJSONと`google-services.json`を取り込んでからペアリングしてください。Androidの再ビルドは不要です。
-以下は従来のCLIによるセットアップ手順です。
+1. Mac に Herdr と Claude Code / Codex / OpenCode を用意し、必要な Herdr integration を入れる。
+2. Mac で `Herdr Companion Gateway.app` を起動し、Gateway を起動する。
+3. Android アプリの **Scan Mac QR** でメニューバーアプリのペアリング QR を読み取る。
+4. 通知が必要なら、Firebase を設定してから QR を発行し直してペアリングする。
+
+Gateway と Android の接続には、Mac と Android が同じ tailnet にいる Tailscale を推奨します。信頼できる LAN や HTTPS トンネルも利用できます。Mac のメニューバーアプリの使い方は [macos/README.md](macos/README.md)、DMG の作成・配布は [docs/macos-release.md](docs/macos-release.md) を参照してください。
+
+Firebase の秘密鍵と Jev の API キーは任意です。どちらも未設定のままペアリングできます。
 
 ## リポジトリ構成
 
@@ -51,7 +70,9 @@ Gateway はペインごとの「どのセッションが動いているか」を
 ```bash
 herdr integration install claude
 herdr integration install codex
-herdr integration status   # claude / codex が installed になっていること
+# OpenCode を使う場合は、OpenCode を一度起動してから実行
+herdr integration install opencode
+herdr integration status   # 利用する integration が installed になっていること
 ```
 
 インストール後に起動した Claude Code / Codex から認識されます（既存セッションは一度再起動してください）。
@@ -69,10 +90,20 @@ daemon を使わない通常の `codex` でも履歴の閲覧とメッセージ�
 
 ## 2. Gateway のセットアップ
 
+### メニューバー版（推奨）
+
+配布 DMG を使う場合は、`Herdr Companion Gateway.app` を Applications に入れて起動し、メニューバーのアイコンから Gateway を起動します。表示された接続先を確認して「ペアリングQRを表示」→ Android の「Scan Mac QR」で接続してください。
+
+`Herdr Companion.app`（Compose Desktop UI）も利用する場合は、UI 用 DMG を別途インストールします。Gateway Manager と UI は別アプリです。Firebase の取り込み、ログイン時起動、Gateway の start/stop もメニューバー版で管理できます。詳しくは [macos/README.md](macos/README.md) を参照してください。
+
+### CLI / launchd 版
+
+配布アプリを使わず、Gateway をソースから起動する場合は次の手順です。
+
 ```bash
 cd gateway
 go build -o ~/.local/bin/herdr-mobile-gateway ./cmd/herdr-mobile-gateway
-herdr-mobile-gateway token          # 初回実行で ~/.config/herdr-mobile/config.json と認証トークンを生成
+~/.local/bin/herdr-mobile-gateway token  # 初回実行で設定と認証トークンを生成
 ```
 
 `~/.config/herdr-mobile/config.json`（自動生成、パーミッション 600）:
@@ -196,40 +227,64 @@ Herdr サーバーはクラッシュ時のみ自動再起動し、`herdr server 
 
 ログ: `~/.local/state/herdr-mobile/gateway.log`（JSON、10MB × 3 世代でローテーション）
 
-## 3. Firebase（通知）のセットアップ
+## 3. Firebase（通知）のセットアップ（任意）
 
-秘密情報（`google-services.json`、サービスアカウント JSON）は **リポジトリにコミットしないでください**（`.gitignore` 済み）。
+通知まで有効にする場合だけ必要です。Firebase の設定は少し手間ですが、Gateway が Mac 上で FCM HTTP v1 を使って通知を送り、Android は通知受信後に会話をバックグラウンド取得します。これが「通知をタップしたら、すでに最新ログが読める」体験を支えています。
 
-1. [Firebase コンソール](https://console.firebase.google.com/) で新規プロジェクトを作成
-2. Android アプリを追加（パッケージ名 `com.tohutohu.herdrcompanion`）し、`google-services.json` を `android/app/google-services.json` に置く
-3. プロジェクトの設定 → サービスアカウント → 「新しい秘密鍵を生成」で JSON をダウンロードし、Mac に置く
-   ```bash
-   mv ~/Downloads/<project>-firebase-adminsdk-*.json ~/.config/herdr-mobile/firebase-service-account.json
-   chmod 600 ~/.config/herdr-mobile/firebase-service-account.json
-   ```
-4. Gateway に場所を渡す（どれか）
-   - 環境変数 `HERDR_MOBILE_FCM_CREDENTIALS`（launchd の plist で設定済み）
-   - `config.json` の `fcmCredentialsFile`
-   - `GOOGLE_APPLICATION_CREDENTIALS`
-5. アプリで Gateway 設定を保存すると端末が登録されます。確認:
-   ```bash
-   herdr-mobile-gateway devices
-   herdr-mobile-gateway notify-test
-   ```
+`google-services.json` とサービスアカウント秘密鍵 JSON は **リポジトリにコミットしないでください**（`.gitignore` 済み）。2つの JSON は同じ Firebase プロジェクトのものを使います。サービスアカウント秘密鍵は Gateway が動く Mac にだけ保存し、Android や QR には渡しません。
 
-CLI で行う場合（firebase CLI と gcloud にログイン済みのとき）:
+### 推奨: Mac のメニューバーアプリで取り込む
+
+1. [Firebase コンソール](https://console.firebase.google.com/) でプロジェクトを作成する。
+2. Android アプリを追加する。パッケージ名は `com.tohutohu.herdrcompanion`。
+3. Android 用の `google-services.json` をダウンロードする。
+4. プロジェクトの設定 → サービスアカウント → 「新しい秘密鍵を生成」でサービスアカウント JSON をダウンロードする。
+5. `Herdr Companion Gateway.app` の「通知 · Firebaseを持ち込む」で、2つの JSON を選んで「取り込む」を押す。
+6. Gateway を再起動し、ペアリング QR を発行し直して Android とペアリングする。
+
+メニューバーアプリは Android に必要な公開設定（API key、App ID、Project ID、Sender ID）だけをペアリング時に渡します。共通配布 APK の再ビルドは不要です。Android 13 以降では、初回起動時に通知の許可も有効にしてください。
+
+### CLI で取り込む場合
+
+Gateway を停止した状態で、同梱またはビルド済みの Gateway に2つのファイルを渡します。
+
+```bash
+herdr-mobile-gateway import-firebase \
+  --service-account "$HOME/Downloads/<project>-firebase-adminsdk-....json" \
+  --android-config "$PWD/android/app/google-services.json"
+```
+
+このコマンドは、サービスアカウントが Android アプリと同じ Firebase プロジェクトに属することを検証し、Gateway の設定へ保存します。通常の CLI / launchd 構成では、サービスアカウントを次の場所に置くとそのまま使えます。
+
+```bash
+mkdir -p "$HOME/.config/herdr-mobile"
+cp "$HOME/Downloads/<project>-firebase-adminsdk-....json" \
+  "$HOME/.config/herdr-mobile/firebase-service-account.json"
+chmod 600 "$HOME/.config/herdr-mobile/firebase-service-account.json"
+```
+
+Gateway を再起動して Android の設定を保存した後、登録確認とテスト通知を実行できます。
+
+```bash
+herdr-mobile-gateway devices
+herdr-mobile-gateway notify-test
+```
+
+Firebase CLI と gcloud でファイルを作る場合の例:
 
 ```bash
 PROJECT=herdr-client-android
-firebase apps:create android "Herdr Companion" --package-name com.tohutohu.herdrcompanion --project $PROJECT
-firebase apps:sdkconfig ANDROID <表示された App ID> --project $PROJECT --out android/app/google-services.json
-gcloud iam service-accounts keys create ~/.config/herdr-mobile/firebase-service-account.json \
-  --iam-account firebase-adminsdk-fbsvc@$PROJECT.iam.gserviceaccount.com --project $PROJECT
+firebase apps:create android "Herdr Companion" \
+  --package-name com.tohutohu.herdrcompanion --project "$PROJECT"
+firebase apps:sdkconfig ANDROID <表示された App ID> \
+  --project "$PROJECT" --out android/app/google-services.json
+gcloud iam service-accounts keys create \
+  "$HOME/.config/herdr-mobile/firebase-service-account.json" \
+  --iam-account firebase-adminsdk-fbsvc@"$PROJECT".iam.gserviceaccount.com \
+  --project "$PROJECT"
 ```
 
-Gateway は FCM HTTP v1 API に data-only / priority HIGH のメッセージを送り、アプリが通知表示とログ先読み（WorkManager）を行います。
-共通配布APKはFirebase設定を内蔵せず、MacとのQRペアリングで取り込みます。未設定でも通知以外は動作します。
-上記の従来方式で自分専用APKに設定を内蔵する場合だけ、ビルド時に`-PbundleFirebase=true`を指定してください。
+個人用 APK に Firebase 設定をビルド時に内蔵する従来方式もあります。その場合だけ `android/app/google-services.json` を置き、`-PbundleFirebase=true` を付けてビルドします。共有 APK では、秘密情報を含めず QR ペアリング時にクライアント設定を受け取る方式を推奨します。
 
 ## 4. Android アプリ
 
@@ -295,6 +350,7 @@ Claude / Codex の仕様変更で dead-letter に記録されたデータは、r
 - Codex の構造化回答は共有 daemon（`codex --remote unix://`）で動くセッションのみです。
 - セッションの identity は Herdr インテグレーションが報告する session id です。インテグレーション未導入のペインは一覧に出ません。
 - 通知の重複防止はメモリ上のみで、Gateway 再起動直後の状態は通知しません。
+- バックグラウンド取得には Gateway が起動していて Android から到達できる必要があります。Android でアプリを「強制停止」している間は FCM 通知が届きません。
 
 ## OpenCode（v1 / 公式 v2）
 
