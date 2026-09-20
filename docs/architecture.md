@@ -200,7 +200,9 @@ pushes.
 On Android, `PushService` shows the notification (channels *Completed*,
 *Needs attention*, *Errors*) and enqueues an expedited `PrefetchWorker` that
 fetches the session into Room, so tapping the notification opens a populated
-conversation. Foreground screens poll every 3 s (detail) / 5 s (list).
+conversation. The same event marks the session unread in the local cache; the
+session-list row shows a marker and heavier text until its detail is opened.
+Foreground screens poll every 3 s (detail) / 5 s (list).
 
 A notification carries an inline *Reply* field when `canSend` is set and the
 session is not waiting on a question or an approval — those expect that exact

@@ -28,6 +28,7 @@ fun SessionEntity.toUiModel() = SessionUiModel(
     costEstimated = costEstimated,
     archived = archived,
     live = status != Status.OFFLINE,
+    unread = unread,
 )
 
 /** Converts Android-owned launch tracking into the common list state. */

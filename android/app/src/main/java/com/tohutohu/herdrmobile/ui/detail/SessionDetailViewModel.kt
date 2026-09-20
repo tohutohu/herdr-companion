@@ -105,10 +105,15 @@ class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidV
      * noticed.
      */
     suspend fun pollWhileVisible() {
+        repo.markRead(sessionId)
         Notifications.cancel(getApplication(), sessionId)
         try {
             while (true) {
                 refresh()
+                // A push can arrive while this screen is open. The current
+                // conversation is still the one the user is reading, so do
+                // not leave an unread marker behind when returning to the list.
+                repo.markRead(sessionId)
                 delay(POLL_MS)
             }
         } finally {

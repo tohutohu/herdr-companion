@@ -22,6 +22,8 @@ data class SessionUiModel(
     val costEstimated: Boolean?,
     val archived: Boolean,
     val live: Boolean,
+    /** Whether a notification arrived since the session was last opened. */
+    val unread: Boolean = false,
 )
 
 fun SessionUiModel.headline(): String =

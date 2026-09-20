@@ -20,6 +20,7 @@ import com.tohutohu.herdrmobile.container
 import com.tohutohu.herdrmobile.data.api.GatewayException
 import java.util.concurrent.TimeUnit
 import android.util.Log
+import kotlinx.coroutines.launch
 
 /**
  * Gateway pushes are data-only, high priority messages:
@@ -41,6 +42,9 @@ class PushService : FirebaseMessagingService() {
             body = data["body"].orEmpty(),
             canSend = data["canSend"] == "true",
         )
+        // Mark the cached row immediately so the list can show the unread
+        // state even while the background prefetch is still running.
+        container.scope.launch { container.repository.markUnread(sessionId) }
         PrefetchWorker.enqueue(this, sessionId)
     }
 
@@ -58,6 +62,8 @@ class PrefetchWorker(context: Context, params: WorkerParameters) : CoroutineWork
         return try {
             repo.refreshMessages(sessionId)
             runCatching { repo.refreshSessions() }
+            // The row may not have existed when the FCM callback marked it.
+            repo.markUnread(sessionId)
             Result.success()
         } catch (e: GatewayException) {
             Log.w(TAG, "prefetch failed for $sessionId: ${e.code} ${e.message}")

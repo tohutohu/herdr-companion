@@ -16,14 +16,17 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.items
@@ -54,6 +57,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -313,6 +318,15 @@ internal fun SessionRow(
                             modifier = Modifier.padding(end = 6.dp).size(16.dp),
                         )
                     }
+                    if (s.unread) {
+                        Spacer(
+                            Modifier
+                                .size(8.dp)
+                                .background(MaterialTheme.colorScheme.primary, CircleShape)
+                                .semantics { contentDescription = "Unread messages" },
+                        )
+                        Spacer(Modifier.width(8.dp))
+                    }
                     Text(s.providerName, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, maxLines = 1)
                     listOfNotNull(agentSettingsLabel(s.model, s.effort, s.mode), contextLabel(s.contextUsedPercent))
                         .joinToString(" · ")
@@ -343,15 +357,26 @@ internal fun SessionRow(
                     modifier = Modifier.padding(start = 8.dp),
                 )
             }
-            Text(s.project.ifBlank { s.cwd ?: s.id }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                s.project.ifBlank { s.cwd ?: s.id },
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = if (s.unread) FontWeight.Bold else FontWeight.SemiBold,
+            )
             s.title?.takeIf { it.isNotBlank() }?.let {
-                Text(it, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (s.unread) FontWeight.SemiBold else null,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
             s.lastMessage?.takeIf { it.isNotBlank() }?.let {
                 Text(
                     it,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = if (s.unread) FontWeight.Medium else null,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )

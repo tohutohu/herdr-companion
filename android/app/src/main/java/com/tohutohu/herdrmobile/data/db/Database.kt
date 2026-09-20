@@ -42,6 +42,9 @@ data class SessionEntity(
     /** Whether the gateway still lists it; stale rows are kept for deep links. */
     val listed: Boolean,
     val lastSyncedAt: Long,
+    /** Whether a push arrived since the session was last opened. */
+    @ColumnInfo(defaultValue = "0")
+    val unread: Boolean = false,
 )
 
 /** Messages keep their blocks as JSON; they are only rendered, never queried. */
@@ -65,16 +68,33 @@ interface SessionDao {
     @Query("SELECT * FROM sessions WHERE id = :id")
     fun observe(id: String): Flow<SessionEntity?>
 
+    @Query("SELECT * FROM sessions WHERE id = :id")
+    suspend fun get(id: String): SessionEntity?
+
+    @Query("SELECT id FROM sessions WHERE unread = 1")
+    suspend fun unreadIds(): List<String>
+
     @Upsert
     suspend fun upsert(sessions: List<SessionEntity>)
+
+    @Query("UPDATE sessions SET unread = :unread WHERE id = :id")
+    suspend fun setUnread(id: String, unread: Boolean)
 
     @Query("UPDATE sessions SET listed = 0 WHERE id NOT IN (:ids)")
     suspend fun unlistExcept(ids: List<String>)
 
     @Transaction
     suspend fun replaceListing(sessions: List<SessionEntity>) {
-        upsert(sessions)
+        val unread = unreadIds().toSet()
+        upsert(sessions.map { session -> if (session.id in unread) session.copy(unread = true) else session })
         unlistExcept(sessions.map { it.id })
+    }
+
+    /** Updates gateway data without allowing a sync to clear a local unread flag. */
+    @Transaction
+    suspend fun upsertPreservingUnread(session: SessionEntity) {
+        val current = get(session.id)
+        upsert(listOf(if (current?.unread == true) session.copy(unread = true) else session))
     }
 
     @Query("DELETE FROM sessions WHERE listed = 0 AND lastSyncedAt < :before")
@@ -114,7 +134,7 @@ interface MessageDao {
 
 @Database(
     entities = [SessionEntity::class, MessageEntity::class],
-    version = 7,
+    version = 8,
     exportSchema = true,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
@@ -123,6 +143,7 @@ interface MessageDao {
         AutoMigration(from = 4, to = 5),
         AutoMigration(from = 5, to = 6),
         AutoMigration(from = 6, to = 7),
+        AutoMigration(from = 7, to = 8),
     ],
 )
 abstract class AppDatabase : RoomDatabase() {

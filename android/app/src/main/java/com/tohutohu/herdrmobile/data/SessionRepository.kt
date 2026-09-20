@@ -27,6 +27,10 @@ class SessionRepository(
 
     fun observeSession(id: String): Flow<SessionEntity?> = db.sessions().observe(id)
 
+    suspend fun markUnread(sessionId: String) = db.sessions().setUnread(sessionId, unread = true)
+
+    suspend fun markRead(sessionId: String) = db.sessions().setUnread(sessionId, unread = false)
+
     fun observeMessages(sessionId: String): Flow<List<Message>> =
         db.messages().observe(sessionId).map { rows ->
             rows.map { row ->
@@ -55,7 +59,7 @@ class SessionRepository(
         val now = System.currentTimeMillis()
         // An archived session is only listed while it runs.
         val s = resp.session
-        db.sessions().upsert(listOf(s.toEntity(now, listed = !s.archived || s.isLive)))
+        db.sessions().upsertPreservingUnread(s.toEntity(now, listed = !s.archived || s.isLive))
 
         val anchorPos = anchor?.let { db.messages().positionOf(sessionId, it) }
         val incremental = anchor != null && anchorPos != null && resp.messages.firstOrNull()?.id == anchor
@@ -68,12 +72,12 @@ class SessionRepository(
 
     suspend fun archive(sessionId: String) {
         val s = api.archive(sessionId)
-        db.sessions().upsert(listOf(s.toEntity(System.currentTimeMillis(), listed = false)))
+        db.sessions().upsertPreservingUnread(s.toEntity(System.currentTimeMillis(), listed = false))
     }
 
     suspend fun unarchive(sessionId: String) {
         val s = api.unarchive(sessionId)
-        db.sessions().upsert(listOf(s.toEntity(System.currentTimeMillis(), listed = true)))
+        db.sessions().upsertPreservingUnread(s.toEntity(System.currentTimeMillis(), listed = true))
     }
 
     /** Keeps the pane id available when resuming stops at a startup dialog. */
