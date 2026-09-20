@@ -33,6 +33,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
@@ -181,8 +182,13 @@ private fun FrameWindowScope.DesktopShell(
 
     DesktopMenuBar(actions)
 
-    Column(Modifier.fillMaxSize()) {
-        Row(
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background,
+        contentColor = MaterialTheme.colorScheme.onBackground,
+    ) {
+        Column(Modifier.fillMaxSize()) {
+            Row(
             Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -244,7 +250,7 @@ private fun FrameWindowScope.DesktopShell(
             }
             Button(onClick = actions::newSession) { Text("+ New Session") }
         }
-        state.transientError?.let { message ->
+            state.transientError?.let { message ->
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -253,8 +259,8 @@ private fun FrameWindowScope.DesktopShell(
                 TextButton(onClick = { state.dismissError(); actions.refresh() }) { Text("Retry") }
             }
         }
-        HorizontalDivider()
-        BoxWithConstraints(Modifier.fillMaxSize()) {
+            HorizontalDivider()
+            BoxWithConstraints(Modifier.fillMaxSize()) {
             var sidebarWidth by remember { mutableStateOf(DesktopPreferences.loadSidebarWidth().dp) }
             val maxSidebarWidth = (maxWidth * 0.4f)
                 .coerceAtMost((maxWidth - MIN_DETAIL_WIDTH).coerceAtLeast(MIN_SIDEBAR_WIDTH))
@@ -270,7 +276,7 @@ private fun FrameWindowScope.DesktopShell(
                     .dp.coerceIn(MIN_SIDEBAR_WIDTH, maxSidebarWidth)
             }
 
-            Row(Modifier.fillMaxSize()) {
+                Row(Modifier.fillMaxSize()) {
                 Column(Modifier.width(safeSidebarWidth).fillMaxHeight()) {
                     Row(
                         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
@@ -369,6 +375,7 @@ private fun FrameWindowScope.DesktopShell(
                             onAction = { action -> handleDetailAction(state, api, window, action) },
                         )
                     }
+                }
                 }
             }
         }
