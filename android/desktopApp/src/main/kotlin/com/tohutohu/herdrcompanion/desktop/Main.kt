@@ -2,6 +2,7 @@ package com.tohutohu.herdrcompanion.desktop
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
@@ -41,6 +43,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -60,6 +63,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.FrameWindowScope
 import androidx.compose.ui.window.MenuBar
@@ -69,6 +73,7 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.tohutohu.herdrcompanion.data.api.GatewayApi
 import com.tohutohu.herdrcompanion.model.SessionUiModel
+import com.tohutohu.herdrcompanion.model.headline
 import com.tohutohu.herdrcompanion.ui.detail.SessionDetailAction
 import com.tohutohu.herdrcompanion.ui.detail.SessionDetailScreen
 import com.tohutohu.herdrcompanion.ui.sessions.SessionListAction
@@ -85,6 +90,7 @@ import java.awt.event.WindowStateListener
 
 private val MIN_SIDEBAR_WIDTH = 240.dp
 private val MIN_DETAIL_WIDTH = 420.dp
+private val MIN_SPLIT_DETAIL_WIDTH = 300.dp
 
 fun main() {
     val instanceLock = DesktopInstanceLock.tryAcquire()
@@ -175,10 +181,6 @@ private fun FrameWindowScope.DesktopShell(
         openAbout = { aboutOpen = true },
         closeWindow = onCloseWindow,
     )
-    val dropTarget = rememberDesktopAttachmentDropTarget(
-        enabled = state.detail?.session?.canSend == true,
-        onFilesDropped = state::addAttachments,
-    )
 
     DesktopMenuBar(actions)
 
@@ -262,8 +264,14 @@ private fun FrameWindowScope.DesktopShell(
             HorizontalDivider()
             BoxWithConstraints(Modifier.fillMaxSize()) {
             var sidebarWidth by remember { mutableStateOf(DesktopPreferences.loadSidebarWidth().dp) }
+            val detailPaneCount = state.openSessionIds.size.coerceAtLeast(1)
+            val minDetailWidth = if (detailPaneCount > 1) {
+                MIN_SPLIT_DETAIL_WIDTH * detailPaneCount + 1.dp
+            } else {
+                MIN_DETAIL_WIDTH
+            }
             val maxSidebarWidth = (maxWidth * 0.4f)
-                .coerceAtMost((maxWidth - MIN_DETAIL_WIDTH).coerceAtLeast(MIN_SIDEBAR_WIDTH))
+                .coerceAtMost((maxWidth - minDetailWidth - 8.dp).coerceAtLeast(MIN_SIDEBAR_WIDTH))
                 .coerceAtLeast(MIN_SIDEBAR_WIDTH)
             val safeSidebarWidth = sidebarWidth.coerceIn(MIN_SIDEBAR_WIDTH, maxSidebarWidth)
             LaunchedEffect(maxSidebarWidth) {
@@ -284,6 +292,9 @@ private fun FrameWindowScope.DesktopShell(
                     ) {
                         Text("Sessions", style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.weight(1f))
+                        if (state.isSplitView) {
+                            TextButton(onClick = state::collapseSplitView) { Text("Single view") }
+                        }
                         if (query.isNotBlank()) {
                             Text(
                                 "${sessions.size}/${state.sessions.size}",
@@ -292,9 +303,9 @@ private fun FrameWindowScope.DesktopShell(
                             )
                         }
                     }
-                    if (query.isNotBlank() && state.selectedSessionId != null && state.selectedSessionId !in sessions.map { it.session.id }) {
+                    if (query.isNotBlank() && state.openSessionIds.any { it !in sessions.map { item -> item.session.id } }) {
                         Text(
-                            "Selected detail stays open while filtered out",
+                            "Open panes stay visible while filtered out",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
@@ -303,7 +314,11 @@ private fun FrameWindowScope.DesktopShell(
                     SessionListScreen(
                         state = SessionListUiState(
                             sessions = sessions.map { item ->
-                                item.copy(selected = item.selected || item.session.id == highlightedId)
+                                item.copy(
+                                    selected = item.selected ||
+                                        item.session.id in state.openSessionIds ||
+                                        item.session.id == highlightedId,
+                                )
                             },
                             isLoaded = state.listLoaded,
                             isRefreshing = state.listRefreshing,
@@ -323,6 +338,7 @@ private fun FrameWindowScope.DesktopShell(
                             DesktopSessionContextMenu(
                                 item = item,
                                 onOpen = { state.selectSession(item.session.id) },
+                                onOpenInSplit = { state.openSessionInSplit(item.session.id) },
                                 onArchive = {
                                     if (item.session.archived) {
                                         handleListAction(state, SessionListAction.Unarchive(listOf(item.session.toRef())))
@@ -362,20 +378,35 @@ private fun FrameWindowScope.DesktopShell(
                         )
                         .pointerHoverIcon(PointerIcon(Cursor.getPredefinedCursor(Cursor.E_RESIZE_CURSOR))),
                 )
-                Box(Modifier.weight(1f).fillMaxHeight().widthIn(min = MIN_DETAIL_WIDTH)) {
-                    val detail = state.detail
-                    if (detail == null) {
+                Box(Modifier.weight(1f).fillMaxHeight().widthIn(min = minDetailWidth)) {
+                    val detailIds = state.openSessionIds
+                    if (detailIds.isEmpty()) {
                         EmptyDetail(state)
                     } else {
-                        SessionDetailScreen(
-                            state = detail,
-                            resolveUrl = api::absolute,
-                            formatFileSize = ::formatFileSize,
-                            resolveAttachmentPreview = { id -> state.resolveAttachmentPreview(id) },
-                            composerModifier = dropTarget.modifier,
-                            attachmentDropActive = dropTarget.active,
-                            onAction = { action -> handleDetailAction(state, api, window, action) },
-                        )
+                        Row(Modifier.fillMaxSize()) {
+                            detailIds.forEachIndexed { index, id ->
+                                if (index > 0) {
+                                    VerticalDivider(Modifier.fillMaxHeight().width(1.dp))
+                                }
+                                key(id) {
+                                    Box(
+                                        Modifier
+                                            .weight(1f)
+                                            .fillMaxHeight()
+                                            .widthIn(min = if (detailIds.size > 1) MIN_SPLIT_DETAIL_WIDTH else MIN_DETAIL_WIDTH),
+                                    ) {
+                                        DesktopSessionPane(
+                                            state = state,
+                                            api = api,
+                                            window = window,
+                                            sessionId = id,
+                                            paneNumber = index + 1,
+                                            paneCount = detailIds.size,
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 }
@@ -425,6 +456,74 @@ private fun FrameWindowScope.DesktopShell(
     }
 }
 
+@Composable
+private fun DesktopSessionPane(
+    state: DesktopAppState,
+    api: GatewayApi,
+    window: java.awt.Window,
+    sessionId: String,
+    paneNumber: Int,
+    paneCount: Int,
+) {
+    val detail = state.detailFor(sessionId)
+    val dropTarget = rememberDesktopAttachmentDropTarget(
+        enabled = detail?.session?.canSend == true,
+        onFilesDropped = { paths -> state.addAttachments(sessionId, paths) },
+    )
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    if (state.selectedSessionId == sessionId) {
+                        MaterialTheme.colorScheme.secondaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant
+                    },
+                )
+                .clickable { state.focusSession(sessionId) }
+                .padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Pane $paneNumber of $paneCount",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = detail?.session?.headline() ?: sessionId,
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f).padding(start = 8.dp),
+            )
+            IconButton(
+                onClick = { state.closeSession(sessionId) },
+                modifier = Modifier.size(32.dp),
+            ) {
+                Icon(Icons.Default.Close, contentDescription = "Close session pane")
+            }
+        }
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            if (detail == null) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            } else {
+                SessionDetailScreen(
+                    state = detail,
+                    resolveUrl = api::absolute,
+                    formatFileSize = ::formatFileSize,
+                    resolveAttachmentPreview = { id -> state.resolveAttachmentPreview(id) },
+                    composerModifier = dropTarget.modifier,
+                    attachmentDropActive = dropTarget.active,
+                    onAction = { action -> handleDetailAction(state, api, window, sessionId, action) },
+                )
+            }
+        }
+    }
+}
+
 private class DesktopActions(
     private val state: DesktopAppState,
     private val focusSearch: () -> Unit,
@@ -438,7 +537,13 @@ private class DesktopActions(
     fun settings() = openSettings()
     fun about() = openAbout()
     fun close() = closeWindow()
-    fun openSession(id: String) = state.selectSession(id)
+    fun openSession(id: String) = if (state.isSplitView) {
+        state.openSessionInSplit(id)
+    } else {
+        state.selectSession(id)
+    }
+    fun singleView() = state.collapseSplitView()
+    fun hasSplitView() = state.isSplitView
     fun archive() = state.detail?.session?.let { state.requestArchive(it.toRef()) }
     fun copySelectedSessionId() = copySessionId(state.selectedSessionId)
     fun copySessionId(id: String?) {
@@ -471,6 +576,7 @@ private fun FrameWindowScope.DesktopMenuBar(actions: DesktopActions) {
         Menu("View", mnemonic = 'V') {
             Item("Search Sessions", shortcut = KeyShortcut(Key.K, ctrl = true), onClick = actions::openSearch)
             Item("Refresh", shortcut = KeyShortcut(Key.R, ctrl = true), onClick = actions::refresh)
+            Item("Single Session View", enabled = actions.hasSplitView(), onClick = actions::singleView)
         }
         Menu("Session", mnemonic = 'S') {
             Item("Archive", enabled = actions.hasSelectedSession(), onClick = actions::archive)
@@ -561,7 +667,11 @@ private fun EmptyDetail(state: DesktopAppState) {
 
 private fun handleListAction(state: DesktopAppState, action: SessionListAction) {
     when (action) {
-        is SessionListAction.OpenSession -> state.selectSession(action.sessionId)
+        is SessionListAction.OpenSession -> if (state.isSplitView) {
+            state.openSessionInSplit(action.sessionId)
+        } else {
+            state.selectSession(action.sessionId)
+        }
         is SessionListAction.Archive -> action.sessions.firstOrNull()?.let(state::requestArchive)
         is SessionListAction.Unarchive -> action.sessions.firstOrNull()?.let(state::unarchive)
         is SessionListAction.Resume -> state.resume(action.session)
@@ -577,29 +687,30 @@ private fun handleDetailAction(
     state: DesktopAppState,
     api: GatewayApi,
     window: java.awt.Window,
+    sessionId: String,
     action: SessionDetailAction,
 ) {
     when (action) {
-        SessionDetailAction.Back -> state.clearSelection()
-        is SessionDetailAction.Send -> state.send(action.text)
-        is SessionDetailAction.Retry -> state.retry(action.localId)
-        is SessionDetailAction.Discard -> state.discard(action.localId)
-        is SessionDetailAction.Respond -> state.respond(action.response)
-        SessionDetailAction.Archive -> state.detail?.session?.let { state.requestArchive(it.toRef()) }
-        SessionDetailAction.Unarchive -> state.detail?.session?.let { state.unarchive(it.toRef()) }
-        SessionDetailAction.Resume -> state.detail?.session?.let { state.resume(it.toRef()) }
-        SessionDetailAction.PickImage -> state.addAttachments(DesktopFilePicker.pickFiles(window, imagesOnly = true))
-        SessionDetailAction.PickFile -> state.addAttachments(DesktopFilePicker.pickFiles(window))
-        is SessionDetailAction.RemoveAttachment -> state.removeAttachment(action.id)
+        SessionDetailAction.Back -> state.closeSession(sessionId)
+        is SessionDetailAction.Send -> state.send(sessionId, action.text)
+        is SessionDetailAction.Retry -> state.retry(sessionId, action.localId)
+        is SessionDetailAction.Discard -> state.discard(sessionId, action.localId)
+        is SessionDetailAction.Respond -> state.respond(sessionId, action.response)
+        SessionDetailAction.Archive -> state.detailFor(sessionId)?.session?.let { state.requestArchive(it.toRef()) }
+        SessionDetailAction.Unarchive -> state.detailFor(sessionId)?.session?.let { state.unarchive(it.toRef()) }
+        SessionDetailAction.Resume -> state.detailFor(sessionId)?.session?.let { state.resume(it.toRef()) }
+        SessionDetailAction.PickImage -> state.addAttachments(sessionId, DesktopFilePicker.pickFiles(window, imagesOnly = true))
+        SessionDetailAction.PickFile -> state.addAttachments(sessionId, DesktopFilePicker.pickFiles(window))
+        is SessionDetailAction.RemoveAttachment -> state.removeAttachment(sessionId, action.id)
         is SessionDetailAction.OpenFile -> {
-            val cwd = state.detail?.session?.cwd
+            val cwd = state.detailFor(sessionId)?.session?.cwd
             if (!DesktopPlatformActions.openPath(action.path, cwd)) state.reportError("Could not open ${action.path} on this Mac.")
         }
         is SessionDetailAction.OpenImage -> {
             if (!DesktopPlatformActions.openUrl(api.absolute(action.url))) state.reportError("Could not open the image in the browser.")
         }
         SessionDetailAction.OpenTerminal -> {
-            if (!DesktopPlatformActions.openTerminal(state.detail?.session?.cwd)) state.reportError("Could not open Terminal for this project.")
+            if (!DesktopPlatformActions.openTerminal(state.detailFor(sessionId)?.session?.cwd)) state.reportError("Could not open Terminal for this project.")
         }
     }
 }
