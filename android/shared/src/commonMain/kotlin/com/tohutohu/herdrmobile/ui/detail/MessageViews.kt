@@ -83,15 +83,21 @@ fun MessageItem(
                 }
             }
         }
+        // Keep one selection container around the whole message so the
+        // standard long-press toolbar can copy a range or select/copy every
+        // text block in the message, including code and multi-paragraph text.
+        val selectableContent: @Composable () -> Unit = {
+            SelectionContainer { content() }
+        }
         if (isUser) {
             Surface(
                 color = MaterialTheme.colorScheme.primaryContainer,
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.widthIn(max = 320.dp),
-            ) { Box(Modifier.padding(10.dp)) { content() } }
+            ) { Box(Modifier.padding(10.dp)) { selectableContent() } }
             if (message.queued) QueuedLine()
         } else {
-            content()
+            selectableContent()
         }
     }
 }
@@ -122,7 +128,7 @@ private fun BlockView(
                 if (role == "assistant" && isToolCallText(text)) {
                     CollapsibleTool(text, output = false)
                 } else {
-                    SelectionContainer { MarkdownText(text) }
+                    MarkdownText(text)
                 }
             }
         }
@@ -175,14 +181,12 @@ private fun CollapsibleTool(text: String, output: Boolean) {
             // The surface animates its size; this only cross-fades the text.
             Crossfade(expanded, modifier = Modifier.weight(1f), label = "tool") { open ->
                 if (open) {
-                    SelectionContainer {
-                        Text(
-                            text.trimEnd(),
-                            fontFamily = FontFamily.Monospace,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+                    Text(
+                        text.trimEnd(),
+                        fontFamily = FontFamily.Monospace,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 } else {
                     Text(
                         toolSummary(text),

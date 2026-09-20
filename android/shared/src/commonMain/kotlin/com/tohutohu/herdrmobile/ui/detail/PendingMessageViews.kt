@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Check
@@ -97,7 +98,9 @@ fun PendingMessageItem(
                         }
                     }
                 }
-                if (message.text.isNotBlank()) MarkdownText(message.text)
+                if (message.text.isNotBlank()) {
+                    SelectionContainer { MarkdownText(message.text) }
+                }
             }
         }
         SwapContent(message.state) { state ->
