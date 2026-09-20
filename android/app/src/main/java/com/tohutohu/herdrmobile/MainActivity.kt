@@ -39,7 +39,8 @@ class MainActivity : ComponentActivity() {
         val settings = container.settings
 
         setContent {
-            HerdrTheme {
+            val themeMode by settings.themeMode.collectAsState()
+            HerdrTheme(themeMode) {
                 val open by pendingSession.collectAsState()
                 AppNavigation(
                     start = if (settings.current.isConfigured) SessionsRoute else SettingsRoute,

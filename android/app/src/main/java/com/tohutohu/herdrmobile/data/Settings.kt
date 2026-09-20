@@ -24,6 +24,7 @@ class SettingsStore(private val context: Context, scope: CoroutineScope) {
     private val gatewayIdKey = stringPreferencesKey("gateway_id")
     private val pendingKey = stringPreferencesKey("pending_connection")
     private val resetKey = booleanPreferencesKey("reset_cache")
+    private val themeModeKey = stringPreferencesKey("theme_mode")
     private val json = Json { ignoreUnknownKeys = true }
 
     private val flow = context.dataStore.data.map {
@@ -48,7 +49,17 @@ class SettingsStore(private val context: Context, scope: CoroutineScope) {
     })
     val state: StateFlow<Settings> = _state.asStateFlow()
 
+    private val _themeMode = MutableStateFlow(runBlocking {
+        ThemeMode.fromStorage(context.dataStore.data.first()[themeModeKey])
+    })
+    val themeMode: StateFlow<ThemeMode> = _themeMode.asStateFlow()
+
     val current: Settings get() = state.value
+
+    suspend fun saveThemeMode(mode: ThemeMode) {
+        context.dataStore.edit { it[themeModeKey] = mode.storageValue }
+        _themeMode.value = mode
+    }
 
     suspend fun save(settings: Settings) {
         write(settings)

@@ -8,10 +8,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -30,11 +32,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.tohutohu.herdrmobile.container
 import com.tohutohu.herdrmobile.data.Settings
+import com.tohutohu.herdrmobile.data.ThemeMode
 import com.tohutohu.herdrmobile.data.PairingInvitation
 import com.tohutohu.herdrmobile.data.PairingClient
 import com.tohutohu.herdrmobile.data.api.GatewayApi
@@ -57,6 +61,7 @@ fun SettingsScreen(onDone: () -> Unit) {
     val context = LocalContext.current
     val container = context.container
     val current by container.settings.state.collectAsState()
+    val themeMode by container.settings.themeMode.collectAsState()
     var url by rememberSaveable { mutableStateOf(current.gatewayUrl) }
     var token by rememberSaveable { mutableStateOf(current.token) }
     var testResult by remember { mutableStateOf<String?>(null) }
@@ -116,6 +121,32 @@ fun SettingsScreen(onDone: () -> Unit) {
                 "Connect to herdr-mobile-gateway on your Mac over Tailscale.",
                 style = MaterialTheme.typography.bodyMedium,
             )
+            Text("Appearance", style = MaterialTheme.typography.titleMedium)
+            Column {
+                ThemeMode.entries.forEach { mode ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .selectable(
+                                selected = themeMode == mode,
+                                onClick = { scope.launch { container.settings.saveThemeMode(mode) } },
+                                role = Role.RadioButton,
+                            )
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = themeMode == mode, onClick = null)
+                        Text(
+                            text = when (mode) {
+                                ThemeMode.SYSTEM -> "System default"
+                                ThemeMode.LIGHT -> "Light"
+                                ThemeMode.DARK -> "Dark"
+                            },
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
+                    }
+                }
+            }
             Button(enabled = !busy && !restart, onClick = {
                 scope.launch {
                     busy = true
