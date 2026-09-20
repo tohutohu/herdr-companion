@@ -84,9 +84,11 @@ internal fun SwipeableSessionRow(
         onSwipe()
         if (!isEngaged()) state.reset()
     }
-    // The action let go of the row and it is still listed: slide back.
+    // The action let go of the row (or its confirmation was canceled) and it
+    // is still listed: slide back. targetValue matters while the dismiss
+    // animation is still settling and currentValue is still Settled.
     LaunchedEffect(engaged) {
-        if (!engaged && state.currentValue != SwipeToDismissBoxValue.Settled) state.reset()
+        if (!engaged && state.targetValue != SwipeToDismissBoxValue.Settled) state.reset()
     }
 
     SwipeToDismissBox(
