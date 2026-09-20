@@ -5,6 +5,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -350,7 +351,9 @@ fun SessionDetailScreen(
                     itemsIndexed(pending.asReversed(), key = { _, p -> "pending:" + p.localId }) { r, p ->
                         val i = pending.lastIndex - r
                         PendingMessageItem(
-                            modifier = Modifier.animateItem(),
+                            modifier = Modifier
+                                .animateContentSize(tween(ITEM_ANIMATION_MS))
+                                .animateItem(placementSpec = tween(ITEM_ANIMATION_MS)),
                             message = p,
                             showRole = i == 0 && messages.lastOrNull()?.role != "user",
                             resolveAttachmentPreview = resolveAttachmentPreview,
@@ -361,7 +364,13 @@ fun SessionDetailScreen(
                     itemsIndexed(messages.asReversed(), key = { _, m -> state.messageKeys[m.id] ?: "message:${m.id}" }) { r, m ->
                         val i = messages.lastIndex - r
                         MessageItem(
-                            modifier = if (settled) Modifier.animateItem() else Modifier,
+                            modifier = if (settled) {
+                                Modifier
+                                    .animateContentSize(tween(ITEM_ANIMATION_MS))
+                                    .animateItem(placementSpec = tween(ITEM_ANIMATION_MS))
+                            } else {
+                                Modifier.animateContentSize(tween(ITEM_ANIMATION_MS))
+                            },
                             message = m,
                             showRole = i == 0 || messages[i - 1].role != m.role,
                             providerName = session?.providerName ?: "Agent",
@@ -395,6 +404,7 @@ fun SessionDetailScreen(
 }
 
 private const val SETTLE_MS = 400L
+private const val ITEM_ANIMATION_MS = 260
 
 @Composable
 private fun LoadingHint(visible: Boolean) {
