@@ -268,16 +268,15 @@ a launch warning rather than failing the start.
 Devin passes its safe `--permission-mode` values (`auto`, `accept-edits`, and
 `smart`) directly to the CLI.
 
-The app does not ask for the agent, the model and the effort separately on
-every start: the combinations the user keeps coming back to are saved as
-favorites (agent id, model id, effort id, mode id, plus the names the catalog gave them
-so a favorite of the other agent can be labelled without loading its catalog)
-in the `agent_presets` DataStore, and offered as one-tap chips. Anything else
-is picked in the full pickers behind *Other…*, which is also where a
-combination is starred or unstarred. The combination a session was started
-with is remembered and preselected next time. The working directory used by
-the last session is restored too; if that directory is a favorite, its
-favorite chip is selected.
+The app does not ask for the agent, the model, the effort and the mode
+separately on every start: named combinations are stored in the
+`agent_presets` DataStore (agent/model/effort/mode ids, catalog display names,
+and the user's preset name), managed from Settings, and offered from a
+drop-down in New Session. Older unnamed favorites remain readable and can be
+renamed from Settings. The combination a session was started with is
+remembered and preselected next time. The working directory used by the last
+session is restored too; if that directory is a favorite, its favorite chip
+is selected.
 
 Sessions report the model they last used (`model`), the reasoning effort
 (`effort`) and a display label for the mode (`mode`):
