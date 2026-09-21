@@ -300,8 +300,8 @@ class DesktopAppState(
         loading = true,
         attachmentsEnabled = false,
         showBackButton = false,
-        sendOnEnter = false,
-        sendWithModifier = true,
+        sendOnEnter = true,
+        sendWithModifier = false,
     )
 
     private fun removeDetail(id: String) {
@@ -340,8 +340,8 @@ class DesktopAppState(
                     loading = false,
                     attachmentsEnabled = true,
                     showBackButton = false,
-                    sendOnEnter = false,
-                    sendWithModifier = true,
+                    sendOnEnter = true,
+                    sendWithModifier = false,
                 ))
                 first = false
                 logger.fine("session detail refreshed")
