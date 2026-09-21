@@ -22,6 +22,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogWindow
@@ -216,6 +217,12 @@ fun DesktopNewSessionWindow(
         },
     ) {
         LaunchedEffect(Unit) {
+            // DialogWindow may not own the native focus on its first frame.
+            // Requesting the field immediately can therefore leave keyboard
+            // input in the parent window (or in the active IME composition).
+            window.toFront()
+            window.requestFocus()
+            withFrameNanos { }
             promptFocusRequester.requestFocus()
         }
         Surface(Modifier.fillMaxSize()) {

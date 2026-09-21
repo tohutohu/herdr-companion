@@ -188,6 +188,20 @@ func (fakeProvider) StartupKeys(s string) []string {
 	return nil
 }
 
+type launchPromptProvider struct {
+	fakeProvider
+	herdr  *fakeHerdr
+	prompt string
+}
+
+func (p *launchPromptProvider) SendLaunchPrompt(_ context.Context, _ string, text string) error {
+	p.prompt = text
+	p.herdr.mu.Lock()
+	p.herdr.session = &herdr.AgentSession{Agent: "claude", Kind: "id", Value: "abc-123"}
+	p.herdr.mu.Unlock()
+	return nil
+}
+
 func newLauncher(t *testing.T, fh *fakeHerdr) (*Launcher, string) {
 	root, _ := setupRoots(t)
 	return &Launcher{
@@ -209,6 +223,29 @@ func Test信頼ダイアログを承認して起動しプロンプトを送る(t
 	want := "create app-b|start claude --model haiku --effort high|keys down,enter|prompt hello"
 	if strings.Join(fh.calls, "|") != want {
 		t.Errorf("calls = %v", fh.calls)
+	}
+}
+
+func Testプロバイダが初回promptの入力経路を選べる(t *testing.T) {
+	fh := &fakeHerdr{status: herdr.StatusIdle}
+	l, root := newLauncher(t, fh)
+	p := &launchPromptProvider{fakeProvider: fakeProvider{}, herdr: fh}
+	l.Providers = []providers.Provider{p}
+
+	res, err := l.Start(context.Background(), StartRequest{
+		Provider: "claude",
+		Cwd:      filepath.Join(root, "app-b"),
+		Prompt:   "abc123",
+		Trust:    true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.SessionID != "claude:abc-123" || p.prompt != "abc123" {
+		t.Errorf("result = %+v, prompt = %q", res, p.prompt)
+	}
+	if got := strings.Join(fh.calls, "|"); strings.Contains(got, "prompt abc123") {
+		t.Errorf("must use provider launch input path: %s", got)
 	}
 }
 

@@ -248,6 +248,13 @@ type Launchable interface {
 	StartupKeys(screen string) []string
 }
 
+// LaunchPromptSender lets a provider choose how its first prompt is entered
+// after the TUI has started. Some TUIs treat Herdr's generic agent.prompt
+// transport as pasted content, so providers that need real typing can opt in.
+type LaunchPromptSender interface {
+	SendLaunchPrompt(ctx context.Context, paneID, text string) error
+}
+
 // PreparedLauncher can create a native session before starting its TUI when
 // model selection is an API operation rather than a command-line option.
 type PreparedLauncher interface {

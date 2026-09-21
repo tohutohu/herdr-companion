@@ -469,6 +469,19 @@ func Test通常の本文はブラケットペーストせず入力してEnterで
 	}
 }
 
+func Test初回promptもブラケットペーストせず入力してEnterで送信する(t *testing.T) {
+	term := &fakeTerminal{}
+	p := New(t.TempDir(), term, deadletter.Nop{})
+	p.keyDelay = 0
+
+	if err := p.SendLaunchPrompt(context.Background(), "w1:p1", "abc123"); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(term.calls, "|"); got != "text:abc123|keys:enter" {
+		t.Errorf("calls = %q", got)
+	}
+}
+
 func Test複数行の本文もブラケットペーストせず入力する(t *testing.T) {
 	term := &fakeTerminal{}
 	p := New(t.TempDir(), term, deadletter.Nop{})

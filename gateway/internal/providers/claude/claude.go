@@ -238,6 +238,13 @@ func (p *Provider) Send(ctx context.Context, nativeID string, live *providers.Li
 	return p.typePrompt(ctx, live.PaneID, text)
 }
 
+// SendLaunchPrompt uses the same raw TUI input path as a follow-up prompt.
+// The generic Herdr prompt endpoint can be rendered as bracketed paste by
+// Claude Code, which changes how an otherwise ordinary first prompt behaves.
+func (p *Provider) SendLaunchPrompt(ctx context.Context, paneID, text string) error {
+	return p.typePrompt(ctx, paneID, text)
+}
+
 // typePrompt enters text without bracketed-paste markers and submits it.
 // Claude Code accepts Shift+Enter as an in-composer newline, so multiline
 // prompts can use the same input path without turning into pasted content.

@@ -417,8 +417,14 @@ func (l *Launcher) finish(ctx context.Context, pane string, pl *pendingLaunch) *
 			res.Warning = "The agent did not become ready; the prompt was not sent."
 			return res
 		}
-		if err := l.Herdr.Prompt(ctx, pane, pl.prompt); err != nil {
-			res.Warning = "Prompt could not be sent: " + err.Error()
+		var promptErr error
+		if sender, ok := pl.p.(providers.LaunchPromptSender); ok {
+			promptErr = sender.SendLaunchPrompt(ctx, pane, pl.prompt)
+		} else {
+			promptErr = l.Herdr.Prompt(ctx, pane, pl.prompt)
+		}
+		if promptErr != nil {
+			res.Warning = "Prompt could not be sent: " + promptErr.Error()
 		}
 		// Never replay a prompt after an ambiguous send error.
 		pl.prompt = ""
