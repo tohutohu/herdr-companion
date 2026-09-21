@@ -243,7 +243,10 @@ opens a warning screen the launcher cannot answer. Codex has no such flag, and i
 thread only exists once the first prompt runs, so the provider implements
 `LaunchModeSetter`: the launcher sends the TUI's Shift+Tab shortcut on the
 ready pane before the first prompt, which switches a fresh session between
-the two collaboration modes it has. A mode that cannot be set is reported as
+the two collaboration modes it has. A key sent while the TUI is still drawing
+its startup notices is dropped, so the status line is read back and the
+shortcut repeated; Codex applies its own plan-mode reasoning effort there,
+just as it does for the shortcut typed by hand. A mode that cannot be set is reported as
 a launch warning rather than failing the start.
 
 The app does not ask for the agent, the model and the effort separately on

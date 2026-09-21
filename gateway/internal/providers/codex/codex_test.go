@@ -357,6 +357,8 @@ func (f *fakeServer) callList() []string {
 type fakeTerm struct {
 	prompts []string
 	keys    []string
+	// pane renders the screen after the given number of keys.
+	pane func(keys int) *herdr.ReadResult
 }
 
 func (f *fakeTerm) SendKeys(_ context.Context, _ string, keys ...string) error {
@@ -368,7 +370,12 @@ func (f *fakeTerm) Prompt(_ context.Context, _ string, text string) error {
 	f.prompts = append(f.prompts, text)
 	return nil
 }
-func (f *fakeTerm) ReadPane(context.Context, string, int) (*herdr.ReadResult, error) { return nil, nil }
+func (f *fakeTerm) ReadPane(context.Context, string, int) (*herdr.ReadResult, error) {
+	if f.pane == nil {
+		return nil, nil
+	}
+	return f.pane(len(f.keys)), nil
+}
 
 func TestDaemon接続時は構造化APIで送信と承認を行う(t *testing.T) {
 	thread := json.RawMessage(`{"id":"thread-000001","cwd":"/tmp","status":{"type":"active"},"turns":[{"id":"t1","status":"inProgress","items":[{"type":"userMessage","id":"u1","content":[{"type":"text","text":"build"}]}]}]}`)
@@ -833,7 +840,14 @@ func Test新規と再開のどちらも起動時の更新確認を無効にす�
 }
 
 func Test起動時のPlanモードはTUIのショートカットで設定する(t *testing.T) {
-	term := &fakeTerm{}
+	// 起動直後の一打目は取りこぼされることがあるので状態を読んで打ち直す
+	planned := func(keys int) *herdr.ReadResult {
+		if keys < 2 {
+			return &herdr.ReadResult{Text: "gpt-6-astra low · ~/workspace/app"}
+		}
+		return &herdr.ReadResult{Text: "› Ask Codex to do anything\nPlan mode (shift+tab to cycle)"}
+	}
+	term := &fakeTerm{pane: planned}
 	p := New("codex", filepath.Join(t.TempDir(), "cx.sock"), term, deadletter.Nop{})
 	// 既定モードのまま起動するときは何も送らない
 	for _, mode := range []string{"", "default"} {
@@ -844,10 +858,16 @@ func Test起動時のPlanモードはTUIのショートカットで設定する(
 	if err := p.SetLaunchMode(context.Background(), "w1:p1", "plan"); err != nil {
 		t.Fatal(err)
 	}
-	if len(term.keys) != 1 || term.keys[0] != "shift+tab" {
+	if len(term.keys) != 2 || term.keys[0] != "shift+tab" || term.keys[1] != "shift+tab" {
 		t.Errorf("keys = %v", term.keys)
 	}
 	if err := p.SetLaunchMode(context.Background(), "w1:p1", "accept"); err == nil {
 		t.Error("unknown mode should fail")
+	}
+	// 切り替わらないままなら諦めて失敗を返す
+	stuck := &fakeTerm{pane: func(int) *herdr.ReadResult { return &herdr.ReadResult{Text: "gpt-6-astra low"} }}
+	p = New("codex", filepath.Join(t.TempDir(), "cx.sock"), stuck, deadletter.Nop{})
+	if err := p.SetLaunchMode(context.Background(), "w1:p1", "plan"); err == nil || len(stuck.keys) != 3 {
+		t.Errorf("err = %v keys = %v", err, stuck.keys)
 	}
 }

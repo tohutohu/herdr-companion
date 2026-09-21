@@ -34,6 +34,8 @@ const (
 	callTimeout      = 30 * time.Second
 	daemonRetryEvery = 10 * time.Second
 	daemonSyncEvery  = 5 * time.Second
+	// modeKeyDelay lets the TUI re-render before its mode is read back.
+	modeKeyDelay = 300 * time.Millisecond
 )
 
 var threadIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{8,64}$`)
@@ -898,15 +900,50 @@ var modes = []providers.ModeOption{
 // SetLaunchMode starts a session in Plan mode. Codex takes no mode argument
 // and its thread does not exist before the first prompt, so the mode is set
 // with the TUI's own shortcut, which toggles between the two modes a fresh
-// session has.
+// session has. A key sent while the TUI is still drawing its startup notices
+// is dropped, so the status line is read back and the shortcut repeated.
+// Codex applies its own plan-mode reasoning effort here, exactly as it does
+// when the user presses the shortcut.
 func (p *Provider) SetLaunchMode(ctx context.Context, paneID, mode string) error {
 	switch mode {
 	case "", "default":
 		return nil
 	case "plan":
-		return p.term.SendKeys(ctx, paneID, "shift+tab")
+	default:
+		return fmt.Errorf("unknown mode %q", mode)
 	}
-	return fmt.Errorf("unknown mode %q", mode)
+	for range 3 {
+		if err := p.term.SendKeys(ctx, paneID, "shift+tab"); err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(modeKeyDelay):
+		}
+		result, err := p.term.ReadPane(ctx, paneID, 40)
+		if err != nil || result == nil {
+			// The key was delivered; a pane that cannot be read now must not
+			// turn a working launch into a failure.
+			return nil
+		}
+		if codexModeFromPane(result.Text) == planLabel {
+			return nil
+		}
+	}
+	return errors.New("the Codex TUI did not switch to Plan mode")
+}
+
+// codexModeFromPane reads the mode off Codex's status line, which names the
+// mode only outside the default one and always with its shortcut hint.
+func codexModeFromPane(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.ToLower(line)
+		if strings.Contains(line, "shift+tab") && strings.Contains(line, "plan mode") {
+			return planLabel
+		}
+	}
+	return ""
 }
 
 func modelOptions(ms []catalogModel) []providers.ModelOption {
