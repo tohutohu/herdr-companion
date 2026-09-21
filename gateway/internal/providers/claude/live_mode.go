@@ -31,6 +31,8 @@ func claudeModeFromPane(text string) string {
 			return "Don't ask"
 		case strings.Contains(line, "bypass permissions"):
 			return "Bypass permissions"
+		case strings.Contains(line, "auto mode"):
+			return "Auto"
 		case strings.Contains(line, "default mode") || strings.Contains(line, "manual mode"):
 			return "Default"
 		}

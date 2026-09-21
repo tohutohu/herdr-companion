@@ -399,6 +399,7 @@ func TestClaudeのステータス行からモードを読み取れる(t *testing
 		"⏵ accept edits on (shift+tab to cycle)":                     "Accept edits",
 		"⏵ don't ask (shift+tab to cycle)":                           "Don't ask",
 		"⏵ BYPASS PERMISSIONS (shift+tab to cycle)":                  "Bypass permissions",
+		"⏵⏵ auto mode on (shift+tab to cycle)":                       "Auto",
 		"⏵ default mode on (shift+tab to cycle)":                     "Default",
 		"conversation mentions plan mode\n⏵ manual mode (shift+tab)": "Default",
 	}
