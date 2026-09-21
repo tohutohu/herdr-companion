@@ -150,13 +150,14 @@ class GatewayApiTest {
     }
 
     @Test
-    fun `モデル一覧を取得し起動リクエストにモデルとエフォートを含める`() = runBlocking {
+    fun `モデル一覧を取得し起動リクエストにモデルとエフォートとモードを含める`() = runBlocking {
         server.enqueue(
             MockResponse.Builder().body(
                 """{"models":[{"id":"gpt-6-astra","name":"GPT-6 Astra","default":true,""" +
                     """"efforts":[{"id":"xhigh","name":"Extra high"}]},""" +
                     """{"id":"gpt-6-mini","name":"Mini","description":"Fast"}],""" +
-                    """"efforts":[{"id":"medium","name":"Medium","default":true}]}""",
+                    """"efforts":[{"id":"medium","name":"Medium","default":true}],""" +
+                    """"modes":[{"id":"default","name":"Default","default":true},{"id":"plan","name":"Plan"}]}""",
             ).build(),
         )
         val catalog = api.models("codex")
@@ -166,17 +167,20 @@ class GatewayApiTest {
         assertEquals(listOf("xhigh"), catalog.models[0].efforts.map { it.id })
         assertEquals("Fast", catalog.models[1].description)
         assertEquals(listOf("medium"), catalog.efforts.map { it.id })
+        assertEquals(listOf("default", "plan"), catalog.modes.map { it.id })
+        assertTrue(catalog.modes[0].default)
 
         server.enqueue(MockResponse.Builder().code(201).body("""{"sessionId":"codex:t1","paneId":"w1:p1"}""").build())
-        api.startSession(StartSessionRequest("codex", "/w/app", "", true, "gpt-6-mini", "xhigh"))
+        api.startSession(StartSessionRequest("codex", "/w/app", "", true, "gpt-6-mini", "xhigh", "plan"))
         val body = server.takeRequest().body!!.utf8()
         assertTrue(body.contains("\"model\":\"gpt-6-mini\""))
         assertTrue(body.contains("\"effort\":\"xhigh\""))
+        assertTrue(body.contains("\"mode\":\"plan\""))
 
         server.enqueue(MockResponse.Builder().code(201).body("""{"paneId":"w1:p2"}""").build())
         api.startSession(StartSessionRequest("codex", "/w/app", "", true))
         val plain = server.takeRequest().body!!.utf8()
-        assertTrue(!plain.contains("model") && !plain.contains("effort"))
+        assertTrue(!plain.contains("model") && !plain.contains("effort") && !plain.contains("mode"))
 
         server.enqueue(MockResponse.Builder().code(201).body("""{"paneId":"w1:p3","trustRequired":true}""").build())
         assertTrue(api.startSession(StartSessionRequest("codex", "/w/app", "", false)).trustRequired)

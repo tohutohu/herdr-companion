@@ -40,21 +40,23 @@ import com.tohutohu.herdrcompanion.data.api.ModelsResponse
 import com.tohutohu.herdrcompanion.ui.SwapContent
 
 /**
- * The full agent / model / effort pickers, for combinations that are not
- * among the favorites. The current one can be saved as a favorite from here,
- * which is also the only way to drop one again.
+ * The full agent / model / effort / mode pickers, for combinations that are
+ * not among the favorites. The current one can be saved as a favorite from
+ * here, which is also the only way to drop one again.
  */
 @Composable
 fun AgentPickerDialog(
     provider: String,
     model: String,
     effort: String,
+    mode: String,
     catalog: ModelsResponse,
     modelsError: String?,
     favorite: Boolean,
     onProvider: (String) -> Unit,
     onModel: (String) -> Unit,
     onEffort: (String) -> Unit,
+    onMode: (String) -> Unit,
     onToggleFavorite: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -93,6 +95,21 @@ fun AgentPickerDialog(
                         selected = effort,
                         error = null,
                         onSelect = onEffort,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                // Agents that cannot be started in a chosen mode offer none.
+                AnimatedVisibility(
+                    visible = catalog.modes.isNotEmpty(),
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut(),
+                ) {
+                    OptionPicker(
+                        label = "Mode",
+                        options = catalog.modes,
+                        selected = mode,
+                        error = null,
+                        onSelect = onMode,
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }

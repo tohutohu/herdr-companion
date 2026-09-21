@@ -214,6 +214,8 @@ data class StartSessionRequest(
     val model: String? = null,
     /** Null uses the agent's default reasoning effort. */
     val effort: String? = null,
+    /** Null starts the session in the agent's own mode. */
+    val mode: String? = null,
 )
 
 @Serializable
@@ -246,10 +248,20 @@ data class EffortOptionDto(
 ) : CatalogOption
 
 @Serializable
+data class ModeOptionDto(
+    override val id: String,
+    override val name: String,
+    override val description: String? = null,
+    override val default: Boolean = false,
+) : CatalogOption
+
+@Serializable
 data class ModelsResponse(
     val models: List<ModelOptionDto> = emptyList(),
     /** Efforts for a session started without a model. */
     val efforts: List<EffortOptionDto> = emptyList(),
+    /** Modes a new session can start in; empty means the agent offers none. */
+    val modes: List<ModeOptionDto> = emptyList(),
 )
 
 @Serializable

@@ -479,7 +479,9 @@ var modes = []providers.ModeOption{
 	{ID: "acceptEdits", Name: modeLabel("acceptEdits"), Description: "Applies file edits without asking"},
 	{ID: "auto", Name: modeLabel("auto"), Description: "Works on its own, asking only when it matters"},
 	{ID: "dontAsk", Name: modeLabel("dontAsk"), Description: "Stops asking for the rest of the session"},
-	{ID: "bypassPermissions", Name: modeLabel("bypassPermissions"), Description: "Skips every permission check"},
+	// Bypass permissions is left out: Claude Code opens it with a warning
+	// screen the launcher does not know how to answer, so the start would
+	// stall on an unknown dialog. It stays reachable in the TUI.
 }
 
 func (p *Provider) Models(ctx context.Context) (providers.ModelCatalog, error) {

@@ -4,8 +4,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class AgentPresetsTest {
-    private val opus = AgentPreset("claude", "opus", "high", "Opus", "High")
-    private val astra = AgentPreset("codex", "gpt-6-astra", "low", "GPT-6 Astra", "Low")
+    private val opus = AgentPreset("claude", "opus", "high", modelName = "Opus", effortName = "High")
+    private val astra = AgentPreset("codex", "gpt-6-astra", "low", modelName = "GPT-6 Astra", effortName = "Low")
 
     @Test
     fun `お気に入りは末尾に足される`() {
@@ -26,6 +26,12 @@ class AgentPresetsTest {
     fun `モデルやエフォートが違えば別の組み合わせになる`() {
         val low = opus.copy(effort = "low", effortName = "Low")
         assertEquals(listOf(opus, low), togglePreset(listOf(opus), low))
+    }
+
+    @Test
+    fun `モードが違えば別の組み合わせになる`() {
+        val plan = opus.copy(mode = "plan", modeName = "Plan")
+        assertEquals(listOf(opus, plan), togglePreset(listOf(opus), plan))
     }
 
     @Test

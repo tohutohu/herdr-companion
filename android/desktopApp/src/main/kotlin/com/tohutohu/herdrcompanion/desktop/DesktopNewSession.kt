@@ -44,6 +44,7 @@ import com.tohutohu.herdrcompanion.ui.newsession.PendingNewSessionStart
 import com.tohutohu.herdrcompanion.ui.newsession.agentPreset
 import com.tohutohu.herdrcompanion.ui.newsession.effortsFor
 import com.tohutohu.herdrcompanion.ui.newsession.needsDirectoryConfirmation
+import com.tohutohu.herdrcompanion.ui.newsession.normalizedMode
 import com.tohutohu.herdrcompanion.ui.newsession.withKnownNames
 import kotlinx.coroutines.launch
 
@@ -71,6 +72,7 @@ fun DesktopNewSessionWindow(
     var showPicker by remember { mutableStateOf(false) }
     var model by rememberSaveable { mutableStateOf("") }
     var effort by rememberSaveable { mutableStateOf("") }
+    var mode by rememberSaveable { mutableStateOf("") }
     var catalog by remember { mutableStateOf(ModelsResponse()) }
     var modelsError by remember { mutableStateOf<String?>(null) }
     var trustRequest by remember { mutableStateOf<StartSessionResponse?>(null) }
@@ -143,6 +145,7 @@ fun DesktopNewSessionWindow(
             provider = it.provider
             model = it.model
             effort = it.effort
+            mode = it.mode
         }
         load(lastUsedDirectory(shortcuts).ifEmpty { null })
     }
@@ -153,6 +156,8 @@ fun DesktopNewSessionWindow(
             catalog = api.models(provider)
             if (model.isNotEmpty() && catalog.models.none { it.id == model }) model = ""
             if (effort.isNotEmpty() && catalog.models.flatMap { it.efforts }.none { it.id == effort } && catalog.efforts.none { it.id == effort }) effort = ""
+            // Modes belong to one agent; the other's are unknown to it.
+            if (mode.isNotEmpty() && catalog.modes.none { it.id == mode }) mode = ""
         } catch (cause: Exception) {
             val mapped = cause.toDesktopGatewayError()
             modelsError = mapped.message
@@ -160,7 +165,7 @@ fun DesktopNewSessionWindow(
     }
 
     val currentPreset = withKnownNames(
-        agentPreset(provider, model, effort, catalog),
+        agentPreset(provider, model, effort, mode, catalog),
         presets.presets + listOfNotNull(presets.lastUsed),
     )
     val state = NewSessionUiState(
@@ -177,6 +182,7 @@ fun DesktopNewSessionWindow(
         showPicker = showPicker,
         model = model,
         effort = effort,
+        mode = mode,
         catalog = catalog,
         modelsError = modelsError,
         shortcuts = shortcuts,
@@ -240,11 +246,13 @@ fun DesktopNewSessionWindow(
                             if (effortsFor(catalog, action.model).none { it.id == effort }) effort = ""
                         }
                         is NewSessionAction.SetEffort -> effort = action.effort
+                        is NewSessionAction.SetMode -> mode = normalizedMode(catalog, action.mode)
                         is NewSessionAction.SetPrompt -> prompt = action.prompt
                         is NewSessionAction.SelectPreset -> {
                             provider = action.preset.provider
                             model = action.preset.model
                             effort = action.preset.effort
+                            mode = action.preset.mode
                         }
                         is NewSessionAction.ReorderPresets -> {
                             presets = presets.copy(presets = action.presets)
@@ -296,6 +304,7 @@ fun DesktopNewSessionWindow(
                                     trust = false,
                                     model = model.ifEmpty { null },
                                     effort = effort.ifEmpty { null },
+                                    mode = mode.ifEmpty { null },
                                 )
                                 scope.launch {
                                     checking = true

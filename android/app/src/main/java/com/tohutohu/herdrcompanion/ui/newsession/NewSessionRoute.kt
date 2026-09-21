@@ -49,6 +49,7 @@ fun NewSessionRoute(
     var showPicker by remember { mutableStateOf(false) }
     var model by rememberSaveable { mutableStateOf("") }
     var effort by rememberSaveable { mutableStateOf("") }
+    var mode by rememberSaveable { mutableStateOf("") }
     var catalog by remember { mutableStateOf(ModelsResponse()) }
     var modelsError by remember { mutableStateOf<String?>(null) }
     var restored by rememberSaveable { mutableStateOf(false) }
@@ -58,7 +59,7 @@ fun NewSessionRoute(
     val loadedShortcuts = shortcuts ?: DirectoryShortcuts()
     val saved = presets?.presets.orEmpty()
     val current = withKnownNames(
-        agentPreset(provider, model, effort, catalog),
+        agentPreset(provider, model, effort, mode, catalog),
         saved + listOfNotNull(presets?.lastUsed),
     )
     val favorite = saved.any { it.key == current.key }
@@ -106,6 +107,7 @@ fun NewSessionRoute(
             provider = it.provider
             model = it.model
             effort = it.effort
+            mode = it.mode
         }
     }
 
@@ -116,6 +118,8 @@ fun NewSessionRoute(
             catalog = api.models(provider)
             if (model.isNotEmpty() && catalog.models.none { it.id == model }) model = ""
             if (effort.isNotEmpty() && effortsFor(catalog, model).none { it.id == effort }) effort = ""
+            // Modes belong to one agent; the other's are unknown to it.
+            if (mode.isNotEmpty() && catalog.modes.none { it.id == mode }) mode = ""
         } catch (e: Exception) {
             modelsError = e.message
         }
@@ -135,6 +139,7 @@ fun NewSessionRoute(
         showPicker = showPicker,
         model = model,
         effort = effort,
+        mode = mode,
         catalog = catalog,
         modelsError = modelsError,
         shortcuts = loadedShortcuts,
@@ -154,11 +159,13 @@ fun NewSessionRoute(
                     if (effortsFor(catalog, action.model).none { it.id == effort }) effort = ""
                 }
                 is NewSessionAction.SetEffort -> effort = action.effort
+                is NewSessionAction.SetMode -> mode = normalizedMode(catalog, action.mode)
                 is NewSessionAction.SetPrompt -> prompt = action.prompt
                 is NewSessionAction.SelectPreset -> {
                     provider = action.preset.provider
                     model = action.preset.model
                     effort = action.preset.effort
+                    mode = action.preset.mode
                 }
                 is NewSessionAction.ReorderPresets -> scope.launch { presetStore.setOrder(action.presets) }
                 is NewSessionAction.ReorderFavoriteDirectories -> scope.launch { shortcutStore.setFavoriteOrder(action.paths) }
@@ -196,6 +203,7 @@ fun NewSessionRoute(
                             trust = false,
                             model.ifEmpty { null },
                             effort.ifEmpty { null },
+                            mode.ifEmpty { null },
                         )
                         val preset = current
                         scope.launch {

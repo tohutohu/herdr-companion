@@ -2,16 +2,19 @@ package com.tohutohu.herdrcompanion.data
 
 import kotlinx.serialization.Serializable
 
-/** A saved coding-agent/model/effort combination. */
+/** A saved coding-agent/model/effort/mode combination. */
 @Serializable
 data class AgentPreset(
     val provider: String,
     val model: String = "",
     val effort: String = "",
+    /** Empty starts the session in the agent's own mode. */
+    val mode: String = "",
     val modelName: String = "",
     val effortName: String = "",
+    val modeName: String = "",
 ) {
-    val key get() = "$provider/$model/$effort"
+    val key get() = "$provider/$model/$effort/$mode"
 }
 
 @Serializable

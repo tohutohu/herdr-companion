@@ -21,6 +21,7 @@ data class NewSessionUiState(
     val showPicker: Boolean,
     val model: String,
     val effort: String,
+    val mode: String,
     val catalog: ModelsResponse,
     val modelsError: String?,
     val shortcuts: DirectoryShortcuts,
@@ -40,6 +41,7 @@ sealed interface NewSessionAction {
     data class SetProvider(val provider: String) : NewSessionAction
     data class SetModel(val model: String) : NewSessionAction
     data class SetEffort(val effort: String) : NewSessionAction
+    data class SetMode(val mode: String) : NewSessionAction
     data class SetPrompt(val prompt: String) : NewSessionAction
     data class SelectPreset(val preset: AgentPreset) : NewSessionAction
     data class ReorderPresets(val presets: List<AgentPreset>) : NewSessionAction

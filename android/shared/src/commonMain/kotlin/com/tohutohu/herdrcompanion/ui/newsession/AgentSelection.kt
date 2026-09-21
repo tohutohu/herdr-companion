@@ -28,24 +28,38 @@ fun effortsFor(catalog: ModelsResponse, modelId: String): List<EffortOptionDto> 
 }
 
 /**
- * The picked combination, carrying the names [catalog] gives it. A model or
- * effort the catalog does not know (it failed to load, or the agent dropped
- * the model) keeps its id as the only label it has.
+ * The mode id to keep for [mode]: the agent's own mode is kept as "", so a
+ * session started in it is never labelled with a mode.
  */
-fun agentPreset(provider: String, model: String, effort: String, catalog: ModelsResponse) = AgentPreset(
+fun normalizedMode(catalog: ModelsResponse, mode: String): String =
+    if (catalog.modes.firstOrNull { it.id == mode }?.default == true) "" else mode
+
+/**
+ * The picked combination, carrying the names [catalog] gives it. A model,
+ * effort or mode the catalog does not know (it failed to load, or the agent
+ * dropped the model) keeps its id as the only label it has.
+ */
+fun agentPreset(provider: String, model: String, effort: String, mode: String, catalog: ModelsResponse) = AgentPreset(
     provider = provider,
     model = model,
     effort = effort,
+    mode = mode,
     modelName = catalog.models.firstOrNull { it.id == model }?.name.orEmpty(),
     effortName = effortsFor(catalog, model).firstOrNull { it.id == effort }?.name.orEmpty(),
+    modeName = catalog.modes.firstOrNull { it.id == mode }?.name.orEmpty(),
 )
 
-/** Chip label for a combination, e.g. "Claude Opus · High" or "Codex default". */
+/**
+ * Chip label for a combination, e.g. "Claude Opus · High · Plan" or
+ * "Codex default". The agent's own mode is left out: it is what a session
+ * starts in anyway, and every favorite would carry the same word.
+ */
 fun presetLabel(preset: AgentPreset): String {
     val model = preset.modelName.ifEmpty { preset.model }
     val effort = preset.effortName.ifEmpty { preset.effort }
+    val mode = preset.modeName.ifEmpty { preset.mode }
     val head = providerShortName(preset.provider) + if (model.isEmpty()) " default" else " $model"
-    return if (effort.isEmpty()) head else "$head · $effort"
+    return listOf(head, effort, mode).filter { it.isNotEmpty() }.joinToString(" · ")
 }
 
 /**
@@ -58,5 +72,6 @@ fun withKnownNames(current: AgentPreset, known: List<AgentPreset>): AgentPreset 
     return current.copy(
         modelName = current.modelName.ifEmpty { match.modelName },
         effortName = current.effortName.ifEmpty { match.effortName },
+        modeName = current.modeName.ifEmpty { match.modeName },
     )
 }

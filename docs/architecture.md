@@ -238,7 +238,8 @@ levels, or the default model's for Codex) used when no model is picked.
 The session mode can be picked for the new session too, and `/v1/models`
 returns the modes a provider offers (`modes`, with one marked `default`).
 Claude Code takes them as `--permission-mode`, so its list is that flag's own
-values, named as its status line names them. Codex has no such flag, and its
+values, named as its status line names them, minus Bypass permissions, which
+opens a warning screen the launcher cannot answer. Codex has no such flag, and its
 thread only exists once the first prompt runs, so the provider implements
 `LaunchModeSetter`: the launcher sends the TUI's Shift+Tab shortcut on the
 ready pane before the first prompt, which switches a fresh session between
