@@ -27,10 +27,12 @@ import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -145,13 +147,22 @@ fun NewSessionScreen(
                     Modifier.navigationBarsPadding().imePadding().padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    AgentPresetsRow(
-                        presets = state.savedPresets,
-                        current = state.currentPreset,
-                        onSelect = { onAction(NewSessionAction.SelectPreset(it)) },
-                        onReorder = { onAction(NewSessionAction.ReorderPresets(it)) },
-                        onCustomize = { onAction(NewSessionAction.CustomizeAgent) },
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        AgentPresetDropdown(
+                            presets = state.savedPresets,
+                            current = state.currentPreset,
+                            onSelect = { onAction(NewSessionAction.SelectPreset(it)) },
+                            onCustomize = { onAction(NewSessionAction.CustomizeAgent) },
+                            modifier = Modifier.weight(1f),
+                        )
+                        FilledTonalIconButton(onClick = { onAction(NewSessionAction.CustomizeAgent) }) {
+                            Icon(Icons.Default.Tune, contentDescription = "Choose agent, model or mode")
+                        }
+                    }
                     OutlinedTextField(
                         value = state.prompt,
                         onValueChange = { onAction(NewSessionAction.SetPrompt(it)) },

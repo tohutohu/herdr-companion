@@ -29,6 +29,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -136,22 +137,31 @@ fun AgentPickerDialog(
 /** Model or effort dropdown; the first entry keeps the agent's own default. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun OptionPicker(
+internal fun OptionPicker(
     label: String,
     options: List<CatalogOption>,
     selected: String,
     error: String?,
+    enabled: Boolean = true,
     onSelect: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    LaunchedEffect(enabled) {
+        if (!enabled) expanded = false
+    }
     val defaultName = options.firstOrNull { it.default }?.name
     val defaultLabel = if (defaultName != null) "Default ($defaultName)" else "Default"
     val current = options.firstOrNull { it.id == selected }?.name ?: defaultLabel
-    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }, modifier = modifier) {
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { if (enabled) expanded = it },
+        modifier = modifier,
+    ) {
         OutlinedTextField(
             value = current,
             onValueChange = {},
+            enabled = enabled,
             readOnly = true,
             singleLine = true,
             textStyle = MaterialTheme.typography.bodyMedium,
