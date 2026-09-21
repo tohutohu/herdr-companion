@@ -1,5 +1,5 @@
 // Package providers defines the adapter boundary between coding agents
-// (Claude Code, Codex, OpenCode v1/v2) and the provider-neutral model.
+// (Claude Code, Codex, OpenCode, Devin) and the provider-neutral model.
 package providers
 
 import (

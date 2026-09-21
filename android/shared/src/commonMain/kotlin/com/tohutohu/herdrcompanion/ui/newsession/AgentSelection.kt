@@ -11,6 +11,7 @@ val PROVIDERS = listOf(
     ProviderInfo("claude", "Claude Code", "Claude"),
     ProviderInfo("codex", "Codex", "Codex"),
     ProviderInfo("opencode", "OpenCode", "OpenCode"),
+    ProviderInfo("devin", "Devin", "Devin"),
 )
 
 fun providerName(id: String): String = PROVIDERS.firstOrNull { it.id == id }?.name ?: id

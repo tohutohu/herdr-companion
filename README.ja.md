@@ -2,7 +2,7 @@
 
 英語版: [README.md](README.md)
 
-Mac 上の [Herdr](https://herdr.dev) で動いている Claude Code / Codex / OpenCode のセッションを、Android から確認・操作するためのアプリです。Mac で AI エージェントを走らせたまま、スマホから進捗を確認したり、質問に答えたり、次の指示を送ったりできます。
+Mac 上の [Herdr](https://herdr.dev) で動いている Claude Code / Codex / OpenCode / Devin のセッションを、Android から確認・操作するためのアプリです。Mac で AI エージェントを走らせたまま、スマホから進捗を確認したり、質問に答えたり、次の指示を送ったりできます。
 
 ## このアプリの良さ
 
@@ -30,14 +30,14 @@ Firebase のプロジェクト作成とサービスアカウント設定は、�
 Gateway は Mac 上で動き、会話データをクラウドへ保存する独自 DB は持ちません。Herdr と各エージェントのデータを読み、Android 側に必要な範囲だけキャッシュします。
 
 ```text
-Android ──(Tailscale推奨 / trusted LAN / HTTPS tunnel, HTTP(S) + Bearer)──▶ Herdr Companion Gateway (Mac) ──▶ Herdr / Claude Code / Codex / OpenCode
+Android ──(Tailscale推奨 / trusted LAN / HTTPS tunnel, HTTP(S) + Bearer)──▶ Herdr Companion Gateway (Mac) ──▶ Herdr / Claude Code / Codex / OpenCode / Devin
 ```
 
 設計の詳細は [docs/architecture.md](docs/architecture.md) を参照してください。
 
 ## 最短の導入手順
 
-1. Mac に Herdr と Claude Code / Codex / OpenCode を用意し、必要な Herdr integration を入れる。
+1. Mac に Herdr と Claude Code / Codex / OpenCode / Devin を用意し、必要な Herdr integration を入れる。
 2. Mac で `Herdr Companion Gateway.app` を起動し、Gateway を起動する。
 3. Android アプリの **Scan Mac QR** でメニューバーアプリのペアリング QR を読み取る。
 4. 通知が必要なら、Firebase を設定してから QR を発行し直してペアリングする。
@@ -59,7 +59,7 @@ docs/      設計・macOS releaseドキュメント
 
 | 対象 | 必要なもの |
 |---|---|
-| Mac | Go 1.24+、Herdr 0.9+、Claude Code および/または Codex CLI、ネットワーク接続（Tailscale推奨） |
+| Mac | Go 1.24+、Herdr 0.9+、Claude Code / Codex CLI / OpenCode / Devin CLI、ネットワーク接続（Tailscale推奨） |
 | 残量表示 | CodexBar（`brew install --cask codexbar`、任意） |
 | Android | Android 10 (API 29) 以上、Macへ到達できるネットワーク（Tailscale推奨） |
 | ビルド | JDK 17、Android SDK（compileSdk 37）|
@@ -74,10 +74,12 @@ herdr integration install claude
 herdr integration install codex
 # OpenCode を使う場合は、OpenCode を一度起動してから実行
 herdr integration install opencode
+# Devin CLI を使う場合
+herdr integration install devin
 herdr integration status   # 利用する integration が installed になっていること
 ```
 
-インストール後に起動した Claude Code / Codex から認識されます（既存セッションは一度再起動してください）。
+インストール後に起動した Claude Code / Codex / OpenCode / Devin から認識されます（既存セッションは一度再起動してください）。
 
 ### Codex の構造化操作（推奨）
 
@@ -119,7 +121,7 @@ go build -o ~/.local/bin/herdr-mobile-gateway ./cmd/herdr-mobile-gateway
 }
 ```
 
-任意項目: `fcmCredentialsFile`, `herdrSocket`, `claudeConfigDir`, `codexBinary`, `codexDaemonSocket`, `uploadDir`, `workspaceRoots`, `usageCommand`, `usageRefreshMinutes`。
+任意項目: `fcmCredentialsFile`, `herdrSocket`, `claudeConfigDir`, `opencode`, `devin`, `codexBinary`, `codexDaemonSocket`, `uploadDir`, `workspaceRoots`, `usageCommand`, `usageRefreshMinutes`。Devin の DB は既定で `~/.local/share/devin/cli/sessions.db` を読み取ります。保存先や実行ファイルを変える場合だけ `devin.database` / `devin.binary` を指定します。
 
 `workspaceRoots`（既定: `~/workspace`、なければホーム）は、アプリからフォルダを選択・作成してセッションを起動できる範囲です。
 
@@ -136,7 +138,7 @@ Gateway は既定で 5 分ごとに読み直してキャッシュし、アプリ
 
 ### アプリからのセッション起動
 
-一覧画面の「New session」で、Claude Code / Codex、作業フォルダ（`workspaceRoots` 配下で選択または新規作成）、最初のプロンプトを指定して起動します。
+一覧画面の「New session」で、Claude Code / Codex / OpenCode / Devin、作業フォルダ（`workspaceRoots` 配下で選択または新規作成）、最初のプロンプトを指定して起動します。
 Gateway は Herdr に新しいワークスペースを作り、`agent.start` でエージェントを起動します。
 エージェントがフォルダ信頼確認ダイアログを出したときだけ、アプリが信頼するか確認します。「Trust」を選ぶと Gateway がダイアログに回答して起動を続け、「Cancel」を選ぶと作成したワークスペースを閉じます。
 Codex の共有 daemon が動いていれば `codex --remote unix://…` で起動します。
@@ -353,6 +355,36 @@ Claude / Codex の仕様変更で dead-letter に記録されたデータは、r
 - セッションの identity は Herdr インテグレーションが報告する session id です。インテグレーション未導入のペインは一覧に出ません。
 - 通知の重複防止はメモリ上のみで、Gateway 再起動直後の状態は通知しません。
 - バックグラウンド取得には Gateway が起動していて Android から到達できる必要があります。Android でアプリを「強制停止」している間は FCM 通知が届きません。
+
+## Devin CLI
+
+アプリのエージェント選択で **Devin** を選びます。Mac に Devin CLI をインストールして
+ログインした後、Herdr integration を入れてください。
+
+```bash
+curl -fsSL https://cli.devin.ai/install.sh | bash
+devin auth login
+herdr integration install devin
+```
+
+Gateway は Devin のローカル会話 DB
+`~/.local/share/devin/cli/sessions.db` を読み取り専用で参照し、現在の
+メッセージチェーンを表示します。新しいプロンプトは Herdr のペイン経由で送信します。
+モデル選択には `devin models list` のモデルファミリーを使い、未選択なら Devin の既定モデルを使います。
+CLI のバージョンによって認識できないワークスペース確認画面は、アプリの **Terminal** から操作できます。
+
+独自の保存先や実行ファイルを使う場合は、他の設定を残したまま次を追加します。
+
+```json
+{
+  "devin": {
+    "database": "/absolute/path/to/sessions.db",
+    "binary": "devin"
+  }
+}
+```
+
+設定画面の「Agent updates on Mac」から `devin update` も実行できます。
 
 ## OpenCode（v1 / 公式 v2）
 

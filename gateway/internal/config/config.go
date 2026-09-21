@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/devin"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/opencode"
 )
 
@@ -39,6 +40,7 @@ type Config struct {
 	HerdrSocket     string          `json:"herdrSocket,omitempty"`
 	ClaudeConfigDir string          `json:"claudeConfigDir,omitempty"`
 	OpenCode        opencode.Config `json:"opencode,omitempty"`
+	Devin           devin.Config    `json:"devin,omitempty"`
 	CodexBinary     string          `json:"codexBinary,omitempty"`
 	CodexDaemonSock string          `json:"codexDaemonSocket,omitempty"`
 	UploadDir       string          `json:"uploadDir,omitempty"`

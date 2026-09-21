@@ -2,7 +2,7 @@
 
 Japanese version: [README.ja.md](README.ja.md)
 
-Herdr Companion lets you inspect and control Claude Code, Codex, and OpenCode sessions running inside [Herdr](https://herdr.dev) on your Mac from Android. Keep an AI agent running on the Mac while checking its progress, answering questions, and sending the next instruction from your phone.
+Herdr Companion lets you inspect and control Claude Code, Codex, OpenCode, and Devin sessions running inside [Herdr](https://herdr.dev) on your Mac from Android. Keep an AI agent running on the Mac while checking its progress, answering questions, and sending the next instruction from your phone.
 
 ## Why this app is useful
 
@@ -30,14 +30,14 @@ Firebase project and service-account setup is, honestly, the most cumbersome par
 The Gateway runs on the Mac and does not keep a separate cloud conversation database. It reads Herdr and each agent's own data, and caches only what Android needs locally.
 
 ```text
-Android ──(Tailscale recommended / trusted LAN / HTTPS tunnel, HTTP(S) + Bearer)──▶ Herdr Companion Gateway (Mac) ──▶ Herdr / Claude Code / Codex / OpenCode
+Android ──(Tailscale recommended / trusted LAN / HTTPS tunnel, HTTP(S) + Bearer)──▶ Herdr Companion Gateway (Mac) ──▶ Herdr / Claude Code / Codex / OpenCode / Devin
 ```
 
 See [docs/architecture.md](docs/architecture.md) for the detailed design.
 
 ## Quick start
 
-1. Set up Herdr and the required Herdr integrations for Claude Code, Codex, and/or OpenCode on the Mac.
+1. Set up Herdr and the required Herdr integrations for Claude Code, Codex, OpenCode, and/or Devin on the Mac.
 2. Install and launch Herdr Companion Gateway.app on the Mac, then start the Gateway.
 3. In the Android app, use **Scan Mac QR** to scan the pairing QR shown by the menu-bar app.
 4. If you want notifications, configure Firebase and pair again with a newly generated QR code.
@@ -59,7 +59,7 @@ docs/      architecture and macOS release documentation
 
 | Target | Requirements |
 |---|---|
-| Mac | Go 1.24+, Herdr 0.9+, Claude Code and/or Codex CLI, optionally OpenCode, and network connectivity (Tailscale recommended) |
+| Mac | Go 1.24+, Herdr 0.9+, Claude Code, Codex CLI, OpenCode and/or Devin CLI, and network connectivity (Tailscale recommended) |
 | Usage limits | CodexBar (brew install --cask codexbar, optional) |
 | Android | Android 10 (API 29) or newer, with a network route to the Mac (Tailscale recommended) |
 | Building | JDK 17 and Android SDK (compileSdk 37) |
@@ -74,6 +74,8 @@ herdr integration install claude
 herdr integration install codex
 # If you use OpenCode, start OpenCode once, then run:
 herdr integration install opencode
+# If you use Devin CLI:
+herdr integration install devin
 herdr integration status   # the integrations you use should be installed
 ```
 
@@ -119,7 +121,7 @@ The generated ~/.config/herdr-mobile/config.json has mode 600:
 }
 ```
 
-Optional fields include fcmCredentialsFile, herdrSocket, claudeConfigDir, codexBinary, codexDaemonSocket, uploadDir, workspaceRoots, usageCommand, and usageRefreshMinutes.
+Optional fields include fcmCredentialsFile, herdrSocket, claudeConfigDir, opencode, devin, codexBinary, codexDaemonSocket, uploadDir, workspaceRoots, usageCommand, and usageRefreshMinutes. The Gateway automatically reads Devin's `~/.local/share/devin/cli/sessions.db`; set `devin.database` or `devin.binary` only when using a custom location or executable.
 
 workspaceRoots (default: ~/workspace, or the home directory if it does not exist) limits the directories where the app can browse, create folders, and start sessions.
 
@@ -136,7 +138,7 @@ The Gateway refreshes and caches usage every five minutes by default, and the ap
 
 ### Starting sessions from the app
 
-From **New session**, choose Claude Code, Codex, or OpenCode, a working directory under workspaceRoots (browse or create one), and the first prompt.
+From **New session**, choose Claude Code, Codex, OpenCode, or Devin, a working directory under workspaceRoots (browse or create one), and the first prompt.
 
 The Gateway creates a Herdr workspace and starts the agent with agent.start. If the agent shows a folder-trust dialog, the app asks whether to trust it. **Trust** answers the dialog and continues; **Cancel** closes the workspace that was created. If the Codex shared daemon is running, the Gateway starts Codex with codex --remote unix://….
 
@@ -340,6 +342,38 @@ gateway/testdata/{claude,codex}/ contains anonymized real-data fixtures and gold
 - Session identity is the session ID reported by the Herdr integration. Panes without an integration do not appear in the list.
 - Notification de-duplication is in memory only, so the Gateway does not notify for the initial observation immediately after a restart.
 - Background fetching requires the Gateway to be running and reachable from Android. FCM notifications are not delivered while the Android app is force-stopped.
+
+## Devin CLI
+
+Choose **Devin** in the app's agent picker. Install and authenticate the local
+CLI on the Mac, then install its Herdr integration:
+
+```bash
+curl -fsSL https://cli.devin.ai/install.sh | bash
+devin auth login
+herdr integration install devin
+```
+
+The Gateway reads Devin's local conversation database at
+`~/.local/share/devin/cli/sessions.db` in read-only mode, follows the active
+message chain, and sends new prompts through the Herdr pane. The model picker
+uses the model families returned by `devin models list`; Devin's own default is
+used when no model is selected. Devin workspace dialogs that are not recognized
+by the current CLI version remain available through the app's **Terminal**
+screen.
+
+For a custom installation, keep the other Gateway settings and add:
+
+```json
+{
+  "devin": {
+    "database": "/absolute/path/to/sessions.db",
+    "binary": "devin"
+  }
+}
+```
+
+The Settings screen also exposes `devin update` as **Check and update**.
 
 ## OpenCode (v1 / official v2)
 

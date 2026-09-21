@@ -7,7 +7,7 @@ macOS 13以降のメニューバーアプリです。Herdr Companion Gatewayを�
 ## 使い方
 
 1. Tailscale（推奨）をMacとAndroidに用意して同じtailnetへ接続するか、同じ信頼できるローカルネットワークを使います。外部からはCloudflare TunnelなどのHTTPSトンネルも利用できます。
-2. MacのHerdrとClaude Code／Codexをセットアップします。Herdrのintegration設定は[ルートREADME](../README.md#1-herdr-のセットアップ)を参照してください。
+2. MacのHerdrと使うエージェント（Claude Code／Codex／OpenCode／Devin CLI）をセットアップします。Herdrのintegration設定は[ルートREADME](../README.md#1-herdr-のセットアップ)を参照してください。
 3. Gateway DMGを開き、`Herdr Companion Gateway.app`をApplicationsへドラッグして起動します。Compose UIを使う場合はUI DMGの`Herdr Companion.app`も別途Applicationsへ入れます。
 4. メニューバーのターミナルアイコンを開き、Tailscale IPv4またはローカルネットワークのIPv4とポートを確認して「Gatewayを起動」。UI側がオフラインの場合は、UIの接続画面またはSettingsからGateway managerを起動できます。
 5. 「ペアリングQRを表示」→ Androidの設定で「Scan Mac QR」→ 接続先を確認して「Pair」。

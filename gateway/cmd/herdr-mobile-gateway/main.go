@@ -1,5 +1,5 @@
 // Command herdr-mobile-gateway is the Herdr Companion Gateway. It serves
-// Herdr-managed Claude Code / Codex sessions to the Herdr Companion apps.
+// Herdr-managed coding-agent sessions to the Herdr Companion apps.
 package main
 
 import (
@@ -28,6 +28,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/claude"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/codex"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/devin"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/opencode"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/sessions"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/uploads"
@@ -141,7 +142,8 @@ func serve(args []string) error {
 	codexProvider := codex.New(cfg.CodexBinary, cfg.CodexDaemonSock, hc, sink)
 	go codexProvider.Run(ctx)
 	openCodeProvider := opencode.New(cfg.OpenCode, hc, sink)
-	svc := sessions.New(hc, time.Duration(cfg.OfflineSessionDays)*24*time.Hour, claudeProvider, codexProvider, openCodeProvider)
+	devinProvider := devin.New(cfg.Devin, hc, sink)
+	svc := sessions.New(hc, time.Duration(cfg.OfflineSessionDays)*24*time.Hour, claudeProvider, codexProvider, openCodeProvider, devinProvider)
 	archived, err := archive.Open(filepath.Join(config.StateDir(), "archive.json"))
 	if err != nil {
 		return err
@@ -152,13 +154,17 @@ func serve(args []string) error {
 	if len(roots) == 0 {
 		roots = launcher.DefaultRoots()
 	}
-	launch := &launcher.Launcher{Herdr: hc, Roots: roots, Providers: []providers.Provider{claudeProvider, codexProvider, openCodeProvider}}
+	launch := &launcher.Launcher{Herdr: hc, Roots: roots, Providers: []providers.Provider{claudeProvider, codexProvider, openCodeProvider, devinProvider}}
 
 	jevKey := os.Getenv("TYPESAFE_API_KEY")
 	if jevKey == "" {
 		jevKey = cfg.JevAPIKey
 	}
-	dirCheck := &directorycheck.Checker{APIKey: jevKey, Providers: []directorycheck.History{claudeProvider, codexProvider}}
+	dirCheck := &directorycheck.Checker{APIKey: jevKey, Providers: []directorycheck.History{claudeProvider, codexProvider, devinProvider}}
+	devinBinary := cfg.Devin.Binary
+	if devinBinary == "" {
+		devinBinary = devin.DefaultBinary()
+	}
 
 	limits := usage.New(cfg.UsageCommand, time.Duration(cfg.UsageRefreshMinutes)*time.Minute, codexProvider)
 	go limits.Run(ctx)
@@ -173,7 +179,7 @@ func serve(args []string) error {
 
 	srv := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           (&api.Server{AgentUpdates: agentupdate.New(ctx, cfg.CodexBinary, cfg.OpenCode.Binary), Sessions: svc, Terminal: hc, Uploads: up, Config: store, Sink: sink, Launcher: launch, Archive: archived, Usage: limits, DirectoryCheck: dirCheck}).Handler(),
+		Handler:           (&api.Server{AgentUpdates: agentupdate.New(ctx, cfg.CodexBinary, cfg.OpenCode.Binary, devinBinary), Sessions: svc, Terminal: hc, Uploads: up, Config: store, Sink: sink, Launcher: launch, Archive: archived, Usage: limits, DirectoryCheck: dirCheck}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {

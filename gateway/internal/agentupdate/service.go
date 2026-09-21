@@ -31,14 +31,18 @@ type Service struct {
 	run      func(context.Context, string, ...string) (string, error)
 }
 
-func New(ctx context.Context, codex, opencode string) *Service {
+func New(ctx context.Context, codex, opencode string, devinArgs ...string) *Service {
 	if codex == "" {
 		codex = "codex"
 	}
 	if opencode == "" {
 		opencode = "opencode"
 	}
-	return &Service{ctx: ctx, commands: map[string]string{"codex": codex, "claude": "claude", "opencode": opencode}, statuses: map[string]Status{}, run: runCommand}
+	devin := "devin"
+	if len(devinArgs) > 0 && devinArgs[0] != "" {
+		devin = devinArgs[0]
+	}
+	return &Service{ctx: ctx, commands: map[string]string{"codex": codex, "claude": "claude", "opencode": opencode, "devin": devin}, statuses: map[string]Status{}, run: runCommand}
 }
 
 // boundedOutput keeps verbose or broken installers from exhausting memory.
@@ -81,8 +85,8 @@ func runCommand(ctx context.Context, binary string, args ...string) (string, err
 }
 
 func (s *Service) List(ctx context.Context) []Status {
-	out := make([]Status, 0, 3)
-	for _, id := range []string{"claude", "codex", "opencode"} {
+	out := make([]Status, 0, 4)
+	for _, id := range []string{"claude", "codex", "opencode", "devin"} {
 		s.mu.Lock()
 		st, ok := s.statuses[id]
 		s.mu.Unlock()

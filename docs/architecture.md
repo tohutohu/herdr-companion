@@ -1,6 +1,6 @@
 # Architecture
 
-Herdr Companion lets an Android phone follow and answer Claude Code / Codex / OpenCode
+Herdr Companion lets an Android phone follow and answer Claude Code / Codex / OpenCode / Devin
 sessions that run inside [Herdr](https://herdr.dev) on a Mac.
 
 ```text
@@ -13,6 +13,7 @@ Herdr Companion Gateway (Go, on the Mac)
    ├─ Claude adapter ──── ~/.claude/projects/*/<session>.jsonl (+ PTY for dialogs)
    ├─ Codex adapter ───── codex app-server (thread/read, thread/list)
    │                      + shared daemon socket for approvals/questions/turns
+   ├─ Devin adapter ───── ~/.local/share/devin/cli/sessions.db (read-only)
    └─ FCM HTTP v1 ─────── data-only pushes on status transitions
 ```
 
@@ -33,8 +34,8 @@ Herdr Companion Gateway (Go, on the Mac)
 
 ## Identity
 
-Sessions are `claude:<session-id>` and `codex:<thread-id>`. Herdr's official
-integrations (`herdr integration install claude|codex`) report the native id
+Sessions are `claude:<session-id>`, `codex:<thread-id>`, and `devin:<session-id>`.
+Herdr's official integrations (`herdr integration install claude|codex|devin`) report the native id
 for each pane (`agent_session` in `session.snapshot`). A pane id is only
 *where* a session currently runs; a resumed session in another pane keeps its
 id. A stored `agent_session` is trusted only while the same agent still
@@ -62,6 +63,19 @@ A Codex thread loaded on the shared daemon may report its own status
 `Summary`, `Recent`, `Messages`, `Image`, `Send`, `Respond`.
 OpenCode v1 and official v2 share one adapter and the `opencode:<session-id>`
 identity; the native database schema selects the history format.
+
+### Devin CLI
+
+- History is read from Devin CLI's shared SQLite database in `mode=ro`.
+  `sessions.main_chain_id` selects the active path in the message forest; abandoned
+  branches are not shown.
+- The adapter reads session metadata and `chat_message` JSON, including text,
+  tool calls/results, inline image data, and explicit context usage when present.
+  Unknown records are dead-lettered and kept visible as a recoverable placeholder.
+- New prompts and image/file paths use the Herdr pane. Resuming uses Devin's
+  `--resume <session-id>` flag, and model families come from `devin models list`.
+- Devin workspace trust screens are intentionally left for the terminal fallback
+  when their layout is not recognized by the installed CLI version.
 
 ### Claude Code
 
@@ -225,8 +239,8 @@ answered (or the gateway restarts), and returns `trustRequired: true`. The app t
 answers with `POST /v1/launches/{pane}/trust`, which continues the launch
 (first prompt, session id) or closes the workspace. The native session id is then read from the pane's
 `agent_session`, which the Herdr integration hook reports at startup.
-An optional model id is passed as the CLI's `--model`. Claude Code has no
-catalog API, so its list is the CLI aliases (`fable`, `opus`, `sonnet`,
+An optional model id is passed as the CLI's `--model`. Devin returns model
+families from `devin models list`. Claude Code has no catalog API, so its list is the CLI aliases (`fable`, `opus`, `sonnet`,
 `haiku`); Codex's comes from `model/list`. Switching the model of a running
 Claude session is not offered because `/model` also changes the user's
 default for new sessions.
@@ -251,6 +265,8 @@ its startup notices is dropped, so the status line is read back and the
 shortcut repeated; Codex applies its own plan-mode reasoning effort there,
 just as it does for the shortcut typed by hand. A mode that cannot be set is reported as
 a launch warning rather than failing the start.
+Devin passes its safe `--permission-mode` values (`auto`, `accept-edits`, and
+`smart`) directly to the CLI.
 
 The app does not ask for the agent, the model and the effort separately on
 every start: the combinations the user keeps coming back to are saved as
@@ -374,7 +390,7 @@ whole thing off, and `herdr-mobile-gateway usage` prints one read.
 | GET / POST | `/v1/launches/{pane}/terminal` | terminal fallback before a session id exists; only panes launched by this gateway |
 | POST | `/v1/launches/{pane}/continue` | retry readiness after manual terminal interaction, then send the retained initial prompt once |
 | GET | `/v1/agents` | installed CLI versions and latest update status/output |
-| POST | `/v1/agents/{provider}/update` | start `claude update` or `codex update`; repeated requests while running share the same job |
+| POST | `/v1/agents/{provider}/update` | start the provider's update command (`claude update`, `codex update`, `opencode upgrade`, or `devin update`); repeated requests while running share the same job |
 | GET | `/v1/models?provider=` | models and efforts offered for new sessions `{models[{id, name, description?, default?, efforts?[]}], efforts?[{id, name, description?, default?}]}` |
 | GET | `/v1/directories?path=` | workspace roots, or subfolders of `path` |
 | POST | `/v1/directories` | create `{parent, name}` under a root |

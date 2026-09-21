@@ -319,7 +319,7 @@ private fun FrameWindowScope.DesktopShell(
                             isRefreshing = state.listRefreshing,
                             error = state.listError,
                             emptyMessage = if (query.isBlank()) {
-                                "No sessions. Start Claude Code or Codex inside Herdr on your Mac."
+                                "No sessions. Start Claude Code, Codex, OpenCode, or Devin inside Herdr on your Mac."
                             } else {
                                 "No sessions match \"$query\"."
                             },

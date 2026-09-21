@@ -110,7 +110,7 @@ func TestOpenCodeは設定済みバイナリのupgradeを使い更新結果を�
 				return "Upgrade complete", nil
 			}
 			list := s.List(context.Background())
-			if len(list) != 3 || list[2].Provider != "opencode" || list[2].Version != version {
+			if len(list) != 4 || list[2].Provider != "opencode" || list[2].Version != version {
 				t.Fatal(list)
 			}
 			first, err := s.Start("opencode")
