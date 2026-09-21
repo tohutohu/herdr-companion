@@ -635,7 +635,7 @@ private fun FrameWindowScope.DesktopMenuBar(actions: DesktopActions) {
 @Composable
 private fun ConnectionIndicator(status: DesktopConnectionState, label: String) {
     val color = when (status) {
-        DesktopConnectionState.CONNECTED -> Color(0xFF2E9D5B)
+        DesktopConnectionState.CONNECTED -> Color(0xFF34C759)
         DesktopConnectionState.CONNECTING,
         DesktopConnectionState.RECONNECTING -> MaterialTheme.colorScheme.tertiary
         DesktopConnectionState.OFFLINE,
