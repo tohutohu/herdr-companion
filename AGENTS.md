@@ -3,6 +3,10 @@
 Herdr Companion: Go gateway on the Mac (`gateway/`) + native Android app (`android/`).
 Design: `docs/architecture.md`. Setup for humans: `README.md`.
 
+用語: 「Mac UI」はCompose Desktop版の`Herdr Companion.app`
+（`android/desktopApp/`）を指す。メニューバーのSwiftUI Gateway Manager
+（`Herdr Companion Gateway.app`）とは別アプリであり、「Mac UI」の再ビルド・再起動ではGateway Managerを更新しない。
+
 ## Commands
 
 ```bash
@@ -21,6 +25,14 @@ export JAVA_HOME=$HOME/Library/Java/JavaVirtualMachines/jbr-17.0.14/Contents/Hom
 ./gradlew --console=plain assembleRelease          # default for APK build requests (R8 + resource shrinking)
 ./gradlew --console=plain assembleDebug testDebugUnitTest  # development checks
 ANDROID_SERIAL=<serial> ./gradlew installDebug
+
+# Compose Mac UI (JDK 17; separate from the menu-bar Gateway Manager)
+cd android
+export JAVA_HOME=$HOME/Library/Java/JavaVirtualMachines/jbr-17.0.14/Contents/Home
+./gradlew --console=plain :desktopApp:createReleaseDistributable
+osascript -e 'tell application id "com.tohutohu.herdrcompanion.desktop" to quit'
+ditto "$(find desktopApp/build/compose/binaries -type d -name 'Herdr Companion.app' -print | sort | tail -n 1)" "/Applications/Herdr Companion.app"
+open "/Applications/Herdr Companion.app"
 
 # Mac menu-bar app (macOS 13+, Swift and Go)
 bash macos/scripts/build-dmg.sh                 # native-architecture DMG, ad-hoc signed by default

@@ -118,7 +118,7 @@ fun SettingsScreen(onDone: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                "Connect to herdr-mobile-gateway on your Mac. Tailscale is recommended; a trusted local network also works.",
+                "Connect to herdr-mobile-gateway on your Mac. Tailscale is recommended; a trusted LAN or HTTPS tunnel also works.",
                 style = MaterialTheme.typography.bodyMedium,
             )
             Text("Appearance", style = MaterialTheme.typography.titleMedium)
@@ -159,12 +159,13 @@ fun SettingsScreen(onDone: () -> Unit) {
                     } finally { busy = false }
                 }
             }) { Text("Scan Mac QR") }
-            Text("On the Mac: Herdr Companion → ペアリングQRを表示. Tailscale is recommended, but pairing also works on a trusted local network. No Firebase or Jev key is required.", style = MaterialTheme.typography.bodySmall)
+            Text("On the Mac: Herdr Companion → ペアリングQRを表示. Tailscale is recommended; a trusted LAN or HTTPS tunnel also works. No Firebase or Jev key is required.", style = MaterialTheme.typography.bodySmall)
             OutlinedTextField(
                 value = url,
                 onValueChange = { url = it },
                 label = { Text("Gateway URL") },
-                placeholder = { Text("http://my-mac.local:8765") },
+                placeholder = { Text("http://my-mac.local:8765 or https://tunnel.example.com") },
+                supportingText = { Text("For Cloudflare Tunnel or another HTTPS tunnel, enter its URL here.") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false),
                 modifier = Modifier.fillMaxWidth(),

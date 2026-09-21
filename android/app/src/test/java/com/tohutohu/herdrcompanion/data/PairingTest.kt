@@ -15,14 +15,19 @@ class PairingTest {
     }
 
     @Test fun `ローカルネットワークのQRも受け入れる`() {
-        listOf("http://192.168.1.23:8766", "http://10.0.0.8:8766", "http://172.16.2.4:8766", "http://my-mac.local:8766").forEach {
+        listOf("http://192.168.1.23:8766", "http://10.0.0.8:8766", "http://172.16.2.4:8766", "http://my-mac.local:8766", "http://203.0.113.23:8766").forEach {
             assertEquals(it.substringAfter("//").substringBefore(':'), PairingInvitation.parse(qr(it)).gateway.host)
         }
     }
 
-    @Test fun `公開ホストやユーザー情報や追加パスを受け入れない`() {
-        listOf("http://evil.example", "http://100.99.15.34.evil.example", "http://127.0.0.1:8766", "http://8.8.8.8:8766", "http://100.128.0.1",
-            "http://user:password@100.99.15.34", "http://100.99.15.34/pair", "http://100.99.15.34?other=1").forEach {
+    @Test fun `HTTPSトンネルのQRを受け入れる`() {
+        val invitation = PairingInvitation.parse(qr("https://herdr.example.com"))
+        assertEquals("https", invitation.gateway.scheme)
+        assertEquals("herdr.example.com", invitation.gateway.host)
+    }
+
+    @Test fun `認証情報や追加パスを受け入れない`() {
+        listOf("http://user:password@100.99.15.34", "http://100.99.15.34/pair", "http://100.99.15.34?other=1").forEach {
             assertThrows(IllegalArgumentException::class.java) { PairingInvitation.parse(qr(it)) }
         }
     }

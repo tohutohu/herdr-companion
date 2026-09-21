@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The gateway may be reached over Tailscale or a trusted local network.
-     Tailscale is recommended when using plain HTTP outside the LAN. -->
+<!-- The gateway may be reached over HTTPS, Tailscale, or a trusted local
+     network. Tailscale is recommended when using plain HTTP outside the LAN. -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="true">
         <trust-anchors>

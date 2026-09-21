@@ -25,31 +25,15 @@ data class PairingInvitation(val gateway: HttpUrl, val code: String) {
             require(params.size == 1 && params[0].startsWith("url=")) { "Invalid pairing URL" }
             val gateway = URLDecoder.decode(params[0].substring(4), "UTF-8").toHttpUrl()
             require(gateway.username.isEmpty() && gateway.password.isEmpty() && gateway.encodedPath == "/" && gateway.query == null && gateway.fragment == null) { "Invalid gateway address" }
-            // QR pairing is limited to addresses that normally stay on a private
-            // network. Tailscale is recommended, but a trusted home/office LAN
-            // should work without installing it on both devices.
-            require(gateway.scheme == "http" && isPrivateGatewayHost(gateway.host)) {
-                "QR pairing supports a Tailscale or private-network address"
+            // Keep the URL shape strict, but do not assume a particular network
+            // overlay. Tailscale is recommended; LANs, HTTPS tunnels, and other
+            // reachable gateway addresses are valid too.
+            require(gateway.scheme == "http" || gateway.scheme == "https") {
+                "QR pairing requires an HTTP or HTTPS gateway address"
             }
             val code = uri.fragment.orEmpty()
             require(code.matches(Regex("[0-9a-f]{64}"))) { "Invalid pairing code" }
             return PairingInvitation(gateway, code)
-        }
-
-        private fun isPrivateGatewayHost(host: String): Boolean {
-            val octets = host.split('.')
-            if (octets.size == 4 && octets.all { it.isNotEmpty() && it.all(Char::isDigit) }) {
-                val values = octets.map(String::toInt)
-                if (values.any { it !in 0..255 }) return false
-                return values[0] == 10 ||
-                    (values[0] == 172 && values[1] in 16..31) ||
-                    (values[0] == 192 && values[1] == 168) ||
-                    (values[0] == 100 && values[1] in 64..127) ||
-                    (values[0] == 169 && values[1] == 254)
-            }
-
-            val lower = host.lowercase()
-            return lower.endsWith(".local") || lower.endsWith(".home.arpa") || lower.endsWith(".ts.net")
         }
     }
 }
