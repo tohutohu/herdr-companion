@@ -252,14 +252,18 @@ Sessions report the model they last used (`model`), the reasoning effort
 - Claude: `model` / `effort` of the newest assistant reply (or the display
   name from a later `/model`); `permissionMode` of the latest entry that has
   one. A Shift+Tab change is recorded with the next prompt, and
-  `permission-mode` entries are re-appended later with the current mode.
+  `permission-mode` entries are re-appended later with the current mode. Until
+  that happens, a live status-line read keeps the changed mode visible without
+  sending a dummy prompt.
 - Codex: the thread's `model` / `reasoningEffort`. The permission preset is
   only known for threads loaded on the shared daemon: `thread/resume` gives
   the approval policy and sandbox, `thread/settings/updated` also gives the
   collaboration mode. A thread that starts in Plan mode sends that
   notification before the gateway subscribes, so Plan mode also comes from
   the newest `collaboration_mode` in the rollout (`turn_context`, or
-  `thread_settings_applied` when the TUI switches mode).
+  `thread_settings_applied` when the TUI switches mode). The mode endpoint
+  preserves the current model and effort when it can use the shared daemon;
+  standalone TUIs use their native shortcut.
 
 They also report how full the context window is (`context`: used tokens,
 window size, percent), omitted until an agent has accounted for a turn:

@@ -356,12 +356,40 @@ func (p *Provider) Send(ctx context.Context, nativeID string, live *providers.Li
 	return p.term.Prompt(ctx, live.PaneID, strings.TrimSpace(text))
 }
 
-// CycleMode uses Codex's live TUI shortcut. This lets Codex choose the next
-// available permission/collaboration mode, including any modes constrained by
-// the current account or configuration.
+// CycleMode changes the collaboration mode without changing the selected
+// model or effort when the session is attached to the shared app-server.
+// Codex's TUI shortcut also applies each mode's configured defaults, which can
+// unexpectedly change max/medium effort. Standalone TUIs still use the native
+// shortcut because they have no structured settings channel.
 func (p *Provider) CycleMode(ctx context.Context, nativeID string, live *providers.Live) error {
 	if live == nil {
 		return providers.ErrNotLive
+	}
+	if d := p.currentDaemon(); d != nil && d.loaded(nativeID) {
+		if current, ok := d.collaborationMode(nativeID); ok && current.Settings != nil && current.Settings.Model != "" {
+			next := "plan"
+			if current.Mode == "plan" {
+				next = "default"
+			}
+			params := map[string]any{
+				"threadId": nativeID,
+				"collaborationMode": map[string]any{
+					"mode": next,
+					"settings": map[string]any{
+						"model":            current.Settings.Model,
+						"reasoning_effort": current.Settings.ReasoningEffort,
+					},
+				},
+			}
+			cctx, cancel := context.WithTimeout(ctx, callTimeout)
+			err := d.c.call(cctx, "thread/settings/update", params, nil)
+			cancel()
+			if err == nil {
+				d.setCollaborationMode(nativeID, next, current.Settings)
+				return nil
+			}
+			return err
+		}
 	}
 	return p.term.SendKeys(ctx, live.PaneID, "shift+tab")
 }
@@ -634,6 +662,30 @@ func (d *daemonConn) mode(thread, rolloutLabel string) string {
 		return planLabel
 	}
 	return s.label()
+}
+
+func (d *daemonConn) collaborationMode(thread string) (*collaborationMode, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	s, ok := d.settings[thread]
+	if !ok || s.CollaborationMode == nil {
+		return nil, false
+	}
+	mode := *s.CollaborationMode
+	if s.CollaborationMode.Settings != nil {
+		settings := *s.CollaborationMode.Settings
+		mode.Settings = &settings
+	}
+	return &mode, true
+}
+
+func (d *daemonConn) setCollaborationMode(thread, mode string, settings *collaborationSettings) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	s := d.settings[thread]
+	copySettings := *settings
+	s.CollaborationMode = &collaborationMode{Mode: mode, Settings: &copySettings}
+	d.settings[thread] = s
 }
 
 func (d *daemonConn) resolve(thread, reqID string) {

@@ -469,6 +469,51 @@ func Testモード変更は次のモードキーをペインへ送る(t *testing
 	}
 }
 
+func TestDaemon経由のモード変更はモデルとエフォートを維持する(t *testing.T) {
+	f := &fakeServer{t: t}
+	pt := &pipeTransport{in: make(chan []byte, 16), out: make(chan []byte, 16), closed: make(chan struct{})}
+	go f.serve(pt, func(v any) {
+		b, _ := json.Marshal(v)
+		pt.in <- b
+	})
+
+	term := &fakeTerm{}
+	p := New("codex-not-used", "/nonexistent.sock", term, deadletter.Nop{})
+	d := newDaemonConn(deadletter.Nop{})
+	d.c = newRPCClient(pt, d)
+	defer d.c.close()
+	p.daemon = d
+	thread := "thread-000001"
+	effort := "max"
+	d.status[thread] = ThreadStatus{Type: "idle"}
+	d.settings[thread] = threadSettings{CollaborationMode: &collaborationMode{
+		Mode:     "default",
+		Settings: &collaborationSettings{Model: "gpt-5.6-luna", ReasoningEffort: &effort},
+	}}
+
+	if err := p.CycleMode(context.Background(), thread, &providers.Live{PaneID: "w1:p1"}); err != nil {
+		t.Fatal(err)
+	}
+	var update string
+	for _, call := range f.callList() {
+		if strings.HasPrefix(call, "thread/settings/update ") {
+			update = call
+			break
+		}
+	}
+	if update == "" || !strings.Contains(update, `"mode":"plan"`) ||
+		!strings.Contains(update, `"model":"gpt-5.6-luna"`) ||
+		!strings.Contains(update, `"reasoning_effort":"max"`) {
+		t.Errorf("settings update = %q", update)
+	}
+	if len(term.keys) != 0 {
+		t.Errorf("should not use the TUI shortcut: %v", term.keys)
+	}
+	if got := d.mode(thread, ""); got != "Plan" {
+		t.Errorf("mode after update = %q", got)
+	}
+}
+
 func TestDaemonがなければペインへ入力しブロック中は端末フォールバックを出す(t *testing.T) {
 	term := &fakeTerm{}
 	p := New("codex", "/nonexistent.sock", term, deadletter.Nop{})

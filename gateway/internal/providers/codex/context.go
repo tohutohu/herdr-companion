@@ -166,7 +166,14 @@ func collaborationModeFrom(lines [][]byte) string {
 }
 
 type collaborationMode struct {
-	Mode string `json:"mode"`
+	Mode     string                 `json:"mode"`
+	Settings *collaborationSettings `json:"settings"`
+}
+
+type collaborationSettings struct {
+	DeveloperInstructions *string `json:"developer_instructions,omitempty"`
+	Model                 string  `json:"model"`
+	ReasoningEffort       *string `json:"reasoning_effort,omitempty"`
 }
 
 func decodeTokenCount(line []byte, info *tokenInfo) bool {
