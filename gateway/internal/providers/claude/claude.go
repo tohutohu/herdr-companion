@@ -26,11 +26,13 @@ const providerName = "claude"
 const maxRecent = 30
 
 type Provider struct {
-	summaryMu sync.Mutex
-	summaries map[summaryKey]cachedSummary
-	configDir string
-	term      providers.Terminal
-	sink      deadletter.Sink
+	summaryMu    sync.Mutex
+	summaries    map[summaryKey]cachedSummary
+	modeMu       sync.Mutex
+	modeOverride map[string]claudeModeOverride
+	configDir    string
+	term         providers.Terminal
+	sink         deadletter.Sink
 	// keyDelay separates dialog steps so the TUI can re-render.
 	keyDelay time.Duration
 }
@@ -123,6 +125,7 @@ func (p *Provider) Summary(ctx context.Context, nativeID string, live *providers
 	if s.Cwd == "" && live != nil {
 		s.Cwd = live.Cwd
 	}
+	p.applyModeOverride(nativeID, path, &s)
 	return &s, nil
 }
 
@@ -167,6 +170,7 @@ func (p *Provider) RecentExcluding(ctx context.Context, since time.Time, exclude
 		if s.LastMessage == "" {
 			continue // empty or metadata-only sessions
 		}
+		p.applyModeOverride(id, c.path, &s)
 		s.NativeID = id
 		out = append(out, s)
 	}
@@ -230,14 +234,42 @@ func (p *Provider) Send(ctx context.Context, nativeID string, live *providers.Li
 	return p.term.Prompt(ctx, live.PaneID, text)
 }
 
-// CycleMode uses Claude Code's built-in next-mode shortcut. The TUI owns the
-// available mode list, so this remains compatible with account and version
-// specific permission modes without duplicating that list in the gateway.
+// CycleMode uses Claude Code's built-in next-mode shortcut. Claude Code only
+// records permissionMode in the transcript when a later prompt is written, so
+// read the status line now and keep that label until the transcript catches
+// up. This avoids sending a dummy prompt just to refresh the display.
 func (p *Provider) CycleMode(ctx context.Context, nativeID string, live *providers.Live) error {
 	if live == nil {
 		return providers.ErrNotLive
 	}
-	return p.term.SendKeys(ctx, live.PaneID, "shift+tab")
+	path, _ := p.transcriptPath(nativeID)
+	var before os.FileInfo
+	if path != "" {
+		before, _ = os.Stat(path)
+	}
+	if err := p.term.SendKeys(ctx, live.PaneID, "shift+tab"); err != nil {
+		return err
+	}
+	if err := p.wait(ctx); err != nil {
+		return err
+	}
+	result, err := p.term.ReadPane(ctx, live.PaneID, 40)
+	if err != nil || result == nil {
+		// The key was already delivered. A temporary inability to read the
+		// pane must not turn a successful mode change into an API failure.
+		return nil
+	}
+	label := claudeModeFromPane(result.Text)
+	if label == "" || before == nil {
+		return nil
+	}
+	p.modeMu.Lock()
+	if p.modeOverride == nil {
+		p.modeOverride = make(map[string]claudeModeOverride)
+	}
+	p.modeOverride[nativeID] = claudeModeOverride{label: label, transcript: before}
+	p.modeMu.Unlock()
+	return nil
 }
 
 func (p *Provider) wait(ctx context.Context) error {

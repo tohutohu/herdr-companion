@@ -266,7 +266,8 @@ func TestClaudeのインライン画像を取り出せる(t *testing.T) {
 }
 
 type fakeTerminal struct {
-	calls []string
+	calls    []string
+	paneText string
 }
 
 func (f *fakeTerminal) SendKeys(_ context.Context, pane string, keys ...string) error {
@@ -282,7 +283,7 @@ func (f *fakeTerminal) Prompt(_ context.Context, pane, text string) error {
 	return nil
 }
 func (f *fakeTerminal) ReadPane(context.Context, string, int) (*herdr.ReadResult, error) {
-	return &herdr.ReadResult{}, nil
+	return &herdr.ReadResult{Text: f.paneText}, nil
 }
 
 func TestAskUserQuestionへの回答をキー操作に変換できる(t *testing.T) {
@@ -377,8 +378,9 @@ func TestProviderはtranscriptを探して承認をペインへ送る(t *testing
 }
 
 func Testモード変更は次のモードキーをペインへ送る(t *testing.T) {
-	term := &fakeTerminal{}
+	term := &fakeTerminal{paneText: "⏸ plan mode on (shift+tab to cycle)"}
 	p := New(t.TempDir(), term, deadletter.Nop{})
+	p.keyDelay = 0
 	live := &providers.Live{PaneID: "w1:p1"}
 	if err := p.CycleMode(context.Background(), "session", live); err != nil {
 		t.Fatal(err)
@@ -388,6 +390,67 @@ func Testモード変更は次のモードキーをペインへ送る(t *testing
 	}
 	if err := p.CycleMode(context.Background(), "session", nil); err != providers.ErrNotLive {
 		t.Errorf("offline err = %v", err)
+	}
+}
+
+func TestClaudeのステータス行からモードを読み取れる(t *testing.T) {
+	cases := map[string]string{
+		"⏸ plan mode on (shift+tab to cycle)":                        "Plan",
+		"⏵ accept edits on (shift+tab to cycle)":                     "Accept edits",
+		"⏵ don't ask (shift+tab to cycle)":                           "Don't ask",
+		"⏵ BYPASS PERMISSIONS (shift+tab to cycle)":                  "Bypass permissions",
+		"⏵ default mode on (shift+tab to cycle)":                     "Default",
+		"conversation mentions plan mode\n⏵ manual mode (shift+tab)": "Default",
+	}
+	for screen, want := range cases {
+		if got := claudeModeFromPane(screen); got != want {
+			t.Errorf("%q -> %q, want %q", screen, got, want)
+		}
+	}
+	if got := claudeModeFromPane("conversation mentions plan mode"); got != "" {
+		t.Errorf("without status shortcut = %q, want empty", got)
+	}
+}
+
+func Testモード変更直後はtranscript更新までペインのモードを表示する(t *testing.T) {
+	dir := t.TempDir()
+	proj := filepath.Join(dir, "projects", "-work-playground")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	id := "f21c11f9-c52b-4cf9-84c0-65208b400cde"
+	path := filepath.Join(proj, id+".jsonl")
+	initial := strings.Join([]string{
+		`{"type":"user","uuid":"u1","timestamp":"2026-09-01T00:00:00Z","message":{"role":"user","content":"hi"}}`,
+		`{"type":"permission-mode","permissionMode":"acceptEdits"}`,
+		`{"type":"assistant","uuid":"a1","timestamp":"2026-09-01T00:00:01Z","message":{"role":"assistant","model":"claude-opus-5","content":[{"type":"text","text":"hello"}]}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(initial), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	term := &fakeTerminal{paneText: "⏸ plan mode on (shift+tab to cycle)"}
+	p := New(dir, term, deadletter.Nop{})
+	p.keyDelay = 0
+	live := &providers.Live{PaneID: "w1:p1"}
+	if got, err := p.Summary(context.Background(), id, live); err != nil || got.Mode != "Accept edits" {
+		t.Fatalf("initial summary = %+v, %v", got, err)
+	}
+	if err := p.CycleMode(context.Background(), id, live); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := p.Summary(context.Background(), id, live); err != nil || got.Mode != "Plan" {
+		t.Fatalf("summary after live change = %+v, %v", got, err)
+	}
+
+	if f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0); err != nil {
+		t.Fatal(err)
+	} else {
+		_, _ = f.WriteString(`{"type":"permission-mode","permissionMode":"plan"}` + "\n")
+		_ = f.Close()
+	}
+	if got, err := p.Summary(context.Background(), id, live); err != nil || got.Mode != "Plan" {
+		t.Fatalf("summary after transcript update = %+v, %v", got, err)
 	}
 }
 
