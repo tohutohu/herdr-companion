@@ -44,6 +44,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,7 +54,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import com.tohutohu.herdrcompanion.ui.ExpandingContent
 import com.tohutohu.herdrcompanion.ui.SwapContent
@@ -67,6 +70,16 @@ fun NewSessionScreen(
     topContent: @Composable () -> Unit = {},
     initialPromptFocusRequester: FocusRequester? = null,
 ) {
+    var promptValue by remember { mutableStateOf(TextFieldValue(state.prompt)) }
+    LaunchedEffect(state.prompt) {
+        if (promptValue.text != state.prompt) {
+            promptValue = TextFieldValue(
+                text = state.prompt,
+                selection = TextRange(state.prompt.length),
+            )
+        }
+    }
+
     val pending = state.pendingStart
     if (pending != null) {
         AlertDialog(
@@ -164,8 +177,13 @@ fun NewSessionScreen(
                         }
                     }
                     OutlinedTextField(
-                        value = state.prompt,
-                        onValueChange = { onAction(NewSessionAction.SetPrompt(it)) },
+                        value = promptValue,
+                        onValueChange = { value ->
+                            promptValue = value
+                            if (value.text != state.prompt) {
+                                onAction(NewSessionAction.SetPrompt(value.text))
+                            }
+                        },
                         enabled = !state.starting && !state.checking,
                         label = { Text("First prompt (optional)") },
                         maxLines = 4,
