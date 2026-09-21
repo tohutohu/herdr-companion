@@ -63,6 +63,7 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("DELETE /v1/pairing", s.cancelPairing)
 	api.HandleFunc("GET /v1/sessions", s.listSessions)
 	api.HandleFunc("POST /v1/sessions", s.startSession)
+	api.HandleFunc("POST /v1/sessions/archive", s.archiveSessions)
 	api.HandleFunc("POST /v1/launches/{pane}/trust", s.answerTrust)
 	api.HandleFunc("GET /v1/models", s.listModels)
 	api.HandleFunc("GET /v1/agents", s.listAgents)
@@ -699,29 +700,92 @@ func (s *Server) createDirectory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]string{"path": p})
 }
 
+type archiveSessionsRequest struct {
+	IDs []string `json:"ids"`
+}
+
+// archiveOne stops a running session (closing its Herdr pane) and marks the
+// returned model as archived. The archive store is updated by the caller so a
+// batch can persist all ids in one write.
+func (s *Server) archiveOne(ctx context.Context, id string) (model.Session, bool, error) {
+	sess, res, err := s.Sessions.Get(ctx, id)
+	if err != nil {
+		return model.Session{}, false, err
+	}
+	stopped := res.Live != nil
+	if res.Live != nil {
+		if err := s.Launcher.Stop(ctx, res.Live.PaneID); err != nil {
+			return model.Session{}, false, err
+		}
+		sess.Status, sess.PaneID, sess.CanSend = model.StatusOffline, "", false
+	}
+	sess.Archived = true
+	return sess, stopped, nil
+}
+
 // archiveSession stops a running session (closing its Herdr pane) and hides
 // it from the session list.
 func (s *Server) archiveSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	sess, res, err := s.Sessions.Get(r.Context(), id)
+	sess, stopped, err := s.archiveOne(r.Context(), id)
 	if err != nil {
 		s.fail(w, r, id, "archive_session", err)
 		return
-	}
-	if res.Live != nil {
-		if err := s.Launcher.Stop(r.Context(), res.Live.PaneID); err != nil {
-			s.fail(w, r, id, "archive_session", err)
-			return
-		}
-		sess.Status, sess.PaneID, sess.CanSend = model.StatusOffline, "", false
 	}
 	if err := s.Archive.Add(id); err != nil {
 		s.fail(w, r, id, "archive_session", err)
 		return
 	}
-	sess.Archived = true
-	slog.Info("session archived", "provider", sess.Provider, "session_id", id, "operation", "archive_session", "stopped", res.Live != nil)
+	slog.Info("session archived", "provider", sess.Provider, "session_id", id, "operation", "archive_session", "stopped", stopped)
 	writeJSON(w, http.StatusOK, sess)
+}
+
+// archiveSessions archives several sessions in one request. Running sessions
+// are stopped before the archive ids are persisted.
+func (s *Server) archiveSessions(w http.ResponseWriter, r *http.Request) {
+	var req archiveSessionsRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		s.fail(w, r, "", "archive_sessions", badRequest("invalid json"))
+		return
+	}
+
+	ids := make([]string, 0, len(req.IDs))
+	seen := make(map[string]struct{}, len(req.IDs))
+	for _, id := range req.IDs {
+		if id == "" {
+			s.fail(w, r, "", "archive_sessions", badRequest("ids must not contain empty values"))
+			return
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		s.fail(w, r, "", "archive_sessions", badRequest("ids must not be empty"))
+		return
+	}
+
+	archived := make([]model.Session, 0, len(ids))
+	stopped := make([]bool, 0, len(ids))
+	for _, id := range ids {
+		sess, wasStopped, err := s.archiveOne(r.Context(), id)
+		if err != nil {
+			s.fail(w, r, id, "archive_sessions", err)
+			return
+		}
+		archived = append(archived, sess)
+		stopped = append(stopped, wasStopped)
+	}
+	if err := s.Archive.AddMany(ids); err != nil {
+		s.fail(w, r, "", "archive_sessions", err)
+		return
+	}
+	for i, sess := range archived {
+		slog.Info("session archived", "provider", sess.Provider, "session_id", sess.ID, "operation", "archive_sessions", "stopped", stopped[i])
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sessions": archived})
 }
 
 func (s *Server) unarchiveSession(w http.ResponseWriter, r *http.Request) {

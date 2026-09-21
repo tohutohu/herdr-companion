@@ -86,6 +86,15 @@ class GatewayApi(
     suspend fun archive(id: String): SessionDto =
         json.decodeFromString(post(url("v1", "sessions", id, "archive"), ByteArray(0).toRequestBody(jsonType)))
 
+    /** Archives all [ids] in one gateway request. Running sessions are stopped. */
+    suspend fun archive(ids: List<String>): List<SessionDto> =
+        json.decodeFromString<ArchiveSessionsResponse>(
+            post(
+                url("v1", "sessions", "archive"),
+                json.encodeToString(ArchiveSessionsRequest(ids)).toRequestBody(jsonType),
+            ),
+        ).sessions
+
     suspend fun unarchive(id: String): SessionDto =
         json.decodeFromString(execute(request(url("v1", "sessions", id, "archive")).delete().build()))
 

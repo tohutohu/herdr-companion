@@ -72,6 +72,27 @@ func (s *Store) Add(id string) error {
 	return s.saveLocked()
 }
 
+// AddMany adds all ids and persists the updated archive in one write. Existing
+// ids keep their original archive time, just like Add.
+func (s *Store) AddMany(ids []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now().UTC()
+	changed := false
+	for i, id := range ids {
+		if _, ok := s.sessions[id]; ok {
+			continue
+		}
+		s.sessions[id] = now.Add(time.Duration(i) * time.Nanosecond)
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	return s.saveLocked()
+}
+
 func (s *Store) Remove(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

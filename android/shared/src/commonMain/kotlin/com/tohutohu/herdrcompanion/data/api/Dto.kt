@@ -51,6 +51,12 @@ data class CostDto(val usd: Double = 0.0, val estimated: Boolean = false)
 data class SessionsResponse(val sessions: List<SessionDto>)
 
 @Serializable
+data class ArchiveSessionsRequest(val ids: List<String>)
+
+@Serializable
+data class ArchiveSessionsResponse(val sessions: List<SessionDto>)
+
+@Serializable
 data class MessageDto(
     val id: String,
     val role: String,

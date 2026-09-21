@@ -22,8 +22,9 @@ import kotlinx.coroutines.launch
 /**
  * Archive, unarchive and resume, shared by the list, archive and detail
  * screens. Every action takes a list so the lists can act on a multi-select;
- * the gateway has no batch endpoint, so they run one session at a time.
- * Batches on different sessions may overlap (swiping several rows quickly).
+ * Archive uses the gateway's batch endpoint; unarchive and resume still run
+ * one session at a time. Batches on different sessions may overlap (swiping
+ * several rows quickly).
  * Call [Dialogs] once in the screen.
  *
  * With a [snackbar] the result is shown there and archiving offline sessions
@@ -85,7 +86,7 @@ class SessionActions internal constructor(
 
     private fun runArchive(targets: List<SessionRef>) {
         val stopping = targets.any { it.live }
-        run(
+        runBatch(
             targets,
             done = if (stopping) "Stopped and archived" else "Archived",
             verb = "archived",
@@ -95,7 +96,7 @@ class SessionActions internal constructor(
                     ?.let { unarchive(it.map { s -> s.copy(archived = true) }) }
             },
             undoable = !stopping,
-        ) { repo.archive(it.id); null }
+        ) { repo.archive(it.map(SessionRef::id)); null }
     }
 
     /**
@@ -140,6 +141,47 @@ class SessionActions internal constructor(
                 message = msg,
                 actionLabel = if (offerUndo) "Undo" else null,
                 // Leave time to notice a mistake; plain confirmations go quickly.
+                duration = if (offerUndo) SnackbarDuration.Long else SnackbarDuration.Short,
+            )
+            if (result == SnackbarResult.ActionPerformed) undo?.invoke(succeeded)
+        }
+    }
+
+    /** Runs one gateway operation for all fresh targets, then reports once. */
+    private fun runBatch(
+        targets: List<SessionRef>,
+        done: String,
+        verb: String,
+        undo: ((List<SessionRef>) -> Unit)? = null,
+        undoable: Boolean = undo != null,
+        block: suspend (List<SessionRef>) -> String?,
+    ) {
+        val fresh = targets.filter { it.id !in busyIds }
+        if (fresh.isEmpty()) return
+        busyIds = busyIds + fresh.map { it.id }
+        scope.launch {
+            var warning: String? = null
+            var failure: String? = null
+            val succeeded = mutableListOf<SessionRef>()
+            try {
+                block(fresh)?.let { warning = it }
+                succeeded += fresh
+            } catch (e: Exception) {
+                failure = e.message ?: e.toString()
+            } finally {
+                busyIds = busyIds - fresh.map { it.id }.toSet()
+            }
+            runCatching { onChanged() }
+            val msg = BatchOutcome(fresh.size, fresh.size - succeeded.size, failure, warning).message(done, verb)
+            val host = snackbar
+            if (host == null) {
+                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            val offerUndo = undo != null && undoable && succeeded.isNotEmpty()
+            val result = host.showSnackbar(
+                message = msg,
+                actionLabel = if (offerUndo) "Undo" else null,
                 duration = if (offerUndo) SnackbarDuration.Long else SnackbarDuration.Short,
             )
             if (result == SnackbarResult.ActionPerformed) undo?.invoke(succeeded)

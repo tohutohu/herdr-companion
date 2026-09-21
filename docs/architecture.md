@@ -397,6 +397,7 @@ whole thing off, and `herdr-mobile-gateway usage` prints one read.
 | GET | `/v1/sessions?archived=true` | archived sessions |
 | GET | `/v1/sessions/{id}` | one session |
 | POST / DELETE | `/v1/sessions/{id}/archive` | archive (stops a running session) / unarchive |
+| POST | `/v1/sessions/archive` | archive `{ids[]}` in one request (stops running sessions) → `{sessions[]}` |
 | POST | `/v1/sessions/{id}/resume` | `{trust}` reopen in a new Herdr workspace → `{sessionId?, paneId, warning?}` |
 | GET | `/v1/sessions/{id}/messages?after=` | `{session, messages}` |
 | POST | `/v1/sessions/{id}/messages` | `{text, uploads[]}` |

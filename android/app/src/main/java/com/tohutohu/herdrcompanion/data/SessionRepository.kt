@@ -70,9 +70,13 @@ class SessionRepository(
 
     suspend fun archivedSessions(): List<SessionDto> = api.archivedSessions()
 
-    suspend fun archive(sessionId: String) {
-        val s = api.archive(sessionId)
-        db.sessions().upsertPreservingUnread(s.toEntity(System.currentTimeMillis(), listed = false))
+    suspend fun archive(sessionId: String) = archive(listOf(sessionId))
+
+    suspend fun archive(sessionIds: List<String>) {
+        val now = System.currentTimeMillis()
+        api.archive(sessionIds).forEach { s ->
+            db.sessions().upsertPreservingUnread(s.toEntity(now, listed = false))
+        }
     }
 
     suspend fun unarchive(sessionId: String) {

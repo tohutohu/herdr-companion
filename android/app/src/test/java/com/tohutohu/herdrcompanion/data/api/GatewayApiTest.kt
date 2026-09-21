@@ -219,4 +219,20 @@ class GatewayApiTest {
             assertEquals("""{"trust":true}""", it.body!!.utf8())
         }
     }
+
+    @Test
+    fun `複数セッションのアーカイブは一度のリクエストで送る`() = runBlocking {
+        val first = """{"id":"claude:s1","provider":"claude","status":"offline","updatedAt":"2026-09-17T10:00:00Z","archived":true}"""
+        val second = first.replace("claude:s1", "codex:s2")
+        server.enqueue(MockResponse.Builder().body("""{"sessions":[$first,$second]}""").build())
+
+        val archived = api.archive(listOf("claude:s1", "codex:s2"))
+
+        assertEquals(listOf("claude:s1", "codex:s2"), archived.map { it.id })
+        val req = server.takeRequest()
+        assertEquals("POST", req.method)
+        assertEquals("/v1/sessions/archive", req.target)
+        assertEquals("""{"ids":["claude:s1","codex:s2"]}""", req.body!!.utf8())
+        assertEquals("Bearer secret", req.headers["Authorization"])
+    }
 }

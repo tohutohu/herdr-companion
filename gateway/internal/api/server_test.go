@@ -531,6 +531,37 @@ func sessionIDs(t *testing.T, body []byte) []string {
 	return ids
 }
 
+func Test複数のセッションを一度のリクエストでアーカイブできる(t *testing.T) {
+	ts, _, fh, tok := newTestServer(t)
+	resp, body := do(
+		t, ts, tok, "POST", "/v1/sessions/archive",
+		[]byte(`{"ids":["fake:s1","fake:old"]}`), "application/json",
+	)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d: %s", resp.StatusCode, body)
+	}
+	var result struct {
+		Sessions []model.Session `json:"sessions"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Sessions) != 2 || !result.Sessions[0].Archived || !result.Sessions[1].Archived {
+		t.Errorf("archived sessions = %+v", result.Sessions)
+	}
+	if got := strings.Join(fh.calls, ","); got != "close-workspace:w1" {
+		t.Errorf("herdr calls = %v", fh.calls)
+	}
+	_, body = do(t, ts, tok, "GET", "/v1/sessions", nil, "")
+	if ids := sessionIDs(t, body); len(ids) != 0 {
+		t.Errorf("list after batch archive = %v", ids)
+	}
+	_, body = do(t, ts, tok, "GET", "/v1/sessions?archived=true", nil, "")
+	if ids := sessionIDs(t, body); len(ids) != 2 {
+		t.Errorf("archived list after batch archive = %v", ids)
+	}
+}
+
 func Test実行中のセッションをアーカイブすると停止して一覧から外れ戻せる(t *testing.T) {
 	ts, _, fh, tok := newTestServer(t)
 	resp, body := do(t, ts, tok, "POST", "/v1/sessions/fake:s1/archive", nil, "")
