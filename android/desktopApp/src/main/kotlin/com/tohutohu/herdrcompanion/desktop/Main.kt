@@ -25,6 +25,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
@@ -35,6 +37,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -72,9 +75,15 @@ import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.tohutohu.herdrcompanion.data.api.GatewayApi
+import com.tohutohu.herdrcompanion.data.AgentPreset
+import com.tohutohu.herdrcompanion.data.removePreset
+import com.tohutohu.herdrcompanion.data.upsertPreset
 import com.tohutohu.herdrcompanion.model.SessionUiModel
 import com.tohutohu.herdrcompanion.ui.detail.SessionDetailAction
 import com.tohutohu.herdrcompanion.ui.detail.SessionDetailScreen
+import com.tohutohu.herdrcompanion.ui.newsession.AgentPresetEditorDialog
+import com.tohutohu.herdrcompanion.ui.newsession.presetDetails
+import com.tohutohu.herdrcompanion.ui.newsession.presetTitle
 import com.tohutohu.herdrcompanion.ui.sessions.SessionListAction
 import com.tohutohu.herdrcompanion.ui.sessions.SessionListScreen
 import com.tohutohu.herdrcompanion.ui.sessions.SessionListUiState
@@ -462,7 +471,7 @@ private fun FrameWindowScope.DesktopShell(
         )
     }
 
-    if (settingsOpen) DesktopSettingsDialog(state, onDismiss = { settingsOpen = false })
+    if (settingsOpen) DesktopSettingsDialog(state, api, onDismiss = { settingsOpen = false })
     if (aboutOpen) {
         AlertDialog(
             onDismissRequest = { aboutOpen = false },
@@ -648,8 +657,12 @@ private fun ConnectionIndicator(status: DesktopConnectionState, label: String) {
 }
 
 @Composable
-private fun DesktopSettingsDialog(state: DesktopAppState, onDismiss: () -> Unit) {
+private fun DesktopSettingsDialog(state: DesktopAppState, api: GatewayApi, onDismiss: () -> Unit) {
     var notifications by remember { mutableStateOf(DesktopPreferences.notificationsEnabled) }
+    var presets by remember { mutableStateOf(DesktopPreferences.loadAgentPresets()) }
+    var editorVisible by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<AgentPreset?>(null) }
+    var deleteTarget by remember { mutableStateOf<AgentPreset?>(null) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Settings") },
@@ -663,6 +676,48 @@ private fun DesktopSettingsDialog(state: DesktopAppState, onDismiss: () -> Unit)
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                HorizontalDivider()
+                Text("Session presets", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "Save an agent, model, effort and mode once for quick selection in New Session.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                presets.presets.forEach { preset ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(presetTitle(preset), maxLines = 1)
+                            if (preset.name.isNotBlank()) {
+                                Text(
+                                    presetDetails(preset),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 2,
+                                )
+                            }
+                        }
+                        IconButton(onClick = {
+                            editing = preset
+                            editorVisible = true
+                        }) { Icon(Icons.Default.Edit, contentDescription = "Edit ${presetTitle(preset)}") }
+                        IconButton(onClick = { deleteTarget = preset }) {
+                            Icon(Icons.Default.Delete, contentDescription = "Delete ${presetTitle(preset)}")
+                        }
+                    }
+                }
+                OutlinedButton(
+                    enabled = state.connection.settings.isConfigured,
+                    onClick = {
+                        editing = null
+                        editorVisible = true
+                    },
+                ) { Text("Add preset") }
+                if (!state.connection.settings.isConfigured) {
+                    Text(
+                        "Connect to a Gateway first to load the available agent and model options.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Desktop notifications", modifier = Modifier.weight(1f))
                     Switch(checked = notifications, onCheckedChange = { notifications = it })
@@ -681,6 +736,41 @@ private fun DesktopSettingsDialog(state: DesktopAppState, onDismiss: () -> Unit)
             }) { Text("Done") }
         },
     )
+    if (editorVisible) {
+        AgentPresetEditorDialog(
+            initial = editing,
+            loadModels = api::models,
+            onSave = { next ->
+                val previousKey = editing?.key
+                val lastUsed = presets.lastUsed
+                presets = presets.copy(
+                    presets = upsertPreset(presets.presets, previousKey, next),
+                    lastUsed = if (lastUsed?.key == previousKey || lastUsed?.key == next.key) next else lastUsed,
+                )
+                DesktopPreferences.saveAgentPresets(presets)
+                editorVisible = false
+            },
+            onDismiss = { editorVisible = false },
+        )
+    }
+    deleteTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("Delete preset?") },
+            text = { Text("Remove ${presetTitle(target)} from your saved session presets?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    presets = presets.copy(
+                        presets = removePreset(presets.presets, target),
+                        lastUsed = presets.lastUsed?.takeUnless { it.key == target.key },
+                    )
+                    DesktopPreferences.saveAgentPresets(presets)
+                    deleteTarget = null
+                }) { Text("Delete") }
+            },
+            dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("Cancel") } },
+        )
+    }
 }
 
 @Composable

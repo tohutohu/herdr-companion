@@ -74,6 +74,22 @@ class AgentSelectionTest {
     }
 
     @Test
+    fun `名前付きプリセットは名前をタイトルにして組み合わせを詳細にする`() {
+        val preset = AgentPreset(
+            "codex",
+            "gpt-6-astra",
+            "xhigh",
+            "plan",
+            "GPT-6 Astra",
+            "Extra high",
+            "Plan",
+            "レビュー用",
+        )
+        assertEquals("レビュー用", presetTitle(preset))
+        assertEquals("Codex GPT-6 Astra · Extra high · Plan", presetDetails(preset))
+    }
+
+    @Test
     fun `カタログ読み込み前は保存済みの組み合わせから表示名を補う`() {
         val known = listOf(AgentPreset("codex", "gpt-6-astra", "xhigh", "plan", "GPT-6 Astra", "Extra high", "Plan"))
         assertEquals(

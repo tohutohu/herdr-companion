@@ -17,9 +17,30 @@ class AgentPresetsStore(private val context: Context) {
 
     val presets: Flow<AgentPresets> = context.agentPresetStore.data.map { it.presets() }
 
-    suspend fun toggle(preset: AgentPreset) = update { it.copy(presets = togglePreset(it.presets, preset)) }
+    suspend fun toggle(preset: AgentPreset) = update {
+        val removing = it.presets.any { saved -> saved.key == preset.key }
+        it.copy(
+            presets = togglePreset(it.presets, preset),
+            lastUsed = if (removing && it.lastUsed?.key == preset.key) null else it.lastUsed,
+        )
+    }
 
     suspend fun setOrder(presets: List<AgentPreset>) = update { it.copy(presets = presets) }
+
+    suspend fun save(previousKey: String?, preset: AgentPreset) = update {
+        val wasLastUsed = it.lastUsed?.key == previousKey || it.lastUsed?.key == preset.key
+        it.copy(
+            presets = upsertPreset(it.presets, previousKey, preset),
+            lastUsed = if (wasLastUsed) preset else it.lastUsed,
+        )
+    }
+
+    suspend fun delete(preset: AgentPreset) = update {
+        it.copy(
+            presets = removePreset(it.presets, preset),
+            lastUsed = it.lastUsed?.takeUnless { last -> last.key == preset.key },
+        )
+    }
 
     /** Remembered so that the next session starts from the same combination. */
     suspend fun recordUsed(preset: AgentPreset) = update { it.copy(lastUsed = preset) }

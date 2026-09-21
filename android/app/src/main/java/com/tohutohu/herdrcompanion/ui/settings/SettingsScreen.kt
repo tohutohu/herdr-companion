@@ -147,6 +147,10 @@ fun SettingsScreen(onDone: () -> Unit) {
                     }
                 }
             }
+            AgentPresetSettingsSection(
+                api = container.api,
+                gatewayConfigured = current.isConfigured,
+            )
             Button(enabled = !busy && !restart, onClick = {
                 scope.launch {
                     busy = true

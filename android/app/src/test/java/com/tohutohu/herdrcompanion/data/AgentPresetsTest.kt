@@ -38,4 +38,21 @@ class AgentPresetsTest {
     fun `お気に入りモデルは指定位置へ移動できる`() {
         assertEquals(listOf(astra, opus), movePreset(listOf(opus, astra), 0, 1))
     }
+
+    @Test
+    fun `プリセットを編集すると組み合わせを差し替えて順番を保つ`() {
+        val renamed = opus.copy(model = "sonnet", modelName = "Sonnet", name = "レビュー")
+        assertEquals(listOf(renamed, astra), upsertPreset(listOf(opus, astra), opus.key, renamed))
+    }
+
+    @Test
+    fun `同じ組み合わせを別名で追加すると一つにまとまる`() {
+        val renamed = opus.copy(name = "別名")
+        assertEquals(listOf(renamed), upsertPreset(listOf(opus), null, renamed))
+    }
+
+    @Test
+    fun `表示名が違っても同じ組み合わせを削除できる`() {
+        assertEquals(emptyList<AgentPreset>(), removePreset(listOf(opus), opus.copy(name = "レビュー")))
+    }
 }

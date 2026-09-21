@@ -63,6 +63,12 @@ fun presetLabel(preset: AgentPreset): String {
     return listOf(head, effort, mode).filter { it.isNotEmpty() }.joinToString(" · ")
 }
 
+/** The stable label shown in a preset picker and in settings. */
+fun presetTitle(preset: AgentPreset): String = preset.name.trim().ifEmpty { presetLabel(preset) }
+
+/** The combination details shown below a user-provided preset name. */
+fun presetDetails(preset: AgentPreset): String = presetLabel(preset)
+
 /**
  * [current] with the names it is missing filled in from combinations that are
  * already named ([known] being the favorites and the last used one). That is
@@ -74,5 +80,6 @@ fun withKnownNames(current: AgentPreset, known: List<AgentPreset>): AgentPreset 
         modelName = current.modelName.ifEmpty { match.modelName },
         effortName = current.effortName.ifEmpty { match.effortName },
         modeName = current.modeName.ifEmpty { match.modeName },
+        name = current.name.ifEmpty { match.name },
     )
 }
