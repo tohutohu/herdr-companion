@@ -885,7 +885,28 @@ func (p *Provider) Models(ctx context.Context) (providers.ModelCatalog, error) {
 			break
 		}
 	}
+	cat.Modes = modes
 	return cat, nil
+}
+
+// Codex has the two collaboration modes its TUI cycles through.
+var modes = []providers.ModeOption{
+	{ID: "default", Name: "Default", Description: "Works on the task", Default: true},
+	{ID: "plan", Name: planLabel, Description: "Plans the work without doing it"},
+}
+
+// SetLaunchMode starts a session in Plan mode. Codex takes no mode argument
+// and its thread does not exist before the first prompt, so the mode is set
+// with the TUI's own shortcut, which toggles between the two modes a fresh
+// session has.
+func (p *Provider) SetLaunchMode(ctx context.Context, paneID, mode string) error {
+	switch mode {
+	case "", "default":
+		return nil
+	case "plan":
+		return p.term.SendKeys(ctx, paneID, "shift+tab")
+	}
+	return fmt.Errorf("unknown mode %q", mode)
 }
 
 func modelOptions(ms []catalogModel) []providers.ModelOption {

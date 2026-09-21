@@ -121,6 +121,13 @@ type ModeChanger interface {
 	CycleMode(ctx context.Context, nativeID string, live *Live) error
 }
 
+// LaunchModeSetter is implemented by providers whose starting mode cannot be
+// passed on the command line. The launcher calls it on the ready TUI, before
+// the first prompt, so the mode already applies to that prompt.
+type LaunchModeSetter interface {
+	SetLaunchMode(ctx context.Context, paneID, mode string) error
+}
+
 // ImageURL builds the gateway URL for an inline image of a message.
 func ImageURL(sessionID, messageID string, index int) string {
 	return "/v1/sessions/" + sessionID + "/messages/" + messageID + "/images/" + itoa(index)
@@ -152,11 +159,23 @@ type EffortOption struct {
 	Default bool `json:"default,omitempty"`
 }
 
+// ModeOption is a session mode the user can pick when starting a session.
+type ModeOption struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	// Default marks the mode a session starts in when none is given.
+	Default bool `json:"default,omitempty"`
+}
+
 // ModelCatalog is what a provider offers when starting a session.
 type ModelCatalog struct {
 	Models []ModelOption `json:"models"`
 	// Efforts apply when no model is picked, and to models listing none.
 	Efforts []EffortOption `json:"efforts,omitempty"`
+	// Modes are the session modes a new session can start in; empty means the
+	// agent offers no choice at startup.
+	Modes []ModeOption `json:"modes,omitempty"`
 }
 
 var modelIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/\[\]-]{0,99}$`)
@@ -168,6 +187,12 @@ var effortIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
 
 // ValidEffortID reports whether id is safe to pass as a CLI argument.
 func ValidEffortID(id string) bool { return effortIDPattern.MatchString(id) }
+
+// Claude Code names its permission modes in camelCase (acceptEdits).
+var modeIDPattern = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9-]{0,31}$`)
+
+// ValidModeID reports whether id is safe to pass as a CLI argument.
+func ValidModeID(id string) bool { return modeIDPattern.MatchString(id) }
 
 // effortNames are the labels for the efforts both agents share.
 var effortNames = map[string]string{
@@ -199,13 +224,15 @@ type SessionLocator interface {
 	LocateLaunched(ctx context.Context, cwd string, since time.Time) string
 }
 
-// LaunchOptions are the user's choices for a new session. Model and Effort
-// are empty for the provider's own defaults; Cwd is the pane's working
+// LaunchOptions are the user's choices for a new session. Model, Effort and
+// Mode are empty for the provider's own defaults; Cwd is the pane's working
 // directory.
 type LaunchOptions struct {
 	Model  string
 	Effort string
-	Cwd    string
+	// Mode is a mode id from the provider's catalog.
+	Mode string
+	Cwd  string
 }
 
 // Launchable providers can be started in a new Herdr pane.

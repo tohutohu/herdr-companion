@@ -441,6 +441,9 @@ func (p *Provider) LaunchArgs(opts providers.LaunchOptions) []string {
 	if opts.Effort != "" {
 		args = append(args, "--effort", opts.Effort)
 	}
+	if opts.Mode != "" {
+		args = append(args, "--permission-mode", opts.Mode)
+	}
 	return args
 }
 
@@ -468,8 +471,19 @@ var efforts = []providers.EffortOption{
 	{ID: "max", Name: providers.EffortName("max"), Description: "Maximum thinking"},
 }
 
+// The permission modes Claude Code's --permission-mode accepts, named as its
+// status line names them so a session shows the mode it was started in.
+var modes = []providers.ModeOption{
+	{ID: "manual", Name: modeLabel("manual"), Description: "Asks before each change", Default: true},
+	{ID: "plan", Name: modeLabel("plan"), Description: "Researches and plans without editing"},
+	{ID: "acceptEdits", Name: modeLabel("acceptEdits"), Description: "Applies file edits without asking"},
+	{ID: "auto", Name: modeLabel("auto"), Description: "Works on its own, asking only when it matters"},
+	{ID: "dontAsk", Name: modeLabel("dontAsk"), Description: "Stops asking for the rest of the session"},
+	{ID: "bypassPermissions", Name: modeLabel("bypassPermissions"), Description: "Skips every permission check"},
+}
+
 func (p *Provider) Models(ctx context.Context) (providers.ModelCatalog, error) {
-	return providers.ModelCatalog{Models: models, Efforts: efforts}, nil
+	return providers.ModelCatalog{Models: models, Efforts: efforts, Modes: modes}, nil
 }
 
 // StartupKeys accepts Claude Code's workspace trust dialog. Two variants exist:

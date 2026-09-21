@@ -575,6 +575,7 @@ func Testモデル一覧をページングしてReserve以外の非表示や不�
 		},
 		// モデル未指定時は既定モデルのエフォートを出す
 		Efforts: astraEfforts,
+		Modes:   modes,
 	}
 	got, _ := json.Marshal(cat)
 	exp, _ := json.Marshal(want)
@@ -828,5 +829,25 @@ func Test新規と再開のどちらも起動時の更新確認を無効にす�
 		if !strings.Contains(strings.Join(args, " "), "-c check_for_update_on_startup=false") {
 			t.Fatal(args)
 		}
+	}
+}
+
+func Test起動時のPlanモードはTUIのショートカットで設定する(t *testing.T) {
+	term := &fakeTerm{}
+	p := New("codex", filepath.Join(t.TempDir(), "cx.sock"), term, deadletter.Nop{})
+	// 既定モードのまま起動するときは何も送らない
+	for _, mode := range []string{"", "default"} {
+		if err := p.SetLaunchMode(context.Background(), "w1:p1", mode); err != nil || len(term.keys) != 0 {
+			t.Fatalf("mode %q sent %v (%v)", mode, term.keys, err)
+		}
+	}
+	if err := p.SetLaunchMode(context.Background(), "w1:p1", "plan"); err != nil {
+		t.Fatal(err)
+	}
+	if len(term.keys) != 1 || term.keys[0] != "shift+tab" {
+		t.Errorf("keys = %v", term.keys)
+	}
+	if err := p.SetLaunchMode(context.Background(), "w1:p1", "accept"); err == nil {
+		t.Error("unknown mode should fail")
 	}
 }

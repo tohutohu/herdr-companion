@@ -750,3 +750,35 @@ func Test応答のないセッションはコストを表示しない(t *testing
 		t.Errorf("cost = %+v, want nil", c)
 	}
 }
+
+func Test起動時のモード指定をパーミッションモード引数にする(t *testing.T) {
+	p := New(t.TempDir(), nil, deadletter.Nop{})
+	args := func(mode string) string {
+		return strings.Join(p.LaunchArgs(providers.LaunchOptions{Mode: mode, Cwd: "/w"}), " ")
+	}
+	if got := args(""); got != "" {
+		t.Errorf("default = %q", got)
+	}
+	if got := args("plan"); got != "--permission-mode plan" {
+		t.Errorf("plan = %q", got)
+	}
+	if got := strings.Join(p.LaunchArgs(providers.LaunchOptions{Model: "opus", Mode: "acceptEdits"}), " "); got != "--model opus --permission-mode acceptEdits" {
+		t.Errorf("model and mode = %q", got)
+	}
+	cat, _ := p.Models(context.Background())
+	if len(cat.Modes) == 0 {
+		t.Fatal("no modes offered")
+	}
+	defaults := 0
+	for _, m := range cat.Modes {
+		if !providers.ValidModeID(m.ID) || m.Name == "" {
+			t.Errorf("invalid mode %+v", m)
+		}
+		if m.Default {
+			defaults++
+		}
+	}
+	if defaults != 1 {
+		t.Errorf("modes marked default = %d", defaults)
+	}
+}

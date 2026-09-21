@@ -235,9 +235,19 @@ the shared daemon. Codex lists the efforts per model in `model/list`, so
 `/v1/models` returns them on each model plus a catalog-level list (Claude's
 levels, or the default model's for Codex) used when no model is picked.
 
+The session mode can be picked for the new session too, and `/v1/models`
+returns the modes a provider offers (`modes`, with one marked `default`).
+Claude Code takes them as `--permission-mode`, so its list is that flag's own
+values, named as its status line names them. Codex has no such flag, and its
+thread only exists once the first prompt runs, so the provider implements
+`LaunchModeSetter`: the launcher sends the TUI's Shift+Tab shortcut on the
+ready pane before the first prompt, which switches a fresh session between
+the two collaboration modes it has. A mode that cannot be set is reported as
+a launch warning rather than failing the start.
+
 The app does not ask for the agent, the model and the effort separately on
 every start: the combinations the user keeps coming back to are saved as
-favorites (agent id, model id, effort id, plus the names the catalog gave them
+favorites (agent id, model id, effort id, mode id, plus the names the catalog gave them
 so a favorite of the other agent can be labelled without loading its catalog)
 in the `agent_presets` DataStore, and offered as one-tap chips. Anything else
 is picked in the full pickers behind *Other…*, which is also where a

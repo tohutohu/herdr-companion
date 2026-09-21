@@ -26,6 +26,7 @@ var (
 	ErrUnknownProvider = errors.New("unknown provider")
 	ErrInvalidModel    = errors.New("invalid model")
 	ErrInvalidEffort   = errors.New("invalid effort")
+	ErrInvalidMode     = errors.New("invalid mode")
 	ErrNoCwd           = errors.New("session has no known working directory")
 	ErrNoPendingTrust  = errors.New("no launch is waiting on a trust answer for this pane")
 )
@@ -70,8 +71,10 @@ type pendingLaunch struct {
 	prompt     string
 	promptSent bool
 	knownID    string
-	started    time.Time
-	logKV      []any
+	// mode is applied to the live TUI once, before the first prompt.
+	mode    string
+	started time.Time
+	logKV   []any
 }
 
 // DefaultRoots returns ~/workspace when it exists, else the home directory.
@@ -194,6 +197,8 @@ type StartRequest struct {
 	Model string `json:"model,omitempty"`
 	// Effort is an effort id from Models; empty uses the agent's default.
 	Effort string `json:"effort,omitempty"`
+	// Mode is a mode id from Models; empty starts in the agent's own mode.
+	Mode string `json:"mode,omitempty"`
 	// Trust accepts the agent's folder-trust dialog on the user's behalf.
 	// Without it the launch stops at the dialog and reports TrustRequired.
 	Trust bool `json:"trust"`
@@ -247,11 +252,14 @@ func (l *Launcher) Start(ctx context.Context, req StartRequest) (*StartResult, e
 	if req.Effort != "" && !providers.ValidEffortID(req.Effort) {
 		return nil, ErrInvalidEffort
 	}
+	if req.Mode != "" && !providers.ValidModeID(req.Mode) {
+		return nil, ErrInvalidMode
+	}
 	cwd, err := l.resolveDir(req.Cwd)
 	if err != nil {
 		return nil, err
 	}
-	opts := providers.LaunchOptions{Model: req.Model, Effort: req.Effort, Cwd: cwd}
+	opts := providers.LaunchOptions{Model: req.Model, Effort: req.Effort, Mode: req.Mode, Cwd: cwd}
 	args := lp.LaunchArgs(opts)
 	nativeID := ""
 	if prep, ok := p.(providers.PreparedLauncher); ok {
@@ -260,7 +268,7 @@ func (l *Launcher) Start(ctx context.Context, req StartRequest) (*StartResult, e
 			return nil, err
 		}
 	}
-	return l.launch(ctx, p, lp, cwd, args, req.Trust, req.Prompt, nativeID, "model", req.Model, "effort", req.Effort)
+	return l.launch(ctx, p, lp, cwd, args, req.Trust, req.Prompt, nativeID, req.Mode, "model", req.Model, "effort", req.Effort, "mode", req.Mode)
 }
 
 // Resume reopens an existing session (not currently in Herdr) in a new
@@ -277,12 +285,13 @@ func (l *Launcher) Resume(ctx context.Context, provider, nativeID, cwd string, t
 	if err != nil {
 		return nil, err
 	}
-	return l.launch(ctx, p, lp, dir, lp.ResumeArgs(nativeID, dir), trust, "", nativeID, "resume", nativeID)
+	return l.launch(ctx, p, lp, dir, lp.ResumeArgs(nativeID, dir), trust, "", nativeID, "", "resume", nativeID)
 }
 
 // launch runs the agent in a new workspace. knownID is the native id when
-// resuming a session.
-func (l *Launcher) launch(ctx context.Context, p providers.Provider, lp providers.Launchable, cwd string, args []string, trust bool, prompt, knownID string, logKV ...any) (*StartResult, error) {
+// resuming a session; mode is set in the live TUI by providers that take no
+// mode argument.
+func (l *Launcher) launch(ctx context.Context, p providers.Provider, lp providers.Launchable, cwd string, args []string, trust bool, prompt, knownID, mode string, logKV ...any) (*StartResult, error) {
 	started := time.Now()
 	ws, pane, err := l.Herdr.CreateWorkspace(ctx, cwd, filepath.Base(cwd))
 	if err != nil {
@@ -304,7 +313,7 @@ func (l *Launcher) launch(ctx context.Context, p providers.Provider, lp provider
 	}
 	l.panes[pane] = true
 	l.mu.Unlock()
-	pl := &pendingLaunch{p: p, lp: lp, ws: ws, cwd: cwd, prompt: prompt, knownID: knownID, started: started, logKV: logKV}
+	pl := &pendingLaunch{p: p, lp: lp, ws: ws, cwd: cwd, prompt: prompt, knownID: knownID, mode: mode, started: started, logKV: logKV}
 	switch l.passStartupDialog(ctx, lp, pane, trust) {
 	case startupTrust:
 		l.putPending(pane, pl)
@@ -400,6 +409,9 @@ func (l *Launcher) takePending(pane string) *pendingLaunch {
 // finish sends the first prompt to a ready agent and waits for its identity.
 func (l *Launcher) finish(ctx context.Context, pane string, pl *pendingLaunch) *StartResult {
 	res := &StartResult{PaneID: pane}
+	if w := l.applyMode(ctx, pane, pl); w != "" {
+		res.Warning = w
+	}
 	if strings.TrimSpace(pl.prompt) != "" {
 		if err := l.waitReady(ctx, pane); err != nil {
 			res.Warning = "The agent did not become ready; the prompt was not sent."
@@ -426,6 +438,29 @@ func (l *Launcher) finish(ctx context.Context, pane string, pl *pendingLaunch) *
 	}
 	slog.Info("session launched", append([]any{"provider", pl.p.Name(), "operation", "launch", "pane", pane, "session_id", res.SessionID, "cwd", pl.cwd}, pl.logKV...)...)
 	return res
+}
+
+// applyMode sets the starting mode of agents that take no mode argument. It
+// runs once, before the first prompt, so the mode applies to that prompt; a
+// failure is reported but does not cancel the launch.
+func (l *Launcher) applyMode(ctx context.Context, pane string, pl *pendingLaunch) string {
+	if pl.mode == "" {
+		return ""
+	}
+	setter, ok := pl.p.(providers.LaunchModeSetter)
+	if !ok {
+		return ""
+	}
+	// Only one attempt: a retry through Continue must not toggle it again.
+	mode := pl.mode
+	pl.mode = ""
+	if err := l.waitReady(ctx, pane); err != nil {
+		return "The agent did not become ready; it started in its usual mode."
+	}
+	if err := setter.SetLaunchMode(ctx, pane, mode); err != nil {
+		return "The mode could not be set: " + err.Error()
+	}
+	return ""
 }
 
 // startAgent runs agent.start. A new pane's shell may still be running its

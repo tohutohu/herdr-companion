@@ -279,6 +279,11 @@ func Test不正な起動リクエストは拒否する(t *testing.T) {
 			t.Errorf("effort %q err = %v", e, err)
 		}
 	}
+	for _, m := range []string{"--permission-mode", "accept edits", "plan;rm"} {
+		if _, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: root, Mode: m}); !errors.Is(err, ErrInvalidMode) {
+			t.Errorf("mode %q err = %v", m, err)
+		}
+	}
 	if len(fh.calls) != 0 {
 		t.Errorf("nothing should be created: %v", fh.calls)
 	}
@@ -502,5 +507,49 @@ func Test準備済みのネイティブIDを起動とHerdrへの報告に使う(
 	p.fail = errors.New("prepare failed")
 	if _, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: root}); err == nil || len(fh.calls) != 0 {
 		t.Fatal("started a pane despite failed preparation")
+	}
+}
+
+// modeProvider stands for Codex, whose mode is set in the live TUI.
+type modeProvider struct {
+	fakeProvider
+	modes []string
+	fail  error
+}
+
+func (p *modeProvider) SetLaunchMode(_ context.Context, paneID, mode string) error {
+	p.modes = append(p.modes, paneID+" "+mode)
+	return p.fail
+}
+
+func Testモード引数を持たないエージェントは最初のプロンプトの前にTUIで設定する(t *testing.T) {
+	fh := &fakeHerdr{status: herdr.StatusIdle}
+	l, root := newLauncher(t, fh)
+	p := &modeProvider{}
+	l.Providers = []providers.Provider{p}
+	res, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: root, Prompt: "hello", Mode: "plan"})
+	if err != nil || res.Warning != "" {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if want := []string{"w9:p1 plan"}; len(p.modes) != 1 || p.modes[0] != want[0] {
+		t.Fatalf("mode calls = %v", p.modes)
+	}
+	// LaunchArgs stays untouched: the mode never reaches the command line.
+	if calls := strings.Join(fh.calls, "|"); !strings.Contains(calls, "start claude --default|prompt hello") {
+		t.Fatalf("calls = %s", calls)
+	}
+}
+
+func Testモード設定に失敗しても起動は続ける(t *testing.T) {
+	fh := &fakeHerdr{status: herdr.StatusIdle}
+	l, root := newLauncher(t, fh)
+	p := &modeProvider{fail: errors.New("pane is gone")}
+	l.Providers = []providers.Provider{p}
+	res, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: root, Prompt: "hello", Mode: "plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.SessionID != "claude:abc-123" || !strings.Contains(res.Warning, "pane is gone") {
+		t.Fatalf("res = %+v", res)
 	}
 }
