@@ -85,9 +85,12 @@ identity; the native database schema selects the history format.
   single-select = Down×n + Enter; free text = move to "Type something",
   type, Enter; multi-select = Space/Down per option, then "Submit";
   multiple questions end with the "Submit answers" review tab.
-- Sending: `agent.prompt` (bracketed paste + Enter). Images are pasted one by
-  one as file paths, which Claude Code turns into `[Image #N]`; other
-  attachments are appended to the prompt text as paths for Claude to read.
+- Sending: ordinary prompt text uses `send_text` and `Enter` (with
+  `Shift+Enter` for embedded newlines), so Claude Code does not wrap a long
+  message in `<pasted_content>`. Images are pasted one by one as file paths,
+  which Claude Code turns into `[Image #N]`; other attachments are appended to
+  the prompt text as paths for Claude to read. Text containing terminal control
+  characters falls back to `agent.prompt`.
 
 ### Codex
 

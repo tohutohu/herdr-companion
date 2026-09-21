@@ -455,7 +455,36 @@ func Testモード変更直後はtranscript更新までペインのモードを�
 	}
 }
 
-func Test画像はパスを個別にブラケットペーストしてから本文を送信する(t *testing.T) {
+func Test通常の本文はブラケットペーストせず入力してEnterで送信する(t *testing.T) {
+	term := &fakeTerminal{}
+	p := New(t.TempDir(), term, deadletter.Nop{})
+	p.keyDelay = 0
+	live := &providers.Live{PaneID: "w1:p1", HerdrStatus: herdr.StatusIdle}
+
+	if err := p.Send(context.Background(), "x", live, model.Input{Text: "長い通常メッセージでも貼り付け扱いにしない"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(term.calls, "|"); got != "text:長い通常メッセージでも貼り付け扱いにしない|keys:enter" {
+		t.Errorf("calls = %q", got)
+	}
+}
+
+func Test複数行の本文もブラケットペーストせず入力する(t *testing.T) {
+	term := &fakeTerminal{}
+	p := New(t.TempDir(), term, deadletter.Nop{})
+	p.keyDelay = 0
+	live := &providers.Live{PaneID: "w1:p1", HerdrStatus: herdr.StatusIdle}
+
+	if err := p.Send(context.Background(), "x", live, model.Input{Text: "一行目\n\n三行目"}); err != nil {
+		t.Fatal(err)
+	}
+	want := "text:一行目|keys:shift+enter|keys:shift+enter|text:三行目|keys:enter"
+	if got := strings.Join(term.calls, "|"); got != want {
+		t.Errorf("calls = %q, want %q", got, want)
+	}
+}
+
+func Test画像はパスを個別にブラケットペーストしてから本文を入力する(t *testing.T) {
 	term := &fakeTerminal{}
 	p := New(t.TempDir(), term, deadletter.Nop{})
 	p.keyDelay = 0
@@ -464,7 +493,7 @@ func Test画像はパスを個別にブラケットペーストしてから本�
 	if err := p.Send(context.Background(), "x", live, model.Input{Text: " 見て ", Images: []string{"/tmp/a.png", "/tmp/b.jpg"}}); err != nil {
 		t.Fatal(err)
 	}
-	want := "text:\x1b[200~/tmp/a.png\x1b[201~|text:\x1b[200~/tmp/b.jpg\x1b[201~|prompt:見て"
+	want := "text:\x1b[200~/tmp/a.png\x1b[201~|text:\x1b[200~/tmp/b.jpg\x1b[201~|text:見て|keys:enter"
 	if got := strings.Join(term.calls, "|"); got != want {
 		t.Errorf("calls = %q, want %q", got, want)
 	}
@@ -497,7 +526,7 @@ func Test画像以外の添付はパスを本文に並べて送信する(t *test
 	if err := p.Send(context.Background(), "x", live, in); err != nil {
 		t.Fatal(err)
 	}
-	want := "text:\x1b[200~/tmp/a.png\x1b[201~|prompt:読んで\n/tmp/up/notes.txt"
+	want := "text:\x1b[200~/tmp/a.png\x1b[201~|text:読んで|keys:shift+enter|text:/tmp/up/notes.txt|keys:enter"
 	if got := strings.Join(term.calls, "|"); got != want {
 		t.Errorf("calls = %q, want %q", got, want)
 	}

@@ -205,8 +205,11 @@ func (p *Provider) Image(ctx context.Context, nativeID, messageID string, index 
 
 // Send types the prompt into the Claude Code TUI. Each image path is pasted
 // on its own (bracketed paste), which Claude Code turns into an [Image #N]
-// attachment, before the text is submitted. Other attachments are named by
-// path in the prompt text for Claude Code to read with its own tools.
+// attachment, before the text is submitted. Ordinary text is typed without
+// bracketed-paste markers because Claude Code wraps sufficiently long pastes
+// in <pasted_content>, even when they are regular prompts. Other attachments
+// are named by path in the prompt text for Claude Code to read with its own
+// tools.
 func (p *Provider) Send(ctx context.Context, nativeID string, live *providers.Live, in model.Input) error {
 	if live == nil {
 		return providers.ErrNotLive
@@ -215,8 +218,9 @@ func (p *Provider) Send(ctx context.Context, nativeID string, live *providers.Li
 	if text == "" && len(in.Images) == 0 {
 		return fmt.Errorf("empty message")
 	}
-	if len(in.Images) > 0 && live.Blocked() {
-		// agent.prompt checks this too, but only after the pastes were typed.
+	if live.Blocked() {
+		// Keep all input out of an agent dialog. agent.prompt performs this
+		// check too, but ordinary prompts are sent through the PTY directly.
 		return &herdr.Error{Code: "agent_blocked", Message: "agent is waiting at a dialog"}
 	}
 	for _, img := range in.Images {
@@ -231,7 +235,37 @@ func (p *Provider) Send(ctx context.Context, nativeID string, live *providers.Li
 	if text == "" {
 		return p.term.SendKeys(ctx, live.PaneID, "enter")
 	}
-	return p.term.Prompt(ctx, live.PaneID, text)
+	return p.typePrompt(ctx, live.PaneID, text)
+}
+
+// typePrompt enters text without bracketed-paste markers and submits it.
+// Claude Code accepts Shift+Enter as an in-composer newline, so multiline
+// prompts can use the same input path without turning into pasted content.
+// Terminal control characters are left to agent.prompt, which can transport
+// them safely as a single bracketed paste instead of being interpreted as key
+// presses by the TUI.
+func (p *Provider) typePrompt(ctx context.Context, paneID, text string) error {
+	if strings.IndexFunc(text, func(r rune) bool {
+		return (r < ' ' && r != '\n') || r == '\x7f'
+	}) >= 0 {
+		return p.term.Prompt(ctx, paneID, text)
+	}
+
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		if line != "" {
+			if err := p.term.SendText(ctx, paneID, line); err != nil {
+				return err
+			}
+		}
+		if i == len(lines)-1 {
+			break
+		}
+		if err := p.term.SendKeys(ctx, paneID, "shift+enter"); err != nil {
+			return err
+		}
+	}
+	return p.term.SendKeys(ctx, paneID, "enter")
 }
 
 // CycleMode uses Claude Code's built-in next-mode shortcut. Claude Code only
