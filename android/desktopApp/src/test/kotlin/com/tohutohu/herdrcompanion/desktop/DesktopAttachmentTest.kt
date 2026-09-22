@@ -1,6 +1,8 @@
 package com.tohutohu.herdrcompanion.desktop
 
 import java.nio.file.Files
+import java.awt.image.BufferedImage
+import javax.imageio.ImageIO
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -27,6 +29,20 @@ class DesktopAttachmentTest {
             assertEquals(file.toAbsolutePath().normalize(), fileUrlToPath(file.toUri().toString()))
         } finally {
             Files.deleteIfExists(file)
+        }
+    }
+
+    @Test
+    fun `clipboard images are normalized to PNG attachments`() {
+        val source = BufferedImage(3, 2, BufferedImage.TYPE_INT_RGB)
+        val target = Files.createTempFile("herdr-clipboard-test", ".png")
+        try {
+            assertTrue(writeImageAsPng(source, target))
+            val saved = ImageIO.read(target.toFile())
+            assertEquals(3, saved.width)
+            assertEquals(2, saved.height)
+        } finally {
+            Files.deleteIfExists(target)
         }
     }
 }

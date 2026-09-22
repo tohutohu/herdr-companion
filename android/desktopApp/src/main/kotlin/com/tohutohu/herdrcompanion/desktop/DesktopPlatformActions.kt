@@ -1,12 +1,16 @@
 package com.tohutohu.herdrcompanion.desktop
 
 import java.awt.Desktop
+import java.awt.Image
 import java.awt.Toolkit
+import java.awt.datatransfer.DataFlavor
 import java.awt.datatransfer.StringSelection
+import java.awt.image.BufferedImage
 import java.net.URI
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import javax.imageio.ImageIO
 
 /** Small Desktop-only bridge for operations that should not enter commonMain. */
 object DesktopPlatformActions {
@@ -16,6 +20,24 @@ object DesktopPlatformActions {
         Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null)
         true
     }.getOrDefault(false)
+
+    /**
+     * Copies the current clipboard image to a PNG file owned by the caller.
+     * Returning null also covers clipboards that only contain text, allowing
+     * the native text-field paste handling to continue.
+     */
+    fun pasteImage(): Path? = runCatching {
+        val clipboard = Toolkit.getDefaultToolkit().systemClipboard
+        if (!clipboard.isDataFlavorAvailable(DataFlavor.imageFlavor)) return@runCatching null
+        val image = clipboard.getData(DataFlavor.imageFlavor) as? Image ?: return@runCatching null
+        val path = Files.createTempFile("herdr-clipboard-", ".png")
+        if (!writeImageAsPng(image, path)) {
+            Files.deleteIfExists(path)
+            null
+        } else {
+            path
+        }
+    }.getOrNull()
 
     fun openUrl(url: String): Boolean = runCatching {
         val uri = URI(url)
@@ -74,3 +96,24 @@ object DesktopPlatformActions {
         return base.resolve(candidate).normalize()
     }
 }
+
+/** Converts any AWT image representation into a format the attachment API accepts. */
+internal fun writeImageAsPng(image: Image, path: Path): Boolean = runCatching {
+    val width = image.getWidth(null)
+    val height = image.getHeight(null)
+    if (width <= 0 || height <= 0) return@runCatching false
+
+    val buffered = if (image is BufferedImage && image.type == BufferedImage.TYPE_INT_ARGB) {
+        image
+    } else {
+        BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB).also { destination ->
+            val graphics = destination.createGraphics()
+            try {
+                graphics.drawImage(image, 0, 0, null)
+            } finally {
+                graphics.dispose()
+            }
+        }
+    }
+    ImageIO.write(buffered, "png", path.toFile())
+}.getOrDefault(false)

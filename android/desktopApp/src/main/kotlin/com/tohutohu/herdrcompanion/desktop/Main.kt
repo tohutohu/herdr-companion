@@ -579,6 +579,7 @@ private fun DesktopSessionPane(
                     resolveAttachmentPreview = { id -> state.resolveAttachmentPreview(id) },
                     composerModifier = dropTarget.modifier,
                     attachmentDropActive = dropTarget.active,
+                    onPasteImage = { state.addClipboardImage(sessionId) },
                     onAction = { action -> handleDetailAction(state, api, window, sessionId, action) },
                 )
             }

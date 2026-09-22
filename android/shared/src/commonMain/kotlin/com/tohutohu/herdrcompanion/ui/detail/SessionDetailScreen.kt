@@ -117,6 +117,7 @@ fun SessionDetailScreen(
     resolveAttachmentPreview: (String) -> Any? = { null },
     composerModifier: Modifier = Modifier,
     attachmentDropActive: Boolean = false,
+    onPasteImage: (() -> Boolean)? = null,
     onAction: (SessionDetailAction) -> Unit,
 ) {
     val session = state.session
@@ -320,6 +321,7 @@ fun SessionDetailScreen(
                         resolveAttachmentPreview = resolveAttachmentPreview,
                         composerModifier = composerModifier,
                         attachmentDropActive = attachmentDropActive,
+                        onPasteImage = onPasteImage,
                         onAction = onAction,
                     )
                 }
@@ -471,6 +473,7 @@ private fun Composer(
     resolveAttachmentPreview: (String) -> Any?,
     composerModifier: Modifier,
     attachmentDropActive: Boolean,
+    onPasteImage: (() -> Boolean)?,
     onAction: (SessionDetailAction) -> Unit,
 ) {
     var text by rememberSaveable { mutableStateOf("") }
@@ -549,7 +552,11 @@ private fun Composer(
                     },
                     maxLines = 6,
                     modifier = Modifier.weight(1f).onPreviewKeyEvent { event ->
-                        if (event.type != KeyEventType.KeyDown || event.key != Key.Enter) {
+                        if (event.type != KeyEventType.KeyDown) {
+                            false
+                        } else if (event.key == Key.V && event.isMetaPressed && !event.isShiftPressed && onPasteImage?.invoke() == true) {
+                            true
+                        } else if (event.key != Key.Enter) {
                             false
                         } else {
                             val plainEnter = sendOnEnter && !event.isShiftPressed && !event.isMetaPressed && !event.isCtrlPressed

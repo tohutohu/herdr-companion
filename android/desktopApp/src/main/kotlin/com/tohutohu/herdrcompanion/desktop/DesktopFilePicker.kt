@@ -17,6 +17,8 @@ data class DesktopAttachment(
     val path: Path,
     val name: String = path.fileName?.toString() ?: "file",
     val mimeType: String = guessMimeType(path),
+    /** True only for files created by the Desktop client, such as pasted images. */
+    val deleteWhenDone: Boolean = false,
 ) {
     val id: String get() = path.toAbsolutePath().normalize().toString()
 }
@@ -53,7 +55,8 @@ object DesktopFilePicker {
     }
 }
 
-fun Path.toDesktopAttachment(): DesktopAttachment = DesktopAttachment(toAbsolutePath().normalize())
+fun Path.toDesktopAttachment(deleteWhenDone: Boolean = false): DesktopAttachment =
+    DesktopAttachment(toAbsolutePath().normalize(), deleteWhenDone = deleteWhenDone)
 
 fun guessMimeType(path: Path): String = runCatching {
     Files.probeContentType(path)

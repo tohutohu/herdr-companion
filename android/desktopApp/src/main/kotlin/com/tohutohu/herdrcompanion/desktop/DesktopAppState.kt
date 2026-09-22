@@ -276,6 +276,7 @@ class DesktopAppState(
         detailJobs.values.forEach(Job::cancel)
         detailJobs.clear()
         detailsBySession = emptyMap()
+        cleanupAttachments(composerAttachmentsBySession.values.flatten())
         composerAttachmentsBySession = emptyMap()
         openSessionIdsState = emptyList()
         selection.clear()
@@ -307,6 +308,7 @@ class DesktopAppState(
     private fun removeDetail(id: String) {
         detailJobs.remove(id)?.cancel()
         detailsBySession = detailsBySession - id
+        cleanupAttachments(composerAttachmentsBySession[id].orEmpty())
         composerAttachmentsBySession = composerAttachmentsBySession - id
     }
 
@@ -372,12 +374,29 @@ class DesktopAppState(
     }
 
     fun addAttachments(sessionId: String, paths: List<Path>) {
-        if (sessionId !in openSessionIdsState) return
-        val existing = composerAttachmentsBySession[sessionId].orEmpty()
-        val additions = paths
+        val candidates = paths
             .filter { Files.isRegularFile(it) }
             .map(Path::toDesktopAttachment)
+        addDesktopAttachments(sessionId, candidates)
+    }
+
+    /** Reads a clipboard image and adds the generated PNG to the composer. */
+    fun addClipboardImage(sessionId: String): Boolean {
+        val path = DesktopPlatformActions.pasteImage() ?: return false
+        addDesktopAttachments(sessionId, listOf(path.toDesktopAttachment(deleteWhenDone = true)))
+        return true
+    }
+
+    private fun addDesktopAttachments(sessionId: String, candidates: List<DesktopAttachment>) {
+        if (sessionId !in openSessionIdsState) {
+            cleanupAttachments(candidates)
+            return
+        }
+        val existing = composerAttachmentsBySession[sessionId].orEmpty()
+        val additions = candidates
+            .filter { Files.isRegularFile(it.path) }
             .filterNot { candidate -> existing.any { it.id == candidate.id } }
+        cleanupAttachments(candidates.filterNot { it in additions })
         if (additions.isEmpty()) return
         composerAttachmentsBySession = composerAttachmentsBySession + (sessionId to (existing + additions))
         updateDetail(sessionId) { it.copy(attachments = composerAttachmentStates(sessionId)) }
@@ -388,8 +407,11 @@ class DesktopAppState(
     }
 
     fun removeAttachment(sessionId: String, attachmentId: String) {
-        val attachments = composerAttachmentsBySession[sessionId].orEmpty()
+        val current = composerAttachmentsBySession[sessionId].orEmpty()
+        val removed = current.filter { it.id == attachmentId }
+        val attachments = current
             .filterNot { it.id == attachmentId }
+        cleanupAttachments(removed)
         composerAttachmentsBySession = if (attachments.isEmpty()) {
             composerAttachmentsBySession - sessionId
         } else {
@@ -470,6 +492,7 @@ class DesktopAppState(
     }
 
     fun discard(id: String, localId: String) {
+        cleanupAttachments(pendingAttachments[localId].orEmpty())
         pendingAttachments = pendingAttachments - localId
         pendingMessageBaselines = pendingMessageBaselines - localId
         updatePending(id) { rows -> rows.filterNot { it.localId == localId } }
@@ -652,6 +675,7 @@ class DesktopAppState(
         }
         if (remaining.size != existing.size) {
             val settledIds = existing.filterNot { it in remaining }.map { it.localId }.toSet()
+            cleanupAttachments(settledIds.flatMap { pendingAttachments[it].orEmpty() })
             pendingAttachments = pendingAttachments - settledIds
             pendingMessageBaselines = pendingMessageBaselines - settledIds
             pendingBySession = if (remaining.isEmpty()) pendingBySession - id else pendingBySession + (id to remaining)
@@ -663,11 +687,19 @@ class DesktopAppState(
         closed = true
         detailJobs.values.forEach(Job::cancel)
         detailJobs.clear()
+        cleanupAttachments(composerAttachmentsBySession.values.flatten())
+        cleanupAttachments(pendingAttachments.values.flatten())
         listJob?.cancel()
         gatewayStartJob?.cancel()
         scope.cancel()
         http.connectionPool.evictAll()
         http.dispatcher.executorService.shutdown()
+    }
+}
+
+private fun cleanupAttachments(attachments: Iterable<DesktopAttachment>) {
+    attachments.filter { it.deleteWhenDone }.forEach { attachment ->
+        runCatching { Files.deleteIfExists(attachment.path) }
     }
 }
 
