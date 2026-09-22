@@ -132,6 +132,7 @@ fun NewSessionScreen(
             effort = state.effort,
             mode = state.mode,
             catalog = state.catalog,
+            modelsLoading = state.modelsLoading,
             modelsError = state.modelsError,
             favorite = state.favorite,
             onProvider = { onAction(NewSessionAction.SetProvider(it)) },

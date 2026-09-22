@@ -18,6 +18,7 @@ import com.tohutohu.herdrcompanion.data.api.DirListingDto
 import com.tohutohu.herdrcompanion.data.api.ModelsResponse
 import com.tohutohu.herdrcompanion.data.api.StartSessionRequest
 import com.tohutohu.herdrcompanion.ui.usage.UsageCardRoute
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 /** Android route: owns stores, gateway calls, loading and start side effects. */
@@ -51,6 +52,7 @@ fun NewSessionRoute(
     var effort by rememberSaveable { mutableStateOf("") }
     var mode by rememberSaveable { mutableStateOf("") }
     var catalog by remember { mutableStateOf(ModelsResponse()) }
+    var modelsLoading by remember { mutableStateOf(false) }
     var modelsError by remember { mutableStateOf<String?>(null) }
     var restored by rememberSaveable { mutableStateOf(false) }
     // Listing is not saveable; after rotation the restored path is loaded again.
@@ -112,17 +114,24 @@ fun NewSessionRoute(
     }
 
     LaunchedEffect(provider) {
-        catalog = ModelsResponse()
+        // Keep the previous catalog while the replacement is loading. The
+        // picker is disabled during this short interval, so the dialog keeps
+        // its current height and only resizes once the new catalog is ready.
+        modelsLoading = true
         modelsError = null
         try {
-            catalog = api.models(provider)
-            if (model.isNotEmpty() && catalog.models.none { it.id == model }) model = ""
-            if (effort.isNotEmpty() && effortsFor(catalog, model).none { it.id == effort }) effort = ""
+            val loaded = api.models(provider)
+            catalog = loaded
+            if (model.isNotEmpty() && loaded.models.none { it.id == model }) model = ""
+            if (effort.isNotEmpty() && effortsFor(loaded, model).none { it.id == effort }) effort = ""
             // Modes belong to one agent; the other's are unknown to it.
-            if (mode.isNotEmpty() && catalog.modes.none { it.id == mode }) mode = ""
+            if (mode.isNotEmpty() && loaded.modes.none { it.id == mode }) mode = ""
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             modelsError = e.message
         }
+        modelsLoading = false
     }
 
     val state = NewSessionUiState(
@@ -141,6 +150,7 @@ fun NewSessionRoute(
         effort = effort,
         mode = mode,
         catalog = catalog,
+        modelsLoading = modelsLoading,
         modelsError = modelsError,
         shortcuts = loadedShortcuts,
         savedPresets = saved,
@@ -153,7 +163,14 @@ fun NewSessionRoute(
         onAction = { action ->
             when (action) {
                 NewSessionAction.Back -> onBack()
-                is NewSessionAction.SetProvider -> provider = action.provider
+                is NewSessionAction.SetProvider -> {
+                    if (provider != action.provider) {
+                        provider = action.provider
+                        model = ""
+                        effort = ""
+                        mode = ""
+                    }
+                }
                 is NewSessionAction.SetModel -> {
                     model = action.model
                     if (effortsFor(catalog, action.model).none { it.id == effort }) effort = ""

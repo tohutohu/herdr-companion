@@ -47,6 +47,7 @@ import com.tohutohu.herdrcompanion.ui.newsession.effortsFor
 import com.tohutohu.herdrcompanion.ui.newsession.needsDirectoryConfirmation
 import com.tohutohu.herdrcompanion.ui.newsession.normalizedMode
 import com.tohutohu.herdrcompanion.ui.newsession.withKnownNames
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 @Composable
@@ -75,6 +76,7 @@ fun DesktopNewSessionWindow(
     var effort by rememberSaveable { mutableStateOf("") }
     var mode by rememberSaveable { mutableStateOf("") }
     var catalog by remember { mutableStateOf(ModelsResponse()) }
+    var modelsLoading by remember { mutableStateOf(false) }
     var modelsError by remember { mutableStateOf<String?>(null) }
     var trustRequest by remember { mutableStateOf<StartSessionResponse?>(null) }
 
@@ -151,18 +153,25 @@ fun DesktopNewSessionWindow(
         load(lastUsedDirectory(shortcuts).ifEmpty { null })
     }
     LaunchedEffect(provider) {
-        catalog = ModelsResponse()
+        // Keep the previous catalog while the replacement is loading. The
+        // picker is disabled during this short interval, so the dialog keeps
+        // its current height and only resizes once the new catalog is ready.
+        modelsLoading = true
         modelsError = null
         try {
-            catalog = api.models(provider)
-            if (model.isNotEmpty() && catalog.models.none { it.id == model }) model = ""
-            if (effort.isNotEmpty() && catalog.models.flatMap { it.efforts }.none { it.id == effort } && catalog.efforts.none { it.id == effort }) effort = ""
+            val loaded = api.models(provider)
+            catalog = loaded
+            if (model.isNotEmpty() && loaded.models.none { it.id == model }) model = ""
+            if (effort.isNotEmpty() && loaded.models.flatMap { it.efforts }.none { it.id == effort } && loaded.efforts.none { it.id == effort }) effort = ""
             // Modes belong to one agent; the other's are unknown to it.
-            if (mode.isNotEmpty() && catalog.modes.none { it.id == mode }) mode = ""
+            if (mode.isNotEmpty() && loaded.modes.none { it.id == mode }) mode = ""
+        } catch (cause: CancellationException) {
+            throw cause
         } catch (cause: Exception) {
             val mapped = cause.toDesktopGatewayError()
             modelsError = mapped.message
         }
+        modelsLoading = false
     }
 
     val currentPreset = withKnownNames(
@@ -185,6 +194,7 @@ fun DesktopNewSessionWindow(
         effort = effort,
         mode = mode,
         catalog = catalog,
+        modelsLoading = modelsLoading,
         modelsError = modelsError,
         shortcuts = shortcuts,
         savedPresets = presets.presets,
@@ -247,7 +257,14 @@ fun DesktopNewSessionWindow(
                 onAction = { action ->
                     when (action) {
                         NewSessionAction.Back -> onDismiss()
-                        is NewSessionAction.SetProvider -> provider = action.provider
+                        is NewSessionAction.SetProvider -> {
+                            if (provider != action.provider) {
+                                provider = action.provider
+                                model = ""
+                                effort = ""
+                                mode = ""
+                            }
+                        }
                         is NewSessionAction.SetModel -> {
                             model = action.model
                             if (effortsFor(catalog, action.model).none { it.id == effort }) effort = ""

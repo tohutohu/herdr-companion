@@ -23,6 +23,7 @@ data class NewSessionUiState(
     val effort: String,
     val mode: String,
     val catalog: ModelsResponse,
+    val modelsLoading: Boolean,
     val modelsError: String?,
     val shortcuts: DirectoryShortcuts,
     val savedPresets: List<AgentPreset>,

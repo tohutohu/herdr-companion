@@ -1,11 +1,5 @@
 package com.tohutohu.herdrcompanion.ui.newsession
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -52,6 +46,7 @@ fun AgentPickerDialog(
     effort: String,
     mode: String,
     catalog: ModelsResponse,
+    modelsLoading: Boolean,
     modelsError: String?,
     favorite: Boolean,
     onProvider: (String) -> Unit,
@@ -66,14 +61,17 @@ fun AgentPickerDialog(
         onDismissRequest = onDismiss,
         title = { Text("Agent") },
         text = {
-            Column(Modifier.animateContentSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // AlertDialog measures its window from this content. Animating both
+            // the rows and the column makes the window resize through several
+            // intermediate heights when an agent changes its catalog.
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                     PROVIDERS.forEachIndexed { i, info ->
                         SegmentedButton(
                             selected = provider == info.id,
                             onClick = { onProvider(info.id) },
                             shape = SegmentedButtonDefaults.itemShape(i, PROVIDERS.size),
-                        ) { Text(info.name) }
+                        ) { Text(info.shortName) }
                     }
                 }
                 OptionPicker(
@@ -81,35 +79,30 @@ fun AgentPickerDialog(
                     options = catalog.models,
                     selected = model,
                     error = modelsError,
+                    enabled = !modelsLoading && modelsError == null,
                     onSelect = onModel,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                // Only some models take an effort; the picker grows in for them.
-                AnimatedVisibility(
-                    visible = efforts.isNotEmpty(),
-                    enter = expandVertically() + fadeIn(),
-                    exit = shrinkVertically() + fadeOut(),
-                ) {
+                // Only some models take an effort.
+                if (efforts.isNotEmpty()) {
                     OptionPicker(
                         label = "Effort",
                         options = efforts,
                         selected = effort,
                         error = null,
+                        enabled = !modelsLoading && modelsError == null,
                         onSelect = onEffort,
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
                 // Agents that cannot be started in a chosen mode offer none.
-                AnimatedVisibility(
-                    visible = catalog.modes.isNotEmpty(),
-                    enter = expandVertically() + fadeIn(),
-                    exit = shrinkVertically() + fadeOut(),
-                ) {
+                if (catalog.modes.isNotEmpty()) {
                     OptionPicker(
                         label = "Mode",
                         options = catalog.modes,
                         selected = mode,
                         error = null,
+                        enabled = !modelsLoading && modelsError == null,
                         onSelect = onMode,
                         modifier = Modifier.fillMaxWidth(),
                     )
