@@ -233,20 +233,11 @@ type Transcript struct {
 
 // Decode reads JSONL. Broken lines are dead-lettered and skipped.
 func Decode(r io.Reader, sessionID string, sink deadletter.Sink) (*Transcript, error) {
-	t := &Transcript{toolNames: map[string]string{},
-		tokens: map[string]pricing.Tokens{}, counted: map[string]bool{}}
+	t := newTranscript()
 	br := bufio.NewReaderSize(r, 1<<20)
 	for {
 		line, err := br.ReadBytes('\n')
-		line = bytes.TrimSpace(line)
-		if len(line) > 0 {
-			var e entry
-			if uerr := json.Unmarshal(line, &e); uerr != nil {
-				sink.Record(providerName, sessionID, deadletter.ParseError, uerr.Error(), line)
-			} else {
-				t.add(&e, line)
-			}
-		}
+		t.decodeLine(line, sessionID, sink)
 		if err == io.EOF {
 			break
 		}
@@ -255,6 +246,26 @@ func Decode(r io.Reader, sessionID string, sink deadletter.Sink) (*Transcript, e
 		}
 	}
 	return t, nil
+}
+
+func newTranscript() *Transcript {
+	return &Transcript{toolNames: map[string]string{},
+		tokens: map[string]pricing.Tokens{}, counted: map[string]bool{}}
+}
+
+// decodeLine adds one JSONL line; the transcript keeps line. A broken line is
+// dead-lettered and skipped.
+func (t *Transcript) decodeLine(line []byte, sessionID string, sink deadletter.Sink) {
+	line = bytes.TrimSpace(line)
+	if len(line) == 0 {
+		return
+	}
+	var e entry
+	if err := json.Unmarshal(line, &e); err != nil {
+		sink.Record(providerName, sessionID, deadletter.ParseError, err.Error(), line)
+		return
+	}
+	t.add(&e, line)
 }
 
 func (t *Transcript) add(e *entry, raw []byte) {

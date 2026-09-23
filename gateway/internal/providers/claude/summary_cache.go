@@ -60,11 +60,24 @@ func (p *Provider) summaryPath(ctx context.Context, path, id string, live *provi
 
 	// Parsing stays outside the cache lock so unrelated requests and cache hits
 	// are not held up by a large transcript.
-	tr, err := p.loadPath(path, id)
-	if err != nil {
-		return providers.Summary{}, err
+	opt := ParseOptions{SessionID: gatewayID(id), Live: live}
+	var summary providers.Summary
+	if live != nil {
+		// A running transcript changes between most requests and is the one
+		// being read, so decode only what was appended.
+		c, err := p.transcript(path, id)
+		if err != nil {
+			return providers.Summary{}, err
+		}
+		summary = c.t.summary(opt)
+		c.mu.Unlock()
+	} else {
+		tr, err := p.loadPath(path, id)
+		if err != nil {
+			return providers.Summary{}, err
+		}
+		summary = tr.summary(opt)
 	}
-	summary := tr.summary(ParseOptions{SessionID: gatewayID(id), Live: live})
 	summary.NativeID = id
 	if err := ctx.Err(); err != nil {
 		return providers.Summary{}, err

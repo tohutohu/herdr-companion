@@ -28,6 +28,8 @@ const maxRecent = 30
 type Provider struct {
 	summaryMu    sync.Mutex
 	summaries    map[summaryKey]cachedSummary
+	transcriptMu sync.Mutex
+	transcripts  map[string]*cachedTranscript
 	modeMu       sync.Mutex
 	modeOverride map[string]claudeModeOverride
 	configDir    string
@@ -177,12 +179,19 @@ func (p *Provider) RecentExcluding(ctx context.Context, since time.Time, exclude
 	return out, nil
 }
 
+// Messages returns messages that may be shared with other callers; they must
+// not be modified.
 func (p *Provider) Messages(ctx context.Context, nativeID string, live *providers.Live) ([]model.Message, error) {
-	t, err := p.load(nativeID)
+	path, err := p.transcriptPath(nativeID)
 	if err != nil {
 		return nil, err
 	}
-	msgs := t.Messages(ParseOptions{SessionID: gatewayID(nativeID), Root: root(t, live), Live: live, Sink: p.sink})
+	c, err := p.transcript(path, nativeID)
+	if err != nil {
+		return nil, err
+	}
+	msgs := c.messages(ParseOptions{SessionID: gatewayID(nativeID), Root: root(c.t, live), Live: live, Sink: p.sink})
+	c.mu.Unlock()
 	p.withScreenPlanRows(ctx, msgs, live)
 	return msgs, nil
 }
