@@ -2,9 +2,12 @@ package com.tohutohu.herdrcompanion.desktop
 
 import java.nio.file.Files
 import java.awt.image.BufferedImage
+import java.io.ByteArrayOutputStream
 import javax.imageio.ImageIO
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class DesktopAttachmentTest {
@@ -41,6 +44,44 @@ class DesktopAttachmentTest {
             val saved = ImageIO.read(target.toFile())
             assertEquals(3, saved.width)
             assertEquals(2, saved.height)
+        } finally {
+            Files.deleteIfExists(target)
+        }
+    }
+
+    @Test
+    fun `クリップボードのPNGはピクセル数を変えずにそのまま保存する`() {
+        val source = BufferedImage(6, 4, BufferedImage.TYPE_INT_ARGB)
+        val bytes = ByteArrayOutputStream().also { ImageIO.write(source, "png", it) }.toByteArray()
+        val target = Files.createTempFile("herdr-clipboard-png", ".png")
+        try {
+            assertTrue(writePngBytes(bytes, target))
+            assertContentEquals(bytes, Files.readAllBytes(target))
+        } finally {
+            Files.deleteIfExists(target)
+        }
+    }
+
+    @Test
+    fun `PNGでないバイト列はPNGとして保存しない`() {
+        val target = Files.createTempFile("herdr-clipboard-png", ".png")
+        try {
+            assertFalse(writePngBytes("not a png".toByteArray(), target))
+        } finally {
+            Files.deleteIfExists(target)
+        }
+    }
+
+    @Test
+    fun `クリップボードのTIFFは元の解像度のPNGに変換する`() {
+        val source = BufferedImage(6, 4, BufferedImage.TYPE_INT_RGB)
+        val tiff = ByteArrayOutputStream().also { ImageIO.write(source, "tiff", it) }.toByteArray()
+        val target = Files.createTempFile("herdr-clipboard-tiff", ".png")
+        try {
+            assertTrue(writeImageBytesAsPng(tiff, target))
+            val saved = ImageIO.read(target.toFile())
+            assertEquals(6, saved.width)
+            assertEquals(4, saved.height)
         } finally {
             Files.deleteIfExists(target)
         }

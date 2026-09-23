@@ -3,9 +3,13 @@ package com.tohutohu.herdrcompanion.desktop
 import java.awt.Desktop
 import java.awt.Image
 import java.awt.Toolkit
+import java.awt.datatransfer.Clipboard
 import java.awt.datatransfer.DataFlavor
 import java.awt.datatransfer.StringSelection
+import java.awt.datatransfer.SystemFlavorMap
 import java.awt.image.BufferedImage
+import java.io.ByteArrayInputStream
+import java.io.InputStream
 import java.net.URI
 import java.nio.file.Files
 import java.nio.file.Path
@@ -28,15 +32,39 @@ object DesktopPlatformActions {
      */
     fun pasteImage(): Path? = runCatching {
         val clipboard = Toolkit.getDefaultToolkit().systemClipboard
-        if (!clipboard.isDataFlavorAvailable(DataFlavor.imageFlavor)) return@runCatching null
-        val image = clipboard.getData(DataFlavor.imageFlavor) as? Image ?: return@runCatching null
         val path = Files.createTempFile("herdr-clipboard-", ".png")
-        if (!writeImageAsPng(image, path)) {
+        val written = clipboardBytes(clipboard, pngFlavor)?.let { writePngBytes(it, path) } == true ||
+            clipboardBytes(clipboard, tiffFlavor)?.let { writeImageBytesAsPng(it, path) } == true ||
+            (clipboard.getDataOrNull(DataFlavor.imageFlavor) as? Image)?.let { writeImageAsPng(it, path) } == true
+        if (!written) {
             Files.deleteIfExists(path)
             null
         } else {
             path
         }
+    }.getOrNull()
+
+    /*
+     * AWT's imageFlavor sizes a macOS pasteboard image in points, which halves
+     * a Retina screenshot. These flavors read the pasteboard's own PNG or TIFF
+     * bytes, which keep every pixel.
+     */
+    private val pngFlavor = rawPasteboardFlavor("PNG")
+    private val tiffFlavor = rawPasteboardFlavor("TIFF")
+
+    private fun rawPasteboardFlavor(native: String): DataFlavor =
+        DataFlavor("image/x-herdr-${native.lowercase()}; class=java.io.InputStream").also { flavor ->
+            (SystemFlavorMap.getDefaultFlavorMap() as? SystemFlavorMap)?.apply {
+                addUnencodedNativeForFlavor(flavor, native)
+                addFlavorForUnencodedNative(native, flavor)
+            }
+        }
+
+    private fun clipboardBytes(clipboard: Clipboard, flavor: DataFlavor): ByteArray? =
+        (clipboard.getDataOrNull(flavor) as? InputStream)?.use(InputStream::readBytes)
+
+    private fun Clipboard.getDataOrNull(flavor: DataFlavor): Any? = runCatching {
+        if (isDataFlavorAvailable(flavor)) getData(flavor) else null
     }.getOrNull()
 
     fun openUrl(url: String): Boolean = runCatching {
@@ -88,6 +116,23 @@ object DesktopPlatformActions {
         return base.resolve(candidate).normalize()
     }
 }
+
+private val PNG_SIGNATURE = byteArrayOf(0x89.toByte(), 'P'.code.toByte(), 'N'.code.toByte(), 'G'.code.toByte())
+
+/** Saves PNG bytes as they are, so nothing is re-encoded or rescaled. */
+internal fun writePngBytes(bytes: ByteArray, path: Path): Boolean = runCatching {
+    if (bytes.size < PNG_SIGNATURE.size || !bytes.copyOfRange(0, PNG_SIGNATURE.size).contentEquals(PNG_SIGNATURE)) {
+        return@runCatching false
+    }
+    Files.write(path, bytes)
+    true
+}.getOrDefault(false)
+
+/** Decodes an image file format ImageIO knows, such as TIFF, and saves it as PNG. */
+internal fun writeImageBytesAsPng(bytes: ByteArray, path: Path): Boolean = runCatching {
+    val image = ImageIO.read(ByteArrayInputStream(bytes)) ?: return@runCatching false
+    writeImageAsPng(image, path)
+}.getOrDefault(false)
 
 /** Converts any AWT image representation into a format the attachment API accepts. */
 internal fun writeImageAsPng(image: Image, path: Path): Boolean = runCatching {
