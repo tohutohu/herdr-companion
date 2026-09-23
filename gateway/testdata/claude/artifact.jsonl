@@ -1,0 +1,6 @@
+{"type":"user","message":{"role":"user","content":"デザイン案を Artifact で共有して"},"uuid":"u1","timestamp":"2026-09-23T01:30:00.000Z","cwd":"/work/app","sessionId":"s3"}
+{"type":"frame-link","sessionId":"s3","path":"/private/tmp/claude-501/-work-app/s3/scratchpad/canvas/project/canvas.json","frameUrl":"https://claude.ai/artifact/RjMUh9sNxAJSzv86wB6SzC","title":"タイムライン デザイン案","artifactCount":1,"timestamp":"2026-09-23T01:33:12.641Z"}
+{"type":"frame-link","artifactCount":1,"sessionId":"s3","timestamp":"2026-09-23T01:33:28.234Z"}
+{"type":"artifact-comment-monitor","v":1,"sessionId":"s3","artifacts":{"c8452f94-6fd3-4864-b073-e40bcb200e61":{"state":"armed","writtenAtMs":1790126947009,"title":"タイムライン デザイン案"}}}
+{"type":"artifact-autoreact-ledger","v":1,"sessionId":"s3","accountUuid":"00000000-0000-0000-0000-000000000000","artifacts":{"c8452f94-6fd3-4864-b073-e40bcb200e61":{"savedAt":1790126947584,"stampHighWater":"2026-09-23T01:28:07.522Z","everBaselined":true,"everHadThreads":false,"turnTimestamps":[],"threads":[]}}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"公開しました。"}]},"uuid":"a9","timestamp":"2026-09-23T01:33:30.000Z","sessionId":"s3"}

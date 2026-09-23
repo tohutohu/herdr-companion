@@ -228,6 +228,15 @@ func TestClaudeの未知データはフォールバック表示しつつdeadlett
 	}
 }
 
+func TestArtifactの管理用エントリは会話に出さずdeadletterにも記録しない(t *testing.T) {
+	tr, rec, _ := loadFixture(t, "artifact.jsonl")
+	msgs := tr.Messages(ParseOptions{SessionID: "claude:test", Sink: rec})
+	assertGolden(t, "artifact.golden.json", msgs)
+	if len(rec.Entries) != 0 {
+		t.Errorf("dead letters = %+v, want none", rec.Entries)
+	}
+}
+
 func TestClaudeのAPIエラーで終わったターンは失敗扱いになる(t *testing.T) {
 	tr, _, _ := loadFixture(t, "normal.jsonl")
 	s := tr.summary(ParseOptions{})

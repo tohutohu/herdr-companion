@@ -123,6 +123,8 @@ var ignoredTypes = map[string]bool{
 	"file-history-snapshot": true, "file-history-delta": true, "cost-state": true,
 	"summary": true, "ai-title": true, "custom-title": true, "agent-name": true,
 	"tag": true, "progress": true,
+	// Artifact bookkeeping: file-to-artifact links and comment watchers.
+	"frame-link": true, "artifact-comment-monitor": true, "artifact-autoreact-ledger": true,
 }
 
 var ignoredSystemSubtypes = map[string]bool{
