@@ -279,7 +279,7 @@ fun LazyItemScope.SessionItem(
                 SessionRow(
                     s = s,
                     relativeUpdatedAt = item.relativeUpdatedAt,
-                    selected = item.selected || selection.contains(s.id),
+                    selected = rowShownSelected(item.selected, selection.active, selection.contains(s.id)),
                     selecting = selection.active,
                     onClick = { if (selection.active) selection.toggle(s.id) else onOpen(s.id) },
                     onLongClick = { selection.toggle(s.id) },
@@ -289,6 +289,13 @@ fun LazyItemScope.SessionItem(
         }
     }
 }
+
+/**
+ * While selecting, a row shows only whether it is checked; the list's own
+ * highlight (e.g. the panes open on the Mac) would otherwise look checked.
+ */
+internal fun rowShownSelected(highlighted: Boolean, selecting: Boolean, checked: Boolean): Boolean =
+    if (selecting) checked else highlighted
 
 /** Fades between the screen's own app bar and the selection bar. */
 @Composable
