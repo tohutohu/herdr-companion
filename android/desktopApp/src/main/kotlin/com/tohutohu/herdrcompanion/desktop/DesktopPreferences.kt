@@ -5,6 +5,7 @@ import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.WindowPlacement
 import com.tohutohu.herdrcompanion.data.AgentPresets
 import com.tohutohu.herdrcompanion.data.DirectoryShortcuts
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.awt.Frame
 import java.awt.GraphicsEnvironment
@@ -76,6 +77,7 @@ object DesktopPreferences {
     private const val DIRECTORY_FAVORITES_KEY = "directoryFavorites"
     private const val DIRECTORY_RECENTS_KEY = "directoryRecents"
     private const val AGENT_PRESETS_KEY = "agentPresets"
+    private const val LAYOUT_KEY = "sessionLayout"
 
     private val store: Preferences
         get() = Preferences.userRoot().node(NODE)
@@ -133,6 +135,12 @@ object DesktopPreferences {
         store.put(AGENT_PRESETS_KEY, encodeAgentPresets(presets))
     }
 
+    fun loadLayout(): DesktopLayoutSnapshot = decodeLayout(store.get(LAYOUT_KEY, null))
+
+    fun saveLayout(layout: DesktopLayoutSnapshot) {
+        store.put(LAYOUT_KEY, encodeLayout(layout))
+    }
+
     var notificationsEnabled: Boolean
         get() = store.getBoolean(NOTIFICATIONS_KEY, true)
         set(value) { store.putBoolean(NOTIFICATIONS_KEY, value) }
@@ -153,6 +161,31 @@ internal fun decodeAgentPresets(value: String?): AgentPresets =
     value?.let { runCatching { json.decodeFromString<AgentPresets>(it) }.getOrNull() } ?: AgentPresets()
 
 internal fun encodeAgentPresets(value: AgentPresets): String = json.encodeToString(value)
+
+/** Open panes, their order and widths, restored on the next launch. */
+@Serializable
+data class DesktopLayoutSnapshot(
+    val openSessionIds: List<String> = emptyList(),
+    val focusedSessionId: String? = null,
+    val paneWeights: List<Float> = emptyList(),
+) {
+    fun normalized(): DesktopLayoutSnapshot {
+        val ids = openSessionIds.filter { it.isNotEmpty() }.distinct()
+        return DesktopLayoutSnapshot(
+            openSessionIds = ids,
+            focusedSessionId = focusedSessionId?.takeIf { it in ids } ?: ids.lastOrNull(),
+            paneWeights = paneWeights
+                .takeIf { weights -> weights.size == ids.size && weights.all { it.isFinite() && it > 0f } }
+                ?: equalPaneWeights(ids.size),
+        )
+    }
+}
+
+internal fun decodeLayout(value: String?): DesktopLayoutSnapshot =
+    (value?.let { runCatching { json.decodeFromString<DesktopLayoutSnapshot>(it) }.getOrNull() } ?: DesktopLayoutSnapshot())
+        .normalized()
+
+internal fun encodeLayout(value: DesktopLayoutSnapshot): String = json.encodeToString(value.normalized())
 
 private val json = Json { ignoreUnknownKeys = true }
 
