@@ -21,6 +21,18 @@ import java.util.concurrent.TimeUnit
 
 class GatewayException(val code: Int, message: String) : IOException(message)
 
+private val HERDR_CODE = Regex("""herdr: ([a-z_]+):""")
+
+/**
+ * Replaces the Herdr errors the gateway passes through ("send message: herdr:
+ * agent_blocked: agent w1:p1 is blocked ...") with what the user can do.
+ */
+internal fun readableError(message: String): String = when (HERDR_CODE.find(message)?.groupValues?.get(1)) {
+    "agent_blocked" -> "The agent is waiting for an answer to a prompt. Answer it, then send again."
+    "agent_pane_busy" -> "The pane is already running another program, so the agent could not start there."
+    else -> message
+}
+
 data class DownloadMetadata(
     val mimeType: String,
     val contentLength: Long,
@@ -64,7 +76,7 @@ class GatewayApi(
         if (!resp.isSuccessful) {
             val msg = runCatching { json.decodeFromString<ErrorResponse>(body).error }.getOrNull()
                 ?: "HTTP ${resp.code}"
-            throw GatewayException(resp.code, msg)
+            throw GatewayException(resp.code, readableError(msg))
         }
         return body
     }

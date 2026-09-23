@@ -127,6 +127,18 @@ class GatewayApiTest {
     }
 
     @Test
+    fun `エージェントが入力待ちで送れないときは対処が分かるメッセージにする`() = runBlocking {
+        server.enqueue(
+            MockResponse.Builder().code(409)
+                .body("""{"error":"send message: herdr: agent_blocked: agent wZ:p1 is blocked and requires interactive input"}""")
+                .build(),
+        )
+        val e = runCatching { api.sendMessage("claude:s1", "hi", emptyList()) }.exceptionOrNull() as GatewayException
+        assertEquals(409, e.code)
+        assertEquals("The agent is waiting for an answer to a prompt. Answer it, then send again.", e.message)
+    }
+
+    @Test
     fun `セッションのモード変更は専用APIを呼ぶ`() = runBlocking {
         server.enqueue(MockResponse.Builder().code(202).body("""{"ok":true}""").build())
         api.cycleMode("claude:s1")
