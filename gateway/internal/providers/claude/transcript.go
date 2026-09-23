@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -192,10 +193,15 @@ func contextWindow(modelIDs ...string) int64 {
 // ParseOptions carries context needed while converting.
 type ParseOptions struct {
 	SessionID string // gateway session id ("claude:<id>") for URLs and dead letters
-	Root      string // workspace root for file references
+	// Root is the session's current workspace root. File blocks carry paths
+	// the files API resolves against it; an empty root makes no file blocks.
+	Root string
 	// Live is used to decide whether an unanswered tool call is actionable.
 	Live *providers.Live
 	Sink deadletter.Sink
+	// refRoot is where the entry being converted looks up its relative paths
+	// (see refRoot).
+	refRoot string
 }
 
 type toolResult struct {
@@ -209,8 +215,12 @@ type Transcript struct {
 	raws      [][]byte
 	toolNames map[string]string // tool_use id -> tool name
 	Cwd       string
-	Title     string
-	Updated   time.Time
+	// cwds are the distinct working directories entries were written in.
+	cwds []string
+	// refs caches file-reference lookups (see fileRefs).
+	refs    map[refKey][]model.Block
+	Title   string
+	Updated time.Time
 	// Model is the latest model: from assistant replies, or a `/model`
 	// change made after them.
 	Model          string
@@ -273,6 +283,9 @@ func (t *Transcript) add(e *entry, raw []byte) {
 	t.raws = append(t.raws, raw)
 	if e.Cwd != "" {
 		t.Cwd = e.Cwd
+		if !slices.Contains(t.cwds, e.Cwd) {
+			t.cwds = append(t.cwds, e.Cwd)
+		}
 	}
 	// A mode change is recorded on the next prompt; permission-mode entries
 	// are re-appended later with the current mode.
@@ -391,10 +404,12 @@ func (t *Transcript) Messages(opt ParseOptions) []model.Message {
 	pending := pendingToolUses(t.entries, results)
 
 	var out []model.Message
+	roots := map[string]string{}
 	for i, e := range t.entries {
 		if e.IsSidechain {
 			continue
 		}
+		opt.refRoot = refRoot(e.Cwd, opt.Root, roots)
 		msgs := t.convert(e, t.raws[i], results, pending, opt)
 		out = append(out, msgs...)
 	}
@@ -801,7 +816,7 @@ func (t *Transcript) convertAssistant(e *entry, raw []byte, results map[string]t
 	if !ok {
 		var s string
 		if json.Unmarshal(e.Message.Content, &s) == nil && s != "" {
-			return []model.Message{{ID: e.UUID, Role: model.RoleAssistant, Timestamp: e.Timestamp, Blocks: textWithRefs(s, opt.Root)}}
+			return []model.Message{{ID: e.UUID, Role: model.RoleAssistant, Timestamp: e.Timestamp, Blocks: t.textWithRefs(s, opt)}}
 		}
 		opt.Sink.Record(providerName, opt.SessionID, deadletter.UnknownContent, "assistant content is neither string nor array", raw)
 		return []model.Message{fallback(e, "Unsupported event: assistant content")}
@@ -817,7 +832,7 @@ func (t *Transcript) convertAssistant(e *entry, raw []byte, results map[string]t
 			if strings.TrimSpace(b.Text) == "" {
 				continue
 			}
-			out = append(out, textWithRefs(b.Text, opt.Root)...)
+			out = append(out, t.textWithRefs(b.Text, opt)...)
 		case "thinking", "redacted_thinking":
 			// Not user-facing.
 		case "tool_use":
@@ -836,8 +851,8 @@ func (t *Transcript) convertAssistant(e *entry, raw []byte, results map[string]t
 	return []model.Message{{ID: e.UUID, Role: role, Timestamp: e.Timestamp, Blocks: out}}
 }
 
-func textWithRefs(text, root string) []model.Block {
-	return append([]model.Block{model.TextBlock(text)}, model.ExtractFileRefs(text, root)...)
+func (t *Transcript) textWithRefs(text string, opt ParseOptions) []model.Block {
+	return append([]model.Block{model.TextBlock(text)}, t.fileRefs(text, opt.refRoot, opt.Root)...)
 }
 
 // pendingToolUses returns tool_use ids without results in the last assistant
@@ -936,12 +951,14 @@ func (t *Transcript) toolUseBlocks(b contentBlock, res toolResult, answered, pen
 		if p == "" {
 			p = str("notebook_path")
 		}
-		blocks = append(blocks, model.TextBlock(b.Name+" "+model.DisplayPath(opt.Root, p)))
+		blocks = append(blocks, model.TextBlock(b.Name+" "+model.DisplayPath(opt.refRoot, p)))
 		line := 0
 		if off, ok := in["offset"].(float64); ok {
 			line = int(off)
 		}
-		if fb, ok := model.FileRef(opt.Root, p, line); ok {
+		if fb, ok := model.FileRef(opt.refRoot, p, line); ok {
+			blocks = append(blocks, rebase([]model.Block{fb}, opt.refRoot, opt.Root)...)
+		} else if fb, ok := model.FileRef(opt.Root, p, line); ok {
 			blocks = append(blocks, fb)
 		}
 	case "Glob", "Grep":

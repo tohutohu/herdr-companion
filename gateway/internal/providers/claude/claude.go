@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -194,6 +195,22 @@ func (p *Provider) Messages(ctx context.Context, nativeID string, live *provider
 	c.mu.Unlock()
 	p.withScreenPlanRows(ctx, msgs, live)
 	return msgs, nil
+}
+
+// SessionFileRoots returns the directories the session worked in, so file
+// links made from an earlier cwd (see fileRefs) can be opened. The session
+// could already read them through its terminal.
+func (p *Provider) SessionFileRoots(ctx context.Context, nativeID string) []string {
+	path, err := p.transcriptPath(nativeID)
+	if err != nil {
+		return nil
+	}
+	c, err := p.transcript(path, nativeID)
+	if err != nil {
+		return nil
+	}
+	defer c.mu.Unlock()
+	return slices.Clone(c.t.cwds)
 }
 
 func (p *Provider) Image(ctx context.Context, nativeID, messageID string, index int) (string, []byte, error) {
