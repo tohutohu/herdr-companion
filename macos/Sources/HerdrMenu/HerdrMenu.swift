@@ -102,10 +102,10 @@ struct SetupError: LocalizedError {
         }
         commandObserver = NotificationCenter.default.addObserver(forName: .herdrGatewayCommand, object: nil, queue: .main) { [weak self] note in
             guard let url = note.object as? URL else { return }
-            Task { @MainActor in self?.handleCommand(url) }
+            Task { @MainActor [weak self] in self?.handleCommand(url) }
         }
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 guard let self else { return }
                 if let expires = self.expires, expires <= Date() { self.clearQR() }
             }
@@ -250,7 +250,7 @@ struct SetupError: LocalizedError {
             process.environment = environment; process.standardOutput = FileHandle.nullDevice; process.standardError = handle
             process.terminationHandler = { [weak self] proc in
                 try? handle.close()
-                Task { @MainActor in
+                Task { @MainActor [weak self] in
                     guard let self, self.child === proc else { return }
                     self.child = nil; self.running = false; self.status = "停止中"; self.clearQR()
                     if proc.terminationStatus != 0 { self.error = "Gatewayを起動できませんでした。ポートの重複やログを確認してください。" }
