@@ -130,8 +130,7 @@ class DesktopAppState(
 
     fun resolveAttachmentPreview(id: String): Any? = (composerAttachmentsBySession.values.flatten() + pendingAttachments.values.flatten())
         .firstOrNull { it.id == id }
-        ?.path
-        ?.toUri()
+        ?.previewModel
 
     init {
         refreshSessions()

@@ -21,6 +21,9 @@ data class DesktopAttachment(
     val deleteWhenDone: Boolean = false,
 ) {
     val id: String get() = path.toAbsolutePath().normalize().toString()
+
+    /** Coil on the JVM loads a File but has no fetcher for a java.net.URI. */
+    val previewModel: Any get() = path.toFile()
 }
 
 /** Native-ish AWT file selection; the shared attachment pipeline sees only paths. */

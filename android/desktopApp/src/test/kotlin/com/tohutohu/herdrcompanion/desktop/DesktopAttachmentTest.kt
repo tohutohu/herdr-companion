@@ -1,13 +1,20 @@
 package com.tohutohu.herdrcompanion.desktop
 
+import coil3.ImageLoader
+import coil3.PlatformContext
+import coil3.request.ErrorResult
+import coil3.request.ImageRequest
+import coil3.request.SuccessResult
 import java.nio.file.Files
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
 import javax.imageio.ImageIO
+import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class DesktopAttachmentTest {
@@ -84,6 +91,21 @@ class DesktopAttachmentTest {
             assertEquals(4, saved.height)
         } finally {
             Files.deleteIfExists(target)
+        }
+    }
+
+    @Test
+    fun `添付画像のプレビューをCoilで読み込める`(): Unit = runBlocking {
+        val file = Files.createTempFile("herdr-preview", ".png")
+        try {
+            ImageIO.write(BufferedImage(4, 3, BufferedImage.TYPE_INT_ARGB), "png", file.toFile())
+            val context = PlatformContext.INSTANCE
+            val result = ImageLoader(context).execute(
+                ImageRequest.Builder(context).data(file.toDesktopAttachment().previewModel).build(),
+            )
+            assertIs<SuccessResult>(result, (result as? ErrorResult)?.throwable?.message)
+        } finally {
+            Files.deleteIfExists(file)
         }
     }
 }
