@@ -49,6 +49,21 @@
     ]
   },
   {
+    "id": "at3",
+    "role": "user",
+    "timestamp": "2026-09-01T00:00:10Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "[Image #1] こんな感じでエラーが出る"
+      },
+      {
+        "type": "image",
+        "url": "/v1/sessions/claude:test/messages/at3/images/0"
+      }
+    ]
+  },
+  {
     "id": "a2",
     "role": "assistant",
     "timestamp": "2026-09-01T00:00:12Z",

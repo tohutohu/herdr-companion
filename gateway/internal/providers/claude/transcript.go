@@ -89,8 +89,9 @@ func (u *apiUsage) total() int64 {
 // carries conversation content; "model" attachments name the exact model,
 // which assistant entries report without its context-length suffix.
 type attachment struct {
-	Type     string `json:"type"`
-	Prompt   string `json:"prompt"`
+	Type string `json:"type"`
+	// Prompt is a string, or content blocks when the prompt has images.
+	Prompt   json.RawMessage `json:"prompt"`
 	Identity *struct {
 		ModelID string `json:"modelId"`
 	} `json:"identity"`
@@ -435,7 +436,7 @@ func (t *Transcript) convert(e *entry, raw []byte, results map[string]toolResult
 	case e.Type == "system":
 		return convertSystem(e, raw, opt)
 	case e.Type == "attachment":
-		return absorbedPrompt(e)
+		return absorbedPrompt(e, opt)
 	case ignoredTypes[e.Type]:
 		return nil
 	default:
@@ -700,15 +701,44 @@ func toolResultBlocks(b contentBlock, sessionID, messageID string, imageIndex in
 // Claude Code queues such a prompt and, when it takes it into the running turn,
 // records it as a queued_command attachment: it never becomes a user entry, so
 // without this the message is missing from the conversation.
-func absorbedPrompt(e *entry) []model.Message {
+func absorbedPrompt(e *entry, opt ParseOptions) []model.Message {
 	if e.Attachment == nil || e.Attachment.Type != attachmentQueuedCommand {
 		return nil // hooks, reminders and the other attachment kinds: metadata
 	}
-	role, text := userText(e.Attachment.Prompt)
-	if text == "" {
+	var out []model.Block
+	role := model.RoleUser
+	imageIndex := 0
+	for _, b := range e.Attachment.promptBlocks() {
+		switch b.Type {
+		case "text":
+			r, text := userText(b.Text)
+			if text == "" {
+				continue
+			}
+			if r != model.RoleUser {
+				role = r
+			}
+			out = append(out, model.TextBlock(text))
+		case "image":
+			out = append(out, model.Block{Type: model.BlockImage, URL: providers.ImageURL(opt.SessionID, e.UUID, imageIndex)})
+			imageIndex++
+		}
+	}
+	if len(out) == 0 {
 		return nil
 	}
-	return []model.Message{{ID: e.UUID, Role: role, Timestamp: e.Timestamp, Blocks: []model.Block{model.TextBlock(text)}}}
+	return []model.Message{{ID: e.UUID, Role: role, Timestamp: e.Timestamp, Blocks: out}}
+}
+
+// promptBlocks returns a queued prompt as content blocks. Claude Code writes
+// a text-only prompt as a string and one with pasted images as blocks.
+func (a *attachment) promptBlocks() []contentBlock {
+	var text string
+	if json.Unmarshal(a.Prompt, &text) == nil {
+		return []contentBlock{{Type: "text", Text: text}}
+	}
+	blocks, _ := decodeBlocks(a.Prompt)
+	return blocks
 }
 
 // queuedPrompts returns the prompts still waiting in Claude Code's queue: sent
@@ -1091,10 +1121,18 @@ func compactJSON(raw json.RawMessage, n int) string {
 func (t *Transcript) imageAt(messageID string, index int) (*imageSource, bool) {
 	uuid := strings.TrimSuffix(messageID, "#tool")
 	for _, e := range t.entries {
-		if e.UUID != uuid || e.Message == nil {
+		if e.UUID != uuid {
 			continue
 		}
-		blocks, _ := decodeBlocks(e.Message.Content)
+		var blocks []contentBlock
+		switch {
+		case e.Message != nil:
+			blocks, _ = decodeBlocks(e.Message.Content)
+		case e.Attachment != nil && e.Attachment.Type == attachmentQueuedCommand:
+			blocks = e.Attachment.promptBlocks()
+		default:
+			continue
+		}
 		var imgs []*imageSource
 		for _, b := range blocks {
 			if b.Type == "image" && b.Source != nil {

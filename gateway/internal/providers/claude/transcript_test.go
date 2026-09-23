@@ -137,6 +137,21 @@ func TestClaudeの作業中に送ったメッセージも会話に表示され�
 	if n := count(msgs, "user:ごめん、テストも直して"); n != 1 {
 		t.Errorf("取り込まれたメッセージ = %d 件, want 1 (%v)", n, texts(msgs))
 	}
+	// 画像付きで取り込まれた分は本文と画像の両方を出す
+	if n := count(msgs, "user:[Image #1] こんな感じでエラーが出る"); n != 1 {
+		t.Errorf("画像付きで取り込まれたメッセージ = %d 件, want 1 (%v)", n, texts(msgs))
+	}
+	for _, m := range msgs {
+		if m.ID != "at3" {
+			continue
+		}
+		if len(m.Blocks) != 2 || m.Blocks[1].Type != model.BlockImage {
+			t.Errorf("画像ブロックがない: %+v", m.Blocks)
+		}
+		if src, ok := tr.imageAt("at3", 0); !ok || src.MediaType != "image/png" {
+			t.Errorf("取り込まれた画像を取り出せない: %+v", src)
+		}
+	}
 	if n := count(msgs, "user:CIも直して"); n != 1 {
 		t.Errorf("キューから実行されたメッセージ = %d 件, want 1 (%v)", n, texts(msgs))
 	}

@@ -5,6 +5,9 @@
 {"type":"user","uuid":"u2","timestamp":"2026-09-01T00:00:08Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool1","content":"package auth"}]}}
 {"type":"attachment","uuid":"at1","timestamp":"2026-09-01T00:00:07Z","attachment":{"type":"queued_command","prompt":"ごめん、テストも直して","source_uuid":"q1","commandMode":"prompt","origin":{"kind":"human"},"timestamp":"2026-09-01T00:00:07Z"}}
 {"type":"attachment","uuid":"at2","timestamp":"2026-09-01T00:00:09Z","attachment":{"type":"hook_success","content":"hook ok"}}
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-09-01T00:00:10Z","sessionId":"s1","content":"[Image #1] こんな感じでエラーが出る"}
+{"type":"queue-operation","operation":"remove","timestamp":"2026-09-01T00:00:10.5Z","sessionId":"s1","content":"[Image #1] こんな感じでエラーが出る","reason":"absorbed_mid_turn"}
+{"parentUuid":"at2","isSidechain":false,"attachment":{"type":"queued_command","prompt":[{"type":"text","text":"[Image #1] こんな感じでエラーが出る"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="}}],"source_uuid":"q2","imagePasteIds":[1],"commandMode":"prompt","origin":{"kind":"human"},"timestamp":"2026-09-01T00:00:10Z","humanTurn":true},"type":"attachment","uuid":"at3","timestamp":"2026-09-01T00:00:10Z"}
 {"type":"assistant","uuid":"a2","timestamp":"2026-09-01T00:00:12Z","message":{"role":"assistant","model":"claude-opus-5","content":[{"type":"text","text":"直しました"}]}}
 {"type":"queue-operation","operation":"enqueue","timestamp":"2026-09-01T00:00:20Z","sessionId":"s1","content":"CIも直して"}
 {"type":"queue-operation","operation":"dequeue","timestamp":"2026-09-01T00:00:21Z","sessionId":"s1","content":""}
