@@ -225,6 +225,24 @@ func TestDaemonの保留リクエストと状態を追跡する(t *testing.T) {
 	}
 }
 
+func Test呼び出し元が中断したスレッド読み込みはdeadletterに記録しない(t *testing.T) {
+	// 応答を返さない app-server
+	pt := &pipeTransport{in: make(chan []byte), out: make(chan []byte, 16), closed: make(chan struct{})}
+	rec := &deadletter.Recorder{}
+	p := New("codex-not-used", "/nonexistent.sock", &fakeTerm{}, rec)
+	p.reader = newRPCClient(pt, nil)
+	defer p.reader.close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := p.readThread(ctx, "thread-000001", false); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if len(rec.Entries) != 0 {
+		t.Errorf("dead letters = %+v, want none", rec.Entries)
+	}
+}
+
 // --- in-process fake app-server ---
 
 type pipeTransport struct {

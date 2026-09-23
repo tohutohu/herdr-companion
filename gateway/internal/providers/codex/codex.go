@@ -196,7 +196,10 @@ func (p *Provider) readThread(ctx context.Context, id string, turns bool) (*Thre
 			// Unknown thread ids are reported as JSON-RPC errors.
 			return nil, fmt.Errorf("%w: %v", providers.ErrNotFound, err)
 		}
-		p.sink.Record(providerName, gatewayID(id), deadletter.ProviderError, "thread/read: "+err.Error(), nil)
+		// A caller that went away (closed request, shutdown) is not a Codex failure.
+		if ctx.Err() == nil {
+			p.sink.Record(providerName, gatewayID(id), deadletter.ProviderError, "thread/read: "+err.Error(), nil)
+		}
 		return nil, err
 	}
 	return &r.Thread, nil
