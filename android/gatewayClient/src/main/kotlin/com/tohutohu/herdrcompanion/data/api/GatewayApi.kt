@@ -16,6 +16,7 @@ import okhttp3.Response
 import java.io.IOException
 import java.io.OutputStream
 import java.net.URLEncoder
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 class GatewayException(val code: Int, message: String) : IOException(message)
@@ -104,6 +105,28 @@ class GatewayApi(
 
     suspend fun messages(id: String, after: String? = null): MessagesResponse =
         get(url("v1", "sessions", id, "messages", query = mapOf("after" to after)))
+
+    /** The ETag of each session's last messages response, and the URL it answered. */
+    private val messageTags = ConcurrentHashMap<String, Pair<HttpUrl, String>>()
+
+    /**
+     * Like [messages], but returns null when the gateway reports the response
+     * unchanged since this client last received it for the same request.
+     */
+    suspend fun messagesIfChanged(id: String, after: String? = null): MessagesResponse? {
+        val url = url("v1", "sessions", id, "messages", query = mapOf("after" to after))
+        val known = messageTags[id]?.takeIf { it.first == url }?.second
+        val req = request(url).get().apply { if (known != null) header("If-None-Match", known) }.build()
+        return withContext(Dispatchers.IO) {
+            http.newCall(req).execute().use { resp ->
+                if (known != null && resp.code == 304) return@use null
+                val body = json.decodeFromString<MessagesResponse>(bodyOrThrow(resp))
+                val etag = resp.header("ETag")
+                if (etag != null) messageTags[id] = url to etag else messageTags.remove(id)
+                body
+            }
+        }
+    }
 
     suspend fun sendMessage(id: String, text: String, uploads: List<String>) {
         post(

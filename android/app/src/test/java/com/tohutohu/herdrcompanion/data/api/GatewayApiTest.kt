@@ -221,6 +221,24 @@ class GatewayApiTest {
     }
 
     @Test
+    fun `メッセージの条件付き取得は変更がなければnullを返しETagを同じ要求にだけ送る`() = runBlocking {
+        val body = """{"session":{"id":"claude:s1","provider":"claude","status":"running","updatedAt":"2026-09-17T10:00:00Z"},"messages":[]}"""
+        server.enqueue(MockResponse.Builder().addHeader("ETag", "\"v1\"").body(body).build())
+        server.enqueue(MockResponse.Builder().code(304).addHeader("ETag", "\"v1\"").build())
+        server.enqueue(MockResponse.Builder().addHeader("ETag", "\"v2\"").body(body).build())
+
+        assertEquals("running", api.messagesIfChanged("claude:s1", after = "m1")!!.session.status)
+        assertNull(server.takeRequest().headers["If-None-Match"])
+
+        assertNull(api.messagesIfChanged("claude:s1", after = "m1"))
+        assertEquals("\"v1\"", server.takeRequest().headers["If-None-Match"])
+
+        // 別の anchor への要求には前回の ETag を送らない。
+        assertEquals("running", api.messagesIfChanged("claude:s1", after = "m2")!!.session.status)
+        assertNull(server.takeRequest().headers["If-None-Match"])
+    }
+
+    @Test
     fun `複数セッションのアーカイブは一度のリクエストで送る`() = runBlocking {
         val first = """{"id":"claude:s1","provider":"claude","status":"offline","updatedAt":"2026-09-17T10:00:00Z","archived":true}"""
         val second = first.replace("claude:s1", "codex:s2")

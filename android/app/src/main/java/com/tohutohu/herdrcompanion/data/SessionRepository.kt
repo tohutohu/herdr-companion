@@ -51,11 +51,16 @@ class SessionRepository(
     /**
      * Fetches messages for a session. Incremental fetches ask for everything
      * from the last cached message on; the gateway includes that anchor so
-     * in-progress changes to it are picked up.
+     * in-progress changes to it are picked up. An incremental fetch the
+     * gateway reports unchanged leaves the cache as it is.
      */
     suspend fun refreshMessages(sessionId: String, full: Boolean = false) {
         val anchor = if (full) null else db.messages().lastId(sessionId)
-        val resp = api.messages(sessionId, after = anchor)
+        val resp = if (anchor == null) {
+            api.messages(sessionId)
+        } else {
+            api.messagesIfChanged(sessionId, after = anchor) ?: return
+        }
         val now = System.currentTimeMillis()
         // An archived session is only listed while it runs.
         val s = resp.session

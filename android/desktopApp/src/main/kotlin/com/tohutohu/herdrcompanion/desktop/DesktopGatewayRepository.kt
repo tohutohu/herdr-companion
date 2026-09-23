@@ -16,6 +16,9 @@ class DesktopGatewayRepository(private val api: GatewayApi) {
 
     suspend fun messageSnapshot(id: String, after: String? = null) = api.messages(id, after)
 
+    /** Null when nothing changed since the last snapshot for the same request. */
+    suspend fun changedMessageSnapshot(id: String, after: String) = api.messagesIfChanged(id, after)
+
     suspend fun send(id: String, text: String, uploads: List<String> = emptyList()) =
         api.sendMessage(id, text, uploads)
 

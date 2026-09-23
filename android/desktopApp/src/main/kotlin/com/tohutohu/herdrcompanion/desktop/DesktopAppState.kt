@@ -326,7 +326,18 @@ class DesktopAppState(
                 // Keep the explicit GET /sessions/{id} call on the first load;
                 // it gives a useful Session-not-found error before messages.
                 if (first) repository.session(id)
-                val response = repository.messageSnapshot(id, after = if (first) null else anchor)
+                val since = anchor.takeUnless { first }
+                val response = if (since == null) {
+                    repository.messageSnapshot(id)
+                } else {
+                    repository.changedMessageSnapshot(id, since)
+                }
+                if (response == null) {
+                    // Unchanged; only clear an error left by an earlier poll.
+                    if (detailsBySession[id]?.error != null) updateDetail(id) { it.copy(error = null) }
+                    delay(DETAIL_POLL_MS)
+                    continue
+                }
                 messages = mergeMessages(messages, response.messages.map(MessageDto::toMessage))
                 anchor = messages.lastOrNull()?.id
                 settlePending(id, messages)
