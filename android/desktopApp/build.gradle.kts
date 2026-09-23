@@ -40,6 +40,7 @@ dependencies {
     implementation(compose.material3)
     implementation(compose.materialIconsExtended)
     implementation(libs.okhttp)
+    implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.serialization.json)

@@ -74,6 +74,7 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import coil3.compose.setSingletonImageLoaderFactory
 import com.tohutohu.herdrcompanion.data.api.GatewayApi
 import com.tohutohu.herdrcompanion.data.AgentPreset
 import com.tohutohu.herdrcompanion.data.removePreset
@@ -125,6 +126,9 @@ fun main() {
                 val http = remember { DesktopHttp.client() }
                 val api = remember { GatewayApi(http) { connectionSource.current.settings } }
                 val appState = remember { DesktopAppState(connectionSource, api, http) }
+                setSingletonImageLoaderFactory { context ->
+                    desktopImageLoader(context, http) { connectionSource.current.settings }
+                }
                 DesktopWindowPersistence(window)
                 DisposableEffect(appState) {
                     onDispose { appState.close() }
