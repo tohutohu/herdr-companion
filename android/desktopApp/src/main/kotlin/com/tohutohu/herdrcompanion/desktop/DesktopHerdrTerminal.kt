@@ -11,25 +11,27 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
- * Opens Terminal.app directly attached to the Herdr pane hosting a session.
- * Like the production Gateway, it talks to the default Herdr session.
+ * Opens the default terminal app directly attached to the Herdr pane hosting a
+ * session. Like the production Gateway, it talks to the default Herdr session.
  */
 internal object DesktopHerdrTerminal {
     private const val PANE_LOOKUP_TIMEOUT_SECONDS = 5L
 
-    /** Returns null once Terminal.app was asked to attach, otherwise a message for the user. */
+    /** Returns null once the terminal app was asked to attach, otherwise a message for the user. */
     fun attach(paneId: String): String? {
         val herdr = findHerdr() ?: return "Could not find the herdr command on this Mac."
         val terminalId = runCatching { lookupTerminalId(herdr, paneId) }.getOrNull()
             ?: return "This session's Herdr pane is not open on this Mac."
         return runCatching {
-            // A .command file runs in a new Terminal window without Apple Events permission.
-            val script = Files.createTempFile("herdr-attach-", ".command")
+            // An extension-less executable opens in the default terminal app (the
+            // handler for public.unix-executable, e.g. after iTerm2's "Make iTerm2
+            // Default Term") and needs no Apple Events permission.
+            val script = Files.createTempDirectory("herdr-attach-").resolve("herdr-attach")
             Files.writeString(script, attachScript(herdr.toString(), terminalId))
             Files.setPosixFilePermissions(script, PosixFilePermissions.fromString("rwx------"))
-            ProcessBuilder("/usr/bin/open", "-a", "Terminal", script.toString()).start()
+            ProcessBuilder("/usr/bin/open", script.toString()).start()
             null
-        }.getOrElse { "Could not open Terminal." }
+        }.getOrElse { "Could not open a terminal app." }
     }
 
     /** GUI apps do not inherit the login shell PATH, so look in the usual install locations. */
@@ -60,10 +62,11 @@ internal fun parseTerminalId(output: String): String? = runCatching {
         ?.takeIf { it.isNotBlank() }
 }.getOrNull()
 
-/** Detaching (ctrl+b q) ends the script; it removes itself once Terminal has started it. */
+/** Detaching (ctrl+b q) ends the script; it removes itself and its directory once started. */
 internal fun attachScript(herdr: String, terminalId: String): String = """
     |#!/bin/sh
     |rm -f "${'$'}0"
+    |rmdir "${'$'}(dirname "${'$'}0")" 2>/dev/null
     |unset HERDR_SOCKET_PATH HERDR_SESSION HERDR_PANE_ID
     |exec ${shellQuote(herdr)} terminal attach ${shellQuote(terminalId)}
     |

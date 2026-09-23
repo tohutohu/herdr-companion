@@ -610,7 +610,7 @@ class DesktopAppState(
         }
     }
 
-    /** Opens Terminal.app attached to the session's Herdr pane. */
+    /** Opens the default terminal app attached to the session's Herdr pane. */
     fun attachTerminal(paneId: String) {
         scope.launch(Dispatchers.IO) {
             DesktopHerdrTerminal.attach(paneId)?.let(::reportError)

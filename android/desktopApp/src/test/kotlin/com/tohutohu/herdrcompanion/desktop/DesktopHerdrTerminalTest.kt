@@ -24,7 +24,7 @@ class DesktopHerdrTerminalTest {
     fun `attachスクリプトは既定セッションのターミナルにexecで接続する`() {
         val script = attachScript("/Users/me/.local/bin/herdr", "term_1")
 
-        assertTrue(script.startsWith("#!/bin/sh\n"))
+        assertTrue(script.startsWith("#!/bin/sh\nrm -f \"$0\"\nrmdir \"$(dirname \"$0\")\" 2>/dev/null\n"))
         assertTrue("unset HERDR_SOCKET_PATH HERDR_SESSION HERDR_PANE_ID\n" in script)
         assertTrue(script.endsWith("exec '/Users/me/.local/bin/herdr' terminal attach 'term_1'\n"))
     }
