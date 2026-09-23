@@ -107,3 +107,60 @@ func Test一覧は稼働中とアーカイブ済みを解析前の除外対象�
 		t.Fatalf("excluded=%v", p.excluded)
 	}
 }
+
+type twoLiveSnapshot struct{}
+
+func (twoLiveSnapshot) Snapshot(context.Context) (*herdr.Snapshot, error) {
+	agent := "claude"
+	return &herdr.Snapshot{Panes: []herdr.Pane{
+		{PaneID: "w1:p1", Agent: &agent, AgentSession: &herdr.AgentSession{Agent: agent, Kind: "id", Value: "a"}},
+		{PaneID: "w2:p1", Agent: &agent, AgentSession: &herdr.AgentSession{Agent: agent, Kind: "id", Value: "b"}},
+	}}, nil
+}
+
+// blockingProvider blocks every Summary and Recent call until release is
+// closed, reporting each call on started.
+type blockingProvider struct {
+	stubProvider
+	started chan string
+	release chan struct{}
+}
+
+func (p *blockingProvider) Summary(_ context.Context, id string, _ *providers.Live) (*providers.Summary, error) {
+	p.started <- "summary:" + id
+	<-p.release
+	return &providers.Summary{NativeID: id}, nil
+}
+
+func (p *blockingProvider) Recent(context.Context, time.Time) ([]providers.Summary, error) {
+	p.started <- "recent"
+	<-p.release
+	return []providers.Summary{{NativeID: "offline"}}, nil
+}
+
+func Test一覧は稼働中セッションの要約と最近のセッション取得を並行して行う(t *testing.T) {
+	p := &blockingProvider{started: make(chan string, 3), release: make(chan struct{})}
+	s := New(twoLiveSnapshot{}, time.Hour, p)
+	type result struct {
+		list []model.Session
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		list, err := s.List(context.Background())
+		done <- result{list, err}
+	}()
+	for range 3 {
+		select {
+		case <-p.started:
+		case <-time.After(2 * time.Second):
+			close(p.release)
+			t.Fatal("summaries and recent sessions were not read concurrently")
+		}
+	}
+	close(p.release)
+	r := <-done
+	if r.err != nil || len(r.list) != 3 {
+		t.Fatalf("list=%v err=%v", r.list, r.err)
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
@@ -144,63 +145,60 @@ func (s *Service) LiveSessions(ctx context.Context) ([]model.Session, error) {
 	return s.liveSessions(ctx, s.live(snap)), nil
 }
 
+// liveSessions summarizes each live session concurrently: providers read
+// transcripts or call the Codex app-server, so one slow session should not
+// delay the others.
 func (s *Service) liveSessions(ctx context.Context, live map[string]*Resolved) []model.Session {
-	var out []model.Session
+	out := make([]model.Session, 0, len(live))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
 	for _, r := range live {
-		sum, err := r.Provider.Summary(ctx, r.NativeID, r.Live)
-		if err != nil {
-			// Herdr knows the session but the provider has no data yet
-			// (e.g. a brand new session): still list it.
-			slog.Debug("summary unavailable", "provider", r.Provider.Name(), "session_id", r.ID(), "error", err)
-			sum = &providers.Summary{NativeID: r.NativeID, Cwd: r.Live.Cwd, UpdatedAt: time.Now()}
-		}
-		out = append(out, s.toSession(r, sum))
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sum, err := r.Provider.Summary(ctx, r.NativeID, r.Live)
+			if err != nil {
+				// Herdr knows the session but the provider has no data yet
+				// (e.g. a brand new session): still list it.
+				slog.Debug("summary unavailable", "provider", r.Provider.Name(), "session_id", r.ID(), "error", err)
+				sum = &providers.Summary{NativeID: r.NativeID, Cwd: r.Live.Cwd, UpdatedAt: time.Now()}
+			}
+			sess := s.toSession(r, sum)
+			mu.Lock()
+			out = append(out, sess)
+			mu.Unlock()
+		}()
 	}
+	wg.Wait()
 	return out
 }
 
-// List returns live sessions first plus recently updated offline ones.
+// List returns live sessions first plus recently updated offline ones. Live
+// summaries and each provider's recent sessions are read concurrently.
 func (s *Service) List(ctx context.Context) ([]model.Session, error) {
 	live := s.live(s.snapshot(ctx))
-	out := s.liveSessions(ctx, live)
+	var liveOut []model.Session
+	offline := make([][]model.Session, len(s.providers))
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		liveOut = s.liveSessions(ctx, live)
+	}()
 	if s.offlineWindow > 0 {
 		since := time.Now().Add(-s.offlineWindow)
-		for _, p := range s.providers {
-			var recent []providers.Summary
-			var err error
-			if filtered, ok := p.(providers.FilteredRecentProvider); ok {
-				exclude := map[string]bool{}
-				for _, r := range live {
-					if r.Provider.Name() == p.Name() {
-						exclude[r.NativeID] = true
-					}
-				}
-				if s.Archive != nil {
-					for _, id := range s.Archive.IDs() {
-						name, native, ok := SplitID(id)
-						if ok && name == p.Name() {
-							exclude[native] = true
-						}
-					}
-				}
-				recent, err = filtered.RecentExcluding(ctx, since, exclude)
-			} else {
-				recent, err = p.Recent(ctx, since)
-			}
-			if err != nil {
-				slog.Warn("listing recent sessions failed", "provider", p.Name(), "operation", "recent", "error", err)
-			}
-			for i := range recent {
-				r := &Resolved{Provider: p, NativeID: recent[i].NativeID}
-				if _, ok := live[r.ID()]; ok {
-					continue
-				}
-				if s.archived(r.ID()) {
-					continue
-				}
-				out = append(out, s.toSession(r, &recent[i]))
-			}
+		for i, p := range s.providers {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				offline[i] = s.recentSessions(ctx, p, live, since)
+			}()
 		}
+	}
+	wg.Wait()
+	out := liveOut
+	for _, sessions := range offline {
+		out = append(out, sessions...)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		li, lj := out[i].Status != model.StatusOffline, out[j].Status != model.StatusOffline
@@ -210,6 +208,47 @@ func (s *Service) List(ctx context.Context) ([]model.Session, error) {
 		return out[i].UpdatedAt.After(out[j].UpdatedAt)
 	})
 	return out, nil
+}
+
+// recentSessions returns p's recently updated sessions that are neither live
+// nor archived.
+func (s *Service) recentSessions(ctx context.Context, p providers.Provider, live map[string]*Resolved, since time.Time) []model.Session {
+	var recent []providers.Summary
+	var err error
+	if filtered, ok := p.(providers.FilteredRecentProvider); ok {
+		exclude := map[string]bool{}
+		for _, r := range live {
+			if r.Provider.Name() == p.Name() {
+				exclude[r.NativeID] = true
+			}
+		}
+		if s.Archive != nil {
+			for _, id := range s.Archive.IDs() {
+				name, native, ok := SplitID(id)
+				if ok && name == p.Name() {
+					exclude[native] = true
+				}
+			}
+		}
+		recent, err = filtered.RecentExcluding(ctx, since, exclude)
+	} else {
+		recent, err = p.Recent(ctx, since)
+	}
+	if err != nil {
+		slog.Warn("listing recent sessions failed", "provider", p.Name(), "operation", "recent", "error", err)
+	}
+	var out []model.Session
+	for i := range recent {
+		r := &Resolved{Provider: p, NativeID: recent[i].NativeID}
+		if _, ok := live[r.ID()]; ok {
+			continue
+		}
+		if s.archived(r.ID()) {
+			continue
+		}
+		out = append(out, s.toSession(r, &recent[i]))
+	}
+	return out
 }
 
 // Archived lists archived sessions, most recently archived first. Sessions
