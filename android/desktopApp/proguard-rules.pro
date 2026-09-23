@@ -10,3 +10,9 @@
 -dontwarn org.bouncycastle.**
 -dontwarn org.conscrypt.**
 -dontwarn org.openjsse.**
+
+# Coil finds its network fetcher through META-INF/services. ProGuard keeps the
+# service file but strips the provider it names, and the ServiceLoader error
+# then fails every image request, local files included.
+-keep class * implements coil3.util.FetcherServiceLoaderTarget { <init>(); }
+-keep class * implements coil3.util.DecoderServiceLoaderTarget { <init>(); }

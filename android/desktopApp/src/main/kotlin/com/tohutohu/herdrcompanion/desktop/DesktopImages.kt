@@ -8,11 +8,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 
-/**
- * Image loader for message images, which the Gateway serves only with the
- * bearer token. Naming the network fetcher here also keeps it in the release
- * build: ProGuard cannot see Coil's ServiceLoader registration and strips it.
- */
+/** Image loader for message images, which the Gateway serves only with the bearer token. */
 fun desktopImageLoader(context: PlatformContext, http: OkHttpClient, settings: () -> Settings): ImageLoader {
     val authed = http.newBuilder().addInterceptor(gatewayAuthInterceptor(settings)).build()
     return ImageLoader.Builder(context)
