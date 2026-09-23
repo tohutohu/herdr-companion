@@ -38,6 +38,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.tohutohu.herdrcompanion.container
 import com.tohutohu.herdrcompanion.data.Settings
+import com.tohutohu.herdrcompanion.data.manualConnection
 import com.tohutohu.herdrcompanion.data.ThemeMode
 import com.tohutohu.herdrcompanion.data.PairingInvitation
 import com.tohutohu.herdrcompanion.data.PairingClient
@@ -203,7 +204,7 @@ fun SettingsScreen(onDone: () -> Unit) {
                         scope.launch {
                             busy = true
                             try {
-                                val next = if (url.trim() == current.gatewayUrl && token.trim() == current.token) current else Settings(url, token, connectionId = java.util.UUID.randomUUID().toString())
+                                val next = manualConnection(current, url, token)
                                 restart = container.configure(next)
                                 if (!restart) onDone()
                             } catch (e: CancellationException) { throw e

@@ -84,3 +84,14 @@ class SettingsStore(private val context: Context, scope: CoroutineScope) {
         }
     }
 }
+
+/**
+ * Settings saved from the manual URL/token fields. The same token means the same
+ * gateway reached at another address, so its Firebase settings and identity stay;
+ * dropping them silently turned push off after editing the URL.
+ */
+fun manualConnection(current: Settings, url: String, token: String): Settings = when {
+    url.trim() == current.gatewayUrl && token.trim() == current.token -> current
+    token.trim() == current.token -> current.copy(gatewayUrl = url.trim(), connectionId = java.util.UUID.randomUUID().toString())
+    else -> Settings(url.trim(), token.trim(), connectionId = java.util.UUID.randomUUID().toString())
+}
