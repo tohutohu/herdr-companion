@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
@@ -74,7 +73,7 @@ fun PendingMessageItem(
                 if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primaryContainer,
             ),
             shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.widthIn(max = 320.dp),
+            modifier = Modifier.userBubbleWidth(),
         ) {
             Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 message.attachments.forEach { a ->

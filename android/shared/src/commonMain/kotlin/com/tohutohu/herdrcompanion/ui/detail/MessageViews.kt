@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
@@ -30,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -93,13 +93,31 @@ fun MessageItem(
             Surface(
                 color = MaterialTheme.colorScheme.primaryContainer,
                 shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.widthIn(max = 320.dp),
+                modifier = Modifier.userBubbleWidth(),
             ) { Box(Modifier.padding(10.dp)) { selectableContent() } }
             if (message.queued) QueuedLine()
         } else {
             selectableContent()
         }
     }
+}
+
+/**
+ * Caps a user bubble at 320dp on phones, and lets it grow to three quarters of
+ * the row (up to 760dp) on wide windows so long messages don't wrap into a
+ * narrow column.
+ */
+internal fun Modifier.userBubbleWidth(): Modifier = layout { measurable, constraints ->
+    val cap = if (constraints.hasBoundedWidth) {
+        (constraints.maxWidth * 0.75f).toInt().coerceIn(320.dp.roundToPx(), 760.dp.roundToPx())
+    } else {
+        320.dp.roundToPx()
+    }
+    val maxWidth = minOf(constraints.maxWidth, cap)
+    val placeable = measurable.measure(
+        constraints.copy(maxWidth = maxWidth, minWidth = minOf(constraints.minWidth, maxWidth)),
+    )
+    layout(placeable.width, placeable.height) { placeable.place(0, 0) }
 }
 
 @Composable
