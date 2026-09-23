@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"mime"
 	"net/http"
 	"net/http/httptest"
@@ -719,5 +720,24 @@ func Testディレクトリ判定は認証とパス制限を守り起動しな�
 	}
 	if len(h.calls) != 0 {
 		t.Fatalf("check launched: %v", h.calls)
+	}
+}
+
+func Test遅いリクエストは成功してもinfoで記録される(t *testing.T) {
+	cases := []struct {
+		status int
+		d      time.Duration
+		want   slog.Level
+	}{
+		{200, 10 * time.Millisecond, slog.LevelDebug},
+		{200, slowRequest, slog.LevelInfo},
+		{404, 10 * time.Millisecond, slog.LevelWarn},
+		{404, time.Second, slog.LevelWarn},
+		{500, time.Second, slog.LevelError},
+	}
+	for _, c := range cases {
+		if got := requestLogLevel(c.status, c.d); got != c.want {
+			t.Errorf("requestLogLevel(%d, %v) = %v, want %v", c.status, c.d, got, c.want)
+		}
 	}
 }

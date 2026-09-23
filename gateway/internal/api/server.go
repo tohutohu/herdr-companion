@@ -119,19 +119,30 @@ func (s *statusRecorder) WriteHeader(code int) {
 	s.ResponseWriter.WriteHeader(code)
 }
 
+// slowRequest is the duration from which a successful request is logged at
+// info level, so slow responses show up in the log without debug logging.
+const slowRequest = 500 * time.Millisecond
+
 func logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: 200}
 		next.ServeHTTP(rec, r)
-		level := slog.LevelDebug
-		if rec.status >= 500 {
-			level = slog.LevelError
-		} else if rec.status >= 400 {
-			level = slog.LevelWarn
-		}
-		slog.Log(r.Context(), level, "http request", "operation", r.Method+" "+r.URL.Path, "status", rec.status, "duration_ms", time.Since(start).Milliseconds())
+		d := time.Since(start)
+		slog.Log(r.Context(), requestLogLevel(rec.status, d), "http request", "operation", r.Method+" "+r.URL.Path, "status", rec.status, "duration_ms", d.Milliseconds())
 	})
+}
+
+func requestLogLevel(status int, d time.Duration) slog.Level {
+	switch {
+	case status >= 500:
+		return slog.LevelError
+	case status >= 400:
+		return slog.LevelWarn
+	case d >= slowRequest:
+		return slog.LevelInfo
+	}
+	return slog.LevelDebug
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
