@@ -59,4 +59,6 @@ sealed interface NewSessionAction {
     data object StartAnyway : NewSessionAction
     data object ChangeFolder : NewSessionAction
     data object Start : NewSessionAction
+    /** Starts the session and opens it beside the current ones (Desktop only). */
+    data object StartInSplit : NewSessionAction
 }

@@ -455,10 +455,12 @@ private fun FrameWindowScope.DesktopShell(
     if (state.newSessionOpen) {
         DesktopNewSessionWindow(
             api = api,
-            onCreated = { id ->
+            onCreated = { id, inSplit ->
                 state.closeNewSession()
                 actions.refresh()
-                if (id != null) state.openSession(id)
+                if (id != null) {
+                    if (inSplit) state.openSessionInSplit(id) else state.openSession(id)
+                }
             },
             onDismiss = state::closeNewSession,
             onError = state::reportError,

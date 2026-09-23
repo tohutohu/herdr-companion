@@ -53,7 +53,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun DesktopNewSessionWindow(
     api: GatewayApi,
-    onCreated: (String?) -> Unit,
+    onCreated: (sessionId: String?, inSplit: Boolean) -> Unit,
     onDismiss: () -> Unit,
     onError: (String) -> Unit,
 ) {
@@ -79,6 +79,7 @@ fun DesktopNewSessionWindow(
     var modelsLoading by remember { mutableStateOf(false) }
     var modelsError by remember { mutableStateOf<String?>(null) }
     var trustRequest by remember { mutableStateOf<StartSessionResponse?>(null) }
+    var startInSplit by remember { mutableStateOf(false) }
 
     suspend fun load(nextPath: String?) {
         loading = true
@@ -100,7 +101,7 @@ fun DesktopNewSessionWindow(
     }
 
     fun finish(result: StartSessionResponse) {
-        if (result.trustRequired) trustRequest = result else onCreated(result.sessionId)
+        if (result.trustRequired) trustRequest = result else onCreated(result.sessionId, startInSplit)
     }
 
     fun start(request: StartSessionRequest, preset: AgentPreset) {
@@ -178,6 +179,34 @@ fun DesktopNewSessionWindow(
         agentPreset(provider, model, effort, mode, catalog),
         presets.presets + listOfNotNull(presets.lastUsed),
     )
+
+    fun requestStart(inSplit: Boolean) {
+        if (path.isNotEmpty() && !starting && !checking && !loading && pendingStart == null) {
+            startInSplit = inSplit
+            val request = StartSessionRequest(
+                provider = provider,
+                cwd = path,
+                prompt = prompt.trim(),
+                trust = false,
+                model = model.ifEmpty { null },
+                effort = effort.ifEmpty { null },
+                mode = mode.ifEmpty { null },
+            )
+            scope.launch {
+                checking = true
+                try {
+                    if (needsDirectoryConfirmation(request) { api.checkDirectory(it.cwd, it.prompt) }) {
+                        pendingStart = PendingNewSessionStart(request, currentPreset)
+                    } else {
+                        start(request, currentPreset)
+                    }
+                } finally {
+                    checking = false
+                }
+            }
+        }
+    }
+
     val state = NewSessionUiState(
         provider = provider,
         path = path,
@@ -254,6 +283,7 @@ fun DesktopNewSessionWindow(
                     }
                 },
                 initialPromptFocusRequester = promptFocusRequester,
+                showStartInSplit = true,
                 onAction = { action ->
                     when (action) {
                         NewSessionAction.Back -> onDismiss()
@@ -319,31 +349,8 @@ fun DesktopNewSessionWindow(
                             }
                         }
                         NewSessionAction.ChangeFolder -> pendingStart = null
-                        NewSessionAction.Start -> {
-                            if (path.isNotEmpty() && !starting && !checking && !loading && pendingStart == null) {
-                                val request = StartSessionRequest(
-                                    provider = provider,
-                                    cwd = path,
-                                    prompt = prompt.trim(),
-                                    trust = false,
-                                    model = model.ifEmpty { null },
-                                    effort = effort.ifEmpty { null },
-                                    mode = mode.ifEmpty { null },
-                                )
-                                scope.launch {
-                                    checking = true
-                                    try {
-                                        if (needsDirectoryConfirmation(request) { api.checkDirectory(it.cwd, it.prompt) }) {
-                                            pendingStart = PendingNewSessionStart(request, currentPreset)
-                                        } else {
-                                            start(request, currentPreset)
-                                        }
-                                    } finally {
-                                        checking = false
-                                    }
-                                }
-                            }
-                        }
+                        NewSessionAction.Start -> requestStart(inSplit = false)
+                        NewSessionAction.StartInSplit -> requestStart(inSplit = true)
                     }
                 },
             )

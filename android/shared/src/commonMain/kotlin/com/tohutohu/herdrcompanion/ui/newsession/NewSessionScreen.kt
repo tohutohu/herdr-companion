@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.VerticalSplit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -37,6 +38,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -69,6 +71,7 @@ fun NewSessionScreen(
     onAction: (NewSessionAction) -> Unit,
     topContent: @Composable () -> Unit = {},
     initialPromptFocusRequester: FocusRequester? = null,
+    showStartInSplit: Boolean = false,
 ) {
     var promptValue by remember { mutableStateOf(TextFieldValue(state.prompt)) }
     LaunchedEffect(state.prompt) {
@@ -80,6 +83,7 @@ fun NewSessionScreen(
         }
     }
 
+    val startEnabled = state.path.isNotEmpty() && !state.starting && !state.checking && !state.loading && state.pendingStart == null
     val pending = state.pendingStart
     if (pending != null) {
         AlertDialog(
@@ -194,25 +198,40 @@ fun NewSessionScreen(
                             Modifier.fillMaxWidth()
                         },
                     )
-                    Button(
-                        enabled = state.path.isNotEmpty() && !state.starting && !state.checking && !state.loading && state.pendingStart == null,
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
-                        onClick = { onAction(NewSessionAction.Start) },
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        val busyLabel = when {
-                            state.starting -> "Starting…"
-                            state.checking -> "Checking folder…"
-                            else -> null
+                        Button(
+                            enabled = startEnabled,
+                            modifier = Modifier.weight(1f),
+                            onClick = { onAction(NewSessionAction.Start) },
+                        ) {
+                            val busyLabel = when {
+                                state.starting -> "Starting…"
+                                state.checking -> "Checking folder…"
+                                else -> null
+                            }
+                            AnimatedContent(
+                                targetState = busyLabel ?: "Start ${providerName(state.provider)} in ${state.path.substringAfterLast('/').ifEmpty { "…" }}",
+                                transitionSpec = { fadeIn(tween(160)) togetherWith fadeOut(tween(100)) using SizeTransform(clip = false) },
+                                contentAlignment = Alignment.Center,
+                                label = "startButton",
+                            ) { label ->
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (busyLabel != null) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                    Text(if (busyLabel != null) "  $label" else label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
                         }
-                        AnimatedContent(
-                            targetState = busyLabel ?: "Start ${providerName(state.provider)} in ${state.path.substringAfterLast('/').ifEmpty { "…" }}",
-                            transitionSpec = { fadeIn(tween(160)) togetherWith fadeOut(tween(100)) using SizeTransform(clip = false) },
-                            contentAlignment = Alignment.Center,
-                            label = "startButton",
-                        ) { label ->
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                if (busyLabel != null) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                                Text(if (busyLabel != null) "  $label" else label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (showStartInSplit) {
+                            OutlinedButton(
+                                enabled = startEnabled,
+                                onClick = { onAction(NewSessionAction.StartInSplit) },
+                            ) {
+                                Icon(Icons.Default.VerticalSplit, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Text("  Split")
                             }
                         }
                     }

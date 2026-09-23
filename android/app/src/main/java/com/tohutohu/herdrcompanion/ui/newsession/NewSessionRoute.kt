@@ -211,6 +211,8 @@ fun NewSessionRoute(
                     }
                 }
                 NewSessionAction.ChangeFolder -> pendingStart = null
+                // Android shows one session at a time, so the button is never offered.
+                NewSessionAction.StartInSplit -> Unit
                 NewSessionAction.Start -> {
                     if (path.isNotEmpty() && !starting && !checking && !loading && pendingStart == null) {
                         val request = StartSessionRequest(
