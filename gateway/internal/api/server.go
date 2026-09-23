@@ -273,6 +273,10 @@ func (s *Server) getMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	msgs, err := res.Provider.Messages(r.Context(), res.NativeID, res.Live)
+	if errors.Is(err, providers.ErrNotFound) && res.Live != nil {
+		// A live session with no saved history yet has no messages.
+		msgs, err = nil, nil
+	}
 	if err != nil {
 		s.fail(w, r, id, "get_messages", err)
 		return

@@ -663,6 +663,36 @@ func Test実行中のセッションをアーカイブすると停止して一�
 	}
 }
 
+func Test履歴がまだない実行中のセッションも開いてアーカイブできる(t *testing.T) {
+	ts, _, fh, tok := newTestServer(t)
+	fh.snap.Workspaces = append(fh.snap.Workspaces, herdr.Workspace{WorkspaceID: "w3", Label: "fresh"})
+	fh.snap.Panes = append(fh.snap.Panes, herdr.Pane{
+		PaneID: "w3:p1", WorkspaceID: "w3", Agent: str("fake"), AgentStatus: herdr.StatusIdle,
+		AgentSession: &herdr.AgentSession{Source: "herdr:fake", Agent: "fake", Kind: "id", Value: "fresh"},
+	})
+
+	resp, body := do(t, ts, tok, "GET", "/v1/sessions/fake:fresh/messages", nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("messages status %d: %s", resp.StatusCode, body)
+	}
+	var page struct {
+		Session  model.Session   `json:"session"`
+		Messages []model.Message `json:"messages"`
+	}
+	json.Unmarshal(body, &page)
+	if page.Session.ID != "fake:fresh" || page.Session.PaneID != "w3:p1" || len(page.Messages) != 0 {
+		t.Errorf("messages = %s", body)
+	}
+
+	resp, body = do(t, ts, tok, "POST", "/v1/sessions/fake:fresh/archive", nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("archive status %d: %s", resp.StatusCode, body)
+	}
+	if got := strings.Join(fh.calls, ","); got != "close-workspace:w3" {
+		t.Errorf("herdr calls = %v", fh.calls)
+	}
+}
+
 func Test停止中のセッションを再開しアーカイブからも外す(t *testing.T) {
 	ts, _, fh, tok := newTestServer(t)
 	do(t, ts, tok, "POST", "/v1/sessions/fake:old/archive", nil, "")

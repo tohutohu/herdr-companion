@@ -5,6 +5,7 @@ package sessions
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sort"
 	"strings"
@@ -121,10 +122,21 @@ func (s *Service) Resolve(ctx context.Context, id string) (*Resolved, error) {
 // Session builds the DTO for a resolved session.
 func (s *Service) Session(ctx context.Context, r *Resolved) (model.Session, error) {
 	sum, err := r.Provider.Summary(ctx, r.NativeID, r.Live)
+	if errors.Is(err, providers.ErrNotFound) && r.Live != nil {
+		// The list shows a live session whose agent has saved nothing yet
+		// (e.g. Devin before the first prompt); opening or archiving it must
+		// work too.
+		sum, err = liveFallback(r), nil
+	}
 	if err != nil {
 		return model.Session{}, err
 	}
 	return s.toSession(r, sum), nil
+}
+
+// liveFallback summarizes a live session the provider has no data for.
+func liveFallback(r *Resolved) *providers.Summary {
+	return &providers.Summary{NativeID: r.NativeID, Cwd: r.Live.Cwd, UpdatedAt: time.Now()}
 }
 
 func (s *Service) Get(ctx context.Context, id string) (model.Session, *Resolved, error) {
@@ -161,7 +173,7 @@ func (s *Service) liveSessions(ctx context.Context, live map[string]*Resolved) [
 				// Herdr knows the session but the provider has no data yet
 				// (e.g. a brand new session): still list it.
 				slog.Debug("summary unavailable", "provider", r.Provider.Name(), "session_id", r.ID(), "error", err)
-				sum = &providers.Summary{NativeID: r.NativeID, Cwd: r.Live.Cwd, UpdatedAt: time.Now()}
+				sum = liveFallback(r)
 			}
 			sess := s.toSession(r, sum)
 			mu.Lock()
