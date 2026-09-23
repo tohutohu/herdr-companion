@@ -4,6 +4,7 @@
 package deadletter
 
 import (
+	"bufio"
 	"crypto/sha256"
 	"encoding/json"
 	"log/slog"
@@ -40,13 +41,16 @@ type Sink interface {
 }
 
 // Writer appends entries to <dir>/<YYYY-MM-DD>.jsonl. Transcripts are parsed
-// again on every poll, so identical entries are de-duplicated in memory to
-// keep the log readable.
+// again on every poll, so identical entries are de-duplicated to keep the log
+// readable. The day's file is read back first, so a restart does not repeat
+// what is already there.
 type Writer struct {
 	dir  string
 	mu   sync.Mutex
 	seen map[[32]byte]struct{}
-	now  func() time.Time
+	// loaded is the file whose entries are in seen.
+	loaded string
+	now    func() time.Time
 }
 
 const maxSeen = 10000
@@ -56,11 +60,21 @@ func NewWriter(dir string) *Writer {
 }
 
 func (w *Writer) Record(provider, sessionID string, kind Kind, errMsg string, raw any) {
-	rawJSON := toRaw(raw)
-	key := sha256.Sum256([]byte(provider + "\x00" + sessionID + "\x00" + string(kind) + "\x00" + errMsg + "\x00" + string(rawJSON)))
+	e := Entry{Provider: provider, SessionID: sessionID, Kind: kind, Error: errMsg, Raw: toRaw(raw)}
+	key, err := entryKey(e)
+	if err != nil {
+		slog.Error("dead-letter marshal failed", "error", err)
+		return
+	}
 
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	e.Timestamp = w.now().UTC()
+	name := filepath.Join(w.dir, e.Timestamp.Format("2006-01-02")+".jsonl")
+	if name != w.loaded {
+		w.loadSeen(name)
+		w.loaded = name
+	}
 	if _, ok := w.seen[key]; ok {
 		return
 	}
@@ -69,7 +83,6 @@ func (w *Writer) Record(provider, sessionID string, kind Kind, errMsg string, ra
 	}
 	w.seen[key] = struct{}{}
 
-	e := Entry{Timestamp: w.now().UTC(), Provider: provider, SessionID: sessionID, Kind: kind, Error: errMsg, Raw: rawJSON}
 	line, err := json.Marshal(e)
 	if err != nil {
 		slog.Error("dead-letter marshal failed", "error", err)
@@ -79,7 +92,6 @@ func (w *Writer) Record(provider, sessionID string, kind Kind, errMsg string, ra
 		slog.Error("dead-letter mkdir failed", "error", err)
 		return
 	}
-	name := filepath.Join(w.dir, e.Timestamp.Format("2006-01-02")+".jsonl")
 	f, err := os.OpenFile(name, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		slog.Error("dead-letter open failed", "error", err)
@@ -90,6 +102,40 @@ func (w *Writer) Record(provider, sessionID string, kind Kind, errMsg string, ra
 		slog.Error("dead-letter write failed", "error", err)
 	}
 	slog.Warn("dead-letter recorded", "provider", provider, "session_id", sessionID, "kind", kind, "error", errMsg)
+}
+
+// entryKey identifies an entry regardless of when it was recorded. It hashes
+// the marshaled form, which is also what the file holds (json.Marshal
+// compacts and escapes Raw), so entries read back produce the same key.
+func entryKey(e Entry) ([32]byte, error) {
+	e.Timestamp = time.Time{}
+	b, err := json.Marshal(e)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return sha256.Sum256(b), nil
+}
+
+// loadSeen adds the entries already in name to seen.
+func (w *Writer) loadSeen(name string) {
+	f, err := os.Open(name)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	r := bufio.NewReader(f)
+	for {
+		line, err := r.ReadBytes('\n')
+		var e Entry
+		if len(line) > 0 && json.Unmarshal(line, &e) == nil {
+			if key, err := entryKey(e); err == nil && len(w.seen) < maxSeen {
+				w.seen[key] = struct{}{}
+			}
+		}
+		if err != nil {
+			return
+		}
+	}
 }
 
 func toRaw(raw any) json.RawMessage {
