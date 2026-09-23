@@ -130,7 +130,6 @@ fun main() {
                         connectionSource = connectionSource,
                         api = api,
                         http = http,
-                        initialLayout = DesktopPreferences.loadLayout(),
                         onLayoutChanged = DesktopPreferences::saveLayout,
                     )
                 }
@@ -138,6 +137,9 @@ fun main() {
                     desktopImageLoader(context, http) { connectionSource.current.settings }
                 }
                 DesktopWindowPersistence(window)
+                LaunchedEffect(appState) {
+                    appState.restoreLayout(DesktopPreferences.loadLayout())
+                }
                 DisposableEffect(appState) {
                     onDispose { appState.close() }
                 }

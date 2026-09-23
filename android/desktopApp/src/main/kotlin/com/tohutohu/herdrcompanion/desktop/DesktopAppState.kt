@@ -59,7 +59,6 @@ class DesktopAppState(
     private val api: com.tohutohu.herdrcompanion.data.api.GatewayApi,
     private val http: OkHttpClient,
     private val repository: DesktopGatewayRepository = DesktopGatewayRepository(api),
-    initialLayout: DesktopLayoutSnapshot = DesktopLayoutSnapshot(),
     private val onLayoutChanged: (DesktopLayoutSnapshot) -> Unit = {},
 ) {
     private val logger = Logger.getLogger("com.tohutohu.herdrcompanion.desktop")
@@ -142,7 +141,6 @@ class DesktopAppState(
         ?.previewModel
 
     init {
-        restoreLayout(initialLayout)
         refreshSessions()
         listJob = scope.launch {
             while (isActive) {
@@ -313,13 +311,20 @@ class DesktopAppState(
         )
     }
 
-    private fun restoreLayout(layout: DesktopLayoutSnapshot) {
+    /**
+     * Reopens the panes from the previous launch. Call it after the first
+     * composition: state written while this object is created inside
+     * `remember` is not yet visible to the detail loops, which then stop.
+     */
+    fun restoreLayout(layout: DesktopLayoutSnapshot) {
+        if (closed || openSessionIdsState.isNotEmpty()) return
         val restored = layout.normalized()
         if (restored.openSessionIds.isEmpty()) return
         openSessionIdsState = restored.openSessionIds
         paneWeights = restored.paneWeights
         restored.focusedSessionId?.let(selection::select)
         restored.openSessionIds.forEach(::ensureDetail)
+        updateSessionRowSelection()
     }
 
     private fun setOpenSessionIds(ids: List<String>) {
