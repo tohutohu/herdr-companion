@@ -12,6 +12,7 @@ import com.tohutohu.herdrcompanion.data.api.GatewayException
 import com.tohutohu.herdrcompanion.data.api.InteractionResponseDto
 import com.tohutohu.herdrcompanion.data.db.SessionEntity
 import com.tohutohu.herdrcompanion.push.Notifications
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -26,6 +27,24 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 private const val POLL_MS = 3_000L
+
+/**
+ * Runs a message refresh and returns the error to show, or null on success.
+ * Cancellation is not a failure: leaving the screen (a picker, another app,
+ * the lock screen) cancels the in-flight poll, and reporting that as offline
+ * left a false banner until the next poll succeeded.
+ */
+internal suspend fun refreshError(fetch: suspend () -> Unit): String? =
+    try {
+        fetch()
+        null
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: GatewayException) {
+        "${e.message}"
+    } catch (e: Exception) {
+        "Offline: showing cached messages (${e.message})"
+    }
 
 data class SessionMessagePresentation(
     val messages: List<Message>,
@@ -129,15 +148,10 @@ class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidV
         refreshMutex.withLock {
             _loading.value = true
             try {
-                _error.value = try {
+                _error.value = refreshError {
                     // The first fetch after opening replaces the cache entirely.
                     repo.refreshMessages(sessionId, full = !fullSyncDone)
                     fullSyncDone = true
-                    null
-                } catch (e: GatewayException) {
-                    "${e.message}"
-                } catch (e: Exception) {
-                    "Offline: showing cached messages (${e.message})"
                 }
             } finally {
                 _loading.value = false
@@ -161,6 +175,8 @@ class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidV
                 repo.respond(sessionId, response)
                 delay(800)
                 refresh()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _error.value = "Answer failed: ${e.message}"
             } finally {
@@ -179,6 +195,8 @@ class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidV
                 // snapshot; give its TUI a moment to process the shortcut.
                 delay(300)
                 refresh()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _error.value = "Mode change failed: ${e.message}"
             } finally {

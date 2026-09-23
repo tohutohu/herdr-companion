@@ -19,6 +19,7 @@ import com.tohutohu.herdrcompanion.container
 import com.tohutohu.herdrcompanion.ui.toUiModel
 import com.tohutohu.herdrcompanion.ui.toUiState
 import com.tohutohu.herdrcompanion.ui.usage.UsageCardRoute
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -56,6 +57,8 @@ fun SessionListRoute(
         error = try {
             repo.refreshSessions()
             null
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             e.message ?: e.toString()
         }
