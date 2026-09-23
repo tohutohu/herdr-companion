@@ -87,16 +87,22 @@ func (f *fakeHerdr) CloseWorkspace(_ context.Context, ws string) error {
 }
 
 type fakeProvider struct {
-	root        string
-	fileRoots   []string
-	sent        []model.Input
-	resp        []model.InteractionResponse
-	modeChanges int
+	root      string
+	fileRoots []string
+	// sessionRoots are the per-session roots (earlier working directories).
+	sessionRoots map[string][]string
+	sent         []model.Input
+	resp         []model.InteractionResponse
+	modeChanges  int
 	// sendHook, when set, runs inside Send before the input is recorded.
 	sendHook func(ctx context.Context)
 }
 
 func (p *fakeProvider) FileRoots() []string { return p.fileRoots }
+
+func (p *fakeProvider) SessionFileRoots(_ context.Context, nativeID string) []string {
+	return p.sessionRoots[nativeID]
+}
 
 func (p *fakeProvider) Name() string        { return "fake" }
 func (p *fakeProvider) DisplayName() string { return "Fake Agent" }
@@ -459,6 +465,25 @@ func Testプロバイダーが示すワークスペース外のフォルダの�
 	resp, body := do(t, ts, tok, "GET", "/v1/sessions/fake:s1/files/content?path="+url.QueryEscape(plan), nil, "")
 	if resp.StatusCode != 200 || string(body) != "# Add subtract\n" {
 		t.Errorf("plan status %d body %q", resp.StatusCode, body)
+	}
+	resp, _ = do(t, ts, tok, "GET", "/v1/sessions/fake:s1/files/content?path=/etc/hosts", nil, "")
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("outside status = %d", resp.StatusCode)
+	}
+}
+
+// 前提: セッションは以前、今のワークスペースの外のフォルダで作業していた。
+// 検証: そのフォルダのファイルは取得でき、作業していない場所のファイルは取得できない。
+func Testセッションが以前作業したフォルダのファイルも取得できる(t *testing.T) {
+	ts, fp, _, tok := newTestServer(t)
+	earlier := t.TempDir()
+	video := filepath.Join(earlier, "out.mp4")
+	os.WriteFile(video, []byte("video"), 0o644)
+	fp.sessionRoots = map[string][]string{"s1": {earlier}}
+
+	resp, body := do(t, ts, tok, "GET", "/v1/sessions/fake:s1/files/content?path="+url.QueryEscape(video)+"&download=1", nil, "")
+	if resp.StatusCode != 200 || string(body) != "video" {
+		t.Errorf("earlier cwd status %d body %q", resp.StatusCode, body)
 	}
 	resp, _ = do(t, ts, tok, "GET", "/v1/sessions/fake:s1/files/content?path=/etc/hosts", nil, "")
 	if resp.StatusCode != http.StatusForbidden {

@@ -443,6 +443,9 @@ func (s *Server) roots(ctx context.Context, id string) ([]string, error) {
 	if fr, ok := res.Provider.(providers.FileRooter); ok {
 		roots = append(roots, fr.FileRoots()...)
 	}
+	if fr, ok := res.Provider.(providers.SessionFileRooter); ok {
+		roots = append(roots, fr.SessionFileRoots(ctx, res.NativeID)...)
+	}
 	return roots, nil
 }
 

@@ -58,6 +58,13 @@ type FileRooter interface {
 	FileRoots() []string
 }
 
+// SessionFileRooter is implemented by providers whose sessions link to files
+// under directories other than the current cwd, such as the earlier working
+// directories recorded in a Claude transcript. The app may read files there.
+type SessionFileRooter interface {
+	SessionFileRoots(ctx context.Context, nativeID string) []string
+}
+
 // Terminal is the Herdr subset adapters may use for PTY fallbacks.
 type Terminal interface {
 	SendKeys(ctx context.Context, paneID string, keys ...string) error
