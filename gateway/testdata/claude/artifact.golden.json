@@ -11,6 +11,194 @@
     ]
   },
   {
+    "id": "a1",
+    "role": "assistant",
+    "timestamp": "2026-09-23T01:30:01Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "▸ Artifact quickstart design"
+      }
+    ]
+  },
+  {
+    "id": "r1",
+    "role": "tool",
+    "timestamp": "2026-09-23T01:30:02Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "Quickstart for a design."
+      }
+    ]
+  },
+  {
+    "id": "a2",
+    "role": "assistant",
+    "timestamp": "2026-09-23T01:30:03Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "▸ Artifact publish タイムライン デザイン案"
+      },
+      {
+        "type": "text",
+        "text": "Artifact: https://claude.ai/artifact/RjMUh9sNxAJSzv86wB6SzC"
+      }
+    ]
+  },
+  {
+    "id": "r2",
+    "role": "tool",
+    "timestamp": "2026-09-23T01:30:04Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "Created a new Artifact at https://claude.ai/artifact/RjMUh9sNxAJSzv86wB6SzC (version 1790126944-bfc2) from the Artifact type https://claude.ai/artifact/QKN21svewxgyPb6SYRqWnd (release 1790105785-06c9)."
+      }
+    ]
+  },
+  {
+    "id": "a3",
+    "role": "assistant",
+    "timestamp": "2026-09-23T01:33:09Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "▸ Artifact publish /private/tmp/claude-501/-work-app/s3/scratchpad/canvas/project/canvas.json"
+      },
+      {
+        "type": "text",
+        "text": "Artifact: https://claude.ai/artifact/RjMUh9sNxAJSzv86wB6SzC"
+      }
+    ]
+  },
+  {
+    "id": "r3",
+    "role": "tool",
+    "timestamp": "2026-09-23T01:33:12.664Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "Updated the Artifact at https://claude.ai/artifact/RjMUh9sNxAJSzv86wB6SzC (Version 2) with /private/tmp/claude-501/-work-app/s3/scratchpad/canvas/project/canvas.json (and any `files` listed); own files not sent this time were kept."
+      }
+    ]
+  },
+  {
+    "id": "a4",
+    "role": "assistant",
+    "timestamp": "2026-09-23T01:34:00Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "▸ Artifact publish promo/index.html"
+      },
+      {
+        "type": "text",
+        "text": "Artifact: https://claude.ai/artifact/6hLR28n7PGGQ669sZ4YVfC"
+      }
+    ]
+  },
+  {
+    "id": "r4",
+    "role": "tool",
+    "timestamp": "2026-09-23T01:34:01Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "Published promo/index.html at https://claude.ai/artifact/6hLR28n7PGGQ669sZ4YVfC (Version 1) Icon: \"video\"."
+      }
+    ]
+  },
+  {
+    "id": "a5",
+    "role": "assistant",
+    "timestamp": "2026-09-23T01:35:00Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "▸ Artifact publish asset https://claude.ai/artifact/6hLR28n7PGGQ669sZ4YVfC"
+      }
+    ]
+  },
+  {
+    "id": "r5",
+    "role": "tool",
+    "timestamp": "2026-09-23T01:35:01Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "Uploaded 1 file to https://claude.ai/artifact/6hLR28n7PGGQ669sZ4YVfC: 01.jpg -\u003e https://claude.ai/artifact/6hLR28n7PGGQ669sZ4YVfC/assets/0123"
+      }
+    ]
+  },
+  {
+    "id": "a6",
+    "role": "assistant",
+    "timestamp": "2026-09-23T01:36:00Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "▸ Artifact publish promo/index.html"
+      }
+    ]
+  },
+  {
+    "id": "r6",
+    "role": "tool",
+    "timestamp": "2026-09-23T01:36:01Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "Error: Refused: a newer version of https://claude.ai/artifact/RjMUh9sNxAJSzv86wB6SzC was published."
+      }
+    ]
+  },
+  {
+    "id": "a7",
+    "role": "assistant",
+    "timestamp": "2026-09-23T01:37:00Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "▸ Artifact read https://claude.ai/artifact/RjMUh9sNxAJSzv86wB6SzC"
+      }
+    ]
+  },
+  {
+    "id": "r7",
+    "role": "tool",
+    "timestamp": "2026-09-23T01:37:01Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "File of an Artifact saved."
+      }
+    ]
+  },
+  {
+    "id": "a8",
+    "role": "assistant",
+    "timestamp": "2026-09-23T01:38:00Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "▸ ListAgents {}"
+      }
+    ]
+  },
+  {
+    "id": "r8",
+    "role": "tool",
+    "timestamp": "2026-09-23T01:38:01Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "No agents."
+      }
+    ]
+  },
+  {
     "id": "a9",
     "role": "assistant",
     "timestamp": "2026-09-23T01:33:30Z",

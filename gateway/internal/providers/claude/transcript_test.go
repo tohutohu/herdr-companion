@@ -228,9 +228,9 @@ func TestClaudeの未知データはフォールバック表示しつつdeadlett
 	}
 }
 
-func TestArtifactの管理用エントリは会話に出さずdeadletterにも記録しない(t *testing.T) {
-	tr, rec, _ := loadFixture(t, "artifact.jsonl")
-	msgs := tr.Messages(ParseOptions{SessionID: "claude:test", Sink: rec})
+func TestArtifactの操作は1行にまとめ公開したページへのリンクを出す(t *testing.T) {
+	tr, rec, ws := loadFixture(t, "artifact.jsonl")
+	msgs := tr.Messages(ParseOptions{SessionID: "claude:test", Root: ws, Sink: rec})
 	assertGolden(t, "artifact.golden.json", msgs)
 	if len(rec.Entries) != 0 {
 		t.Errorf("dead letters = %+v, want none", rec.Entries)

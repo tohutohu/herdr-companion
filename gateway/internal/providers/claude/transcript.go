@@ -1014,8 +1014,11 @@ func (t *Transcript) toolUseBlocks(b contentBlock, res toolResult, answered, pen
 			text += "\nArgs:\n" + args
 		}
 		blocks = append(blocks, model.TextBlock(text))
+	case "Artifact":
+		blocks = append(blocks, artifactBlocks(in, res, answered, opt)...)
 	case "ToolSearch", "SlashCommand", "BashOutput", "KillShell", "KillBash", "TaskOutput", "TaskStop",
-		"Monitor", "SendUserFile", "ListMcpResourcesTool", "ReadMcpResourceTool", "EnterPlanMode", "LSP", "SendMessage":
+		"Monitor", "SendUserFile", "ListMcpResourcesTool", "ReadMcpResourceTool", "EnterPlanMode", "LSP", "SendMessage",
+		"ListAgents":
 		blocks = append(blocks, model.TextBlock("▸ "+b.Name+" "+compactJSON(b.Input, 200)))
 	default:
 		if !strings.HasPrefix(b.Name, "mcp__") {
