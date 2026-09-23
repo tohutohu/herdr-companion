@@ -101,7 +101,12 @@ identity; the native database schema selects the history format.
   multiple questions end with the "Submit answers" review tab.
 - Sending: ordinary prompt text uses `send_text` and `Enter` (with
   `Shift+Enter` for embedded newlines), so Claude Code does not wrap a long
-  message in `<pasted_content>`. Images are pasted one by one as file paths,
+  message in `<pasted_content>`. Enter is sent as CSI 13 u: a plain CR read
+  together with a long line becomes a newline inside that line. Text with a
+  line over 800 UTF-16 units is one bracketed paste instead, because Claude
+  Code takes such a read as an unbracketed paste and keeps only the last read
+  of the line; the transcript parser removes the `<pasted_content>` frame
+  again (verified with Claude Code 2.1.280). Images are pasted one by one as file paths,
   which Claude Code turns into `[Image #N]`; other attachments are appended to
   the prompt text as paths for Claude to read. Text containing terminal control
   characters falls back to `agent.prompt`.

@@ -524,7 +524,41 @@ func userText(s string) (model.Role, string) {
 	case strings.HasPrefix(s, "<agent-message"):
 		return model.RoleTool, agentMessage(s)
 	}
-	return model.RoleUser, s
+	return model.RoleUser, unwrapPastedContent(s)
+}
+
+// unwrapPastedContent removes the <pasted_content id="xxxx"> frame Claude Code
+// puts around a long paste, together with the blank line it adds in front,
+// so the prompt reads as it was written. A frame without its matching close
+// is left alone.
+func unwrapPastedContent(s string) string {
+	const open, close = `<pasted_content id="`, `</pasted_content id="`
+	var b strings.Builder
+	for {
+		start := strings.Index(s, open)
+		if start < 0 {
+			break
+		}
+		id, rest, ok := strings.Cut(s[start+len(open):], "\">\n")
+		end := strings.Index(rest, "\n"+close+id+`">`)
+		if !ok || len(id) != 4 || strings.Trim(id, "0123456789abcdef") != "" || end < 0 {
+			b.WriteString(s[:start+len(open)])
+			s = s[start+len(open):]
+			continue
+		}
+		before := strings.TrimSuffix(strings.TrimSuffix(s[:start], "\n"), "\n")
+		b.WriteString(before)
+		if before != "" {
+			b.WriteString("\n")
+		}
+		b.WriteString(rest[:end])
+		s = strings.TrimPrefix(rest[end+len("\n"+close+id+`">`):], "\n")
+		if s != "" {
+			b.WriteString("\n")
+		}
+	}
+	b.WriteString(s)
+	return strings.TrimSpace(b.String())
 }
 
 // taskNotification keeps the human-readable part of a <task-notification>: the

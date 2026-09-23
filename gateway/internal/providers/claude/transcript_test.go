@@ -488,7 +488,7 @@ func Test通常の本文はブラケットペーストせず入力してEnterで
 	if err := p.Send(context.Background(), "x", live, model.Input{Text: "長い通常メッセージでも貼り付け扱いにしない"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(term.calls, "|"); got != "text:長い通常メッセージでも貼り付け扱いにしない|keys:enter" {
+	if got := strings.Join(term.calls, "|"); got != "text:長い通常メッセージでも貼り付け扱いにしない|text:\x1b[13u" {
 		t.Errorf("calls = %q", got)
 	}
 }
@@ -501,7 +501,7 @@ func Test初回promptもブラケットペーストせず入力してEnterで送
 	if err := p.SendLaunchPrompt(context.Background(), "w1:p1", "abc123"); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(term.calls, "|"); got != "text:abc123|keys:enter" {
+	if got := strings.Join(term.calls, "|"); got != "text:abc123|text:\x1b[13u" {
 		t.Errorf("calls = %q", got)
 	}
 }
@@ -515,9 +515,44 @@ func Test複数行の本文もブラケットペーストせず入力する(t *t
 	if err := p.Send(context.Background(), "x", live, model.Input{Text: "一行目\n\n三行目"}); err != nil {
 		t.Fatal(err)
 	}
-	want := "text:一行目|keys:shift+enter|keys:shift+enter|text:三行目|keys:enter"
+	want := "text:一行目|keys:shift+enter|keys:shift+enter|text:三行目|text:\x1b[13u"
 	if got := strings.Join(term.calls, "|"); got != want {
 		t.Errorf("calls = %q, want %q", got, want)
+	}
+}
+
+func Test800単位を超える行があれば本文全体をブラケットペーストして送信する(t *testing.T) {
+	term := &fakeTerminal{}
+	p := New(t.TempDir(), term, deadletter.Nop{})
+	p.keyDelay = 0
+	live := &providers.Live{PaneID: "w1:p1", HerdrStatus: herdr.StatusIdle}
+
+	long := "前置き\n" + strings.Repeat("a", 801)
+	if err := p.Send(context.Background(), "x", live, model.Input{Text: long}); err != nil {
+		t.Fatal(err)
+	}
+	want := "text:\x1b[200~" + long + "\x1b[201~|text:\x1b[13u"
+	if got := strings.Join(term.calls, "|"); got != want {
+		t.Errorf("calls = %q, want %q", got, want)
+	}
+}
+
+func Test行の長さはUTF16単位で数えて800までなら入力する(t *testing.T) {
+	cases := map[string]bool{
+		strings.Repeat("あ", 800): false,
+		strings.Repeat("😀", 400): false,
+		strings.Repeat("😀", 401): true,
+		strings.Repeat("あ", 801): true,
+	}
+	for text, pasted := range cases {
+		term := &fakeTerminal{}
+		p := New(t.TempDir(), term, deadletter.Nop{})
+		if err := p.SendLaunchPrompt(context.Background(), "w1:p1", text); err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.HasPrefix(term.calls[0], "text:\x1b[200~"); got != pasted {
+			t.Errorf("%d runes: pasted = %v, want %v", len([]rune(text)), got, pasted)
+		}
 	}
 }
 
@@ -530,7 +565,7 @@ func Test画像はパスを個別にブラケットペーストしてから本�
 	if err := p.Send(context.Background(), "x", live, model.Input{Text: " 見て ", Images: []string{"/tmp/a.png", "/tmp/b.jpg"}}); err != nil {
 		t.Fatal(err)
 	}
-	want := "text:\x1b[200~/tmp/a.png\x1b[201~|text:\x1b[200~/tmp/b.jpg\x1b[201~|text:見て|keys:enter"
+	want := "text:\x1b[200~/tmp/a.png\x1b[201~|text:\x1b[200~/tmp/b.jpg\x1b[201~|text:見て|text:\x1b[13u"
 	if got := strings.Join(term.calls, "|"); got != want {
 		t.Errorf("calls = %q, want %q", got, want)
 	}
@@ -545,7 +580,7 @@ func Test本文なしの画像だけならペースト後にEnterで送信する
 	if err := p.Send(context.Background(), "x", live, model.Input{Images: []string{"/tmp/a.png"}}); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(term.calls, "|"); got != "text:\x1b[200~/tmp/a.png\x1b[201~|keys:enter" {
+	if got := strings.Join(term.calls, "|"); got != "text:\x1b[200~/tmp/a.png\x1b[201~|text:\x1b[13u" {
 		t.Errorf("calls = %q", got)
 	}
 	if err := p.Send(context.Background(), "x", live, model.Input{Text: "  "}); err == nil {
@@ -563,7 +598,7 @@ func Test画像以外の添付はパスを本文に並べて送信する(t *test
 	if err := p.Send(context.Background(), "x", live, in); err != nil {
 		t.Fatal(err)
 	}
-	want := "text:\x1b[200~/tmp/a.png\x1b[201~|text:読んで|keys:shift+enter|text:/tmp/up/notes.txt|keys:enter"
+	want := "text:\x1b[200~/tmp/a.png\x1b[201~|text:読んで|keys:shift+enter|text:/tmp/up/notes.txt|text:\x1b[13u"
 	if got := strings.Join(term.calls, "|"); got != want {
 		t.Errorf("calls = %q, want %q", got, want)
 	}
@@ -701,6 +736,38 @@ func Testタスク通知は要約とイベントだけをシステムメッセ�
 			}
 			if got != tt.want {
 				t.Errorf("text = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test長いペーストのpasted_content枠は外して本文として表示する(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "本文全体がペースト",
+			in:   "\n\n<pasted_content id=\"341b\">\n一行目\n二行目\n</pasted_content id=\"341b\">\n",
+			want: "一行目\n二行目",
+		},
+		{
+			name: "入力した文の後ろにペーストがあり続きもある",
+			in:   "見て\n\n<pasted_content id=\"0a9f\">\nログ\n</pasted_content id=\"0a9f\">\nどう？",
+			want: "見て\nログ\nどう？",
+		},
+		{
+			name: "閉じ枠がなければそのまま",
+			in:   "<pasted_content id=\"341b\">\n途中まで",
+			want: "<pasted_content id=\"341b\">\n途中まで",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			role, got := userText(tt.in)
+			if role != model.RoleUser || got != tt.want {
+				t.Errorf("userText = %q, %q, want user, %q", role, got, tt.want)
 			}
 		})
 	}

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf16"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
@@ -233,9 +234,9 @@ func (p *Provider) Image(ctx context.Context, nativeID, messageID string, index 
 // on its own (bracketed paste), which Claude Code turns into an [Image #N]
 // attachment, before the text is submitted. Ordinary text is typed without
 // bracketed-paste markers because Claude Code wraps sufficiently long pastes
-// in <pasted_content>, even when they are regular prompts. Other attachments
-// are named by path in the prompt text for Claude Code to read with its own
-// tools.
+// in <pasted_content>, even when they are regular prompts; see typePrompt for
+// the long lines that are pasted anyway. Other attachments are named by path
+// in the prompt text for Claude Code to read with its own tools.
 func (p *Provider) Send(ctx context.Context, nativeID string, live *providers.Live, in model.Input) error {
 	if live == nil {
 		return providers.ErrNotLive
@@ -259,7 +260,7 @@ func (p *Provider) Send(ctx context.Context, nativeID string, live *providers.Li
 		}
 	}
 	if text == "" {
-		return p.term.SendKeys(ctx, live.PaneID, "enter")
+		return p.submit(ctx, live.PaneID)
 	}
 	return p.typePrompt(ctx, live.PaneID, text)
 }
@@ -271,12 +272,27 @@ func (p *Provider) SendLaunchPrompt(ctx context.Context, paneID, text string) er
 	return p.typePrompt(ctx, paneID, text)
 }
 
+const (
+	// maxTypedLine is the longest line typed key by key. Claude Code handles
+	// one terminal read longer than 800 UTF-16 units as an unbracketed paste,
+	// and a long line arrives in several such reads: all but the last are
+	// lost from the composer (verified with Claude Code 2.1.280).
+	maxTypedLine = 800
+	// submitKey is Enter in the kitty keyboard protocol (CSI 13 u). A plain
+	// CR that Claude Code reads together with the end of a long line becomes
+	// part of that paste, so the prompt gets a newline instead of being sent.
+	// The escape sequence always starts a key event of its own.
+	submitKey = "\x1b[13u"
+)
+
 // typePrompt enters text without bracketed-paste markers and submits it.
 // Claude Code accepts Shift+Enter as an in-composer newline, so multiline
 // prompts can use the same input path without turning into pasted content.
-// Terminal control characters are left to agent.prompt, which can transport
-// them safely as a single bracketed paste instead of being interpreted as key
-// presses by the TUI.
+// Text with a line Claude Code could not take as typed input is sent as one
+// bracketed paste; Claude Code records it in <pasted_content>, which the
+// transcript parser removes again. Terminal control characters are left to
+// agent.prompt, which can transport them safely as a single bracketed paste
+// instead of being interpreted as key presses by the TUI.
 func (p *Provider) typePrompt(ctx context.Context, paneID, text string) error {
 	if strings.IndexFunc(text, func(r rune) bool {
 		return (r < ' ' && r != '\n') || r == '\x7f'
@@ -285,6 +301,14 @@ func (p *Provider) typePrompt(ctx context.Context, paneID, text string) error {
 	}
 
 	lines := strings.Split(text, "\n")
+	if slices.ContainsFunc(lines, func(line string) bool {
+		return len(utf16.Encode([]rune(line))) > maxTypedLine
+	}) {
+		if err := p.term.SendText(ctx, paneID, "\x1b[200~"+text+"\x1b[201~"); err != nil {
+			return err
+		}
+		return p.submit(ctx, paneID)
+	}
 	for i, line := range lines {
 		if line != "" {
 			if err := p.term.SendText(ctx, paneID, line); err != nil {
@@ -298,7 +322,12 @@ func (p *Provider) typePrompt(ctx context.Context, paneID, text string) error {
 			return err
 		}
 	}
-	return p.term.SendKeys(ctx, paneID, "enter")
+	return p.submit(ctx, paneID)
+}
+
+// submit presses Enter in the composer.
+func (p *Provider) submit(ctx context.Context, paneID string) error {
+	return p.term.SendText(ctx, paneID, submitKey)
 }
 
 // CycleMode uses Claude Code's built-in next-mode shortcut. Claude Code only
