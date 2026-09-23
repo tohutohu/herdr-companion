@@ -125,7 +125,15 @@ fun main() {
                 val connectionSource = remember { DesktopConnectionSource() }
                 val http = remember { DesktopHttp.client() }
                 val api = remember { GatewayApi(http) { connectionSource.current.settings } }
-                val appState = remember { DesktopAppState(connectionSource, api, http) }
+                val appState = remember {
+                    DesktopAppState(
+                        connectionSource = connectionSource,
+                        api = api,
+                        http = http,
+                        initialLayout = DesktopPreferences.loadLayout(),
+                        onLayoutChanged = DesktopPreferences::saveLayout,
+                    )
+                }
                 setSingletonImageLoaderFactory { context ->
                     desktopImageLoader(context, http) { connectionSource.current.settings }
                 }
@@ -394,12 +402,8 @@ private fun FrameWindowScope.DesktopShell(
                         EmptyDetail(state)
                     } else {
                         val paneCount = detailIds.size
-                        var paneWeights by remember { mutableStateOf(emptyList<Float>()) }
-                        val weights = paneWeights.takeIf { it.size == paneCount }
+                        val weights = state.paneWeights.takeIf { it.size == paneCount }
                             ?: equalPaneWeights(paneCount)
-                        LaunchedEffect(paneCount) {
-                            paneWeights = equalPaneWeights(paneCount)
-                        }
                         val dividerWidth = 8.dp
                         val paneWidth = (maxWidth - dividerWidth * (paneCount - 1)).coerceAtLeast(0.dp)
                         val density = androidx.compose.ui.platform.LocalDensity.current
@@ -408,16 +412,17 @@ private fun FrameWindowScope.DesktopShell(
                                 if (index > 0) {
                                     DesktopPaneDivider(
                                         onDrag = { deltaPx ->
-                                            val current = paneWeights.takeIf { it.size == paneCount }
+                                            val current = state.paneWeights.takeIf { it.size == paneCount }
                                                 ?: equalPaneWeights(paneCount)
-                                            paneWeights = adjustPaneDividerWeights(
+                                            state.updatePaneWeights(adjustPaneDividerWeights(
                                                 current = current,
                                                 dividerIndex = index - 1,
                                                 deltaPx = deltaPx,
                                                 paneWidthPx = with(density) { paneWidth.toPx() },
                                                 minimumPaneWidthPx = with(density) { MIN_SPLIT_DETAIL_WIDTH.toPx() },
-                                            )
+                                            ))
                                         },
+                                        onDragStopped = state::saveLayout,
                                     )
                                 }
                                 key(id) {
@@ -455,6 +460,7 @@ private fun FrameWindowScope.DesktopShell(
     if (state.newSessionOpen) {
         DesktopNewSessionWindow(
             api = api,
+            focusRequest = state.newSessionFocusRequest,
             onCreated = { id, inSplit ->
                 state.closeNewSession()
                 actions.refresh()
@@ -489,7 +495,7 @@ private fun FrameWindowScope.DesktopShell(
 }
 
 @Composable
-private fun DesktopPaneDivider(onDrag: (Float) -> Unit) {
+private fun DesktopPaneDivider(onDrag: (Float) -> Unit, onDragStopped: () -> Unit) {
     val dragState = rememberDraggableState { deltaPx -> onDrag(deltaPx) }
     Box(
         modifier = Modifier
@@ -498,6 +504,7 @@ private fun DesktopPaneDivider(onDrag: (Float) -> Unit) {
             .draggable(
                 orientation = Orientation.Horizontal,
                 state = dragState,
+                onDragStopped = { onDragStopped() },
             )
             .pointerHoverIcon(PointerIcon(Cursor.getPredefinedCursor(Cursor.E_RESIZE_CURSOR))),
         contentAlignment = Alignment.Center,

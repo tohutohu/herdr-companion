@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -25,6 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogModalityType
 import androidx.compose.ui.window.DialogWindow
 import androidx.compose.ui.window.rememberDialogState
 import com.tohutohu.herdrcompanion.data.AgentPreset
@@ -50,9 +52,11 @@ import com.tohutohu.herdrcompanion.ui.newsession.withKnownNames
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun DesktopNewSessionWindow(
     api: GatewayApi,
+    focusRequest: Int,
     onCreated: (sessionId: String?, inSplit: Boolean) -> Unit,
     onDismiss: () -> Unit,
     onError: (String) -> Unit,
@@ -231,21 +235,13 @@ fun DesktopNewSessionWindow(
         favorite = presets.presets.any { it.key == currentPreset.key },
     )
 
-    if (trustRequest != null) {
-        AlertDialog(
-            onDismissRequest = { answerTrust(false) },
-            title = { Text("Trust this folder?") },
-            text = { Text("The agent needs permission to use this working folder. Continue starting the session?") },
-            confirmButton = { TextButton(onClick = { answerTrust(true) }) { Text("Trust and continue") } },
-            dismissButton = { TextButton(onClick = { answerTrust(false) }) { Text("Cancel") } },
-        )
-    }
-
     DialogWindow(
         onCloseRequest = onDismiss,
         title = "New Session",
         state = rememberDialogState(width = 900.dp, height = 720.dp),
         resizable = true,
+        // Modeless so the sessions behind stay usable while a prompt is drafted.
+        modalityType = DialogModalityType.Modeless,
         onKeyEvent = { event ->
             if (event.type == KeyEventType.KeyDown && event.key == Key.Escape) {
                 onDismiss()
@@ -263,6 +259,22 @@ fun DesktopNewSessionWindow(
             window.requestFocus()
             withFrameNanos { }
             promptFocusRequester.requestFocus()
+        }
+        LaunchedEffect(focusRequest) {
+            // New Session was requested again while this window stayed open behind the main one.
+            if (focusRequest > 0) {
+                window.toFront()
+                window.requestFocus()
+            }
+        }
+        if (trustRequest != null) {
+            AlertDialog(
+                onDismissRequest = { answerTrust(false) },
+                title = { Text("Trust this folder?") },
+                text = { Text("The agent needs permission to use this working folder. Continue starting the session?") },
+                confirmButton = { TextButton(onClick = { answerTrust(true) }) { Text("Trust and continue") } },
+                dismissButton = { TextButton(onClick = { answerTrust(false) }) { Text("Cancel") } },
+            )
         }
         Surface(Modifier.fillMaxSize()) {
             NewSessionScreen(

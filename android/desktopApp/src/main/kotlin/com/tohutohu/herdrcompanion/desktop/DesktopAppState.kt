@@ -59,6 +59,8 @@ class DesktopAppState(
     private val api: com.tohutohu.herdrcompanion.data.api.GatewayApi,
     private val http: OkHttpClient,
     private val repository: DesktopGatewayRepository = DesktopGatewayRepository(api),
+    initialLayout: DesktopLayoutSnapshot = DesktopLayoutSnapshot(),
+    private val onLayoutChanged: (DesktopLayoutSnapshot) -> Unit = {},
 ) {
     private val logger = Logger.getLogger("com.tohutohu.herdrcompanion.desktop")
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -94,11 +96,18 @@ class DesktopAppState(
     var archiveConfirmation by mutableStateOf<SessionUiModel?>(null)
         private set
     var newSessionOpen by mutableStateOf(false)
+        private set
+    /** Bumped when New Session is requested while its window is already open. */
+    var newSessionFocusRequest by mutableStateOf(0)
+        private set
     var connectionState by mutableStateOf(
         if (connection.configIssue == null) DesktopConnectionState.CONNECTING else DesktopConnectionState.OFFLINE,
     )
         private set
     var notificationEvent by mutableStateOf<DesktopNotificationEvent?>(null)
+        private set
+    /** Relative widths of [openSessionIds]; reset to equal whenever the pane count changes. */
+    var paneWeights by mutableStateOf<List<Float>>(emptyList())
         private set
 
     val selectedSessionId: String? get() = selection.selectedId
@@ -133,6 +142,7 @@ class DesktopAppState(
         ?.previewModel
 
     init {
+        restoreLayout(initialLayout)
         refreshSessions()
         listJob = scope.launch {
             while (isActive) {
@@ -230,10 +240,11 @@ class DesktopAppState(
         val current = openSessionIdsState
         val next = openSessionInFocusedPane(current, selectedSessionId, id)
         current.firstOrNull { it !in next }?.let(::removeDetail)
-        openSessionIdsState = next
+        setOpenSessionIds(next)
         selection.select(id)
         updateSessionRowSelection()
         ensureDetail(id)
+        saveLayout()
     }
 
     /** Adds a session to the Desktop split view, or focuses it if it is already open. */
@@ -247,10 +258,11 @@ class DesktopAppState(
             openSession(id)
             return
         }
-        openSessionIdsState = openSessionIdsState + id
+        setOpenSessionIds(openSessionIdsState + id)
         selection.select(id)
         updateSessionRowSelection()
         ensureDetail(id)
+        saveLayout()
     }
 
     fun focusSession(id: String) {
@@ -258,17 +270,19 @@ class DesktopAppState(
         if (selection.selectedId == id) return
         selection.select(id)
         updateSessionRowSelection()
+        saveLayout()
     }
 
     fun closeSession(id: String) {
         if (id !in openSessionIdsState) return
         val wasSelected = selection.selectedId == id
         removeDetail(id)
-        openSessionIdsState = openSessionIdsState - id
+        setOpenSessionIds(openSessionIdsState - id)
         if (wasSelected) {
             openSessionIdsState.lastOrNull()?.let(selection::select) ?: selection.clear()
         }
         updateSessionRowSelection()
+        saveLayout()
     }
 
     fun clearSelection() {
@@ -277,9 +291,40 @@ class DesktopAppState(
         detailsBySession = emptyMap()
         cleanupAttachments(composerAttachmentsBySession.values.flatten())
         composerAttachmentsBySession = emptyMap()
-        openSessionIdsState = emptyList()
+        setOpenSessionIds(emptyList())
         selection.clear()
         updateSessionRowSelection()
+        saveLayout()
+    }
+
+    /** Applies a divider drag; call [saveLayout] when the drag ends. */
+    fun updatePaneWeights(weights: List<Float>) {
+        if (weights.size == openSessionIdsState.size) paneWeights = weights
+    }
+
+    fun saveLayout() {
+        if (closed) return
+        onLayoutChanged(
+            DesktopLayoutSnapshot(
+                openSessionIds = openSessionIdsState,
+                focusedSessionId = selection.selectedId,
+                paneWeights = paneWeights,
+            ),
+        )
+    }
+
+    private fun restoreLayout(layout: DesktopLayoutSnapshot) {
+        val restored = layout.normalized()
+        if (restored.openSessionIds.isEmpty()) return
+        openSessionIdsState = restored.openSessionIds
+        paneWeights = restored.paneWeights
+        restored.focusedSessionId?.let(selection::select)
+        restored.openSessionIds.forEach(::ensureDetail)
+    }
+
+    private fun setOpenSessionIds(ids: List<String>) {
+        if (ids.size != openSessionIdsState.size) paneWeights = equalPaneWeights(ids.size)
+        openSessionIdsState = ids
     }
 
     private fun ensureDetail(id: String) {
@@ -640,7 +685,7 @@ class DesktopAppState(
     }
 
     fun openNewSession() {
-        newSessionOpen = true
+        if (newSessionOpen) newSessionFocusRequest++ else newSessionOpen = true
     }
 
     fun closeNewSession() {
