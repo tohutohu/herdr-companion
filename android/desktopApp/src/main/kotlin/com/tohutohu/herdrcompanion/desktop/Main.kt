@@ -844,7 +844,8 @@ private fun handleDetailAction(
             if (!DesktopPlatformActions.openUrl(api.absolute(action.url))) state.reportError("Could not open the image in the browser.")
         }
         SessionDetailAction.OpenTerminal -> {
-            if (!DesktopPlatformActions.openTerminal(state.detailFor(sessionId)?.session?.cwd)) state.reportError("Could not open Terminal for this project.")
+            val paneId = state.detailFor(sessionId)?.session?.paneId
+            if (paneId == null) state.reportError("This session has no Herdr pane.") else state.attachTerminal(paneId)
         }
     }
 }

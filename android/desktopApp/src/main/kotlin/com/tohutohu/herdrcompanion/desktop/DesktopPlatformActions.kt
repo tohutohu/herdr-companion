@@ -70,14 +70,6 @@ object DesktopPlatformActions {
         }.getOrDefault(false)
     }
 
-    fun openTerminal(directory: String?): Boolean {
-        val dir = directory?.let { resolvePath(it, null) }?.takeIf { Files.isDirectory(it) } ?: return false
-        return runCatching {
-            ProcessBuilder("/usr/bin/open", "-a", "Terminal", dir.toString()).start()
-            true
-        }.getOrDefault(false)
-    }
-
     /** Ask the separately installed SwiftUI manager to start its owned Gateway. */
     fun requestGatewayStart(): Boolean = runCatching {
         ProcessBuilder(
