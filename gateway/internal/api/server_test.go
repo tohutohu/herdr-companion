@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"mime"
 	"net/http"
@@ -271,6 +272,44 @@ func Testメッセージ取得はafter指定で差分を返す(t *testing.T) {
 	resp, _ = do(t, ts, tok, "GET", "/v1/sessions/nope/messages", nil, "")
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("malformed id status = %d", resp.StatusCode)
+	}
+}
+
+func Testメッセージ取得は内容が変わらなければ304を返す(t *testing.T) {
+	ts, _, _, tok := newTestServer(t)
+	get := func(path, etag string) (*http.Response, []byte) {
+		t.Helper()
+		req, _ := http.NewRequest("GET", ts.URL+path, nil)
+		req.Header.Set("Authorization", "Bearer "+tok)
+		if etag != "" {
+			req.Header.Set("If-None-Match", etag)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		return resp, body
+	}
+	first, body := get("/v1/sessions/fake:s1/messages", "")
+	etag := first.Header.Get("ETag")
+	if first.StatusCode != http.StatusOK || etag == "" || len(body) == 0 {
+		t.Fatalf("status=%d etag=%q body=%s", first.StatusCode, etag, body)
+	}
+	resp, body := get("/v1/sessions/fake:s1/messages", etag)
+	if resp.StatusCode != http.StatusNotModified || len(body) != 0 || resp.Header.Get("ETag") != etag {
+		t.Fatalf("status=%d etag=%q body=%s", resp.StatusCode, resp.Header.Get("ETag"), body)
+	}
+	// 弱いETagや複数指定でも一致すれば304にする。
+	resp, _ = get("/v1/sessions/fake:s1/messages", `"other", W/`+etag)
+	if resp.StatusCode != http.StatusNotModified {
+		t.Fatalf("list status=%d", resp.StatusCode)
+	}
+	// 本文が違う要求(after指定)には同じETagでも本文を返す。
+	resp, body = get("/v1/sessions/fake:s1/messages?after=m2", etag)
+	if resp.StatusCode != http.StatusOK || len(body) == 0 || resp.Header.Get("ETag") == etag {
+		t.Fatalf("after status=%d etag=%q", resp.StatusCode, resp.Header.Get("ETag"))
 	}
 }
 

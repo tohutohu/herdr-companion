@@ -2,8 +2,11 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -151,6 +154,37 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
+// writeJSONWithETag answers 304 Not Modified when the client already has
+// this body, so polling clients skip receiving and applying it again.
+func writeJSONWithETag(w http.ResponseWriter, r *http.Request, v any) {
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(v); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	sum := sha256.Sum256(buf.Bytes())
+	etag := `"` + hex.EncodeToString(sum[:16]) + `"`
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "no-cache")
+	if etagMatches(r.Header.Get("If-None-Match"), etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(buf.Bytes())
+}
+
+func etagMatches(header, etag string) bool {
+	for _, tag := range strings.Split(header, ",") {
+		tag = strings.TrimPrefix(strings.TrimSpace(tag), "W/")
+		if tag == etag || tag == "*" {
+			return true
+		}
+	}
+	return false
+}
+
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
@@ -247,7 +281,7 @@ func (s *Server) getMessages(w http.ResponseWriter, r *http.Request) {
 	if msgs == nil {
 		msgs = []model.Message{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"session": sess, "messages": msgs})
+	writeJSONWithETag(w, r, map[string]any{"session": sess, "messages": msgs})
 }
 
 func messagesFrom(msgs []model.Message, after string) []model.Message {
