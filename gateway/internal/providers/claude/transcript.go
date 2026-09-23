@@ -943,7 +943,18 @@ func (t *Transcript) toolUseBlocks(b contentBlock, res toolResult, answered, pen
 		blocks = append(blocks, model.TextBlock("Agent: "+str("description")))
 	case "TodoWrite":
 		blocks = append(blocks, model.TextBlock(todoText(in)))
-	case "ToolSearch", "Skill", "SlashCommand", "BashOutput", "KillShell", "KillBash", "TaskOutput", "TaskStop",
+	case "Skill":
+		skill := str("skill")
+		if skill == "" {
+			blocks = append(blocks, model.TextBlock("▸ Skill "+compactJSON(b.Input, 200)))
+			break
+		}
+		text := "▸ Skill: " + skill
+		if args := str("args"); args != "" {
+			text += "\nArgs:\n" + args
+		}
+		blocks = append(blocks, model.TextBlock(text))
+	case "ToolSearch", "SlashCommand", "BashOutput", "KillShell", "KillBash", "TaskOutput", "TaskStop",
 		"Monitor", "SendUserFile", "ListMcpResourcesTool", "ReadMcpResourceTool", "EnterPlanMode", "LSP", "SendMessage":
 		blocks = append(blocks, model.TextBlock("▸ "+b.Name+" "+compactJSON(b.Input, 200)))
 	default:
