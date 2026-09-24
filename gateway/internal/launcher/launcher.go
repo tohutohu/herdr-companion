@@ -411,22 +411,22 @@ func (l *Launcher) launch(ctx context.Context, plan launchPlan) (*StartResult, e
 	}
 	startErr := l.startAgent(ctx, p, pane, plan.args)
 	wt := plan.worktree
+	var refused error
 	if plan.agentWorktree {
 		// A failed start made no worktree worth waiting for.
 		wait := l.identityWait()
 		if startErr != nil {
 			wait = 0
 		}
-		wt = l.markAgentWorktree(ctx, p, cwd, before, wait)
+		wt, refused = l.markAgentWorktree(ctx, p, pane, cwd, before, wait)
 	}
-	if startErr != nil {
+	if startErr != nil && refused == nil {
+		refused = l.startFailure(ctx, p, pane)
+	}
+	if startErr != nil || refused != nil {
 		err := fmt.Errorf("start agent: %w", startErr)
-		if ex, ok := p.(providers.StartFailureExplainer); ok {
-			if screen, rerr := l.Herdr.ReadVisible(ctx, pane); rerr == nil {
-				if why := ex.StartFailure(screen); why != nil {
-					err = fmt.Errorf("%w: %w", ErrStartRefused, why)
-				}
-			}
+		if refused != nil {
+			err = fmt.Errorf("%w: %w", ErrStartRefused, refused)
 		}
 		// Don't leave an empty shell workspace (or checkout) behind.
 		l.discard(ctx, ws, wt, p)
@@ -457,8 +457,9 @@ func (l *Launcher) launch(ctx context.Context, plan launchPlan) (*StartResult, e
 // comparing the repository's worktrees with those before, and marks it as
 // the gateway's so archiving the session removes it. Herdr reports the
 // agent started as soon as its process runs, which can be before it has
-// made the worktree, so this polls for up to wait.
-func (l *Launcher) markAgentWorktree(ctx context.Context, p providers.Provider, cwd string, before []string, wait time.Duration) string {
+// made the worktree, or before it quits because it could not, so this polls
+// for up to wait and returns the agent's reason when the pane shows one.
+func (l *Launcher) markAgentWorktree(ctx context.Context, p providers.Provider, pane, cwd string, before []string, wait time.Duration) (string, error) {
 	deadline := time.Now().Add(wait)
 	var added []string
 	for {
@@ -470,19 +471,39 @@ func (l *Launcher) markAgentWorktree(ctx context.Context, p providers.Provider, 
 				}
 			}
 		}
-		if len(added) > 0 || !time.Now().Before(deadline) || !sleep(ctx, l.pollInterval()) {
+		if len(added) > 0 {
+			break
+		}
+		if why := l.startFailure(ctx, p, pane); why != nil {
+			return "", why
+		}
+		if !time.Now().Before(deadline) || !sleep(ctx, l.pollInterval()) {
 			break
 		}
 	}
 	if len(added) != 1 {
 		slog.Warn("no single new worktree after the agent started; none marked", "provider", p.Name(), "cwd", cwd, "worktrees", added)
-		return ""
+		return "", nil
 	}
 	if err := worktree.Mark(ctx, added[0], p.Name()); err != nil {
 		slog.Warn("marking worktree failed", "provider", p.Name(), "path", added[0], "error", err)
-		return ""
+		return "", nil
 	}
-	return added[0]
+	return added[0], nil
+}
+
+// startFailure is the agent's own reason, read from its pane, for not
+// starting; nil when the provider does not recognise the screen.
+func (l *Launcher) startFailure(ctx context.Context, p providers.Provider, pane string) error {
+	ex, ok := p.(providers.StartFailureExplainer)
+	if !ok {
+		return nil
+	}
+	screen, err := l.Herdr.ReadVisible(ctx, pane)
+	if err != nil {
+		return nil
+	}
+	return ex.StartFailure(screen)
 }
 
 // discard closes a workspace opened for a launch that is not going ahead,

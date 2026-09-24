@@ -745,19 +745,27 @@ func Test信頼を断るとHerdrが作ったworktreeも削除する(t *testing.T
 }
 
 func Testエージェントが起動を拒んだ理由を画面から伝える(t *testing.T) {
-	fh := &fakeHerdr{screen: "Error creating worktree: Workspace trust not yet accepted.", startErr: &herdr.Error{Code: "timeout"}}
-	l, root := newLauncher(t, fh)
-	repo := filepath.Join(root, "repo")
-	os.Mkdir(repo, 0o755)
-	gitRepo(t, repo)
-	l.Providers = []providers.Provider{&worktreeProvider{}}
+	// Herdrが起動失敗を報告する場合と、一瞬起動したとみなしたあとでエージェントが終了する場合
+	for _, startErr := range []error{&herdr.Error{Code: "timeout"}, nil} {
+		fh := &fakeHerdr{status: herdr.StatusIdle, screen: "Error creating worktree: Workspace trust not yet accepted.", startErr: startErr}
+		l, root := newLauncher(t, fh)
+		l.IdentityWait = time.Minute
+		repo := filepath.Join(root, "repo")
+		os.Mkdir(repo, 0o755)
+		gitRepo(t, repo)
+		l.Providers = []providers.Provider{&worktreeProvider{}}
 
-	_, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: repo, Worktree: true})
-	if !errors.Is(err, ErrStartRefused) || !strings.Contains(err.Error(), "trust the folder first") {
-		t.Fatalf("err = %v", err)
-	}
-	if got := strings.Join(fh.calls, "|"); !strings.HasSuffix(got, "|close workspace w9") {
-		t.Errorf("calls = %s", got)
+		began := time.Now()
+		_, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: repo, Worktree: true})
+		if !errors.Is(err, ErrStartRefused) || !strings.Contains(err.Error(), "trust the folder first") {
+			t.Fatalf("start error %v: err = %v", startErr, err)
+		}
+		if time.Since(began) > 10*time.Second {
+			t.Errorf("start error %v: waited for the worktree anyway", startErr)
+		}
+		if got := strings.Join(fh.calls, "|"); !strings.HasSuffix(got, "|close workspace w9") {
+			t.Errorf("calls = %s", got)
+		}
 	}
 }
 
