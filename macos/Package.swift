@@ -5,5 +5,8 @@ let package = Package(
     name: "HerdrMenu",
     platforms: [.macOS(.v13)],
     products: [.executable(name: "HerdrMenu", targets: ["HerdrMenu"])],
-    targets: [.executableTarget(name: "HerdrMenu")]
+    targets: [
+        .executableTarget(name: "HerdrMenu"),
+        .testTarget(name: "HerdrMenuTests", dependencies: ["HerdrMenu"]),
+    ]
 )

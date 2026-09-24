@@ -9,6 +9,7 @@ import UniformTypeIdentifiers
 struct HerdrMenuApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @StateObject private var model: GatewayModel
+    @StateObject private var updater: Updater
     init() {
         guard AppInstanceLock.shared.acquire() else {
             AppInstanceLock.shared.activateExisting()
@@ -17,10 +18,16 @@ struct HerdrMenuApp: App {
         // Start the owner at login even if the menu popover has never been opened.
         let owner = GatewayModel()
         _model = StateObject(wrappedValue: owner)
+        let updater = Updater()
+        updater.startAutomaticChecks()
+        _updater = StateObject(wrappedValue: updater)
     }
     var body: some Scene {
-        MenuBarExtra("Herdr Companion Gateway", systemImage: "terminal") {
-            Panel(model: model)
+        MenuBarExtra {
+            Panel(model: model, updater: updater)
+        } label: {
+            // A badge on the menu-bar icon is the only sign of an update while the panel is closed.
+            Image(systemName: updater.availableUpdate == nil ? "terminal" : "arrow.down.app")
         }.menuBarExtraStyle(.window)
     }
 }
@@ -268,6 +275,15 @@ struct SetupError: LocalizedError {
             await stop(); error = "Gatewayの起動確認がタイムアウトしました。ログを確認してください。"
         } catch { self.error = error.localizedDescription }
     }
+    /// Ends the owned Gateway before an update restarts the app, keeping `autoStart`
+    /// so the new version starts it again on the port this one frees.
+    func stopForUpdate() async {
+        guard let process = child else { return }
+        process.terminate()
+        for _ in 0..<35 where process.isRunning {
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
+    }
     func stop() async {
         UserDefaults.standard.set(false, forKey: "autoStart")
         clearQR()
@@ -411,6 +427,7 @@ struct SetupError: LocalizedError {
 
 struct Panel: View {
     @ObservedObject var model: GatewayModel
+    @ObservedObject var updater: Updater
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -475,6 +492,7 @@ struct Panel: View {
                         }
                     }.padding(6)
                 }
+                UpdateBox(model: model, updater: updater)
                 Toggle("ログイン時に起動", isOn: Binding(get: { model.loginEnabled }, set: { model.setLogin($0) }))
                 Text(model.loginStatus).font(.caption).foregroundStyle(.secondary)
                 if model.loginNeedsApproval {
@@ -486,5 +504,52 @@ struct Panel: View {
         }
         .frame(width: 430, height: 700)
         .onAppear { model.refreshLoginStatus() }
+    }
+}
+
+struct UpdateBox: View {
+    @ObservedObject var model: GatewayModel
+    @ObservedObject var updater: Updater
+    var body: some View {
+        GroupBox("アップデート") {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("現在のバージョン: \(updater.currentVersion ?? "不明")").font(.caption)
+                switch updater.state {
+                case .idle:
+                    EmptyView()
+                case .checking:
+                    ProgressView("確認中…").controlSize(.small)
+                case .upToDate(let version):
+                    Text("\(version)は最新です。").font(.caption)
+                case .available(let update):
+                    Text("バージョン\(update.version)を利用できます。").font(.caption.bold())
+                    Text("インストールするとGatewayを止めてアプリを再起動し、Gatewayを起動し直します。接続中の端末は一時的に切断されます。")
+                        .font(.caption).foregroundStyle(.secondary)
+                    HStack {
+                        Button("インストールして再起動") { install(update) }.buttonStyle(.borderedProminent)
+                        Button("リリースノート") { NSWorkspace.shared.open(update.releaseURL) }
+                    }
+                case .installing(let update):
+                    ProgressView("\(update.version)をダウンロード・検証中…").controlSize(.small)
+                case .failed(let message, let update):
+                    Text(message).font(.caption).foregroundStyle(.red).textSelection(.enabled)
+                    if let update {
+                        HStack {
+                            Button("再試行") { install(update) }
+                            Button("リリースページを開く") { NSWorkspace.shared.open(update.releaseURL) }
+                        }
+                    }
+                }
+                HStack {
+                    Button("アップデートを確認") { updater.check() }
+                        .disabled(!updater.supported || updater.state == .checking)
+                    Toggle("自動で確認", isOn: $updater.automaticChecks)
+                }
+            }.padding(6)
+        }
+    }
+
+    private func install(_ update: AppUpdate) {
+        updater.install(update) { [model] in await model.stopForUpdate() }
     }
 }
