@@ -15,7 +15,7 @@ import (
 )
 
 // ExitPlanMode opens Claude Code's plan dialog. Verified against Claude Code
-// 2.1.276:
+// 2.1.281:
 //
 //	Claude has written up a plan and is ready to execute. Would you like to proceed?
 //
