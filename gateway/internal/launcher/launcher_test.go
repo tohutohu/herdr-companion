@@ -94,10 +94,8 @@ type fakeHerdr struct {
 	startErrs []error
 	snap      *herdr.Snapshot
 	calls     []string
-	// worktree is the checkout CreateWorktree reports; onStart runs in
-	// StartAgent (e.g. to create the worktree an agent would).
+	// worktree is the checkout CreateWorktree reports.
 	worktree string
-	onStart  func()
 }
 
 func (f *fakeHerdr) record(s string) {
@@ -116,9 +114,6 @@ func (f *fakeHerdr) CreateWorktree(_ context.Context, cwd, label string) (string
 }
 func (f *fakeHerdr) StartAgent(_ context.Context, name, kind, pane string, args []string, _ time.Duration) error {
 	f.record("start " + kind + " " + strings.Join(args, " "))
-	if f.onStart != nil {
-		f.onStart()
-	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if len(f.startErrs) > 0 {
@@ -150,6 +145,15 @@ func (f *fakeHerdr) Prompt(_ context.Context, _ string, text string) error {
 func (f *fakeHerdr) Snapshot(context.Context) (*herdr.Snapshot, error) { return f.snap, nil }
 func (f *fakeHerdr) ClosePane(_ context.Context, pane string) error {
 	f.record("close pane " + pane)
+	return nil
+}
+
+// RemoveWorktree removes the checkout the way Herdr does, without --force.
+func (f *fakeHerdr) RemoveWorktree(_ context.Context, ws string) error {
+	f.record("remove worktree " + ws)
+	if out, err := exec.Command("git", "-C", f.worktree, "worktree", "remove", f.worktree).CombinedOutput(); err != nil {
+		return &herdr.Error{Code: herdr.ErrDirtyWorktree, Message: string(out)}
+	}
 	return nil
 }
 func (f *fakeHerdr) CloseWorkspace(_ context.Context, ws string) error {
@@ -627,25 +631,7 @@ func marked(wt string) bool {
 	return err == nil
 }
 
-// worktreeProvider stands for an agent that creates its own worktree.
-type worktreeProvider struct {
-	fakeProvider
-	name string
-}
-
-func (p *worktreeProvider) WorktreeArgs(o providers.LaunchOptions, name string) ([]string, bool) {
-	p.name = name
-	return append(p.LaunchArgs(o), "--worktree", name), true
-}
-
-func (p *worktreeProvider) StartFailure(screen string) error {
-	if strings.Contains(screen, "trust not yet accepted") {
-		return errors.New("trust the folder first")
-	}
-	return nil
-}
-
-func Test自前でworktreeを作れないエージェントはHerdrが作ったworktreeで起動する(t *testing.T) {
+func TestWorktreeを指定するとHerdrが作ったworktreeで起動し印を付ける(t *testing.T) {
 	fh := &fakeHerdr{status: herdr.StatusIdle}
 	l, root := newLauncher(t, fh)
 	repo := filepath.Join(root, "repo")
@@ -665,40 +651,6 @@ func Test自前でworktreeを作れないエージェントはHerdrが作ったw
 	}
 	if !marked(wt) {
 		t.Error("the worktree is not marked as the gateway's")
-	}
-}
-
-func Test自前でworktreeを作れるエージェントには自前のworktreeを作らせて印を付ける(t *testing.T) {
-	fh := &fakeHerdr{status: herdr.StatusIdle}
-	l, root := newLauncher(t, fh)
-	repo := filepath.Join(root, "My Repo")
-	os.Mkdir(repo, 0o755)
-	gitRepo(t, repo)
-	p := &worktreeProvider{}
-	l.Providers = []providers.Provider{p}
-	var wt string
-	// エージェントはHerdrに起動を報告されたあとでworktreeを作ることがある
-	fh.onStart = func() {
-		wt = filepath.Join(repo, ".claude", "worktrees", p.name)
-		go func() {
-			time.Sleep(20 * time.Millisecond)
-			gitRun(t, repo, "worktree", "add", "-q", "-b", "worktree-"+p.name, wt)
-		}()
-	}
-
-	res, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: repo, Model: "haiku", Worktree: true})
-	if err != nil || res.PaneID != "w9:p1" {
-		t.Fatalf("res = %+v err = %v", res, err)
-	}
-	if !strings.HasPrefix(p.name, "My-Repo-") || len(p.name) != len("My-Repo-")+6 {
-		t.Errorf("worktree name = %q", p.name)
-	}
-	if got := strings.Join(fh.calls, "|"); got != "create My Repo|start claude --model haiku --worktree "+p.name {
-		t.Errorf("calls = %s", got)
-	}
-	gitDir := filepath.Join(repo, ".git", "worktrees", p.name, "herdr-companion.json")
-	if _, err := os.Stat(gitDir); err != nil {
-		t.Errorf("the agent's worktree is not marked: %v", err)
 	}
 }
 
@@ -736,7 +688,7 @@ func Test信頼を断るとHerdrが作ったworktreeも削除する(t *testing.T
 	if _, err := l.AnswerTrust(context.Background(), "w9:p1", false); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(fh.calls, "|"); got != "worktree repo|start claude --default|close workspace w9" {
+	if got := strings.Join(fh.calls, "|"); got != "worktree repo|start claude --default|remove worktree w9" {
 		t.Errorf("calls = %s", got)
 	}
 	if _, err := os.Stat(wt); !os.IsNotExist(err) {
@@ -744,28 +696,35 @@ func Test信頼を断るとHerdrが作ったworktreeも削除する(t *testing.T
 	}
 }
 
-func Testエージェントが起動を拒んだ理由を画面から伝える(t *testing.T) {
-	// Herdrが起動失敗を報告する場合と、一瞬起動したとみなしたあとでエージェントが終了する場合
-	for _, startErr := range []error{&herdr.Error{Code: "timeout"}, nil} {
-		fh := &fakeHerdr{status: herdr.StatusIdle, screen: "Error creating worktree: Workspace trust not yet accepted.", startErr: startErr}
-		l, root := newLauncher(t, fh)
-		l.IdentityWait = time.Minute
-		repo := filepath.Join(root, "repo")
-		os.Mkdir(repo, 0o755)
-		gitRepo(t, repo)
-		l.Providers = []providers.Provider{&worktreeProvider{}}
+func Test起動に失敗したらHerdrにworktreeを削除させる(t *testing.T) {
+	fh := &fakeHerdr{status: herdr.StatusIdle, startErr: &herdr.Error{Code: "timeout"}}
+	l, root := newLauncher(t, fh)
+	repo := filepath.Join(root, "repo")
+	os.Mkdir(repo, 0o755)
+	gitRepo(t, repo)
+	wt := filepath.Join(root, "wt", "repo-a")
+	gitRun(t, repo, "worktree", "add", "-q", "-b", "worktree/a", wt)
+	fh.worktree = wt
 
-		began := time.Now()
-		_, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: repo, Worktree: true})
-		if !errors.Is(err, ErrStartRefused) || !strings.Contains(err.Error(), "trust the folder first") {
-			t.Fatalf("start error %v: err = %v", startErr, err)
-		}
-		if time.Since(began) > 10*time.Second {
-			t.Errorf("start error %v: waited for the worktree anyway", startErr)
-		}
-		if got := strings.Join(fh.calls, "|"); !strings.HasSuffix(got, "|close workspace w9") {
-			t.Errorf("calls = %s", got)
-		}
+	if _, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: repo, Worktree: true}); err == nil {
+		t.Fatal("start succeeded")
+	}
+	if got := strings.Join(fh.calls, "|"); !strings.HasSuffix(got, "|remove worktree w9") {
+		t.Errorf("calls = %s", got)
+	}
+	if _, err := os.Stat(wt); !os.IsNotExist(err) {
+		t.Errorf("worktree still exists: %v", err)
+	}
+	// 変更が残っていてHerdrが削除を断ったときはワークスペースだけ閉じる
+	wt2 := filepath.Join(root, "wt", "repo-b")
+	gitRun(t, repo, "worktree", "add", "-q", "-b", "worktree/b", wt2)
+	os.WriteFile(filepath.Join(wt2, "new.txt"), []byte("x"), 0o644)
+	fh.worktree, fh.calls = wt2, nil
+	if _, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: repo, Worktree: true}); err == nil {
+		t.Fatal("start succeeded")
+	}
+	if got := strings.Join(fh.calls, "|"); !strings.HasSuffix(got, "|remove worktree w9|close workspace w9") {
+		t.Errorf("calls = %s", got)
 	}
 }
 

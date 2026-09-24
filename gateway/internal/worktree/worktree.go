@@ -1,7 +1,6 @@
-// Package worktree finds and removes the git worktrees sessions were started
-// in. The gateway keeps no record of them: a worktree it created carries a
-// marker file in its git directory, the way Codex marks the worktrees it
-// manages with the thread that owns them.
+// Package worktree finds the git worktrees sessions were started in and has
+// Herdr, which creates them, remove them again. The gateway keeps no record
+// of them: a worktree it created carries a marker file in its git directory.
 package worktree
 
 import (
@@ -10,29 +9,20 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"strings"
-	"syscall"
 	"time"
+
+	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 )
 
 var ErrNotRepository = errors.New("the directory is not in a git repository")
 
-const (
-	// markerFile sits in a linked worktree's git directory (.git/worktrees/<name>).
-	markerFile = "herdr-companion.json"
-	// codexOwnerFile is where Codex records the thread that owns a worktree
-	// it created with --worktree.
-	codexOwnerFile = "codex-thread.json"
-)
-
-// LockWait is how long Cleanup waits for an agent that holds the worktree
-// lock to exit after its pane was closed.
-var LockWait = 5 * time.Second
+// markerFile sits in a linked worktree's git directory (.git/worktrees/<name>).
+const markerFile = "herdr-companion.json"
 
 type checkout struct {
 	top       string // root of this working tree
@@ -101,26 +91,8 @@ func MainCheckout(ctx context.Context, dir string) (string, error) {
 	return c.main(), nil
 }
 
-// List returns the working trees of the repository dir is in.
-func List(ctx context.Context, dir string) ([]string, error) {
-	out, err := git(ctx, dir, "worktree", "list", "--porcelain")
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrNotRepository, err)
-	}
-	var paths []string
-	for line := range strings.SplitSeq(out, "\n") {
-		if p, ok := strings.CutPrefix(line, "worktree "); ok {
-			if real, err := filepath.EvalSymlinks(p); err == nil {
-				p = real
-			}
-			paths = append(paths, p)
-		}
-	}
-	return paths, nil
-}
-
-// Mark records that the gateway created the linked worktree dir is in for a
-// new session, so archiving the session may remove it.
+// Mark records that the gateway had the linked worktree dir is in created
+// for a new session, so archiving the session may remove it.
 func Mark(ctx context.Context, dir, provider string) error {
 	c, err := inspect(ctx, dir)
 	if err != nil {
@@ -133,10 +105,11 @@ func Mark(ctx context.Context, dir, provider string) error {
 	return os.WriteFile(filepath.Join(c.gitDir, markerFile), b, 0o644)
 }
 
-// Owner is the session a worktree is cleaned up for.
-type Owner struct {
-	Provider string
-	NativeID string
+// Herdr is the part of the Herdr client that removes worktrees.
+type Herdr interface {
+	OpenWorktree(ctx context.Context, path string) (workspaceID string, alreadyOpen bool, err error)
+	RemoveWorktree(ctx context.Context, workspaceID string) error
+	CloseWorkspace(ctx context.Context, workspaceID string) error
 }
 
 // Outcome reports what Cleanup did with a session's worktree.
@@ -155,31 +128,12 @@ func (o *Outcome) Warning() string {
 	return "Worktree kept because " + o.Reason + ": " + o.Path
 }
 
-func (c *checkout) ownedBy(o Owner) bool {
-	if _, err := os.Stat(filepath.Join(c.gitDir, markerFile)); err == nil {
-		return true
-	}
-	if o.Provider != "codex" {
-		return false
-	}
-	b, err := os.ReadFile(filepath.Join(c.gitDir, codexOwnerFile))
-	if err != nil {
-		return false
-	}
-	var f struct {
-		OwnerThreadID string `json:"ownerThreadId"`
-	}
-	return json.Unmarshal(b, &f) == nil && f.OwnerThreadID != "" && f.OwnerThreadID == o.NativeID
-}
-
-// Cleanup removes the worktree dir is in once its session is archived. It
-// only touches linked worktrees the gateway created (or, for Codex, the one
-// Codex made for this thread), and keeps any that other panes (inUse
-// directories) still use or that hold work: uncommitted changes, or commits
-// no branch points to. Its branch is deleted only when merged, as `git
-// branch -d` decides, so commits are never lost. A nil Outcome means dir is
-// not such a worktree.
-func Cleanup(ctx context.Context, dir string, owner Owner, inUse []string) (*Outcome, error) {
+// Cleanup has Herdr remove the worktree dir is in once its session is
+// archived. It only touches linked worktrees the gateway created, and keeps
+// any that a Herdr workspace still has open or that Herdr refuses to remove
+// because of uncommitted changes. Herdr keeps the branch, so commits are
+// never lost. A nil Outcome means dir is not such a worktree.
+func Cleanup(ctx context.Context, h Herdr, dir string) (*Outcome, error) {
 	if dir == "" {
 		return nil, nil
 	}
@@ -187,102 +141,34 @@ func Cleanup(ctx context.Context, dir string, owner Owner, inUse []string) (*Out
 		return nil, nil // already gone
 	}
 	c, err := inspect(ctx, dir)
-	if err != nil || !c.linked() || !c.ownedBy(owner) {
+	if err != nil || !c.linked() {
+		return nil, nil
+	}
+	if _, err := os.Stat(filepath.Join(c.gitDir, markerFile)); err != nil {
 		return nil, nil
 	}
 	out := &Outcome{Path: c.top}
-	for _, d := range inUse {
-		if real, err := filepath.EvalSymlinks(d); err == nil {
-			d = real
-		}
-		if within(c.top, d) {
-			out.Reason = "another pane is still using it"
-			return out, nil
-		}
-	}
-	if reason := c.releaseLock(ctx); reason != "" {
-		out.Reason = reason
-		return out, nil
-	}
-	status, err := git(ctx, c.top, "status", "--porcelain", "--untracked-files=normal")
+	// Herdr removes a worktree through the workspace open in it.
+	ws, alreadyOpen, err := h.OpenWorktree(ctx, c.top)
 	if err != nil {
 		return nil, err
 	}
-	if status != "" {
+	if alreadyOpen {
+		out.Reason = "another pane is still using it"
+		return out, nil
+	}
+	err = h.RemoveWorktree(ctx, ws)
+	if err == nil {
+		out.Removed = true
+		return out, nil
+	}
+	if cerr := h.CloseWorkspace(ctx, ws); cerr != nil {
+		slog.Warn("closing the workspace opened to remove a worktree failed", "workspace", ws, "path", c.top, "error", cerr)
+	}
+	var herr *herdr.Error
+	if errors.As(err, &herr) && herr.Code == herdr.ErrDirtyWorktree {
 		out.Reason = "it has uncommitted changes"
 		return out, nil
 	}
-	branch, _ := git(ctx, c.top, "symbolic-ref", "--quiet", "--short", "HEAD")
-	if branch == "" {
-		// A detached HEAD's commits are only reachable from this worktree.
-		lost, err := git(ctx, c.top, "rev-list", "--max-count=1", "HEAD", "--not", "--branches", "--tags", "--remotes")
-		if err != nil {
-			return nil, err
-		}
-		if lost != "" {
-			out.Reason = "it has commits that are not on any branch"
-			return out, nil
-		}
-	}
-	if _, err := git(ctx, c.main(), "worktree", "remove", c.top); err != nil {
-		return nil, err
-	}
-	out.Removed = true
-	if branch != "" {
-		// Unmerged work stays on its branch.
-		git(ctx, c.main(), "branch", "-d", branch)
-	}
-	if owner.Provider == "codex" {
-		// Codex keeps each worktree in a bucket directory of its own.
-		os.Remove(filepath.Dir(c.top))
-	}
-	return out, nil
-}
-
-// claudeLock matches the reason Claude Code locks its --worktree checkouts
-// with: "claude session <name> (pid <pid> start <time>)".
-var claudeLock = regexp.MustCompile(`^claude session .*\(pid (\d+)\b`)
-
-// releaseLock unlocks a worktree locked by an agent that has exited and
-// returns why the worktree must be kept otherwise.
-func (c *checkout) releaseLock(ctx context.Context) string {
-	b, err := os.ReadFile(filepath.Join(c.gitDir, "locked"))
-	if err != nil {
-		return ""
-	}
-	m := claudeLock.FindSubmatch(b)
-	if m == nil {
-		return "it is locked"
-	}
-	pid, _ := strconv.Atoi(string(m[1]))
-	// The pane was just closed; give the agent a moment to exit.
-	deadline := time.Now().Add(LockWait)
-	for alive(pid) {
-		if time.Now().After(deadline) {
-			return "its agent is still running"
-		}
-		select {
-		case <-ctx.Done():
-			return "its agent is still running"
-		case <-time.After(100 * time.Millisecond):
-		}
-	}
-	if _, err := git(ctx, c.main(), "worktree", "unlock", c.top); err != nil {
-		return "it could not be unlocked"
-	}
-	return ""
-}
-
-func alive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	err := syscall.Kill(pid, 0)
-	return err == nil || errors.Is(err, syscall.EPERM)
-}
-
-// within reports whether p is root or inside it.
-func within(root, p string) bool {
-	rel, err := filepath.Rel(root, p)
-	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	return nil, err
 }

@@ -336,6 +336,30 @@ func (c *Client) CreateWorktree(ctx context.Context, cwd, label string) (workspa
 	return r.Workspace.WorkspaceID, r.RootPane.PaneID, r.Worktree.Path, nil
 }
 
+// OpenWorktree opens a workspace (without focusing it) in an existing linked
+// worktree. alreadyOpen means a workspace was open there before.
+func (c *Client) OpenWorktree(ctx context.Context, path string) (workspaceID string, alreadyOpen bool, err error) {
+	var r struct {
+		AlreadyOpen bool      `json:"already_open"`
+		Workspace   Workspace `json:"workspace"`
+	}
+	params := map[string]any{"path": path, "focus": false}
+	if err := c.Call(ctx, "worktree.open", params, &r); err != nil {
+		return "", false, err
+	}
+	return r.Workspace.WorkspaceID, r.AlreadyOpen, nil
+}
+
+// ErrDirtyWorktree is the code RemoveWorktree fails with when the checkout
+// has uncommitted or untracked changes.
+const ErrDirtyWorktree = "dirty_worktree_requires_force"
+
+// RemoveWorktree removes the checkout of a worktree workspace and closes the
+// workspace. Its branch is kept.
+func (c *Client) RemoveWorktree(ctx context.Context, workspaceID string) error {
+	return c.Call(ctx, "worktree.remove", map[string]any{"workspace_id": workspaceID}, nil)
+}
+
 // StartAgent launches an agent in a shell pane. Herdr returns agent_not_ready
 // when the agent is blocked by a startup dialog.
 func (c *Client) StartAgent(ctx context.Context, name, kind, paneID string, args []string, timeout time.Duration) error {

@@ -179,7 +179,7 @@ func serve(args []string) error {
 
 	srv := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           (&api.Server{AgentUpdates: agentupdate.New(ctx, cfg.CodexBinary, cfg.OpenCode.Binary, devinBinary), Sessions: svc, Terminal: hc, Uploads: up, Config: store, Sink: sink, Launcher: launch, Archive: archived, Usage: limits, DirectoryCheck: dirCheck}).Handler(),
+		Handler:           (&api.Server{AgentUpdates: agentupdate.New(ctx, cfg.CodexBinary, cfg.OpenCode.Binary, devinBinary), Sessions: svc, Terminal: hc, Uploads: up, Config: store, Sink: sink, Launcher: launch, Worktrees: hc, Archive: archived, Usage: limits, DirectoryCheck: dirCheck}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {

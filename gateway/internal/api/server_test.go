@@ -34,6 +34,8 @@ import (
 type fakeHerdr struct {
 	snap  *herdr.Snapshot
 	calls []string
+	// worktree is the checkout OpenWorktree opened a workspace in.
+	worktree string
 }
 
 func (f *fakeHerdr) Snapshot(context.Context) (*herdr.Snapshot, error) { return f.snap, nil }
@@ -78,6 +80,26 @@ func (f *fakeHerdr) Pane(_ context.Context, pane string) (*herdr.Pane, error) {
 func (f *fakeHerdr) ReportAgentSession(context.Context, string, string, string) error { return nil }
 func (f *fakeHerdr) ClosePane(_ context.Context, pane string) error {
 	f.calls = append(f.calls, "close-pane:"+pane)
+	return nil
+}
+
+// OpenWorktree reports a worktree as open when a pane is in it, as Herdr
+// does for the workspace open there.
+func (f *fakeHerdr) OpenWorktree(_ context.Context, path string) (string, bool, error) {
+	f.calls = append(f.calls, "open-worktree")
+	for _, p := range f.snap.Panes {
+		if rel, err := filepath.Rel(path, p.WorkingDir()); err == nil && !strings.HasPrefix(rel, "..") {
+			return p.WorkspaceID, true, nil
+		}
+	}
+	f.worktree = path
+	return "w8", false, nil
+}
+func (f *fakeHerdr) RemoveWorktree(_ context.Context, ws string) error {
+	f.calls = append(f.calls, "remove-worktree:"+ws)
+	if out, err := exec.Command("git", "-C", f.worktree, "worktree", "remove", f.worktree).CombinedOutput(); err != nil {
+		return &herdr.Error{Code: herdr.ErrDirtyWorktree, Message: string(out)}
+	}
 	return nil
 }
 func (f *fakeHerdr) CloseWorkspace(_ context.Context, ws string) error {
@@ -198,12 +220,13 @@ func newTestServer(t *testing.T) (*httptest.Server, *fakeProvider, *fakeHerdr, s
 			Herdr: fh, Roots: []string{root}, Providers: []providers.Provider{fp},
 			StartTimeout: time.Second, PollInterval: time.Millisecond, IdentityWait: 100 * time.Millisecond,
 		},
-		Archive:  arch,
-		Sessions: svc,
-		Terminal: fh,
-		Uploads:  uploads.New(t.TempDir(), time.Hour),
-		Config:   store,
-		Sink:     deadletter.Nop{},
+		Worktrees: fh,
+		Archive:   arch,
+		Sessions:  svc,
+		Terminal:  fh,
+		Uploads:   uploads.New(t.TempDir(), time.Hour),
+		Config:    store,
+		Sink:      deadletter.Nop{},
 	}
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)

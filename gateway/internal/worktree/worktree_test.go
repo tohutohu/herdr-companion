@@ -5,10 +5,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
-	"time"
+
+	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 )
 
 func run(t *testing.T, dir string, args ...string) string {
@@ -35,16 +37,11 @@ func newRepo(t *testing.T) string {
 	return repo
 }
 
-// addWorktree adds a worktree on a new branch (or detached when branch is
-// empty) and returns its path.
+// addWorktree adds a worktree on a new branch and returns its path.
 func addWorktree(t *testing.T, repo, name, branch string) string {
 	t.Helper()
 	wt := filepath.Join(filepath.Dir(repo), "worktrees", name)
-	if branch == "" {
-		run(t, repo, "worktree", "add", "-q", "--detach", wt)
-	} else {
-		run(t, repo, "worktree", "add", "-q", "-b", branch, wt)
-	}
+	run(t, repo, "worktree", "add", "-q", "-b", branch, wt)
 	return wt
 }
 
@@ -53,13 +50,49 @@ func exists(p string) bool {
 	return err == nil
 }
 
-func branches(t *testing.T, repo string) string {
-	return run(t, repo, "branch", "--format=%(refname:short)")
+// fakeHerdr removes worktrees the way Herdr does: `git worktree remove`
+// without --force, through the workspace open in the worktree.
+type fakeHerdr struct {
+	open   map[string]bool // worktrees a workspace is open in
+	fail   error           // returned by RemoveWorktree instead of removing
+	paths  map[string]string
+	calls  []string
+	nextWS int
 }
 
-var claude = Owner{Provider: "claude", NativeID: "s1"}
+func (h *fakeHerdr) OpenWorktree(_ context.Context, path string) (string, bool, error) {
+	h.calls = append(h.calls, "open "+path)
+	if h.open[path] {
+		return "w-open", true, nil
+	}
+	h.nextWS++
+	ws := "w" + strconv.Itoa(h.nextWS)
+	if h.paths == nil {
+		h.paths = map[string]string{}
+	}
+	h.paths[ws] = path
+	return ws, false, nil
+}
 
-func Testゲートウェイが作ったクリーンなworktreeは削除しマージ済みのブランチも消す(t *testing.T) {
+func (h *fakeHerdr) RemoveWorktree(_ context.Context, ws string) error {
+	h.calls = append(h.calls, "remove "+ws)
+	if h.fail != nil {
+		return h.fail
+	}
+	path := h.paths[ws]
+	out, err := exec.Command("git", "-C", path, "worktree", "remove", path).CombinedOutput()
+	if err != nil {
+		return &herdr.Error{Code: herdr.ErrDirtyWorktree, Message: string(out)}
+	}
+	return nil
+}
+
+func (h *fakeHerdr) CloseWorkspace(_ context.Context, ws string) error {
+	h.calls = append(h.calls, "close "+ws)
+	return nil
+}
+
+func Testゲートウェイが作ったクリーンなworktreeはHerdrに削除させる(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepo(t)
 	wt := addWorktree(t, repo, "a", "worktree/a")
@@ -67,19 +100,20 @@ func Testゲートウェイが作ったクリーンなworktreeは削除しマー
 		t.Fatal(err)
 	}
 	os.MkdirAll(filepath.Join(wt, "sub"), 0o755)
+	h := &fakeHerdr{}
 
-	out, err := Cleanup(ctx, filepath.Join(wt, "sub"), claude, nil)
+	out, err := Cleanup(ctx, h, filepath.Join(wt, "sub"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if out == nil || !out.Removed || out.Path != wt || out.Warning() != "" {
 		t.Fatalf("outcome = %+v", out)
 	}
+	if want := []string{"open " + wt, "remove w1"}; !slices.Equal(h.calls, want) {
+		t.Errorf("calls = %q, want %q", h.calls, want)
+	}
 	if exists(wt) {
 		t.Error("worktree directory is still there")
-	}
-	if b := branches(t, repo); b != "main" {
-		t.Errorf("branches = %q", b)
 	}
 }
 
@@ -87,154 +121,73 @@ func Testマーカーのないworktreeや通常のチェックアウトには触
 	ctx := context.Background()
 	repo := newRepo(t)
 	wt := addWorktree(t, repo, "mine", "mine")
-	for _, dir := range []string{wt, repo, t.TempDir(), filepath.Join(repo, "missing")} {
-		out, err := Cleanup(ctx, dir, claude, nil)
+	h := &fakeHerdr{}
+	for _, dir := range []string{wt, repo, t.TempDir(), filepath.Join(repo, "missing"), ""} {
+		out, err := Cleanup(ctx, h, dir)
 		if err != nil || out != nil {
 			t.Errorf("%s: outcome = %+v, err = %v", dir, out, err)
 		}
 	}
-	if !exists(wt) {
-		t.Error("an unmarked worktree was removed")
+	if len(h.calls) != 0 {
+		t.Errorf("calls = %q", h.calls)
 	}
 	if err := Mark(ctx, repo, "claude"); err == nil {
 		t.Error("the main checkout must not be marked")
 	}
 }
 
-func Test作業中の変更があるworktreeは理由を添えて残す(t *testing.T) {
+func Test作業中の変更があるworktreeは開いたワークスペースを閉じて理由を添えて残す(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepo(t)
 	wt := addWorktree(t, repo, "a", "worktree/a")
 	Mark(ctx, wt, "claude")
 	os.WriteFile(filepath.Join(wt, "new.txt"), []byte("x"), 0o644)
+	h := &fakeHerdr{}
 
-	out, err := Cleanup(ctx, wt, claude, nil)
+	out, err := Cleanup(ctx, h, wt)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if out == nil || out.Removed || out.Warning() != "Worktree kept because it has uncommitted changes: "+wt {
 		t.Fatalf("outcome = %+v", out)
 	}
+	if want := []string{"open " + wt, "remove w1", "close w1"}; !slices.Equal(h.calls, want) {
+		t.Errorf("calls = %q, want %q", h.calls, want)
+	}
 	if !exists(filepath.Join(wt, "new.txt")) {
 		t.Error("the uncommitted file is gone")
 	}
 }
 
-func Test無視されたファイルだけならworktreeを削除する(t *testing.T) {
-	ctx := context.Background()
-	repo := newRepo(t)
-	os.WriteFile(filepath.Join(repo, ".gitignore"), []byte("build/\n"), 0o644)
-	run(t, repo, "add", ".")
-	run(t, repo, "commit", "-qm", "ignore")
-	wt := addWorktree(t, repo, "a", "worktree/a")
-	Mark(ctx, wt, "opencode")
-	os.MkdirAll(filepath.Join(wt, "build"), 0o755)
-	os.WriteFile(filepath.Join(wt, "build", "out"), []byte("x"), 0o644)
-
-	out, err := Cleanup(ctx, wt, Owner{Provider: "opencode"}, nil)
-	if err != nil || out == nil || !out.Removed {
-		t.Fatalf("outcome = %+v, err = %v", out, err)
-	}
-}
-
-func Testマージされていないコミットのあるブランチはworktreeを消しても残す(t *testing.T) {
+func TestHerdrのワークスペースが開いているworktreeは残す(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepo(t)
 	wt := addWorktree(t, repo, "a", "worktree/a")
 	Mark(ctx, wt, "claude")
-	os.WriteFile(filepath.Join(wt, "feature.txt"), []byte("x"), 0o644)
-	run(t, wt, "add", ".")
-	run(t, wt, "commit", "-qm", "feature")
+	h := &fakeHerdr{open: map[string]bool{wt: true}}
 
-	out, err := Cleanup(ctx, wt, claude, nil)
-	if err != nil || out == nil || !out.Removed {
-		t.Fatalf("outcome = %+v, err = %v", out, err)
-	}
-	if b := branches(t, repo); b != "main\nworktree/a" {
-		t.Errorf("branches = %q", b)
-	}
-}
-
-func Test別のペインが使っているworktreeは残す(t *testing.T) {
-	ctx := context.Background()
-	repo := newRepo(t)
-	wt := addWorktree(t, repo, "a", "worktree/a")
-	Mark(ctx, wt, "claude")
-	os.MkdirAll(filepath.Join(wt, "sub"), 0o755)
-
-	out, err := Cleanup(ctx, wt, claude, []string{repo, filepath.Join(wt, "sub")})
+	out, err := Cleanup(ctx, h, wt)
 	if err != nil || out == nil || out.Removed || out.Reason != "another pane is still using it" {
 		t.Fatalf("outcome = %+v, err = %v", out, err)
 	}
-	// 名前が前方一致するだけの別ディレクトリは使用中とみなさない
-	out, err = Cleanup(ctx, wt, claude, []string{wt + "-other"})
-	if err != nil || out == nil || !out.Removed {
-		t.Fatalf("outcome = %+v, err = %v", out, err)
+	if want := []string{"open " + wt}; !slices.Equal(h.calls, want) {
+		t.Errorf("calls = %q, want %q", h.calls, want)
 	}
 }
 
-func TestCodexのworktreeは所有スレッドのセッションでだけ削除する(t *testing.T) {
+func Test削除できなかったときは開いたワークスペースを閉じてエラーを返す(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepo(t)
-	bucket := filepath.Join(filepath.Dir(repo), "codex", "114f")
-	wt := filepath.Join(bucket, "repo")
-	run(t, repo, "worktree", "add", "-q", "--detach", wt)
-	gitDir := run(t, wt, "rev-parse", "--path-format=absolute", "--git-dir")
-	os.WriteFile(filepath.Join(gitDir, "codex-thread.json"), []byte(`{"version":1,"ownerThreadId":"th-1"}`), 0o600)
+	wt := addWorktree(t, repo, "a", "worktree/a")
+	Mark(ctx, wt, "claude")
+	h := &fakeHerdr{fail: &herdr.Error{Code: "worktree_remove_failed", Message: "locked"}}
 
-	for _, o := range []Owner{{Provider: "codex", NativeID: "th-2"}, {Provider: "claude", NativeID: "th-1"}} {
-		if out, err := Cleanup(ctx, wt, o, nil); err != nil || out != nil {
-			t.Fatalf("%+v: outcome = %+v, err = %v", o, out, err)
-		}
-	}
-	out, err := Cleanup(ctx, wt, Owner{Provider: "codex", NativeID: "th-1"}, nil)
-	if err != nil || out == nil || !out.Removed {
+	out, err := Cleanup(ctx, h, wt)
+	if err == nil || out != nil {
 		t.Fatalf("outcome = %+v, err = %v", out, err)
 	}
-	if exists(bucket) {
-		t.Error("the empty Codex bucket directory is still there")
-	}
-}
-
-func Testブランチのないコミットが残るdetachedなworktreeは削除しない(t *testing.T) {
-	ctx := context.Background()
-	repo := newRepo(t)
-	wt := addWorktree(t, repo, "d", "")
-	Mark(ctx, wt, "codex")
-	os.WriteFile(filepath.Join(wt, "f.txt"), []byte("x"), 0o644)
-	run(t, wt, "add", ".")
-	run(t, wt, "commit", "-qm", "detached work")
-
-	out, err := Cleanup(ctx, wt, Owner{Provider: "codex", NativeID: "x"}, nil)
-	if err != nil || out == nil || out.Removed || out.Reason != "it has commits that are not on any branch" {
-		t.Fatalf("outcome = %+v, err = %v", out, err)
-	}
-}
-
-func Test終了したClaudeのロックは外して削除し他のロックは残す(t *testing.T) {
-	ctx := context.Background()
-	repo := newRepo(t)
-	dead := addWorktree(t, repo, "dead", "worktree-dead")
-	Mark(ctx, dead, "claude")
-	// PID 1 以外で存在しないであろう大きな番号を使う
-	run(t, repo, "worktree", "lock", "--reason", "claude session dead (pid 999999 start Thu Sep 24 02:04:24 2026)", dead)
-	other := addWorktree(t, repo, "other", "worktree-other")
-	Mark(ctx, other, "claude")
-	run(t, repo, "worktree", "lock", "--reason", "on a USB drive", other)
-	running := addWorktree(t, repo, "running", "worktree-running")
-	Mark(ctx, running, "claude")
-	run(t, repo, "worktree", "lock", "--reason", "claude session running (pid "+strconv.Itoa(os.Getpid())+" start now)", running)
-	defer func(d time.Duration) { LockWait = d }(LockWait)
-	LockWait = 0
-
-	if out, err := Cleanup(ctx, dead, claude, nil); err != nil || out == nil || !out.Removed {
-		t.Fatalf("dead: outcome = %+v, err = %v", out, err)
-	}
-	if out, err := Cleanup(ctx, other, claude, nil); err != nil || out == nil || out.Removed || out.Reason != "it is locked" {
-		t.Fatalf("other: outcome = %+v, err = %v", out, err)
-	}
-	if out, err := Cleanup(ctx, running, claude, nil); err != nil || out == nil || out.Removed || out.Reason != "its agent is still running" {
-		t.Fatalf("running: outcome = %+v, err = %v", out, err)
+	if want := []string{"open " + wt, "remove w1", "close w1"}; !slices.Equal(h.calls, want) {
+		t.Errorf("calls = %q, want %q", h.calls, want)
 	}
 }
 

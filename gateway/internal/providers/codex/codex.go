@@ -815,15 +815,6 @@ func (p *Provider) remoteArgs(cwd string) []string {
 	return nil
 }
 
-// WorktreeArgs uses Codex's own --worktree, which the TUI only supports for
-// local sessions: with the shared daemon running, Herdr makes the worktree.
-func (p *Provider) WorktreeArgs(opts providers.LaunchOptions, _ string) ([]string, bool) {
-	if _, err := os.Stat(p.daemonSock); err == nil {
-		return nil, false
-	}
-	return append(p.LaunchArgs(opts), "--worktree"), true
-}
-
 // ResumeArgs reopens a thread with `codex resume <id>`.
 func (p *Provider) ResumeArgs(nativeID, cwd string) []string {
 	return append([]string{"resume", nativeID, "-c", "check_for_update_on_startup=false"}, p.remoteArgs(cwd)...)

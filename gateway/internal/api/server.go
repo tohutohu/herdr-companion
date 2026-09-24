@@ -52,7 +52,9 @@ type Server struct {
 	Config         *config.Store
 	Sink           deadletter.Sink
 	Launcher       *launcher.Launcher
-	Archive        *archive.Store
+	// Worktrees removes the worktrees of archived sessions.
+	Worktrees worktree.Herdr
+	Archive   *archive.Store
 	// Usage is nil when subscription limit reporting is turned off.
 	Usage *usage.Service
 }
@@ -199,8 +201,7 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, sessionID, op stri
 		errors.Is(err, launcher.ErrNoPendingTrust):
 		status = http.StatusNotFound
 	case errors.Is(err, providers.ErrNotLive), errors.Is(err, providers.ErrInteractionGone),
-		errors.Is(err, errAlreadyLive), errors.Is(err, launcher.ErrNoCwd), errors.Is(err, launcher.ErrCwdGone),
-		errors.Is(err, launcher.ErrStartRefused):
+		errors.Is(err, errAlreadyLive), errors.Is(err, launcher.ErrNoCwd), errors.Is(err, launcher.ErrCwdGone):
 		status = http.StatusConflict
 	case errors.Is(err, providers.ErrUnsupported):
 		status = http.StatusUnprocessableEntity
@@ -783,30 +784,21 @@ func (s *Server) archiveOne(ctx context.Context, id string) (archivedSession, bo
 		sess.Status, sess.PaneID, sess.CanSend = model.StatusOffline, "", false
 	}
 	sess.Archived = true
-	return archivedSession{Session: sess, Warning: s.removeWorktree(ctx, sess, res)}, stopped, nil
+	return archivedSession{Session: sess, Warning: s.removeWorktree(ctx, sess)}, stopped, nil
 }
 
-// removeWorktree deletes the session's worktree and returns a warning when
-// it was kept or could not be removed.
-func (s *Server) removeWorktree(ctx context.Context, sess model.Session, res *sessions.Resolved) string {
-	var inUse []string
-	if snap, err := s.Launcher.Herdr.Snapshot(ctx); err == nil {
-		for _, pn := range snap.Panes {
-			inUse = append(inUse, pn.WorkingDir())
-		}
-	} else {
-		return "" // unknown which panes still use it; leave it alone
-	}
-	owner := worktree.Owner{Provider: res.Provider.Name(), NativeID: res.NativeID}
-	out, err := worktree.Cleanup(ctx, sess.Cwd, owner, inUse)
+// removeWorktree has Herdr remove the session's worktree and returns a
+// warning when it was kept or could not be removed.
+func (s *Server) removeWorktree(ctx context.Context, sess model.Session) string {
+	out, err := worktree.Cleanup(ctx, s.Worktrees, sess.Cwd)
 	if err != nil {
-		slog.Warn("removing worktree failed", "provider", owner.Provider, "session_id", sess.ID, "cwd", sess.Cwd, "error", err)
+		slog.Warn("removing worktree failed", "provider", sess.Provider, "session_id", sess.ID, "cwd", sess.Cwd, "error", err)
 		return "Could not remove the session's worktree: " + err.Error()
 	}
 	if out == nil {
 		return ""
 	}
-	slog.Info("session worktree cleaned up", "provider", owner.Provider, "session_id", sess.ID, "path", out.Path, "removed", out.Removed, "reason", out.Reason)
+	slog.Info("session worktree cleaned up", "provider", sess.Provider, "session_id", sess.ID, "path", out.Path, "removed", out.Removed, "reason", out.Reason)
 	return out.Warning()
 }
 

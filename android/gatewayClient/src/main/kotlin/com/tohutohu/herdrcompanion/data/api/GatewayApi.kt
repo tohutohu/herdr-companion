@@ -103,9 +103,8 @@ class GatewayApi(
         json.decodeFromString(post(url("v1", "sessions", id, "archive"), ByteArray(0).toRequestBody(jsonType)))
 
     /**
-     * Archives all [ids] in one gateway request. Running sessions are stopped;
-     * each may wait a few seconds for its agent to exit before its worktree
-     * is removed.
+     * Archives all [ids] in one gateway request. Running sessions are stopped
+     * and their worktrees removed, one after another.
      */
     suspend fun archive(ids: List<String>): List<SessionDto> =
         slowPost<ArchiveSessionsResponse>(url("v1", "sessions", "archive"), json.encodeToString(ArchiveSessionsRequest(ids))).sessions

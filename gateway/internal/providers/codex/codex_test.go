@@ -664,20 +664,6 @@ func Test起動引数にdaemon接続とモデルとエフォート指定を含�
 	}
 }
 
-func Test自前のworktreeはdaemonを使わない起動のときだけ使う(t *testing.T) {
-	sock := filepath.Join(t.TempDir(), "cx.sock")
-	p := New("codex", sock, &fakeTerm{}, deadletter.Nop{})
-	args, ok := p.WorktreeArgs(providers.LaunchOptions{Model: "gpt-6-mini", Cwd: "/w/app"}, "app-1")
-	if got := strings.Join(args, " "); !ok || got != "-c check_for_update_on_startup=false --model gpt-6-mini --worktree" {
-		t.Errorf("without daemon = %q, %v", got, ok)
-	}
-	// --remote の TUI は --worktree を受け付けないので Herdr に任せる
-	os.WriteFile(sock, nil, 0o600)
-	if args, ok := p.WorktreeArgs(providers.LaunchOptions{Cwd: "/w/app"}, "app-1"); ok || args != nil {
-		t.Errorf("with daemon = %v, %v", args, ok)
-	}
-}
-
 func TestCodexが作ったworktreeのスレッドはペインではなくスレッドの作業ディレクトリを使う(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", home)

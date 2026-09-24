@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -32,14 +31,13 @@ var (
 	ErrNoCwd           = errors.New("session has no known working directory")
 	ErrNoPendingTrust  = errors.New("no launch is waiting on a trust answer for this pane")
 	ErrCwdGone         = errors.New("the session's working directory no longer exists")
-	// ErrStartRefused wraps an agent's own explanation of why it did not start.
-	ErrStartRefused = errors.New("the agent did not start")
 )
 
 // Herdr is the subset of the Herdr client used to launch agents.
 type Herdr interface {
 	CreateWorkspace(ctx context.Context, cwd, label string) (workspaceID, paneID string, err error)
 	CreateWorktree(ctx context.Context, cwd, label string) (workspaceID, paneID, path string, err error)
+	RemoveWorktree(ctx context.Context, workspaceID string) error
 	StartAgent(ctx context.Context, name, kind, paneID string, args []string, timeout time.Duration) error
 	ReadVisible(ctx context.Context, paneID string) (string, error)
 	SendKeys(ctx context.Context, paneID string, keys ...string) error
@@ -216,8 +214,8 @@ type StartRequest struct {
 	// Trust accepts the agent's folder-trust dialog on the user's behalf.
 	// Without it the launch stops at the dialog and reports TrustRequired.
 	Trust bool `json:"trust"`
-	// Worktree starts the session in a new git worktree of Cwd's repository:
-	// made by the agent when it can, otherwise by Herdr.
+	// Worktree starts the session in a new git worktree of Cwd's repository,
+	// made by Herdr.
 	Worktree bool `json:"worktree,omitempty"`
 }
 
@@ -280,31 +278,23 @@ func (l *Launcher) Start(ctx context.Context, req StartRequest) (*StartResult, e
 	plan := launchPlan{p: p, lp: lp, cwd: cwd, trust: req.Trust, prompt: req.Prompt, mode: req.Mode,
 		logKV: []any{"model", req.Model, "effort", req.Effort, "mode", req.Mode, "worktree", req.Worktree}}
 	if req.Worktree {
+		// Herdr makes the worktree and opens the workspace in it.
 		top, err := worktree.Toplevel(ctx, cwd)
 		if err != nil {
 			return nil, err
 		}
-		if wl, ok := p.(providers.WorktreeLauncher); ok {
-			plan.args, plan.agentWorktree = wl.WorktreeArgs(opts, worktreeName(top))
+		ws, pane, path, err := l.Herdr.CreateWorktree(ctx, cwd, filepath.Base(top))
+		if err != nil {
+			return nil, fmt.Errorf("create worktree: %w", err)
 		}
-		if !plan.agentWorktree {
-			// The agent cannot make one here, so Herdr does and the
-			// workspace opens in it.
-			ws, pane, path, err := l.Herdr.CreateWorktree(ctx, cwd, filepath.Base(top))
-			if err != nil {
-				return nil, fmt.Errorf("create worktree: %w", err)
-			}
-			if err := worktree.Mark(ctx, path, p.Name()); err != nil {
-				slog.Warn("marking worktree failed", "provider", p.Name(), "path", path, "error", err)
-			}
-			plan.ws, plan.pane, plan.worktree = ws, pane, path
-			plan.cwd, opts.Cwd = path, path
+		if err := worktree.Mark(ctx, path, p.Name()); err != nil {
+			slog.Warn("marking worktree failed", "provider", p.Name(), "path", path, "error", err)
 		}
+		plan.ws, plan.pane, plan.worktree = ws, pane, path
+		plan.cwd, opts.Cwd = path, path
 	}
-	if !plan.agentWorktree {
-		plan.args = lp.LaunchArgs(opts)
-	}
-	if prep, ok := p.(providers.PreparedLauncher); ok && !plan.agentWorktree {
+	plan.args = lp.LaunchArgs(opts)
+	if prep, ok := p.(providers.PreparedLauncher); ok {
 		plan.args, plan.knownID, err = prep.PrepareLaunch(ctx, opts)
 		if err != nil {
 			l.discard(ctx, plan.ws, plan.worktree, p)
@@ -312,23 +302,6 @@ func (l *Launcher) Start(ctx context.Context, req StartRequest) (*StartResult, e
 		}
 	}
 	return l.launch(ctx, plan)
-}
-
-// worktreeName names a worktree an agent creates after its repository.
-func worktreeName(top string) string {
-	name := strings.Map(func(r rune) rune {
-		if r < 0x80 && (r == '-' || r == '_' || r == '.' || r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z') {
-			return r
-		}
-		return '-'
-	}, filepath.Base(top))
-	name = strings.Trim(name, "-.")
-	if name == "" {
-		name = "session"
-	}
-	b := make([]byte, 3)
-	rand.Read(b)
-	return name + "-" + hex.EncodeToString(b)
 }
 
 // Resume reopens an existing session (not currently in Herdr) in a new
@@ -386,9 +359,7 @@ type launchPlan struct {
 	// ws and pane are the workspace Herdr opened in a worktree it created
 	// for the session (worktree); empty to open a new one in cwd.
 	ws, pane, worktree string
-	// agentWorktree means args make the agent create its own worktree.
-	agentWorktree bool
-	logKV         []any
+	logKV              []any
 }
 
 // launch runs the agent in a new workspace.
@@ -405,32 +376,11 @@ func (l *Launcher) launch(ctx context.Context, plan launchPlan) (*StartResult, e
 	res := &StartResult{PaneID: pane}
 	log := slog.With("provider", p.Name(), "operation", "launch", "pane", pane)
 
-	var before []string
-	if plan.agentWorktree {
-		before, _ = worktree.List(ctx, cwd)
-	}
-	startErr := l.startAgent(ctx, p, pane, plan.args)
 	wt := plan.worktree
-	var refused error
-	if plan.agentWorktree {
-		// A failed start made no worktree worth waiting for.
-		wait := l.identityWait()
-		if startErr != nil {
-			wait = 0
-		}
-		wt, refused = l.markAgentWorktree(ctx, p, pane, cwd, before, wait)
-	}
-	if startErr != nil && refused == nil {
-		refused = l.startFailure(ctx, p, pane)
-	}
-	if startErr != nil || refused != nil {
-		err := fmt.Errorf("start agent: %w", startErr)
-		if refused != nil {
-			err = fmt.Errorf("%w: %w", ErrStartRefused, refused)
-		}
+	if err := l.startAgent(ctx, p, pane, plan.args); err != nil {
 		// Don't leave an empty shell workspace (or checkout) behind.
 		l.discard(ctx, ws, wt, p)
-		return nil, err
+		return nil, fmt.Errorf("start agent: %w", err)
 	}
 	l.mu.Lock()
 	if l.panes == nil {
@@ -453,73 +403,25 @@ func (l *Launcher) launch(ctx context.Context, plan launchPlan) (*StartResult, e
 	return l.finishPending(ctx, pane, pl), nil
 }
 
-// markAgentWorktree finds the worktree an agent created on start by
-// comparing the repository's worktrees with those before, and marks it as
-// the gateway's so archiving the session removes it. Herdr reports the
-// agent started as soon as its process runs, which can be before it has
-// made the worktree, or before it quits because it could not, so this polls
-// for up to wait and returns the agent's reason when the pane shows one.
-func (l *Launcher) markAgentWorktree(ctx context.Context, p providers.Provider, pane, cwd string, before []string, wait time.Duration) (string, error) {
-	deadline := time.Now().Add(wait)
-	var added []string
-	for {
-		added = added[:0]
-		if after, err := worktree.List(ctx, cwd); err == nil {
-			for _, a := range after {
-				if !slices.Contains(before, a) {
-					added = append(added, a)
-				}
-			}
-		}
-		if len(added) > 0 {
-			break
-		}
-		if why := l.startFailure(ctx, p, pane); why != nil {
-			return "", why
-		}
-		if !time.Now().Before(deadline) || !sleep(ctx, l.pollInterval()) {
-			break
-		}
-	}
-	if len(added) != 1 {
-		slog.Warn("no single new worktree after the agent started; none marked", "provider", p.Name(), "cwd", cwd, "worktrees", added)
-		return "", nil
-	}
-	if err := worktree.Mark(ctx, added[0], p.Name()); err != nil {
-		slog.Warn("marking worktree failed", "provider", p.Name(), "path", added[0], "error", err)
-		return "", nil
-	}
-	return added[0], nil
-}
-
-// startFailure is the agent's own reason, read from its pane, for not
-// starting; nil when the provider does not recognise the screen.
-func (l *Launcher) startFailure(ctx context.Context, p providers.Provider, pane string) error {
-	ex, ok := p.(providers.StartFailureExplainer)
-	if !ok {
-		return nil
-	}
-	screen, err := l.Herdr.ReadVisible(ctx, pane)
-	if err != nil {
-		return nil
-	}
-	return ex.StartFailure(screen)
-}
-
 // discard closes a workspace opened for a launch that is not going ahead,
-// and removes the worktree made for it.
-func (l *Launcher) discard(ctx context.Context, ws, wt string, p providers.Provider) {
+// and has Herdr remove the worktree (wt) the workspace was opened in.
+func (l *Launcher) discard(ctx context.Context, ws, wt string, p providers.Provider) error {
 	ctx = context.WithoutCancel(ctx)
-	if ws != "" {
-		if err := l.Herdr.CloseWorkspace(ctx, ws); err != nil {
-			slog.Warn("closing workspace of a cancelled launch failed", "provider", p.Name(), "workspace", ws, "error", err)
-		}
+	if ws == "" {
+		return nil
 	}
 	if wt != "" {
-		if _, err := worktree.Cleanup(ctx, wt, worktree.Owner{Provider: p.Name()}, nil); err != nil {
-			slog.Warn("removing worktree of a cancelled launch failed", "provider", p.Name(), "path", wt, "error", err)
+		err := l.Herdr.RemoveWorktree(ctx, ws)
+		if err == nil {
+			return nil
 		}
+		slog.Warn("removing worktree of a cancelled launch failed", "provider", p.Name(), "path", wt, "error", err)
 	}
+	err := l.Herdr.CloseWorkspace(ctx, ws)
+	if err != nil {
+		slog.Warn("closing workspace of a cancelled launch failed", "provider", p.Name(), "workspace", ws, "error", err)
+	}
+	return err
 }
 
 // AnswerTrust resumes a launch stopped at the folder-trust dialog. Declining
@@ -534,11 +436,7 @@ func (l *Launcher) AnswerTrust(ctx context.Context, pane string, accept bool) (*
 		delete(l.panes, pane)
 		l.mu.Unlock()
 		slog.Info("folder trust declined", "provider", pl.p.Name(), "pane", pane, "cwd", pl.cwd)
-		err := l.Herdr.CloseWorkspace(ctx, pl.ws)
-		if err == nil {
-			l.discard(ctx, "", pl.worktree, pl.p)
-		}
-		return &StartResult{PaneID: pane}, err
+		return &StartResult{PaneID: pane}, l.discard(ctx, pl.ws, pl.worktree, pl.p)
 	}
 	if l.passStartupDialog(ctx, pl.lp, pane, true) != startupReady {
 		l.putPending(pane, pl)
