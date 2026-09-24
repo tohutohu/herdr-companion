@@ -74,6 +74,7 @@ object DesktopPreferences {
     private const val WINDOW_KEY = "window"
     private const val SIDEBAR_KEY = "sidebarWidth"
     private const val NOTIFICATIONS_KEY = "notificationsEnabled"
+    private const val UPDATE_CHECKS_KEY = "automaticUpdateChecks"
     private const val DIRECTORY_FAVORITES_KEY = "directoryFavorites"
     private const val DIRECTORY_RECENTS_KEY = "directoryRecents"
     private const val AGENT_PRESETS_KEY = "agentPresets"
@@ -144,6 +145,10 @@ object DesktopPreferences {
     var notificationsEnabled: Boolean
         get() = store.getBoolean(NOTIFICATIONS_KEY, true)
         set(value) { store.putBoolean(NOTIFICATIONS_KEY, value) }
+
+    var automaticUpdateChecks: Boolean
+        get() = store.getBoolean(UPDATE_CHECKS_KEY, true)
+        set(value) { store.putBoolean(UPDATE_CHECKS_KEY, value) }
 
     fun clearWindow() {
         store.remove(WINDOW_KEY)

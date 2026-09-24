@@ -50,6 +50,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -136,15 +137,18 @@ fun main() {
                 setSingletonImageLoaderFactory { context ->
                     desktopImageLoader(context, http) { connectionSource.current.settings }
                 }
+                val updateScope = rememberCoroutineScope()
+                val updater = remember { DesktopUpdater(updateScope, onQuit = ::exitApplication) }
                 DesktopWindowPersistence(window)
                 LaunchedEffect(appState) {
                     appState.restoreLayout(DesktopPreferences.loadLayout())
                 }
+                LaunchedEffect(updater) { updater.startAutomaticChecks() }
                 DisposableEffect(appState) {
                     onDispose { appState.close() }
                 }
                 SharedTheme {
-                    DesktopShell(appState, api, onCloseWindow = ::exitApplication)
+                    DesktopShell(appState, api, updater, onCloseWindow = ::exitApplication)
                 }
             }
         }
@@ -176,6 +180,7 @@ private fun DesktopWindowPersistence(window: java.awt.Window) {
 private fun FrameWindowScope.DesktopShell(
     state: DesktopAppState,
     api: GatewayApi,
+    updater: DesktopUpdater,
     onCloseWindow: () -> Unit,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
@@ -183,6 +188,7 @@ private fun FrameWindowScope.DesktopShell(
     var searchFocused by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
     var aboutOpen by remember { mutableStateOf(false) }
+    var updateDialogOpen by remember { mutableStateOf(false) }
     val searchFocusRequester = remember { FocusRequester() }
     val sessions = state.sessions.filterDesktopSessions(query)
     val highlightedId = if (searchFocused) sessions.getOrNull(highlightedIndex)?.session?.id else null
@@ -201,6 +207,11 @@ private fun FrameWindowScope.DesktopShell(
         focusSearch = ::focusSearch,
         openSettings = { settingsOpen = true },
         openAbout = { aboutOpen = true },
+        checkForUpdates = {
+            updateDialogOpen = true
+            updater.check()
+        },
+        updatesSupported = updater.supported,
         closeWindow = onCloseWindow,
     )
 
@@ -283,6 +294,7 @@ private fun FrameWindowScope.DesktopShell(
                 TextButton(onClick = { state.dismissError(); actions.refresh() }) { Text("Retry") }
             }
         }
+            DesktopUpdateBanner(updater, onShowDetails = { updateDialogOpen = true })
             state.notice?.let { message ->
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 2.dp),
@@ -495,11 +507,15 @@ private fun FrameWindowScope.DesktopShell(
     }
 
     if (settingsOpen) DesktopSettingsDialog(state, api, onDismiss = { settingsOpen = false })
+    if (updateDialogOpen) DesktopUpdateDialog(updater, onDismiss = { updateDialogOpen = false })
     if (aboutOpen) {
         AlertDialog(
             onDismissRequest = { aboutOpen = false },
             title = { Text("About Herdr Companion") },
-            text = { Text("Herdr Companion\nCompose Multiplatform client for the Herdr Companion Gateway.") },
+            text = {
+                val version = updater.currentVersion?.let { " $it" }.orEmpty()
+                Text("Herdr Companion$version\nCompose Multiplatform client for the Herdr Companion Gateway.")
+            },
             confirmButton = { TextButton(onClick = { aboutOpen = false }) { Text("OK") } },
         )
     }
@@ -616,6 +632,8 @@ private class DesktopActions(
     private val focusSearch: () -> Unit,
     private val openSettings: () -> Unit,
     private val openAbout: () -> Unit,
+    private val checkForUpdates: () -> Unit,
+    val updatesSupported: Boolean,
     private val closeWindow: () -> Unit,
 ) {
     fun newSession() = state.openNewSession()
@@ -623,6 +641,7 @@ private class DesktopActions(
     fun openSearch() = focusSearch()
     fun settings() = openSettings()
     fun about() = openAbout()
+    fun updates() = checkForUpdates()
     fun close() = closeWindow()
     fun openSession(id: String) = state.openSession(id)
     fun archive() = state.detail?.session?.let { state.requestArchive(it.toRef()) }
@@ -647,6 +666,7 @@ private fun FrameWindowScope.DesktopMenuBar(actions: DesktopActions) {
     MenuBar {
         Menu("Herdr Companion", mnemonic = 'H') {
             Item("About Herdr Companion", onClick = actions::about)
+            Item("Check for Updates…", enabled = actions.updatesSupported, onClick = actions::updates)
             Item("Settings…", shortcut = KeyShortcut(Key.Comma, ctrl = true), onClick = actions::settings)
             Separator()
             Item("Close Window", shortcut = KeyShortcut(Key.W, ctrl = true), onClick = actions::close)
@@ -684,6 +704,7 @@ private fun ConnectionIndicator(status: DesktopConnectionState, label: String) {
 @Composable
 private fun DesktopSettingsDialog(state: DesktopAppState, api: GatewayApi, onDismiss: () -> Unit) {
     var notifications by remember { mutableStateOf(DesktopPreferences.notificationsEnabled) }
+    var updateChecks by remember { mutableStateOf(DesktopPreferences.automaticUpdateChecks) }
     var presets by remember { mutableStateOf(DesktopPreferences.loadAgentPresets()) }
     var editorVisible by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<AgentPreset?>(null) }
@@ -747,6 +768,10 @@ private fun DesktopSettingsDialog(state: DesktopAppState, api: GatewayApi, onDis
                     Text("Desktop notifications", modifier = Modifier.weight(1f))
                     Switch(checked = notifications, onCheckedChange = { notifications = it })
                 }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Check for updates automatically", modifier = Modifier.weight(1f))
+                    Switch(checked = updateChecks, onCheckedChange = { updateChecks = it })
+                }
                 Text(
                     "Gateway host and port are owned by the macOS menu-bar manager.",
                     style = MaterialTheme.typography.labelSmall,
@@ -757,6 +782,7 @@ private fun DesktopSettingsDialog(state: DesktopAppState, api: GatewayApi, onDis
         confirmButton = {
             TextButton(onClick = {
                 DesktopPreferences.notificationsEnabled = notifications
+                DesktopPreferences.automaticUpdateChecks = updateChecks
                 onDismiss()
             }) { Text("Done") }
         },
