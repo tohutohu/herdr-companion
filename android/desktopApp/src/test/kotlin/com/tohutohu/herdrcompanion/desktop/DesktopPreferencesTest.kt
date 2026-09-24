@@ -60,6 +60,7 @@ class DesktopPreferencesTest {
         val value = AgentPresets(
             presets = listOf(AgentPreset("codex", "gpt-6-astra", "high", "Astra", "High")),
             lastUsed = AgentPreset("claude", model = "sonnet"),
+            lastWorktree = true,
         )
 
         assertEquals(value, decodeAgentPresets(encodeAgentPresets(value)))

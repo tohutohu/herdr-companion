@@ -29,7 +29,14 @@ data class NewSessionUiState(
     val savedPresets: List<AgentPreset>,
     val currentPreset: AgentPreset,
     val favorite: Boolean,
-)
+    /** The user's choice to start in a new git worktree. */
+    val worktree: Boolean = false,
+) {
+    /** Only a folder in a git repository can have a worktree. */
+    val worktreeAvailable get() = listing?.git == true
+
+    val startsInWorktree get() = worktree && worktreeAvailable
+}
 
 data class PendingNewSessionStart(
     val request: StartSessionRequest,
@@ -50,6 +57,7 @@ sealed interface NewSessionAction {
     data object CustomizeAgent : NewSessionAction
     data object ToggleFavorite : NewSessionAction
     data object ToggleFavoriteDirectory : NewSessionAction
+    data object ToggleWorktree : NewSessionAction
     data class OpenDirectory(val path: String) : NewSessionAction
     data object OpenParent : NewSessionAction
     data object ShowMkdir : NewSessionAction

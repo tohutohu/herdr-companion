@@ -51,6 +51,7 @@ fun NewSessionRoute(
     var model by rememberSaveable { mutableStateOf("") }
     var effort by rememberSaveable { mutableStateOf("") }
     var mode by rememberSaveable { mutableStateOf("") }
+    var worktree by rememberSaveable { mutableStateOf(false) }
     var catalog by remember { mutableStateOf(ModelsResponse()) }
     var modelsLoading by remember { mutableStateOf(false) }
     var modelsError by remember { mutableStateOf<String?>(null) }
@@ -72,7 +73,7 @@ fun NewSessionRoute(
         val id = starts.enqueue(request)
         container.scope.launch {
             runCatching { shortcutStore.recordUsed(request.cwd) }
-            runCatching { presetStore.recordUsed(preset) }
+            runCatching { presetStore.recordUsed(preset, request.worktree) }
         }
         onStarted(id)
     }
@@ -111,6 +112,7 @@ fun NewSessionRoute(
             effort = it.effort
             mode = it.mode
         }
+        worktree = loaded.lastWorktree
     }
 
     LaunchedEffect(provider) {
@@ -156,6 +158,7 @@ fun NewSessionRoute(
         savedPresets = saved,
         currentPreset = current,
         favorite = favorite,
+        worktree = worktree,
     )
 
     NewSessionScreen(
@@ -189,6 +192,7 @@ fun NewSessionRoute(
                 NewSessionAction.CustomizeAgent -> showPicker = true
                 NewSessionAction.ToggleFavorite -> scope.launch { presetStore.toggle(current) }
                 NewSessionAction.ToggleFavoriteDirectory -> scope.launch { shortcutStore.toggleFavorite(path) }
+                NewSessionAction.ToggleWorktree -> worktree = !worktree
                 is NewSessionAction.OpenDirectory -> scope.launch { load(action.path) }
                 NewSessionAction.OpenParent -> scope.launch { load(listing?.parent.orEmpty()) }
                 NewSessionAction.ShowMkdir -> showMkdir = true
@@ -223,6 +227,7 @@ fun NewSessionRoute(
                             model.ifEmpty { null },
                             effort.ifEmpty { null },
                             mode.ifEmpty { null },
+                            worktree = state.startsInWorktree,
                         )
                         val preset = current
                         scope.launch {

@@ -48,6 +48,11 @@ class SwipeActionTest {
     @Test
     fun `複数の結果は件数で報告する`() {
         assertEquals("3 sessions archived", BatchOutcome(total = 3, failed = 0).message("Archived", "archived"))
+        assertEquals(
+            "2 sessions archived\nKept the worktree at /w/a because it has uncommitted changes.",
+            BatchOutcome(total = 2, failed = 0, warning = "Kept the worktree at /w/a because it has uncommitted changes.")
+                .message("Archived", "archived"),
+        )
         assertEquals("Failed: boom", BatchOutcome(total = 2, failed = 2, failure = "boom").message("Archived", "archived"))
         assertEquals(
             "2 archived, 1 failed: boom",

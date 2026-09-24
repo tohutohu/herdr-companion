@@ -77,11 +77,14 @@ class SessionRepository(
 
     suspend fun archive(sessionId: String) = archive(listOf(sessionId))
 
-    suspend fun archive(sessionIds: List<String>) {
+    /** Returns the gateway's warnings, e.g. a worktree kept because it has changes. */
+    suspend fun archive(sessionIds: List<String>): List<String> {
         val now = System.currentTimeMillis()
-        api.archive(sessionIds).forEach { s ->
+        val archived = api.archive(sessionIds)
+        archived.forEach { s ->
             db.sessions().upsertPreservingUnread(s.toEntity(now, listed = false))
         }
+        return archived.mapNotNull { it.warning }
     }
 
     suspend fun unarchive(sessionId: String) {

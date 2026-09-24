@@ -43,7 +43,8 @@ class AgentPresetsStore(private val context: Context) {
     }
 
     /** Remembered so that the next session starts from the same combination. */
-    suspend fun recordUsed(preset: AgentPreset) = update { it.copy(lastUsed = preset) }
+    suspend fun recordUsed(preset: AgentPreset, worktree: Boolean) =
+        update { it.copy(lastUsed = preset, lastWorktree = worktree) }
 
     private suspend fun update(f: (AgentPresets) -> AgentPresets) {
         context.agentPresetStore.edit { it[key] = json.encodeToString(f(it.presets())) }

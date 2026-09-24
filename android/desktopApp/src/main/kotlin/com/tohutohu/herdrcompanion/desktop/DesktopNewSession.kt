@@ -79,6 +79,7 @@ fun DesktopNewSessionWindow(
     var model by rememberSaveable { mutableStateOf("") }
     var effort by rememberSaveable { mutableStateOf("") }
     var mode by rememberSaveable { mutableStateOf("") }
+    var worktree by rememberSaveable { mutableStateOf(presets.lastWorktree) }
     var catalog by remember { mutableStateOf(ModelsResponse()) }
     var modelsLoading by remember { mutableStateOf(false) }
     var modelsError by remember { mutableStateOf<String?>(null) }
@@ -115,7 +116,7 @@ fun DesktopNewSessionWindow(
         // last-used selection even when it is not one of the favorites.
         shortcuts = shortcuts.copy(recents = pushRecent(shortcuts.recents, request.cwd))
         DesktopPreferences.saveDirectoryShortcuts(shortcuts)
-        presets = presets.copy(lastUsed = preset)
+        presets = presets.copy(lastUsed = preset, lastWorktree = request.worktree)
         DesktopPreferences.saveAgentPresets(presets)
         scope.launch {
             try {
@@ -195,6 +196,7 @@ fun DesktopNewSessionWindow(
                 model = model.ifEmpty { null },
                 effort = effort.ifEmpty { null },
                 mode = mode.ifEmpty { null },
+                worktree = worktree && listing?.git == true,
             )
             scope.launch {
                 checking = true
@@ -233,6 +235,7 @@ fun DesktopNewSessionWindow(
         savedPresets = presets.presets,
         currentPreset = currentPreset,
         favorite = presets.presets.any { it.key == currentPreset.key },
+        worktree = worktree,
     )
 
     DialogWindow(
@@ -337,6 +340,7 @@ fun DesktopNewSessionWindow(
                             DesktopPreferences.saveDirectoryShortcuts(shortcuts)
                         }
                         NewSessionAction.CustomizeAgent -> showPicker = true
+                        NewSessionAction.ToggleWorktree -> worktree = !worktree
                         is NewSessionAction.OpenDirectory -> scope.launch { load(action.path) }
                         NewSessionAction.OpenParent -> scope.launch { load(listing?.parent) }
                         NewSessionAction.ShowMkdir -> showMkdir = true

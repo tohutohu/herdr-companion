@@ -24,7 +24,7 @@ data class BatchOutcome(
     /** [done] describes a single success, [verb] a batch ("archived"). */
     fun message(done: String, verb: String): String = when {
         total == 1 -> failure?.let { "Failed: $it" } ?: warning ?: done
-        failed == 0 -> "$total sessions $verb"
+        failed == 0 -> listOfNotNull("$total sessions $verb", warning).joinToString("\n")
         failed == total -> "Failed: $failure"
         else -> "${total - failed} $verb, $failed failed: $failure"
     }

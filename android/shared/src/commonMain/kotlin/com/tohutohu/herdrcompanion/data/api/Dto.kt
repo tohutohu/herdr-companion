@@ -28,6 +28,8 @@ data class SessionDto(
     /** What the session's tokens are worth; null when nothing is known. */
     val cost: CostDto? = null,
     val archived: Boolean = false,
+    /** Only in archive responses: why the session's worktree was kept. */
+    val warning: String? = null,
 ) {
     val isLive get() = status != Status.OFFLINE
 }
@@ -202,7 +204,13 @@ object Status {
 data class DirEntryDto(val name: String, val path: String)
 
 @Serializable
-data class DirListingDto(val path: String = "", val parent: String? = null, val entries: List<DirEntryDto> = emptyList())
+data class DirListingDto(
+    val path: String = "",
+    val parent: String? = null,
+    val entries: List<DirEntryDto> = emptyList(),
+    /** [path] is in a git repository, so a session can start in a new worktree. */
+    val git: Boolean = false,
+)
 
 @Serializable
 data class MkdirRequest(val parent: String, val name: String)
@@ -222,6 +230,8 @@ data class StartSessionRequest(
     val effort: String? = null,
     /** Null starts the session in the agent's own mode. */
     val mode: String? = null,
+    /** Starts in a new git worktree, removed again when the session is archived. */
+    val worktree: Boolean = false,
 )
 
 @Serializable

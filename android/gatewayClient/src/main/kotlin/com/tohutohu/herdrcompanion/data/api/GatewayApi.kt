@@ -95,18 +95,20 @@ class GatewayApi(
     suspend fun archivedSessions(): List<SessionDto> =
         get<SessionsResponse>(url("v1", "sessions", query = mapOf("archived" to "true"))).sessions
 
-    /** Archiving a running session closes its Herdr pane. */
+    /**
+     * Archiving a running session closes its Herdr pane and removes the
+     * worktree it ran in; [SessionDto.warning] says why one was kept.
+     */
     suspend fun archive(id: String): SessionDto =
         json.decodeFromString(post(url("v1", "sessions", id, "archive"), ByteArray(0).toRequestBody(jsonType)))
 
-    /** Archives all [ids] in one gateway request. Running sessions are stopped. */
+    /**
+     * Archives all [ids] in one gateway request. Running sessions are stopped;
+     * each may wait a few seconds for its agent to exit before its worktree
+     * is removed.
+     */
     suspend fun archive(ids: List<String>): List<SessionDto> =
-        json.decodeFromString<ArchiveSessionsResponse>(
-            post(
-                url("v1", "sessions", "archive"),
-                json.encodeToString(ArchiveSessionsRequest(ids)).toRequestBody(jsonType),
-            ),
-        ).sessions
+        slowPost<ArchiveSessionsResponse>(url("v1", "sessions", "archive"), json.encodeToString(ArchiveSessionsRequest(ids))).sessions
 
     suspend fun unarchive(id: String): SessionDto =
         json.decodeFromString(execute(request(url("v1", "sessions", id, "archive")).delete().build()))

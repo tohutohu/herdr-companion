@@ -193,6 +193,11 @@ class GatewayApiTest {
         api.startSession(StartSessionRequest("codex", "/w/app", "", true))
         val plain = server.takeRequest().body!!.utf8()
         assertTrue(!plain.contains("model") && !plain.contains("effort") && !plain.contains("mode"))
+        assertTrue(!plain.contains("worktree"))
+
+        server.enqueue(MockResponse.Builder().code(201).body("""{"paneId":"w1:p4"}""").build())
+        api.startSession(StartSessionRequest("codex", "/w/app", "", true, worktree = true))
+        assertTrue(server.takeRequest().body!!.utf8().contains("\"worktree\":true"))
 
         server.enqueue(MockResponse.Builder().code(201).body("""{"paneId":"w1:p3","trustRequired":true}""").build())
         assertTrue(api.startSession(StartSessionRequest("codex", "/w/app", "", false)).trustRequired)
@@ -264,5 +269,25 @@ class GatewayApiTest {
         assertEquals("/v1/sessions/archive", req.target)
         assertEquals("""{"ids":["claude:s1","codex:s2"]}""", req.body!!.utf8())
         assertEquals("Bearer secret", req.headers["Authorization"])
+    }
+
+    @Test
+    fun `アーカイブ時にworktreeを残した理由とフォルダがリポジトリかどうかを受け取る`() = runBlocking {
+        val kept = """{"id":"claude:s1","provider":"claude","status":"offline","updatedAt":"2026-09-17T10:00:00Z","archived":true,""" +
+            """"warning":"Kept the worktree at /w/a because it has uncommitted changes."}"""
+        server.enqueue(MockResponse.Builder().body(kept).build())
+        assertEquals("Kept the worktree at /w/a because it has uncommitted changes.", api.archive("claude:s1").warning)
+        server.takeRequest()
+
+        server.enqueue(MockResponse.Builder().body("""{"sessions":[$kept]}""").build())
+        assertEquals(listOf("Kept the worktree at /w/a because it has uncommitted changes."), api.archive(listOf("claude:s1")).map { it.warning })
+        server.takeRequest()
+
+        server.enqueue(MockResponse.Builder().body("""{"path":"/w/app","entries":[],"git":true}""").build())
+        assertTrue(api.directories("/w/app").git)
+        server.takeRequest()
+        // 古いGatewayは git を返さないので worktree は選べない
+        server.enqueue(MockResponse.Builder().body("""{"path":"/w/app","entries":[]}""").build())
+        assertTrue(!api.directories("/w/app").git)
     }
 }

@@ -20,7 +20,12 @@ data class AgentPreset(
 }
 
 @Serializable
-data class AgentPresets(val presets: List<AgentPreset> = emptyList(), val lastUsed: AgentPreset? = null)
+data class AgentPresets(
+    val presets: List<AgentPreset> = emptyList(),
+    val lastUsed: AgentPreset? = null,
+    /** Whether the last session started in a new worktree. */
+    val lastWorktree: Boolean = false,
+)
 
 fun togglePreset(presets: List<AgentPreset>, preset: AgentPreset): List<AgentPreset> =
     if (presets.any { it.key == preset.key }) presets.filterNot { it.key == preset.key } else presets + preset

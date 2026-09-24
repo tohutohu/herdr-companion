@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.CreateNewFolder
@@ -34,6 +35,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -203,6 +206,21 @@ fun NewSessionScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        if (state.worktreeAvailable) {
+                            FilterChip(
+                                selected = state.worktree,
+                                enabled = !state.starting && !state.checking,
+                                onClick = { onAction(NewSessionAction.ToggleWorktree) },
+                                label = { Text("Worktree") },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Default.AccountTree,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(FilterChipDefaults.IconSize),
+                                    )
+                                },
+                            )
+                        }
                         Button(
                             enabled = startEnabled,
                             modifier = Modifier.weight(1f),
@@ -214,7 +232,7 @@ fun NewSessionScreen(
                                 else -> null
                             }
                             AnimatedContent(
-                                targetState = busyLabel ?: "Start ${providerName(state.provider)} in ${state.path.substringAfterLast('/').ifEmpty { "…" }}",
+                                targetState = busyLabel ?: startLabel(state),
                                 transitionSpec = { fadeIn(tween(160)) togetherWith fadeOut(tween(100)) using SizeTransform(clip = false) },
                                 contentAlignment = Alignment.Center,
                                 label = "startButton",
@@ -331,4 +349,11 @@ fun NewSessionScreen(
             }
         }
     }
+}
+
+/** The Start button's text: which agent starts where. */
+internal fun startLabel(state: NewSessionUiState): String {
+    val folder = state.path.substringAfterLast('/').ifEmpty { "…" }
+    val where = if (state.startsInWorktree) "$folder (worktree)" else folder
+    return "Start ${providerName(state.provider)} in $where"
 }

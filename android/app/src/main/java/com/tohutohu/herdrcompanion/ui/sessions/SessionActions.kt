@@ -96,7 +96,7 @@ class SessionActions internal constructor(
                     ?.let { unarchive(it.map { s -> s.copy(archived = true) }) }
             },
             undoable = !stopping,
-        ) { repo.archive(it.map(SessionRef::id)); null }
+        ) { repo.archive(it.map(SessionRef::id)).joinToString("\n").ifEmpty { null } }
     }
 
     /**
@@ -141,7 +141,7 @@ class SessionActions internal constructor(
                 message = msg,
                 actionLabel = if (offerUndo) "Undo" else null,
                 // Leave time to notice a mistake; plain confirmations go quickly.
-                duration = if (offerUndo) SnackbarDuration.Long else SnackbarDuration.Short,
+                duration = if (offerUndo || warning != null) SnackbarDuration.Long else SnackbarDuration.Short,
             )
             if (result == SnackbarResult.ActionPerformed) undo?.invoke(succeeded)
         }
@@ -182,7 +182,7 @@ class SessionActions internal constructor(
             val result = host.showSnackbar(
                 message = msg,
                 actionLabel = if (offerUndo) "Undo" else null,
-                duration = if (offerUndo) SnackbarDuration.Long else SnackbarDuration.Short,
+                duration = if (offerUndo || warning != null) SnackbarDuration.Long else SnackbarDuration.Short,
             )
             if (result == SnackbarResult.ActionPerformed) undo?.invoke(succeeded)
         }

@@ -90,6 +90,9 @@ class DesktopAppState(
         private set
     var transientError by mutableStateOf<String?>(null)
         private set
+    /** Something the user should know that is not an error, e.g. a worktree that was kept. */
+    var notice by mutableStateOf<String?>(null)
+        private set
     var busySessionIds by mutableStateOf<Set<String>>(emptySet())
         private set
     var archiveConfirmation by mutableStateOf<SessionUiModel?>(null)
@@ -623,7 +626,7 @@ class DesktopAppState(
         setBusy(id, true)
         scope.launch {
             try {
-                api.archive(id)
+                api.archive(id).warning?.let { notice = it }
                 if (id in openSessionIdsState) closeSession(id)
                 refreshSessions()
                 logger.info("session archived")
@@ -679,6 +682,10 @@ class DesktopAppState(
 
     fun reportError(message: String) {
         transientError = message
+    }
+
+    fun dismissNotice() {
+        notice = null
     }
 
     fun dismissError() {

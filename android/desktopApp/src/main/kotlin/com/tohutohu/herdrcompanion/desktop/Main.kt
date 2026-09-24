@@ -283,6 +283,15 @@ private fun FrameWindowScope.DesktopShell(
                 TextButton(onClick = { state.dismissError(); actions.refresh() }) { Text("Retry") }
             }
         }
+            state.notice?.let { message ->
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                TextButton(onClick = state::dismissNotice) { Text("Dismiss") }
+            }
+        }
             HorizontalDivider()
             BoxWithConstraints(Modifier.fillMaxSize()) {
             var sidebarWidth by remember { mutableStateOf(DesktopPreferences.loadSidebarWidth().dp) }
