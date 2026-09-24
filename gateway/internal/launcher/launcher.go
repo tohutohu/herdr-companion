@@ -105,6 +105,9 @@ type Listing struct {
 	Path    string `json:"path"`             // empty for the list of roots
 	Parent  string `json:"parent,omitempty"` // empty at a root
 	Entries []Dir  `json:"entries"`
+	// Git means Path is in a git working tree, so a session can start in a
+	// new worktree of it.
+	Git bool `json:"git,omitempty"`
 }
 
 func (l *Launcher) rootFor(real string) (string, bool) {
@@ -143,7 +146,7 @@ func (l *Launcher) resolveDir(path string) (string, error) {
 func (l *Launcher) ResolveDir(path string) (string, error) { return l.resolveDir(path) }
 
 // List lists the roots (path == "") or the visible subdirectories of path.
-func (l *Launcher) List(path string) (*Listing, error) {
+func (l *Launcher) List(ctx context.Context, path string) (*Listing, error) {
 	if path == "" {
 		out := &Listing{}
 		for _, r := range l.Roots {
@@ -162,6 +165,8 @@ func (l *Launcher) List(path string) (*Listing, error) {
 		return nil, err
 	}
 	out := &Listing{Path: real, Entries: []Dir{}}
+	_, err = worktree.Toplevel(ctx, real)
+	out.Git = err == nil
 	if _, isRoot := l.rootFor(real); !isRoot {
 		out.Parent = filepath.Dir(real)
 	}
@@ -407,7 +412,12 @@ func (l *Launcher) launch(ctx context.Context, plan launchPlan) (*StartResult, e
 	startErr := l.startAgent(ctx, p, pane, plan.args)
 	wt := plan.worktree
 	if plan.agentWorktree {
-		wt = l.markAgentWorktree(ctx, p, cwd, before)
+		// A failed start made no worktree worth waiting for.
+		wait := l.identityWait()
+		if startErr != nil {
+			wait = 0
+		}
+		wt = l.markAgentWorktree(ctx, p, cwd, before, wait)
 	}
 	if startErr != nil {
 		err := fmt.Errorf("start agent: %w", startErr)
@@ -445,22 +455,27 @@ func (l *Launcher) launch(ctx context.Context, plan launchPlan) (*StartResult, e
 
 // markAgentWorktree finds the worktree an agent created on start by
 // comparing the repository's worktrees with those before, and marks it as
-// the gateway's so archiving the session removes it.
-func (l *Launcher) markAgentWorktree(ctx context.Context, p providers.Provider, cwd string, before []string) string {
-	after, err := worktree.List(ctx, cwd)
-	if err != nil {
-		return ""
-	}
+// the gateway's so archiving the session removes it. Herdr reports the
+// agent started as soon as its process runs, which can be before it has
+// made the worktree, so this polls for up to wait.
+func (l *Launcher) markAgentWorktree(ctx context.Context, p providers.Provider, cwd string, before []string, wait time.Duration) string {
+	deadline := time.Now().Add(wait)
 	var added []string
-	for _, a := range after {
-		if !slices.Contains(before, a) {
-			added = append(added, a)
+	for {
+		added = added[:0]
+		if after, err := worktree.List(ctx, cwd); err == nil {
+			for _, a := range after {
+				if !slices.Contains(before, a) {
+					added = append(added, a)
+				}
+			}
+		}
+		if len(added) > 0 || !time.Now().Before(deadline) || !sleep(ctx, l.pollInterval()) {
+			break
 		}
 	}
 	if len(added) != 1 {
-		if len(added) > 1 {
-			slog.Warn("several new worktrees; none marked", "provider", p.Name(), "cwd", cwd, "worktrees", added)
-		}
+		slog.Warn("no single new worktree after the agent started; none marked", "provider", p.Name(), "cwd", cwd, "worktrees", added)
 		return ""
 	}
 	if err := worktree.Mark(ctx, added[0], p.Name()); err != nil {

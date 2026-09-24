@@ -432,7 +432,7 @@ whole thing off, and `herdr-mobile-gateway usage` prints one read.
 | GET | `/v1/agents` | installed CLI versions and latest update status/output |
 | POST | `/v1/agents/{provider}/update` | start the provider's update command (`claude update`, `codex update`, `opencode upgrade`, or `devin update`); repeated requests while running share the same job |
 | GET | `/v1/models?provider=` | models and efforts offered for new sessions `{models[{id, name, description?, default?, efforts?[]}], efforts?[{id, name, description?, default?}]}` |
-| GET | `/v1/directories?path=` | workspace roots, or subfolders of `path` |
+| GET | `/v1/directories?path=` | workspace roots, or subfolders of `path` (`git` when `path` is in a repository) |
 | POST | `/v1/directories` | create `{parent, name}` under a root |
 | GET | `/v1/sessions?archived=true` | archived sessions |
 | GET | `/v1/sessions/{id}` | one session |

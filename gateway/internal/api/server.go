@@ -728,7 +728,7 @@ func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listDirectories(w http.ResponseWriter, r *http.Request) {
-	res, err := s.Launcher.List(r.URL.Query().Get("path"))
+	res, err := s.Launcher.List(r.Context(), r.URL.Query().Get("path"))
 	if err != nil {
 		s.fail(w, r, "", "list_directories", err)
 		return

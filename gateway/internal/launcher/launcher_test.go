@@ -34,11 +34,11 @@ func Testルート配下のディレクトリだけを一覧できる(t *testing
 	root, outside := setupRoots(t)
 	l := &Launcher{Roots: []string{root}}
 
-	roots, err := l.List("")
+	roots, err := l.List(context.Background(), "")
 	if err != nil || len(roots.Entries) != 1 || roots.Entries[0].Path != root {
 		t.Fatalf("roots = %+v, %v", roots, err)
 	}
-	got, err := l.List(root)
+	got, err := l.List(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,12 +50,12 @@ func Testルート配下のディレクトリだけを一覧できる(t *testing
 	if strings.Join(names, ",") != "App-a,app-b" || got.Parent != "" {
 		t.Errorf("entries = %v parent = %q", names, got.Parent)
 	}
-	sub, _ := l.List(filepath.Join(root, "App-a"))
+	sub, _ := l.List(context.Background(), filepath.Join(root, "App-a"))
 	if sub.Parent != root {
 		t.Errorf("parent = %q", sub.Parent)
 	}
 	for _, p := range []string{outside, filepath.Join(root, "escape"), root + "/../secret", "workspace"} {
-		if _, err := l.List(p); !errors.Is(err, files.ErrForbidden) {
+		if _, err := l.List(context.Background(), p); !errors.Is(err, files.ErrForbidden) {
 			t.Errorf("%s: err = %v", p, err)
 		}
 	}
@@ -677,9 +677,13 @@ func Test自前でworktreeを作れるエージェントには自前のworktree�
 	p := &worktreeProvider{}
 	l.Providers = []providers.Provider{p}
 	var wt string
+	// エージェントはHerdrに起動を報告されたあとでworktreeを作ることがある
 	fh.onStart = func() {
 		wt = filepath.Join(repo, ".claude", "worktrees", p.name)
-		gitRun(t, repo, "worktree", "add", "-q", "-b", "worktree-"+p.name, wt)
+		go func() {
+			time.Sleep(20 * time.Millisecond)
+			gitRun(t, repo, "worktree", "add", "-q", "-b", "worktree-"+p.name, wt)
+		}()
 	}
 
 	res, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: repo, Model: "haiku", Worktree: true})
@@ -704,6 +708,15 @@ func TestGitリポジトリでない場所ではworktreeで起動しない(t *te
 	_, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: filepath.Join(root, "app-b"), Worktree: true})
 	if !errors.Is(err, worktree.ErrNotRepository) || len(fh.calls) != 0 {
 		t.Fatalf("err = %v calls = %v", err, fh.calls)
+	}
+	// 一覧でもworktreeを選べるディレクトリかどうかを返す
+	repo := filepath.Join(root, "repo")
+	os.MkdirAll(filepath.Join(repo, "sub"), 0o755)
+	gitRepo(t, repo)
+	for dir, want := range map[string]bool{repo: true, filepath.Join(repo, "sub"): true, filepath.Join(root, "app-b"): false} {
+		if got, err := l.List(context.Background(), dir); err != nil || got.Git != want {
+			t.Errorf("%s: git = %v, %v", dir, got.Git, err)
+		}
 	}
 }
 
