@@ -36,7 +36,10 @@ open "/Applications/Herdr Companion.app"
 
 # Mac menu-bar app (macOS 13+, Swift and Go)
 bash macos/scripts/build-dmg.sh                 # native-architecture DMG, ad-hoc signed by default
+swift test --package-path macos                 # updater logic tests
 ```
+
+Both Mac apps update themselves from the latest GitHub Release (`docs/macos-release.md#アプリ内アップデート`); keep the release asset names stable.
 
 ### APK build requests
 

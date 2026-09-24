@@ -66,6 +66,10 @@ jobs:
           env -u GOROOT go test ./...
           env -u GOROOT go vet ./...
 
+      - name: Run Gateway Manager checks
+        working-directory: macos
+        run: swift test
+
       - name: Build Android release APK
         working-directory: android
         env:

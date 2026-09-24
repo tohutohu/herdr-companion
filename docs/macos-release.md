@@ -203,12 +203,28 @@ git push origin v1.0.0
 
 tag名と`version.properties`が一致しないreleaseはwrapperが停止します。
 
+## アプリ内アップデート
+
+`Herdr Companion.app`と`Herdr Companion Gateway.app`は、それぞれ自分でGitHub Releasesの最新版（`releases/latest`、draft・prereleaseを除く）を確認して更新します。
+
+- 確認: 起動5秒後と6時間ごと（設定でオフにできる）、およびUIの「Herdr Companion → Check for Updates…」／Gateway Managerの「アップデートを確認」。更新があるとUIはツールバー下にバナーを出し、Gateway Managerはメニューバーアイコンを`arrow.down.app`に変える。
+- インストールは利用者がボタンを押したときだけ行う。`Herdr-Companion-x.y.z.dmg`または`Herdr-Companion-Gateway-x.y.z.dmg`をダウンロードし、GitHubが返すassetの`digest`（なければ`.sha256` asset）とSHA-256を照合する。
+- DMGを読み取り専用でmountし、中のappのBundle ID・`CFBundleShortVersionString`・`codesign --verify --deep --strict`を確認する。インストール済みappにTeam IDがある場合は同じTeam IDの署名だけを受け入れる（ad-hoc署名の現行版からDeveloper ID版への移行は許可）。
+- 検証済みappをインストール先と同じフォルダの`.<App名>.app.update/`へコピーし、アプリ終了後に`/bin/sh`のhelperが旧bundleと入れ替えて開き直す。入れ替えに失敗したときは旧bundleを戻す。ログは同じフォルダの`update.log`に残る。
+- Gateway Managerは入れ替え前に子Gatewayを止め、`autoStart`を保ったまま再起動するので、新しいversionがGatewayを起動し直す。UIは開いていたsessionを起動時に復元する。
+- DMG上・App Translocation下で起動したapp、またはインストール先フォルダへ書き込めない場合は更新せず、Applicationsへの移動かリリースページからの更新を案内する。
+
+アプリ自身がダウンロードしたファイルにはquarantine属性が付かないため、ad-hoc署名のままでも更新後にGatekeeperの確認は出ません。初回インストールは従来どおりDMGから行います。
+
+**updaterはrelease assetの名前に依存します。** `Herdr-Companion-x.y.z.dmg`／`Herdr-Companion-Gateway-x.y.z.dmg`とその`.sha256`、tag `vx.y.z`の形式を変えると、既存の利用者が更新を受け取れなくなります。
+
 ## Known limitations / 次フェーズ
 
 今回の配布では、次を実装していません。
 
 - IntelまたはUniversal Binary
-- Sparkle等のautomatic updater、release channel、rollback
+- release channel（stable/beta）、updateとは独立した署名鍵による検証、更新後のrollback
+- 利用者の操作なしの自動インストール（確認は自動、インストールはボタン操作）
 
 実装済みのruntime連携は次のとおりです。
 
@@ -218,6 +234,4 @@ tag名と`version.properties`が一致しないreleaseはwrapperが停止しま�
 4. UIとmanagerの両方でper-user instance lockを取得する
 5. login itemは`SMAppService.mainApp`で管理し、承認待ち状態からSystem Settingsを開ける
 
-次フェーズでは、現行の別アプリ構成を保ったまま、UIとGatewayを同じrelease manifestで配布し、stable/beta等のrelease channel、独立したupdate signing、staged update、旧bundle保持によるrollbackを追加します。
-
-automatic updaterは今回のrelease pipelineへ追加していません。
+次フェーズでは、stable/beta等のrelease channel、独立したupdate signing、旧bundle保持によるrollbackを検討します。

@@ -47,6 +47,10 @@ Firebase APIキーをAndroidアプリに制限する場合、配布APKのパッ�
 - Gatewayがクラッシュした場合は状態が停止に変わります。managerの「Gatewayを起動」またはCompose UIの「Start Gateway manager」で再起動してください。
 - ログイン時起動を有効にするとmanagerの起動後にGatewayも自動起動します。承認待ちの場合はアプリ内のボタンからシステム設定を開けます。
 
+## アップデート
+
+起動時と6時間ごとにGitHub Releasesの最新版を確認します。更新があるとメニューバーアイコンが変わり、パネルの「アップデート」から「インストールして再起動」できます。DMGのチェックサム・Bundle ID・バージョン・署名を確認してから入れ替え、Gatewayを起動し直します。接続中の端末は一時的に切断されます。自動確認はパネルでオフにできます。詳細は[macOS release guide](../docs/macos-release.md#アプリ内アップデート)を参照してください。
+
 ## ビルド・DMG
 
 Xcode Command Line Tools（Swift）、Go、JDK 17、arm64 macOSが必要です。UIとGatewayを別々に含むrelease成果物はルートのwrapperで作成します。
