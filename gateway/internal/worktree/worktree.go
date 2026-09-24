@@ -118,6 +118,9 @@ type Outcome struct {
 	Removed bool   `json:"removed"`
 	// Reason says why the worktree was kept.
 	Reason string `json:"reason,omitempty"`
+	// Branch is the worktree's branch, kept when it has unmerged commits.
+	Branch     string `json:"branch,omitempty"`
+	BranchKept bool   `json:"branchKept,omitempty"`
 }
 
 // Warning is a sentence for the user when the worktree was kept.
@@ -131,8 +134,9 @@ func (o *Outcome) Warning() string {
 // Cleanup has Herdr remove the worktree dir is in once its session is
 // archived. It only touches linked worktrees the gateway created, and keeps
 // any that a Herdr workspace still has open or that Herdr refuses to remove
-// because of uncommitted changes. Herdr keeps the branch, so commits are
-// never lost. A nil Outcome means dir is not such a worktree.
+// because of uncommitted changes. Herdr keeps the branch; it is then deleted
+// only when merged, as `git branch -d` decides, so commits are never lost.
+// A nil Outcome means dir is not such a worktree.
 func Cleanup(ctx context.Context, h Herdr, dir string) (*Outcome, error) {
 	if dir == "" {
 		return nil, nil
@@ -147,7 +151,8 @@ func Cleanup(ctx context.Context, h Herdr, dir string) (*Outcome, error) {
 	if _, err := os.Stat(filepath.Join(c.gitDir, markerFile)); err != nil {
 		return nil, nil
 	}
-	out := &Outcome{Path: c.top}
+	branch, _ := git(ctx, c.top, "symbolic-ref", "--quiet", "--short", "HEAD")
+	out := &Outcome{Path: c.top, Branch: branch}
 	// Herdr removes a worktree through the workspace open in it.
 	ws, alreadyOpen, err := h.OpenWorktree(ctx, c.top)
 	if err != nil {
@@ -160,6 +165,11 @@ func Cleanup(ctx context.Context, h Herdr, dir string) (*Outcome, error) {
 	err = h.RemoveWorktree(ctx, ws)
 	if err == nil {
 		out.Removed = true
+		if branch != "" {
+			// Unmerged work stays on its branch.
+			_, err := git(ctx, c.main(), "branch", "-d", branch)
+			out.BranchKept = err != nil
+		}
 		return out, nil
 	}
 	if cerr := h.CloseWorkspace(ctx, ws); cerr != nil {

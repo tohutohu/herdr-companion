@@ -824,7 +824,7 @@ func (s *Server) removeWorktree(ctx context.Context, sess model.Session) string 
 	if out == nil {
 		return ""
 	}
-	slog.Info("session worktree cleaned up", "provider", sess.Provider, "session_id", sess.ID, "path", out.Path, "removed", out.Removed, "reason", out.Reason)
+	slog.Info("session worktree cleaned up", "provider", sess.Provider, "session_id", sess.ID, "path", out.Path, "removed", out.Removed, "reason", out.Reason, "branch", out.Branch, "branch_kept", out.BranchKept)
 	return out.Warning()
 }
 

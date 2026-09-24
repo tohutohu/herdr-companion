@@ -45,6 +45,10 @@ func addWorktree(t *testing.T, repo, name, branch string) string {
 	return wt
 }
 
+func branches(t *testing.T, repo string) string {
+	return run(t, repo, "branch", "--format=%(refname:short)")
+}
+
 func exists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
@@ -115,6 +119,27 @@ func Testゲートウェイが作ったクリーンなworktreeはHerdrに削除�
 	if exists(wt) {
 		t.Error("worktree directory is still there")
 	}
+	if b := branches(t, repo); b != "main" || out.BranchKept {
+		t.Errorf("branches = %q, kept = %v", b, out.BranchKept)
+	}
+}
+
+func Testマージされていないコミットのあるブランチはworktreeを消しても残す(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepo(t)
+	wt := addWorktree(t, repo, "a", "worktree/a")
+	Mark(ctx, wt, "claude")
+	os.WriteFile(filepath.Join(wt, "feature.txt"), []byte("x"), 0o644)
+	run(t, wt, "add", ".")
+	run(t, wt, "commit", "-qm", "feature")
+
+	out, err := Cleanup(ctx, &fakeHerdr{}, wt)
+	if err != nil || out == nil || !out.Removed || !out.BranchKept || out.Branch != "worktree/a" {
+		t.Fatalf("outcome = %+v, err = %v", out, err)
+	}
+	if b := branches(t, repo); b != "main\nworktree/a" {
+		t.Errorf("branches = %q", b)
+	}
 }
 
 func Testマーカーのないworktreeや通常のチェックアウトには触れない(t *testing.T) {
@@ -156,6 +181,9 @@ func Test作業中の変更があるworktreeは開いたワークスペースを
 	}
 	if !exists(filepath.Join(wt, "new.txt")) {
 		t.Error("the uncommitted file is gone")
+	}
+	if b := branches(t, repo); b != "main\nworktree/a" {
+		t.Errorf("branches = %q", b)
 	}
 }
 

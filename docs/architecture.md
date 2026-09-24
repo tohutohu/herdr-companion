@@ -373,7 +373,8 @@ with `pane.report_agent_session`.
   workspace that was already open there (another pane still uses it), or
   uncommitted or untracked changes, which Herdr refuses to remove without
   `force` (ignored files do not count), keep it, and the response carries a
-  `warning` saying why. Herdr keeps the branch, so commits are never lost.
+  `warning` saying why. Herdr keeps the branch; the gateway then deletes it
+  with `git branch -d`, so a branch with unmerged commits stays.
 - Resume opens a session that is not in Herdr in a new workspace in its
   working directory (`claude --resume <id>`, `codex resume <id>`) and
   removes it from the archive. Both keep the native id. A worktree outside
