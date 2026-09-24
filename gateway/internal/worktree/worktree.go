@@ -152,7 +152,7 @@ func (o *Outcome) Warning() string {
 	if o == nil || o.Removed {
 		return ""
 	}
-	return "Kept the worktree at " + o.Path + " because " + o.Reason + "."
+	return "Worktree kept because " + o.Reason + ": " + o.Path
 }
 
 func (c *checkout) ownedBy(o Owner) bool {

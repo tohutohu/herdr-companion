@@ -274,13 +274,13 @@ class GatewayApiTest {
     @Test
     fun `アーカイブ時にworktreeを残した理由とフォルダがリポジトリかどうかを受け取る`() = runBlocking {
         val kept = """{"id":"claude:s1","provider":"claude","status":"offline","updatedAt":"2026-09-17T10:00:00Z","archived":true,""" +
-            """"warning":"Kept the worktree at /w/a because it has uncommitted changes."}"""
+            """"warning":"Worktree kept because it has uncommitted changes: /w/a"}"""
         server.enqueue(MockResponse.Builder().body(kept).build())
-        assertEquals("Kept the worktree at /w/a because it has uncommitted changes.", api.archive("claude:s1").warning)
+        assertEquals("Worktree kept because it has uncommitted changes: /w/a", api.archive("claude:s1").warning)
         server.takeRequest()
 
         server.enqueue(MockResponse.Builder().body("""{"sessions":[$kept]}""").build())
-        assertEquals(listOf("Kept the worktree at /w/a because it has uncommitted changes."), api.archive(listOf("claude:s1")).map { it.warning })
+        assertEquals(listOf("Worktree kept because it has uncommitted changes: /w/a"), api.archive(listOf("claude:s1")).map { it.warning })
         server.takeRequest()
 
         server.enqueue(MockResponse.Builder().body("""{"path":"/w/app","entries":[],"git":true}""").build())

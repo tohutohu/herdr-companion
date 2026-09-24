@@ -112,7 +112,7 @@ func Test作業中の変更があるworktreeは理由を添えて残す(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out == nil || out.Removed || out.Warning() != "Kept the worktree at "+wt+" because it has uncommitted changes." {
+	if out == nil || out.Removed || out.Warning() != "Worktree kept because it has uncommitted changes: "+wt {
 		t.Fatalf("outcome = %+v", out)
 	}
 	if !exists(filepath.Join(wt, "new.txt")) {

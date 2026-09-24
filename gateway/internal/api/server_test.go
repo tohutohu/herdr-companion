@@ -877,7 +877,7 @@ func Testアーカイブするとセッションのworktreeを削除し作業が
 		Warning string `json:"warning"`
 	}
 	json.Unmarshal(body, &sess)
-	if resp.StatusCode != http.StatusOK || !sess.Archived || sess.Warning != "Kept the worktree at "+wt+" because it has uncommitted changes." {
+	if resp.StatusCode != http.StatusOK || !sess.Archived || sess.Warning != "Worktree kept because it has uncommitted changes: "+wt {
 		t.Fatalf("status %d: %s", resp.StatusCode, body)
 	}
 
