@@ -382,6 +382,12 @@ func (c *Client) ClosePane(ctx context.Context, paneID string) error {
 	return c.Call(ctx, "pane.close", map[string]any{"pane_id": paneID}, nil)
 }
 
+// FocusPane focuses a pane. Herdr also marks a finished agent in it as seen,
+// turning done into idle; no terminal has to be attached.
+func (c *Client) FocusPane(ctx context.Context, paneID string) error {
+	return c.Call(ctx, "pane.focus", map[string]any{"pane_id": paneID}, nil)
+}
+
 // CloseWorkspace closes a workspace and all of its panes.
 func (c *Client) CloseWorkspace(ctx context.Context, workspaceID string) error {
 	return c.Call(ctx, "workspace.close", map[string]any{"workspace_id": workspaceID}, nil)

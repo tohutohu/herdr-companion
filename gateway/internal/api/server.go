@@ -42,12 +42,18 @@ type Terminal interface {
 	SendText(ctx context.Context, paneID, text string) error
 }
 
+// Focuser marks a pane seen in Herdr by focusing it.
+type Focuser interface {
+	FocusPane(ctx context.Context, paneID string) error
+}
+
 type Server struct {
 	pairing        pairingState
 	AgentUpdates   *agentupdate.Service
 	DirectoryCheck *directorycheck.Checker
 	Sessions       *sessions.Service
 	Terminal       Terminal
+	Focus          Focuser
 	Uploads        *uploads.Store
 	Config         *config.Store
 	Sink           deadletter.Sink
@@ -88,6 +94,7 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("POST /v1/sessions/{id}/messages", s.postMessage)
 	api.HandleFunc("POST /v1/sessions/{id}/respond", s.respond)
 	api.HandleFunc("POST /v1/sessions/{id}/mode", s.cycleMode)
+	api.HandleFunc("POST /v1/sessions/{id}/seen", s.markSeen)
 	api.HandleFunc("GET /v1/sessions/{id}/messages/{mid}/images/{n}", s.getImage)
 	api.HandleFunc("GET /v1/sessions/{id}/files", s.listFiles)
 	api.HandleFunc("GET /v1/sessions/{id}/files/content", s.fileContent)
@@ -401,6 +408,25 @@ func (s *Server) cycleMode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
+}
+
+// markSeen hands read state to Herdr: focusing the pane of a finished agent
+// turns its done into idle. Other panes are left alone so the Mac's Herdr
+// view only moves when there is something to mark.
+func (s *Server) markSeen(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	res, err := s.Sessions.Resolve(r.Context(), id)
+	if err != nil {
+		s.fail(w, r, id, "mark_seen", err)
+		return
+	}
+	if res.Live != nil && res.Live.HerdrStatus == herdr.StatusDone {
+		if err := s.Focus.FocusPane(r.Context(), res.Live.PaneID); err != nil {
+			s.fail(w, r, id, "mark_seen", err)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (s *Server) recordSendError(id, msg string, payload any, err error) {

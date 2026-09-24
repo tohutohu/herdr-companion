@@ -41,6 +41,9 @@ type Session struct {
 	Mode         string    `json:"mode,omitempty"`   // display label, e.g. "Plan", "Accept edits"
 	CanSend      bool      `json:"canSend"`
 	Archived     bool      `json:"archived,omitempty"`
+	// Unread is Herdr's view: the agent finished (done) and its pane has not
+	// been focused since.
+	Unread bool `json:"unread,omitempty"`
 	// Context is how full the model's context window is; nil when unknown.
 	Context *ContextUsage `json:"context,omitempty"`
 	// Cost is what the session's tokens are worth; nil when nothing is known.

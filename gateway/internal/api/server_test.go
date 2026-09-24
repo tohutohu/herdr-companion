@@ -77,6 +77,15 @@ func (f *fakeHerdr) Pane(_ context.Context, pane string) (*herdr.Pane, error) {
 	}
 	return nil, &herdr.Error{Code: "pane_not_found"}
 }
+func (f *fakeHerdr) FocusPane(_ context.Context, pane string) error {
+	f.calls = append(f.calls, "focus:"+pane)
+	for i := range f.snap.Panes {
+		if f.snap.Panes[i].PaneID == pane && f.snap.Panes[i].AgentStatus == herdr.StatusDone {
+			f.snap.Panes[i].AgentStatus = herdr.StatusIdle
+		}
+	}
+	return nil
+}
 func (f *fakeHerdr) ReportAgentSession(context.Context, string, string, string) error { return nil }
 func (f *fakeHerdr) ClosePane(_ context.Context, pane string) error {
 	f.calls = append(f.calls, "close-pane:"+pane)
@@ -224,6 +233,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *fakeProvider, *fakeHerdr, s
 		Archive:   arch,
 		Sessions:  svc,
 		Terminal:  fh,
+		Focus:     fh,
 		Uploads:   uploads.New(t.TempDir(), time.Hour),
 		Config:    store,
 		Sink:      deadletter.Nop{},
@@ -580,6 +590,39 @@ func Testセッションのモードを変更できる(t *testing.T) {
 	resp, _ = do(t, ts, tok, "POST", "/v1/sessions/fake:old/mode", nil, "")
 	if resp.StatusCode != http.StatusConflict {
 		t.Errorf("offline status = %d", resp.StatusCode)
+	}
+}
+
+func Test既読化はHerdrで完了したペインをフォーカスして未読を消す(t *testing.T) {
+	ts, _, fh, tok := newTestServer(t)
+	unread := func() bool {
+		t.Helper()
+		_, body := do(t, ts, tok, "GET", "/v1/sessions/fake:s1", nil, "")
+		var s model.Session
+		if err := json.Unmarshal(body, &s); err != nil {
+			t.Fatal(err)
+		}
+		return s.Unread
+	}
+	if !unread() {
+		t.Fatal("done のセッションが未読になっていない")
+	}
+	resp, _ := do(t, ts, tok, "POST", "/v1/sessions/fake:s1/seen", nil, "")
+	if resp.StatusCode != http.StatusOK || strings.Join(fh.calls, "|") != "focus:w1:p1" {
+		t.Fatalf("status %d calls %v", resp.StatusCode, fh.calls)
+	}
+	if unread() {
+		t.Error("既読化後も未読のまま")
+	}
+	// Already seen or offline: nothing to mark, and the Mac view stays put.
+	for _, id := range []string{"fake:s1", "fake:old"} {
+		resp, _ = do(t, ts, tok, "POST", "/v1/sessions/"+id+"/seen", nil, "")
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("%s status %d", id, resp.StatusCode)
+		}
+	}
+	if len(fh.calls) != 1 {
+		t.Errorf("余分なフォーカス: %v", fh.calls)
 	}
 }
 
