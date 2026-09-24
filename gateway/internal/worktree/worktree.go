@@ -101,6 +101,24 @@ func MainCheckout(ctx context.Context, dir string) (string, error) {
 	return c.main(), nil
 }
 
+// List returns the working trees of the repository dir is in.
+func List(ctx context.Context, dir string) ([]string, error) {
+	out, err := git(ctx, dir, "worktree", "list", "--porcelain")
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrNotRepository, err)
+	}
+	var paths []string
+	for line := range strings.SplitSeq(out, "\n") {
+		if p, ok := strings.CutPrefix(line, "worktree "); ok {
+			if real, err := filepath.EvalSymlinks(p); err == nil {
+				p = real
+			}
+			paths = append(paths, p)
+		}
+	}
+	return paths, nil
+}
+
 // Mark records that the gateway created the linked worktree dir is in for a
 // new session, so archiving the session may remove it.
 func Mark(ctx context.Context, dir, provider string) error {

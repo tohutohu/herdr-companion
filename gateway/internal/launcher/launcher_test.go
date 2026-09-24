@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -13,6 +14,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/files"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/worktree"
 )
 
 func setupRoots(t *testing.T) (root, outside string) {
@@ -92,6 +94,10 @@ type fakeHerdr struct {
 	startErrs []error
 	snap      *herdr.Snapshot
 	calls     []string
+	// worktree is the checkout CreateWorktree reports; onStart runs in
+	// StartAgent (e.g. to create the worktree an agent would).
+	worktree string
+	onStart  func()
 }
 
 func (f *fakeHerdr) record(s string) {
@@ -104,8 +110,15 @@ func (f *fakeHerdr) CreateWorkspace(_ context.Context, cwd, label string) (strin
 	f.record("create " + label)
 	return "w9", "w9:p1", nil
 }
+func (f *fakeHerdr) CreateWorktree(_ context.Context, cwd, label string) (string, string, string, error) {
+	f.record("worktree " + label)
+	return "w9", "w9:p1", f.worktree, nil
+}
 func (f *fakeHerdr) StartAgent(_ context.Context, name, kind, pane string, args []string, _ time.Duration) error {
 	f.record("start " + kind + " " + strings.Join(args, " "))
+	if f.onStart != nil {
+		f.onStart()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if len(f.startErrs) > 0 {
@@ -588,5 +601,176 @@ func Testモード設定に失敗しても起動は続ける(t *testing.T) {
 	}
 	if res.SessionID != "claude:abc-123" || !strings.Contains(res.Warning, "pane is gone") {
 		t.Fatalf("res = %+v", res)
+	}
+}
+
+func gitRun(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+// gitRepo turns dir into a repository with one commit.
+func gitRepo(t *testing.T, dir string) {
+	t.Helper()
+	gitRun(t, dir, "init", "-q", "-b", "main")
+	os.WriteFile(filepath.Join(dir, "README.md"), []byte("hi\n"), 0o644)
+	gitRun(t, dir, "add", ".")
+	gitRun(t, dir, "commit", "-qm", "init")
+}
+
+func marked(wt string) bool {
+	_, err := os.Stat(filepath.Join(filepath.Dir(filepath.Dir(wt)), "repo", ".git", "worktrees", filepath.Base(wt), "herdr-companion.json"))
+	return err == nil
+}
+
+// worktreeProvider stands for an agent that creates its own worktree.
+type worktreeProvider struct {
+	fakeProvider
+	name string
+}
+
+func (p *worktreeProvider) WorktreeArgs(o providers.LaunchOptions, name string) ([]string, bool) {
+	p.name = name
+	return append(p.LaunchArgs(o), "--worktree", name), true
+}
+
+func (p *worktreeProvider) StartFailure(screen string) error {
+	if strings.Contains(screen, "trust not yet accepted") {
+		return errors.New("trust the folder first")
+	}
+	return nil
+}
+
+func Test自前でworktreeを作れないエージェントはHerdrが作ったworktreeで起動する(t *testing.T) {
+	fh := &fakeHerdr{status: herdr.StatusIdle}
+	l, root := newLauncher(t, fh)
+	repo := filepath.Join(root, "repo")
+	os.Mkdir(repo, 0o755)
+	gitRepo(t, repo)
+	wt := filepath.Join(root, "wt", "repo-a")
+	gitRun(t, repo, "worktree", "add", "-q", "-b", "worktree/a", wt)
+	fh.worktree = wt
+
+	res, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: repo, Prompt: "hello", Worktree: true})
+	if err != nil || res.SessionID != "claude:abc-123" {
+		t.Fatalf("res = %+v err = %v", res, err)
+	}
+	// ワークスペースはHerdrのworktreeで開き、別途作らない
+	if got := strings.Join(fh.calls, "|"); got != "worktree repo|start claude --default|prompt hello" {
+		t.Errorf("calls = %s", got)
+	}
+	if !marked(wt) {
+		t.Error("the worktree is not marked as the gateway's")
+	}
+}
+
+func Test自前でworktreeを作れるエージェントには自前のworktreeを作らせて印を付ける(t *testing.T) {
+	fh := &fakeHerdr{status: herdr.StatusIdle}
+	l, root := newLauncher(t, fh)
+	repo := filepath.Join(root, "My Repo")
+	os.Mkdir(repo, 0o755)
+	gitRepo(t, repo)
+	p := &worktreeProvider{}
+	l.Providers = []providers.Provider{p}
+	var wt string
+	fh.onStart = func() {
+		wt = filepath.Join(repo, ".claude", "worktrees", p.name)
+		gitRun(t, repo, "worktree", "add", "-q", "-b", "worktree-"+p.name, wt)
+	}
+
+	res, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: repo, Model: "haiku", Worktree: true})
+	if err != nil || res.PaneID != "w9:p1" {
+		t.Fatalf("res = %+v err = %v", res, err)
+	}
+	if !strings.HasPrefix(p.name, "My-Repo-") || len(p.name) != len("My-Repo-")+6 {
+		t.Errorf("worktree name = %q", p.name)
+	}
+	if got := strings.Join(fh.calls, "|"); got != "create My Repo|start claude --model haiku --worktree "+p.name {
+		t.Errorf("calls = %s", got)
+	}
+	gitDir := filepath.Join(repo, ".git", "worktrees", p.name, "herdr-companion.json")
+	if _, err := os.Stat(gitDir); err != nil {
+		t.Errorf("the agent's worktree is not marked: %v", err)
+	}
+}
+
+func TestGitリポジトリでない場所ではworktreeで起動しない(t *testing.T) {
+	fh := &fakeHerdr{status: herdr.StatusIdle}
+	l, root := newLauncher(t, fh)
+	_, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: filepath.Join(root, "app-b"), Worktree: true})
+	if !errors.Is(err, worktree.ErrNotRepository) || len(fh.calls) != 0 {
+		t.Fatalf("err = %v calls = %v", err, fh.calls)
+	}
+}
+
+func Test信頼を断るとHerdrが作ったworktreeも削除する(t *testing.T) {
+	fh := &fakeHerdr{status: herdr.StatusBlocked, screen: "Yes, I trust this folder", startErr: &herdr.Error{Code: "agent_not_ready"}}
+	l, root := newLauncher(t, fh)
+	repo := filepath.Join(root, "repo")
+	os.Mkdir(repo, 0o755)
+	gitRepo(t, repo)
+	wt := filepath.Join(root, "wt", "repo-a")
+	gitRun(t, repo, "worktree", "add", "-q", "-b", "worktree/a", wt)
+	fh.worktree = wt
+
+	if res, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: repo, Worktree: true}); err != nil || !res.TrustRequired {
+		t.Fatalf("res = %+v err = %v", res, err)
+	}
+	if _, err := l.AnswerTrust(context.Background(), "w9:p1", false); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(fh.calls, "|"); got != "worktree repo|start claude --default|close workspace w9" {
+		t.Errorf("calls = %s", got)
+	}
+	if _, err := os.Stat(wt); !os.IsNotExist(err) {
+		t.Errorf("worktree still exists: %v", err)
+	}
+}
+
+func Testエージェントが起動を拒んだ理由を画面から伝える(t *testing.T) {
+	fh := &fakeHerdr{screen: "Error creating worktree: Workspace trust not yet accepted.", startErr: &herdr.Error{Code: "timeout"}}
+	l, root := newLauncher(t, fh)
+	repo := filepath.Join(root, "repo")
+	os.Mkdir(repo, 0o755)
+	gitRepo(t, repo)
+	l.Providers = []providers.Provider{&worktreeProvider{}}
+
+	_, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: repo, Worktree: true})
+	if !errors.Is(err, ErrStartRefused) || !strings.Contains(err.Error(), "trust the folder first") {
+		t.Fatalf("err = %v", err)
+	}
+	if got := strings.Join(fh.calls, "|"); !strings.HasSuffix(got, "|close workspace w9") {
+		t.Errorf("calls = %s", got)
+	}
+}
+
+func Testルート外にあるworktreeのセッションもリポジトリがルート内なら再開できる(t *testing.T) {
+	fh := &fakeHerdr{status: herdr.StatusIdle, session: &herdr.AgentSession{Agent: "claude", Kind: "id", Value: "abc-123"}}
+	l, root := newLauncher(t, fh)
+	repo := filepath.Join(root, "repo")
+	os.Mkdir(repo, 0o755)
+	gitRepo(t, repo)
+	outside, _ := filepath.EvalSymlinks(t.TempDir())
+	wt := filepath.Join(outside, "worktrees", "repo-a")
+	gitRun(t, repo, "worktree", "add", "-q", "-b", "worktree/a", wt)
+
+	res, err := l.Resume(context.Background(), "claude", "abc-123", wt, true)
+	if err != nil || res.SessionID != "claude:abc-123" {
+		t.Fatalf("res = %+v err = %v", res, err)
+	}
+	if got := strings.Join(fh.calls, "|"); got != "create repo-a|start claude --resume abc-123" {
+		t.Errorf("calls = %s", got)
+	}
+	// ルート外の普通のディレクトリは引き続き拒否する
+	if _, err := l.Resume(context.Background(), "claude", "abc-123", outside, true); !errors.Is(err, files.ErrForbidden) {
+		t.Errorf("outside err = %v", err)
+	}
+	// 削除済みのworktreeは分かるエラーにする
+	if _, err := l.Resume(context.Background(), "claude", "abc-123", filepath.Join(root, "gone"), true); !errors.Is(err, ErrCwdGone) {
+		t.Errorf("gone err = %v", err)
 	}
 }

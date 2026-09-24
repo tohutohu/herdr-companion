@@ -333,6 +333,29 @@ left unpriced rather than guessed, and the field is omitted entirely.
   Codex keeps one total per thread rather than per model, so the model the
   thread runs on now prices all of it.
 
+### Worktrees
+
+A start can ask for a new git worktree of the chosen directory's repository
+(`worktree: true`; a directory outside a repository is refused). An agent
+that makes worktrees itself is asked to (`providers.WorktreeLauncher`):
+Claude Code gets `--worktree <repo>-<hex>` and works in
+`<repo>/.claude/worktrees/…` on branch `worktree-<name>`; Codex gets
+`--worktree` (a detached checkout under `$CODEX_HOME/worktrees`), but only
+without the shared daemon, since a `--remote` TUI rejects it and has no
+`/worktree` command. Everything else, Codex on the daemon included, starts in
+a worktree Herdr creates (`worktree.create`, `~/.herdr/worktrees/…`), whose
+workspace the launcher then uses. Claude Code quits instead of making a
+worktree in a folder whose trust dialog was never answered; the screen it
+leaves is reported back (`providers.StartFailureExplainer`).
+
+The gateway keeps no list of them. A worktree it made, or found new in `git
+worktree list` right after the agent started, gets `herdr-companion.json` in
+its git directory (`.git/worktrees/<name>/`), the way Codex writes
+`codex-thread.json` with the owning thread. A Codex TUI runs in its worktree
+without changing its process directory, so for a thread in
+`$CODEX_HOME/worktrees` the thread's cwd, not the pane's, is the session
+directory (`Summary.PinnedCwd`).
+
 A new pane's shell may still be running its startup files; Herdr then
 answers `agent.start` with `agent_pane_busy`, which is retried until the
 start timeout. A workspace whose agent fails to start is closed again.
@@ -348,9 +371,22 @@ with `pane.report_agent_session`.
   was the only pane) and the id is stored in `archive.json`. Archived
   sessions are left out of the offline part of `GET /v1/sessions`; a live
   one is still listed (e.g. resumed from a terminal).
+- The worktree the session ran in is then removed (`internal/worktree`) when
+  it carries the gateway's marker (or Codex's, for the same thread) and
+  nothing in it would be lost: another pane in it, uncommitted or untracked
+  changes (ignored files do not count), commits on a detached HEAD that no
+  branch has, or a lock other than Claude Code's own keep it, and the
+  response carries a `warning` saying why. Claude Code locks its worktree
+  while it runs; the lock is released once that pid has exited. The branch is
+  deleted with `git branch -d`, so unmerged commits stay on it. The agents'
+  own removal is not used: Claude Code offers it only in its exit dialog,
+  whose "Remove worktree" also deletes unmerged commits, and Codex only in the
+  TUI's worktree browser, which is the same `git worktree remove`.
 - Resume opens a session that is not in Herdr in a new workspace in its
   working directory (`claude --resume <id>`, `codex resume <id>`) and
-  removes it from the archive. Both keep the native id.
+  removes it from the archive. Both keep the native id. A worktree outside
+  `workspaceRoots` may be resumed when its repository is inside them; one
+  that was removed answers 409.
 
 Directories are restricted to `workspaceRoots` with the same checks as file
 access; new folder names must be a single, non-hidden path segment.
@@ -389,7 +425,7 @@ whole thing off, and `herdr-mobile-gateway usage` prints one read.
 |---|---|---|
 | GET | `/healthz` | no auth |
 | GET | `/v1/sessions` | live + recent offline sessions |
-| POST | `/v1/sessions` | start `{provider, cwd, prompt, model?, effort?, trust}` in a new Herdr workspace → `{sessionId?, paneId, warning?, trustRequired?}` |
+| POST | `/v1/sessions` | start `{provider, cwd, prompt, model?, effort?, trust, worktree?}` in a new Herdr workspace → `{sessionId?, paneId, warning?, trustRequired?}` |
 | POST | `/v1/launches/{pane}/trust` | `{trust}` answer a start that returned `trustRequired`: continue it or close its workspace → `{sessionId?, paneId, warning?}` |
 | GET / POST | `/v1/launches/{pane}/terminal` | terminal fallback before a session id exists; only panes launched by this gateway |
 | POST | `/v1/launches/{pane}/continue` | retry readiness after manual terminal interaction, then send the retained initial prompt once |
@@ -400,8 +436,8 @@ whole thing off, and `herdr-mobile-gateway usage` prints one read.
 | POST | `/v1/directories` | create `{parent, name}` under a root |
 | GET | `/v1/sessions?archived=true` | archived sessions |
 | GET | `/v1/sessions/{id}` | one session |
-| POST / DELETE | `/v1/sessions/{id}/archive` | archive (stops a running session) / unarchive |
-| POST | `/v1/sessions/archive` | archive `{ids[]}` in one request (stops running sessions) → `{sessions[]}` |
+| POST / DELETE | `/v1/sessions/{id}/archive` | archive (stops a running session, removes its worktree) → session + `warning?` / unarchive |
+| POST | `/v1/sessions/archive` | archive `{ids[]}` in one request (stops running sessions) → `{sessions[]}` (each with `warning?`) |
 | POST | `/v1/sessions/{id}/resume` | `{trust}` reopen in a new Herdr workspace → `{sessionId?, paneId, warning?}` |
 | GET | `/v1/sessions/{id}/messages?after=` | `{session, messages}` |
 | POST | `/v1/sessions/{id}/messages` | `{text, uploads[]}` |

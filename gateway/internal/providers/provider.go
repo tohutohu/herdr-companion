@@ -97,6 +97,10 @@ type Summary struct {
 	Context *model.ContextUsage
 	// Cost is what the session spent, priced from its token counts.
 	Cost *model.Cost
+	// PinnedCwd keeps Cwd as the session's directory while it runs, where
+	// the pane's directory would otherwise win: the agent works in a
+	// worktree it created without moving its process there.
+	PinnedCwd bool
 }
 
 // FilteredRecentProvider can skip unwanted native IDs before reading history.
@@ -253,6 +257,21 @@ type Launchable interface {
 	// StartupKeys returns the keys that accept a folder-trust dialog shown on
 	// screen, or nil when the screen is not a known trust dialog.
 	StartupKeys(screen string) []string
+}
+
+// WorktreeLauncher is implemented by agents that can create a git worktree
+// for a new session and run in it themselves.
+type WorktreeLauncher interface {
+	// WorktreeArgs are LaunchArgs that make the agent create and enter a new
+	// worktree, named name where the agent takes a name. ok is false when
+	// this launch cannot; the launcher then creates the worktree with Herdr.
+	WorktreeArgs(opts LaunchOptions, name string) (args []string, ok bool)
+}
+
+// StartFailureExplainer turns what a pane shows after its agent failed to
+// start into an error the user can act on; nil when the screen is unknown.
+type StartFailureExplainer interface {
+	StartFailure(screen string) error
 }
 
 // LaunchPromptSender lets a provider choose how its first prompt is entered

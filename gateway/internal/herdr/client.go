@@ -319,6 +319,23 @@ func (c *Client) CreateWorkspace(ctx context.Context, cwd, label string) (worksp
 	return r.Workspace.WorkspaceID, r.RootPane.PaneID, nil
 }
 
+// CreateWorktree creates a git worktree of the repository cwd is in, on a
+// new branch, and opens a workspace (without focusing it) there.
+func (c *Client) CreateWorktree(ctx context.Context, cwd, label string) (workspaceID, paneID, path string, err error) {
+	var r struct {
+		Workspace Workspace `json:"workspace"`
+		RootPane  Pane      `json:"root_pane"`
+		Worktree  struct {
+			Path string `json:"path"`
+		} `json:"worktree"`
+	}
+	params := map[string]any{"cwd": cwd, "label": label, "focus": false}
+	if err := c.Call(ctx, "worktree.create", params, &r); err != nil {
+		return "", "", "", err
+	}
+	return r.Workspace.WorkspaceID, r.RootPane.PaneID, r.Worktree.Path, nil
+}
+
 // StartAgent launches an agent in a shell pane. Herdr returns agent_not_ready
 // when the agent is blocked by a startup dialog.
 func (c *Client) StartAgent(ctx context.Context, name, kind, paneID string, args []string, timeout time.Duration) error {

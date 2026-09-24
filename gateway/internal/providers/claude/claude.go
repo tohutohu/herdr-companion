@@ -5,6 +5,7 @@ package claude
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -541,6 +542,22 @@ func (p *Provider) LaunchArgs(opts providers.LaunchOptions) []string {
 		args = append(args, "--permission-mode", opts.Mode)
 	}
 	return args
+}
+
+// WorktreeArgs makes Claude Code create the worktree
+// (<repo>/.claude/worktrees/<name> on branch worktree-<name>) and run in it.
+func (p *Provider) WorktreeArgs(opts providers.LaunchOptions, name string) ([]string, bool) {
+	return append(p.LaunchArgs(opts), "--worktree", name), true
+}
+
+// StartFailure explains why Claude Code quit instead of starting: it only
+// makes a worktree in a folder whose trust dialog has been answered.
+func (p *Provider) StartFailure(screen string) error {
+	screen = strings.ReplaceAll(screen, "\n", "") // the message wraps mid-word
+	if strings.Contains(screen, "Error creating worktree") && strings.Contains(screen, "trust not yet accepted") {
+		return errors.New("Claude Code has not been trusted in this folder yet. Start a session there once without a worktree and trust the folder")
+	}
+	return nil
 }
 
 // ResumeArgs continues the transcript under the same session id.

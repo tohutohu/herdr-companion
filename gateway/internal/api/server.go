@@ -32,6 +32,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/sessions"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/uploads"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/usage"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/worktree"
 )
 
 // Terminal is the Herdr subset used by the terminal fallback endpoints.
@@ -198,7 +199,8 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, sessionID, op stri
 		errors.Is(err, launcher.ErrNoPendingTrust):
 		status = http.StatusNotFound
 	case errors.Is(err, providers.ErrNotLive), errors.Is(err, providers.ErrInteractionGone),
-		errors.Is(err, errAlreadyLive), errors.Is(err, launcher.ErrNoCwd):
+		errors.Is(err, errAlreadyLive), errors.Is(err, launcher.ErrNoCwd), errors.Is(err, launcher.ErrCwdGone),
+		errors.Is(err, launcher.ErrStartRefused):
 		status = http.StatusConflict
 	case errors.Is(err, providers.ErrUnsupported):
 		status = http.StatusUnprocessableEntity
@@ -213,7 +215,8 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, sessionID, op stri
 		if herr.Code == "agent_blocked" {
 			status = http.StatusConflict
 		}
-	case errors.Is(err, errBadRequest), errors.Is(err, launcher.ErrInvalidName), errors.Is(err, launcher.ErrUnknownProvider), errors.Is(err, launcher.ErrInvalidModel):
+	case errors.Is(err, errBadRequest), errors.Is(err, launcher.ErrInvalidName), errors.Is(err, launcher.ErrUnknownProvider), errors.Is(err, launcher.ErrInvalidModel),
+		errors.Is(err, worktree.ErrNotRepository):
 		status = http.StatusBadRequest
 	case errors.Is(err, os.ErrExist):
 		status = http.StatusConflict
@@ -756,23 +759,55 @@ type archiveSessionsRequest struct {
 	IDs []string `json:"ids"`
 }
 
-// archiveOne stops a running session (closing its Herdr pane) and marks the
-// returned model as archived. The archive store is updated by the caller so a
-// batch can persist all ids in one write.
-func (s *Server) archiveOne(ctx context.Context, id string) (model.Session, bool, error) {
+// archivedSession is an archive response entry.
+type archivedSession struct {
+	model.Session
+	// Warning tells the user why the session's worktree was kept.
+	Warning string `json:"warning,omitempty"`
+}
+
+// archiveOne stops a running session (closing its Herdr pane), removes the
+// worktree it was started in when nothing there would be lost, and marks
+// the returned model as archived. The archive store is updated by the
+// caller so a batch can persist all ids in one write.
+func (s *Server) archiveOne(ctx context.Context, id string) (archivedSession, bool, error) {
 	sess, res, err := s.Sessions.Get(ctx, id)
 	if err != nil {
-		return model.Session{}, false, err
+		return archivedSession{}, false, err
 	}
 	stopped := res.Live != nil
 	if res.Live != nil {
 		if err := s.Launcher.Stop(ctx, res.Live.PaneID); err != nil {
-			return model.Session{}, false, err
+			return archivedSession{}, false, err
 		}
 		sess.Status, sess.PaneID, sess.CanSend = model.StatusOffline, "", false
 	}
 	sess.Archived = true
-	return sess, stopped, nil
+	return archivedSession{Session: sess, Warning: s.removeWorktree(ctx, sess, res)}, stopped, nil
+}
+
+// removeWorktree deletes the session's worktree and returns a warning when
+// it was kept or could not be removed.
+func (s *Server) removeWorktree(ctx context.Context, sess model.Session, res *sessions.Resolved) string {
+	var inUse []string
+	if snap, err := s.Launcher.Herdr.Snapshot(ctx); err == nil {
+		for _, pn := range snap.Panes {
+			inUse = append(inUse, pn.WorkingDir())
+		}
+	} else {
+		return "" // unknown which panes still use it; leave it alone
+	}
+	owner := worktree.Owner{Provider: res.Provider.Name(), NativeID: res.NativeID}
+	out, err := worktree.Cleanup(ctx, sess.Cwd, owner, inUse)
+	if err != nil {
+		slog.Warn("removing worktree failed", "provider", owner.Provider, "session_id", sess.ID, "cwd", sess.Cwd, "error", err)
+		return "Could not remove the session's worktree: " + err.Error()
+	}
+	if out == nil {
+		return ""
+	}
+	slog.Info("session worktree cleaned up", "provider", owner.Provider, "session_id", sess.ID, "path", out.Path, "removed", out.Removed, "reason", out.Reason)
+	return out.Warning()
 }
 
 // archiveSession stops a running session (closing its Herdr pane) and hides
@@ -819,7 +854,7 @@ func (s *Server) archiveSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	archived := make([]model.Session, 0, len(ids))
+	archived := make([]archivedSession, 0, len(ids))
 	stopped := make([]bool, 0, len(ids))
 	for _, id := range ids {
 		sess, wasStopped, err := s.archiveOne(r.Context(), id)

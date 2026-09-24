@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -27,6 +28,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/sessions"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/uploads"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/usage"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/worktree"
 )
 
 type fakeHerdr struct {
@@ -50,6 +52,10 @@ func (f *fakeHerdr) SendText(_ context.Context, pane, text string) error {
 func (f *fakeHerdr) CreateWorkspace(_ context.Context, cwd, label string) (string, string, error) {
 	f.calls = append(f.calls, "create:"+label)
 	return "w2", "w2:p1", nil
+}
+func (f *fakeHerdr) CreateWorktree(_ context.Context, cwd, label string) (string, string, string, error) {
+	f.calls = append(f.calls, "worktree:"+label)
+	return "w2", "w2:p1", cwd, nil
 }
 func (f *fakeHerdr) StartAgent(_ context.Context, name, kind, pane string, args []string, _ time.Duration) error {
 	f.calls = append(f.calls, "start:"+kind+" "+strings.Join(args, " "))
@@ -833,5 +839,69 @@ func Test遅いリクエストは成功してもinfoで記録される(t *testin
 		if got := requestLogLevel(c.status, c.d); got != c.want {
 			t.Errorf("requestLogLevel(%d, %v) = %v, want %v", c.status, c.d, got, c.want)
 		}
+	}
+}
+
+// markedWorktree makes a repository with a worktree the gateway created
+// and returns the worktree's path.
+func markedWorktree(t *testing.T) string {
+	t.Helper()
+	base, _ := filepath.EvalSymlinks(t.TempDir())
+	repo, wt := filepath.Join(base, "repo"), filepath.Join(base, "wt")
+	os.Mkdir(repo, 0o755)
+	for _, args := range [][]string{
+		{"init", "-q", "-b", "main"}, {"commit", "-q", "--allow-empty", "-m", "init"}, {"worktree", "add", "-q", "-b", "worktree/a", wt},
+	} {
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	if err := worktree.Mark(context.Background(), wt, "fake"); err != nil {
+		t.Fatal(err)
+	}
+	return wt
+}
+
+func Testアーカイブするとセッションのworktreeを削除し作業が残っていれば理由を返す(t *testing.T) {
+	ts, fp, fh, tok := newTestServer(t)
+	wt := markedWorktree(t)
+	fp.root = wt
+	fh.snap.Panes[0].Cwd = str(wt)
+
+	os.WriteFile(filepath.Join(wt, "draft.txt"), []byte("x"), 0o644)
+	resp, body := do(t, ts, tok, "POST", "/v1/sessions/fake:s1/archive", nil, "")
+	var sess struct {
+		model.Session
+		Warning string `json:"warning"`
+	}
+	json.Unmarshal(body, &sess)
+	if resp.StatusCode != http.StatusOK || !sess.Archived || sess.Warning != "Kept the worktree at "+wt+" because it has uncommitted changes." {
+		t.Fatalf("status %d: %s", resp.StatusCode, body)
+	}
+
+	os.Remove(filepath.Join(wt, "draft.txt"))
+	resp, body = do(t, ts, tok, "POST", "/v1/sessions/archive", []byte(`{"ids":["fake:old"]}`), "application/json")
+	if resp.StatusCode != http.StatusOK || strings.Contains(string(body), "warning") {
+		t.Fatalf("status %d: %s", resp.StatusCode, body)
+	}
+	if _, err := os.Stat(wt); !os.IsNotExist(err) {
+		t.Errorf("worktree still exists: %v", err)
+	}
+}
+
+func Test別のペインが使っているworktreeはアーカイブしても残す(t *testing.T) {
+	ts, fp, fh, tok := newTestServer(t)
+	wt := markedWorktree(t)
+	fp.root = wt
+	fh.snap.Panes = append(fh.snap.Panes, herdr.Pane{PaneID: "w4:p1", WorkspaceID: "w4", Cwd: str(filepath.Join(wt))})
+
+	resp, body := do(t, ts, tok, "POST", "/v1/sessions/fake:old/archive", nil, "")
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "another pane is still using it") {
+		t.Fatalf("status %d: %s", resp.StatusCode, body)
+	}
+	if _, err := os.Stat(wt); err != nil {
+		t.Errorf("worktree was removed: %v", err)
 	}
 }

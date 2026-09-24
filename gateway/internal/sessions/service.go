@@ -319,7 +319,7 @@ func toSession(r *Resolved, sum *providers.Summary) model.Session {
 		sess.PaneID = r.Live.PaneID
 		// Providers resolve file links against the pane cwd, so the file API
 		// must use the same root (the transcript cwd follows `cd`s).
-		if r.Live.Cwd != "" {
+		if r.Live.Cwd != "" && !sum.PinnedCwd {
 			sess.Cwd = r.Live.Cwd
 		}
 	}

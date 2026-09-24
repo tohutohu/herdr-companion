@@ -52,13 +52,27 @@ type Provider struct {
 	terminalInputMu sync.Mutex
 }
 
-func DefaultDaemonSocket() string {
-	home := os.Getenv("CODEX_HOME")
-	if home == "" {
-		h, _ := os.UserHomeDir()
-		home = filepath.Join(h, ".codex")
+func codexHome() string {
+	if home := os.Getenv("CODEX_HOME"); home != "" {
+		return home
 	}
-	return filepath.Join(home, "app-server-control", "app-server-control.sock")
+	h, _ := os.UserHomeDir()
+	return filepath.Join(h, ".codex")
+}
+
+func DefaultDaemonSocket() string {
+	return filepath.Join(codexHome(), "app-server-control", "app-server-control.sock")
+}
+
+// inManagedWorktree reports whether cwd is in a worktree Codex created with
+// --worktree. The TUI runs there without changing its process directory, so
+// the pane keeps showing the repository it was started from.
+func inManagedWorktree(cwd string) bool {
+	if cwd == "" {
+		return false
+	}
+	rel, err := filepath.Rel(filepath.Join(codexHome(), "worktrees"), cwd)
+	return err == nil && rel != "." && !strings.HasPrefix(rel, "..")
 }
 
 func New(bin, daemonSock string, term providers.Terminal, sink deadletter.Sink) *Provider {
@@ -242,7 +256,7 @@ func summaryFromThread(th *Thread) providers.Summary {
 	lines := rolloutTailLines(th.Path)
 	info := tokenInfoFrom(lines)
 	s := providers.Summary{NativeID: th.ID, Cwd: th.Cwd, Model: th.Model, LastMessage: providers.OneLine(th.Preview, 160),
-		Context: info.context(), Cost: info.cost(th.Model)}
+		Context: info.context(), Cost: info.cost(th.Model), PinnedCwd: inManagedWorktree(th.Cwd)}
 	if collaborationModeFrom(lines) == "plan" {
 		s.Mode = planLabel
 	}
@@ -295,7 +309,7 @@ func (p *Provider) Messages(ctx context.Context, nativeID string, live *provider
 		return nil, err
 	}
 	root := th.Cwd
-	if live != nil && live.Cwd != "" {
+	if live != nil && live.Cwd != "" && !inManagedWorktree(th.Cwd) {
 		root = live.Cwd
 	}
 	msgs := ConvertThread(th, convertOptions{SessionID: gatewayID(nativeID), Root: root, Sink: p.sink, Answered: answeredInputs(th.Path)})
@@ -799,6 +813,15 @@ func (p *Provider) remoteArgs(cwd string) []string {
 		return []string{"--remote", "unix://" + p.daemonSock, "--cd", cwd}
 	}
 	return nil
+}
+
+// WorktreeArgs uses Codex's own --worktree, which the TUI only supports for
+// local sessions: with the shared daemon running, Herdr makes the worktree.
+func (p *Provider) WorktreeArgs(opts providers.LaunchOptions, _ string) ([]string, bool) {
+	if _, err := os.Stat(p.daemonSock); err == nil {
+		return nil, false
+	}
+	return append(p.LaunchArgs(opts), "--worktree"), true
 }
 
 // ResumeArgs reopens a thread with `codex resume <id>`.

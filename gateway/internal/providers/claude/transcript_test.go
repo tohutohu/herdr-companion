@@ -663,6 +663,22 @@ func TestClaudeのモデルとエフォートとモードは最新の記録か�
 	}
 }
 
+func Test作業ツリー指定の起動はClaude自身にworktreeを作らせる(t *testing.T) {
+	p := New(t.TempDir(), nil, deadletter.Nop{})
+	args, ok := p.WorktreeArgs(providers.LaunchOptions{Model: "haiku", Cwd: "/w"}, "app-1a2b3c")
+	if got := strings.Join(args, " "); !ok || got != "--model haiku --worktree app-1a2b3c" {
+		t.Errorf("args = %q, %v", got, ok)
+	}
+	// Claude Code 2.1.281 が未承認のフォルダで出す画面
+	screen := "Error creating worktree: Workspace trust not yet acc\nepted. Run `claude` once in this directory and accept the trust dia\nlog, then retry with --worktree."
+	if err := p.StartFailure(screen); err == nil || !strings.Contains(err.Error(), "trust the folder") {
+		t.Errorf("trust error = %v", err)
+	}
+	if err := p.StartFailure("$ "); err != nil {
+		t.Errorf("unknown screen = %v", err)
+	}
+}
+
 func Test起動時のモデルとエフォート指定をCLI引数にする(t *testing.T) {
 	p := New(t.TempDir(), nil, deadletter.Nop{})
 	args := func(model, effort string) []string {
