@@ -24,4 +24,5 @@ fun SessionDto.toUiModel(): SessionUiModel = SessionUiModel(
     costEstimated = cost?.estimated,
     archived = archived,
     live = isLive,
+    unread = unread,
 )

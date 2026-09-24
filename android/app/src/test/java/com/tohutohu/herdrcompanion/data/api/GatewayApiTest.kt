@@ -149,6 +149,15 @@ class GatewayApiTest {
     }
 
     @Test
+    fun `既読化はHerdrの既読APIを呼ぶ`() = runBlocking {
+        server.enqueue(MockResponse.Builder().body("""{"ok":true}""").build())
+        api.markSeen("claude:s1")
+        val req = server.takeRequest()
+        assertEquals("POST", req.method)
+        assertEquals("/v1/sessions/claude:s1/seen", req.target)
+    }
+
+    @Test
     fun `アップロードは本文の種別と元のファイル名を送る`() = runBlocking {
         server.enqueue(MockResponse.Builder().code(201).body("""{"id":"abc","name":"売上_レポート.csv"}""").build())
         assertEquals("abc", api.upload("col1\n".toByteArray(), "text/csv", "売上 レポート.csv"))

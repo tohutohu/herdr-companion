@@ -222,8 +222,17 @@ pushes.
 On Android, `PushService` shows the notification (channels *Completed*,
 *Needs attention*, *Errors*) and enqueues an expedited `PrefetchWorker` that
 fetches the session into Room, so tapping the notification opens a populated
-conversation. The same event marks the session unread in the local cache; the
-session-list row shows a marker and heavier text until its detail is opened.
+conversation.
+
+Read state is Herdr's, not the app's. Herdr reports a finished agent as `done`
+until its pane is focused, then as `idle`; a pane that is focused when its
+agent finishes goes straight to `idle`. The gateway sends that as `unread` on
+each session, and the session-list row shows a marker and heavier text while it
+is set. `POST /v1/sessions/{id}/seen` focuses the pane of a `done` session (and
+leaves any other pane alone), which works with no Herdr terminal attached but
+does switch the pane an attached one shows. Android marks the session seen while
+its detail screen is open; the Mac UI does so when the user opens or selects a
+session, not while it merely stays open.
 Foreground screens poll every 3 s (detail) / 5 s (list).
 
 A notification carries an inline *Reply* field when `canSend` is set and the
@@ -436,6 +445,7 @@ whole thing off, and `herdr-mobile-gateway usage` prints one read.
 | POST | `/v1/sessions/{id}/messages` | `{text, uploads[]}` |
 | POST | `/v1/sessions/{id}/respond` | `{interactionId, answers{qid:{selected[],text}}, decision}` |
 | POST | `/v1/sessions/{id}/mode` | advance the live provider TUI to its next available mode |
+| POST | `/v1/sessions/{id}/seen` | mark a `done` session seen in Herdr by focusing its pane; `{ok}` |
 | GET | `/v1/sessions/{id}/messages/{mid}/images/{n}` | inline image bytes |
 | GET | `/v1/sessions/{id}/files?path=` | directory listing |
 | GET | `/v1/sessions/{id}/files/content?path=` | file bytes |

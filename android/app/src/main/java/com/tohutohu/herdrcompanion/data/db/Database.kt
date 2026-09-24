@@ -42,7 +42,7 @@ data class SessionEntity(
     /** Whether the gateway still lists it; stale rows are kept for deep links. */
     val listed: Boolean,
     val lastSyncedAt: Long,
-    /** Whether a push arrived since the session was last opened. */
+    /** Herdr's unread state, as the gateway last reported it. */
     @ColumnInfo(defaultValue = "0")
     val unread: Boolean = false,
 )
@@ -71,9 +71,6 @@ interface SessionDao {
     @Query("SELECT * FROM sessions WHERE id = :id")
     suspend fun get(id: String): SessionEntity?
 
-    @Query("SELECT id FROM sessions WHERE unread = 1")
-    suspend fun unreadIds(): List<String>
-
     @Upsert
     suspend fun upsert(sessions: List<SessionEntity>)
 
@@ -85,16 +82,8 @@ interface SessionDao {
 
     @Transaction
     suspend fun replaceListing(sessions: List<SessionEntity>) {
-        val unread = unreadIds().toSet()
-        upsert(sessions.map { session -> if (session.id in unread) session.copy(unread = true) else session })
+        upsert(sessions)
         unlistExcept(sessions.map { it.id })
-    }
-
-    /** Updates gateway data without allowing a sync to clear a local unread flag. */
-    @Transaction
-    suspend fun upsertPreservingUnread(session: SessionEntity) {
-        val current = get(session.id)
-        upsert(listOf(if (current?.unread == true) session.copy(unread = true) else session))
     }
 
     @Query("DELETE FROM sessions WHERE listed = 0 AND lastSyncedAt < :before")

@@ -156,6 +156,11 @@ class GatewayApi(
         post(url("v1", "sessions", id, "mode"), ByteArray(0).toRequestBody(jsonType))
     }
 
+    /** Marks the session seen in Herdr, which clears its unread state. */
+    suspend fun markSeen(id: String) {
+        post(url("v1", "sessions", id, "seen"), ByteArray(0).toRequestBody(jsonType))
+    }
+
     /** Uploads one attachment and returns its upload id. */
     suspend fun upload(bytes: ByteArray, contentType: String, filename: String): String {
         val req = request(url("v1", "uploads"))

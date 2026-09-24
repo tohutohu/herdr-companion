@@ -28,6 +28,8 @@ data class SessionDto(
     /** What the session's tokens are worth; null when nothing is known. */
     val cost: CostDto? = null,
     val archived: Boolean = false,
+    /** Herdr reports the agent finished and its pane has not been looked at since. */
+    val unread: Boolean = false,
     /** Only in archive responses: why the session's worktree was kept. */
     val warning: String? = null,
 ) {

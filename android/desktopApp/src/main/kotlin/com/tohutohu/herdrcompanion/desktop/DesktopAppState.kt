@@ -246,6 +246,7 @@ class DesktopAppState(
         updateSessionRowSelection()
         ensureDetail(id)
         saveLayout()
+        markSeen(id)
     }
 
     /** Adds a session to the Desktop split view, or focuses it if it is already open. */
@@ -264,6 +265,7 @@ class DesktopAppState(
         updateSessionRowSelection()
         ensureDetail(id)
         saveLayout()
+        markSeen(id)
     }
 
     fun focusSession(id: String) {
@@ -272,6 +274,29 @@ class DesktopAppState(
         selection.select(id)
         updateSessionRowSelection()
         saveLayout()
+        markSeen(id)
+    }
+
+    /**
+     * Read state lives in Herdr, where marking a session seen focuses its
+     * pane. Only a session the user opens or selects is marked, never one that
+     * merely stays open, so the Herdr view does not move behind their back.
+     */
+    private fun markSeen(id: String) {
+        if (sessions.none { it.session.id == id && it.session.unread }) return
+        sessions = sessions.map { row ->
+            if (row.session.id == id) row.copy(session = row.session.copy(unread = false)) else row
+        }
+        scope.launch {
+            try {
+                repository.markSeen(id)
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (error: Exception) {
+                // The next list refresh brings the unread state back.
+                logger.warning("mark seen failed: ${error.toDesktopGatewayError().kind}")
+            }
+        }
     }
 
     fun closeSession(id: String) {

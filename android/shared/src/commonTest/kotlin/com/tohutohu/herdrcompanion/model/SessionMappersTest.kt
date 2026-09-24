@@ -26,4 +26,17 @@ class SessionMappersTest {
         assertEquals(0.04, model.costUsd)
         assertTrue(model.live)
     }
+
+    @Test
+    fun `Herdrの未読状態を一覧表示モデルへ引き継ぐ`() {
+        val model = SessionDto(
+            id = "claude:1",
+            provider = "claude",
+            status = "completed",
+            updatedAt = "2026-09-20T00:00:00Z",
+            unread = true,
+        ).toUiModel()
+
+        assertTrue(model.unread)
+    }
 }
