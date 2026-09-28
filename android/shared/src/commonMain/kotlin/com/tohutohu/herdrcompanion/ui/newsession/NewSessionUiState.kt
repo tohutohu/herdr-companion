@@ -5,6 +5,7 @@ import com.tohutohu.herdrcompanion.data.DirectoryShortcuts
 import com.tohutohu.herdrcompanion.data.api.DirListingDto
 import com.tohutohu.herdrcompanion.data.api.ModelsResponse
 import com.tohutohu.herdrcompanion.data.api.StartSessionRequest
+import com.tohutohu.herdrcompanion.ui.detail.AttachmentUiState
 
 /** State needed to render the new-session form and directory browser. */
 data class NewSessionUiState(
@@ -31,6 +32,10 @@ data class NewSessionUiState(
     val favorite: Boolean,
     /** The user's choice to start in a new git worktree. */
     val worktree: Boolean = false,
+    /** Files picked to go with the first prompt. */
+    val attachments: List<AttachmentUiState> = emptyList(),
+    /** Whether this platform can pick attachments. */
+    val attachmentsEnabled: Boolean = false,
 ) {
     /** Only a folder in a git repository can have a worktree. */
     val worktreeAvailable get() = listing?.git == true
@@ -51,6 +56,9 @@ sealed interface NewSessionAction {
     data class SetEffort(val effort: String) : NewSessionAction
     data class SetMode(val mode: String) : NewSessionAction
     data class SetPrompt(val prompt: String) : NewSessionAction
+    data object PickImage : NewSessionAction
+    data object PickFile : NewSessionAction
+    data class RemoveAttachment(val id: String) : NewSessionAction
     data class SelectPreset(val preset: AgentPreset) : NewSessionAction
     data class ReorderPresets(val presets: List<AgentPreset>) : NewSessionAction
     data class ReorderFavoriteDirectories(val paths: List<String>) : NewSessionAction

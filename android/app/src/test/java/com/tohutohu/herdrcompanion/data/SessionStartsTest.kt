@@ -25,6 +25,27 @@ class SessionStartsTest {
         assertTrue(starts.entries.value.single().listed)
     }
 
+    @Test fun `添付をアップロードしてからそのIDを付けて起動する`() = runBlocking {
+        var sent: StartSessionRequest? = null
+        val starts = SessionStarts(this, { sent = it; StartSessionResponse(sessionId = "real", paneId = "pane") }, { _, _ -> error("unused") }, {})
+        starts.enqueue(request) { listOf("up1", "up2") }
+        yield()
+        assertEquals(request.copy(uploads = listOf("up1", "up2")), sent)
+        assertEquals("real", starts.entries.value.single().sessionId)
+    }
+
+    @Test fun `添付のアップロードに失敗したら起動しない`() = runBlocking {
+        var calls = 0
+        val starts = SessionStarts(this, { calls++; StartSessionResponse(paneId = "pane") }, { _, _ -> error("unused") }, {})
+        starts.enqueue(request) { error("too large") }
+        yield()
+        val entry = starts.entries.value.single()
+        assertEquals(0, calls)
+        assertFalse(entry.busy)
+        assertTrue(entry.notice!!.contains("too large"))
+        assertTrue(entry.notice!!.contains("not started"))
+    }
+
     @Test fun `セッションIDが遅れて判明してもペインで照合する`() = runBlocking {
         val starts = SessionStarts(this, { StartSessionResponse(paneId = "pane") }, { _, _ -> error("unused") }, {})
         starts.enqueue(request)

@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.tohutohu.herdrcompanion.data.Message
 import com.tohutohu.herdrcompanion.data.SendState
+import com.tohutohu.herdrcompanion.data.api.GatewayApi
 import com.tohutohu.herdrcompanion.data.api.InteractionResponseDto
 import com.tohutohu.herdrcompanion.data.api.MessageDto
 import com.tohutohu.herdrcompanion.data.api.Status
@@ -748,16 +749,7 @@ class DesktopAppState(
     }
 
     private suspend fun uploadAttachments(attachments: List<DesktopAttachment>): List<String> =
-        attachments.map { attachment ->
-            val bytes = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                val size = Files.size(attachment.path)
-                if (size > MAX_UPLOAD_BYTES) {
-                    error("${attachment.name} is larger than ${MAX_UPLOAD_BYTES / (1024 * 1024)} MB")
-                }
-                Files.readAllBytes(attachment.path)
-            }
-            api.upload(bytes, attachment.mimeType, attachment.name)
-        }
+        uploadDesktopAttachments(api, attachments)
 
     private fun settlePending(id: String, messages: List<Message>) {
         val existing = pendingBySession[id].orEmpty()
@@ -796,6 +788,19 @@ class DesktopAppState(
     }
 }
 
+/** Uploads the files to the gateway and returns their upload ids. */
+internal suspend fun uploadDesktopAttachments(api: GatewayApi, attachments: List<DesktopAttachment>): List<String> =
+    attachments.map { attachment ->
+        val bytes = withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val size = Files.size(attachment.path)
+            if (size > MAX_UPLOAD_BYTES) {
+                error("${attachment.name} is larger than ${MAX_UPLOAD_BYTES / (1024 * 1024)} MB")
+            }
+            Files.readAllBytes(attachment.path)
+        }
+        api.upload(bytes, attachment.mimeType, attachment.name)
+    }
+
 private fun cleanupAttachments(attachments: Iterable<DesktopAttachment>) {
     attachments.filter { it.deleteWhenDone }.forEach { attachment ->
         runCatching { Files.deleteIfExists(attachment.path) }
@@ -827,7 +832,7 @@ private fun MessageDto.toMessage() = Message(
 
 private fun Message.text(): String = blocks.filter { it.type == "text" }.joinToString(" ") { it.text.orEmpty() }
 
-private fun DesktopAttachment.toUiState() = AttachmentUiState(
+internal fun DesktopAttachment.toUiState() = AttachmentUiState(
     id = id,
     name = name,
     mimeType = mimeType,

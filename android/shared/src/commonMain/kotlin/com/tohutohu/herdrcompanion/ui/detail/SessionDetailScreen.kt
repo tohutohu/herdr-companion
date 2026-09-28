@@ -15,7 +15,6 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.DragInteraction
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
@@ -28,20 +27,14 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AttachFile
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Terminal
@@ -86,7 +79,6 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import coil3.compose.AsyncImage
 import com.tohutohu.herdrcompanion.data.api.Status
 import com.tohutohu.herdrcompanion.model.headline
 import com.tohutohu.herdrcompanion.ui.ContextBar
@@ -491,54 +483,17 @@ private fun Composer(
                     modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
                 )
             }
-            ExpandingContent(value = attachments.takeIf { it.isNotEmpty() }) { shown ->
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 8.dp)) {
-                    items(shown, key = { it.id }) { attachment ->
-                        Box(Modifier.animateItem()) {
-                            if (attachment.isImage) {
-                                AsyncImage(
-                                    model = resolveAttachmentPreview(attachment.id),
-                                    contentDescription = null,
-                                    modifier = Modifier.size(64.dp),
-                                )
-                            } else {
-                                FileChip(attachment.name)
-                            }
-                            IconButton(
-                                onClick = { onAction(SessionDetailAction.RemoveAttachment(attachment.id)) },
-                                modifier = Modifier.size(24.dp).align(Alignment.TopEnd),
-                            ) {
-                                Icon(Icons.Default.Close, contentDescription = "Remove")
-                            }
-                        }
-                    }
-                }
-            }
+            AttachmentPreviewRow(
+                attachments = attachments,
+                resolvePreview = resolveAttachmentPreview,
+                onRemove = { onAction(SessionDetailAction.RemoveAttachment(it)) },
+            )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box {
-                    var menuOpen by remember { mutableStateOf(false) }
-                    IconButton(enabled = enabled && attachmentsEnabled, onClick = { menuOpen = true }) {
-                        Icon(Icons.Default.Add, contentDescription = "Attach")
-                    }
-                    DropdownMenu(expanded = menuOpen && enabled, onDismissRequest = { menuOpen = false }) {
-                        DropdownMenuItem(
-                            text = { Text("Image") },
-                            leadingIcon = { Icon(Icons.Default.Image, contentDescription = null) },
-                            onClick = {
-                                menuOpen = false
-                                onAction(SessionDetailAction.PickImage)
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("File") },
-                            leadingIcon = { Icon(Icons.Default.AttachFile, contentDescription = null) },
-                            onClick = {
-                                menuOpen = false
-                                onAction(SessionDetailAction.PickFile)
-                            },
-                        )
-                    }
-                }
+                AttachButton(
+                    enabled = enabled && attachmentsEnabled,
+                    onPickImage = { onAction(SessionDetailAction.PickImage) },
+                    onPickFile = { onAction(SessionDetailAction.PickFile) },
+                )
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it },
@@ -587,24 +542,6 @@ private fun Composer(
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun FileChip(name: String) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = MaterialTheme.shapes.small,
-        modifier = Modifier.height(64.dp).widthIn(max = 160.dp),
-    ) {
-        Row(
-            Modifier.padding(horizontal = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Icon(Icons.Default.AttachFile, contentDescription = null, modifier = Modifier.size(16.dp))
-            Text(name, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
     }
 }

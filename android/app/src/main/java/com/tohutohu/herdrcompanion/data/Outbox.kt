@@ -4,7 +4,6 @@ import android.content.ContentResolver
 import com.tohutohu.herdrcompanion.data.api.GatewayApi
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -14,11 +13,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
-
-private const val MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
 /** How long a message the gateway took may wait to show up before it is let go. */
 private const val UNSEEN_EXPIRY_MS = 30L * 60 * 1000
@@ -113,17 +109,7 @@ class Outbox(
         }
     }
 
-    private suspend fun upload(attachment: Attachment): String {
-        val bytes = withContext(Dispatchers.IO) {
-            resolver.openInputStream(attachment.uri)?.use { it.readBytes() }
-                ?: error("cannot read ${attachment.name}")
-        }
-        // The gateway rejects anything larger, with a much vaguer message.
-        if (bytes.size > MAX_UPLOAD_BYTES) {
-            error("${attachment.name} is larger than ${MAX_UPLOAD_BYTES / (1024 * 1024)} MB")
-        }
-        return api.upload(bytes, attachment.mime, attachment.name)
-    }
+    private suspend fun upload(attachment: Attachment): String = uploadAttachment(resolver, api, attachment)
 
     private fun edit(localId: String, change: (PendingMessage) -> PendingMessage): PendingMessage? {
         var out: PendingMessage? = null

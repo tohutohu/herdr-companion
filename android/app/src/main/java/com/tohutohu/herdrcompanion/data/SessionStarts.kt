@@ -40,10 +40,23 @@ class SessionStarts(
     private val mutable = MutableStateFlow<List<SessionStart>>(emptyList())
     val entries = mutable.asStateFlow()
 
-    fun enqueue(request: StartSessionRequest): String {
+    /**
+     * Starts a session. [uploads] uploads the first prompt's attachments and
+     * returns their ids; when it fails, the session is not started.
+     */
+    fun enqueue(request: StartSessionRequest, uploads: suspend () -> List<String> = { emptyList() }): String {
         val entry = SessionStart(UUID.randomUUID().toString(), request)
         mutable.update { listOf(entry) + it }
-        execute(entry.id) { start(request) }
+        execute(entry.id) {
+            val ids = try {
+                uploads()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                throw UploadFailed(e)
+            }
+            start(if (ids.isEmpty()) request else request.copy(uploads = ids))
+        }
         return entry.id
     }
 
@@ -99,9 +112,14 @@ class SessionStarts(
                 try { refresh() } catch (e: CancellationException) { throw e } catch (_: Exception) { }
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: UploadFailed) {
+                change(id) { it.copy(busy = false, notice = "Could not upload the attachments: ${e.cause?.message}. The session was not started.") }
             } catch (e: Exception) {
                 change(id) { it.copy(busy = false, notice = "Could not confirm session start: ${e.message}. Check the session list before starting again.") }
             }
         }
     }
+
+    /** Nothing was sent to the gateway yet, so the session certainly did not start. */
+    private class UploadFailed(cause: Exception) : Exception(cause)
 }

@@ -65,6 +65,8 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import com.tohutohu.herdrcompanion.ui.ExpandingContent
 import com.tohutohu.herdrcompanion.ui.SwapContent
+import com.tohutohu.herdrcompanion.ui.detail.AttachButton
+import com.tohutohu.herdrcompanion.ui.detail.AttachmentPreviewRow
 
 /** Pure Compose rendering for choosing an agent and working directory. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -75,6 +77,7 @@ fun NewSessionScreen(
     topContent: @Composable () -> Unit = {},
     initialPromptFocusRequester: FocusRequester? = null,
     showStartInSplit: Boolean = false,
+    resolveAttachmentPreview: (String) -> Any? = { null },
 ) {
     var promptValue by remember { mutableStateOf(TextFieldValue(state.prompt)) }
     LaunchedEffect(state.prompt) {
@@ -184,23 +187,38 @@ fun NewSessionScreen(
                             Icon(Icons.Default.Tune, contentDescription = "Choose agent, model or mode")
                         }
                     }
-                    OutlinedTextField(
-                        value = promptValue,
-                        onValueChange = { value ->
-                            promptValue = value
-                            if (value.text != state.prompt) {
-                                onAction(NewSessionAction.SetPrompt(value.text))
-                            }
-                        },
-                        enabled = !state.starting && !state.checking,
-                        label = { Text("First prompt (optional)") },
-                        maxLines = 4,
-                        modifier = if (initialPromptFocusRequester != null) {
-                            Modifier.fillMaxWidth().focusRequester(initialPromptFocusRequester)
-                        } else {
-                            Modifier.fillMaxWidth()
-                        },
+                    val editable = !state.starting && !state.checking
+                    AttachmentPreviewRow(
+                        attachments = state.attachments,
+                        resolvePreview = resolveAttachmentPreview,
+                        onRemove = { onAction(NewSessionAction.RemoveAttachment(it)) },
                     )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (state.attachmentsEnabled) {
+                            AttachButton(
+                                enabled = editable,
+                                onPickImage = { onAction(NewSessionAction.PickImage) },
+                                onPickFile = { onAction(NewSessionAction.PickFile) },
+                            )
+                        }
+                        OutlinedTextField(
+                            value = promptValue,
+                            onValueChange = { value ->
+                                promptValue = value
+                                if (value.text != state.prompt) {
+                                    onAction(NewSessionAction.SetPrompt(value.text))
+                                }
+                            },
+                            enabled = editable,
+                            label = { Text("First prompt (optional)") },
+                            maxLines = 4,
+                            modifier = if (initialPromptFocusRequester != null) {
+                                Modifier.weight(1f).focusRequester(initialPromptFocusRequester)
+                            } else {
+                                Modifier.weight(1f)
+                            },
+                        )
+                    }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),

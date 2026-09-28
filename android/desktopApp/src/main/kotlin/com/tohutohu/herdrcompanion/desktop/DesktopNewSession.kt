@@ -85,6 +85,7 @@ fun DesktopNewSessionWindow(
     var modelsError by remember { mutableStateOf<String?>(null) }
     var trustRequest by remember { mutableStateOf<StartSessionResponse?>(null) }
     var startInSplit by remember { mutableStateOf(false) }
+    var attachments by remember { mutableStateOf(emptyList<DesktopAttachment>()) }
 
     suspend fun load(nextPath: String?) {
         loading = true
@@ -120,7 +121,8 @@ fun DesktopNewSessionWindow(
         DesktopPreferences.saveAgentPresets(presets)
         scope.launch {
             try {
-                finish(api.startSession(request))
+                val uploads = uploadDesktopAttachments(api, attachments)
+                finish(api.startSession(request.copy(uploads = uploads)))
             } catch (cause: Exception) {
                 val mapped = cause.toDesktopGatewayError()
                 error = mapped.message
@@ -236,6 +238,8 @@ fun DesktopNewSessionWindow(
         currentPreset = currentPreset,
         favorite = presets.presets.any { it.key == currentPreset.key },
         worktree = worktree,
+        attachments = attachments.map { it.toUiState() },
+        attachmentsEnabled = true,
     )
 
     DialogWindow(
@@ -299,6 +303,7 @@ fun DesktopNewSessionWindow(
                 },
                 initialPromptFocusRequester = promptFocusRequester,
                 showStartInSplit = true,
+                resolveAttachmentPreview = { id -> attachments.firstOrNull { it.id == id }?.previewModel },
                 onAction = { action ->
                     when (action) {
                         NewSessionAction.Back -> onDismiss()
@@ -317,6 +322,12 @@ fun DesktopNewSessionWindow(
                         is NewSessionAction.SetEffort -> effort = action.effort
                         is NewSessionAction.SetMode -> mode = normalizedMode(catalog, action.mode)
                         is NewSessionAction.SetPrompt -> prompt = action.prompt
+                        NewSessionAction.PickImage, NewSessionAction.PickFile -> {
+                            val picked = DesktopFilePicker.pickFiles(window, imagesOnly = action == NewSessionAction.PickImage)
+                                .map { it.toDesktopAttachment() }
+                            attachments = attachments + picked.filterNot { new -> attachments.any { it.id == new.id } }
+                        }
+                        is NewSessionAction.RemoveAttachment -> attachments = attachments.filterNot { it.id == action.id }
                         is NewSessionAction.SelectPreset -> {
                             provider = action.preset.provider
                             model = action.preset.model

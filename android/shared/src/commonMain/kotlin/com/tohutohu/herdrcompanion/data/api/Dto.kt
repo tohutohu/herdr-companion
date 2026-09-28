@@ -234,6 +234,8 @@ data class StartSessionRequest(
     val mode: String? = null,
     /** Starts in a new git worktree, removed again when the session is archived. */
     val worktree: Boolean = false,
+    /** Upload ids attached to the first prompt. */
+    val uploads: List<String> = emptyList(),
 )
 
 @Serializable
