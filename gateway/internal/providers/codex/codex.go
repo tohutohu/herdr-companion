@@ -367,12 +367,8 @@ func (p *Provider) Send(ctx context.Context, nativeID string, live *providers.Li
 	if live == nil {
 		return providers.ErrNotLive
 	}
-	text := providers.TextWithFiles(in)
-	for _, img := range in.Images {
-		// The Codex TUI attaches pasted image paths.
-		text += "\n" + img
-	}
-	return p.term.Prompt(ctx, live.PaneID, strings.TrimSpace(text))
+	// The Codex TUI attaches pasted image paths.
+	return p.term.Prompt(ctx, live.PaneID, providers.TextWithAttachments(in))
 }
 
 // CycleMode changes the collaboration mode without changing the selected

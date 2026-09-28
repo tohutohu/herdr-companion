@@ -18,6 +18,7 @@ import (
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/files"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/worktree"
 )
@@ -72,7 +73,7 @@ type pendingLaunch struct {
 	p          providers.Provider
 	lp         providers.Launchable
 	ws, cwd    string
-	prompt     string
+	prompt     model.Input
 	promptSent bool
 	knownID    string
 	// mode is applied to the live TUI once, before the first prompt.
@@ -217,6 +218,10 @@ type StartRequest struct {
 	// Worktree starts the session in a new git worktree of Cwd's repository,
 	// made by Herdr.
 	Worktree bool `json:"worktree,omitempty"`
+	// Images and Files are attachments of the first prompt, as local paths
+	// the API has already resolved from upload ids.
+	Images []string `json:"-"`
+	Files  []string `json:"-"`
 }
 
 type StartResult struct {
@@ -275,7 +280,8 @@ func (l *Launcher) Start(ctx context.Context, req StartRequest) (*StartResult, e
 		return nil, err
 	}
 	opts := providers.LaunchOptions{Model: req.Model, Effort: req.Effort, Mode: req.Mode, Cwd: cwd}
-	plan := launchPlan{p: p, lp: lp, cwd: cwd, trust: req.Trust, prompt: req.Prompt, mode: req.Mode,
+	prompt := model.Input{Text: req.Prompt, Images: req.Images, Files: req.Files}
+	plan := launchPlan{p: p, lp: lp, cwd: cwd, trust: req.Trust, prompt: prompt, mode: req.Mode,
 		logKV: []any{"model", req.Model, "effort", req.Effort, "mode", req.Mode, "worktree", req.Worktree}}
 	if req.Worktree {
 		// Herdr makes the worktree and opens the workspace in it.
@@ -349,13 +355,14 @@ func (l *Launcher) resolveWorktree(ctx context.Context, dir string) (string, err
 // a session; mode is set in the live TUI by providers that take no mode
 // argument.
 type launchPlan struct {
-	p               providers.Provider
-	lp              providers.Launchable
-	cwd             string
-	args            []string
-	trust           bool
-	prompt, knownID string
-	mode            string
+	p       providers.Provider
+	lp      providers.Launchable
+	cwd     string
+	args    []string
+	trust   bool
+	prompt  model.Input
+	knownID string
+	mode    string
 	// ws and pane are the workspace Herdr opened in a worktree it created
 	// for the session (worktree); empty to open a new one in cwd.
 	ws, pane, worktree string
@@ -508,7 +515,7 @@ func (l *Launcher) finish(ctx context.Context, pane string, pl *pendingLaunch) *
 	if w := l.applyMode(ctx, pane, pl); w != "" {
 		res.Warning = w
 	}
-	if strings.TrimSpace(pl.prompt) != "" {
+	if !pl.prompt.Empty() {
 		if err := l.waitReady(ctx, pane); err != nil {
 			res.Warning = "The agent did not become ready; the prompt was not sent."
 			return res
@@ -517,13 +524,15 @@ func (l *Launcher) finish(ctx context.Context, pane string, pl *pendingLaunch) *
 		if sender, ok := pl.p.(providers.LaunchPromptSender); ok {
 			promptErr = sender.SendLaunchPrompt(ctx, pane, pl.prompt)
 		} else {
-			promptErr = l.Herdr.Prompt(ctx, pane, pl.prompt)
+			// Agents without their own way paste the attachments as paths,
+			// which their TUIs attach (images) or read.
+			promptErr = l.Herdr.Prompt(ctx, pane, providers.TextWithAttachments(pl.prompt))
 		}
 		if promptErr != nil {
 			res.Warning = "Prompt could not be sent: " + promptErr.Error()
 		}
 		// Never replay a prompt after an ambiguous send error.
-		pl.prompt = ""
+		pl.prompt = model.Input{}
 		pl.promptSent = true
 	} else if !pl.promptSent && pl.knownID == "" {
 		// Agents do not always create a native session until the first prompt

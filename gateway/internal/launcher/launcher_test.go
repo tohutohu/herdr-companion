@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/files"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/worktree"
 )
@@ -208,11 +210,11 @@ func (fakeProvider) StartupKeys(s string) []string {
 type launchPromptProvider struct {
 	fakeProvider
 	herdr  *fakeHerdr
-	prompt string
+	prompt model.Input
 }
 
-func (p *launchPromptProvider) SendLaunchPrompt(_ context.Context, _ string, text string) error {
-	p.prompt = text
+func (p *launchPromptProvider) SendLaunchPrompt(_ context.Context, _ string, in model.Input) error {
+	p.prompt = in
 	p.herdr.mu.Lock()
 	p.herdr.session = &herdr.AgentSession{Agent: "claude", Kind: "id", Value: "abc-123"}
 	p.herdr.mu.Unlock()
@@ -258,11 +260,52 @@ func Testプロバイダが初回promptの入力経路を選べる(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.SessionID != "claude:abc-123" || p.prompt != "abc123" {
+	if res.SessionID != "claude:abc-123" || p.prompt.Text != "abc123" {
 		t.Errorf("result = %+v, prompt = %q", res, p.prompt)
 	}
 	if got := strings.Join(fh.calls, "|"); strings.Contains(got, "prompt abc123") {
 		t.Errorf("must use provider launch input path: %s", got)
+	}
+}
+
+func Test初回promptの添付はプロバイダの入力経路に渡す(t *testing.T) {
+	fh := &fakeHerdr{status: herdr.StatusIdle}
+	l, root := newLauncher(t, fh)
+	p := &launchPromptProvider{fakeProvider: fakeProvider{}, herdr: fh}
+	l.Providers = []providers.Provider{p}
+
+	_, err := l.Start(context.Background(), StartRequest{
+		Provider: "claude",
+		Cwd:      filepath.Join(root, "app-b"),
+		Images:   []string{"/up/a.png"},
+		Files:    []string{"/up/notes.txt"},
+		Trust:    true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := model.Input{Images: []string{"/up/a.png"}, Files: []string{"/up/notes.txt"}}
+	if !reflect.DeepEqual(p.prompt, want) {
+		t.Errorf("prompt = %+v, want %+v", p.prompt, want)
+	}
+}
+
+func Test独自の入力経路がないプロバイダには添付のパスを本文に続けて送る(t *testing.T) {
+	fh := &fakeHerdr{status: herdr.StatusIdle}
+	l, root := newLauncher(t, fh)
+	_, err := l.Start(context.Background(), StartRequest{
+		Provider: "claude",
+		Cwd:      filepath.Join(root, "app-b"),
+		Prompt:   "見て",
+		Images:   []string{"/up/a.png"},
+		Files:    []string{"/up/notes.txt"},
+		Trust:    true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(fh.calls, "|"); !strings.Contains(got, "prompt 見て\n/up/notes.txt\n/up/a.png") {
+		t.Errorf("calls = %q", got)
 	}
 }
 
@@ -512,7 +555,7 @@ func TestセッションID待ちの再試行でプロンプトを再送しない
 	l, root := newLauncher(t, fh)
 	// Identity belongs to a different provider, so the launcher keeps waiting.
 	p := fakeProvider{}
-	pl := &pendingLaunch{p: p, lp: p, cwd: root, prompt: "hello", started: time.Now()}
+	pl := &pendingLaunch{p: p, lp: p, cwd: root, prompt: model.Input{Text: "hello"}, started: time.Now()}
 	l.IdentityWait = time.Nanosecond
 	res := l.finishPending(context.Background(), "w9:p1", pl)
 	if res.SessionID != "" || res.Warning == "" {

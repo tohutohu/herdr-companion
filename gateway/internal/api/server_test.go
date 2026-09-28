@@ -61,14 +61,22 @@ func (f *fakeHerdr) CreateWorktree(_ context.Context, cwd, label string) (string
 }
 func (f *fakeHerdr) StartAgent(_ context.Context, name, kind, pane string, args []string, _ time.Duration) error {
 	f.calls = append(f.calls, "start:"+kind+" "+strings.Join(args, " "))
+	// A resume keeps the id it was given; a new session gets one.
+	id := "new"
+	if len(args) > 0 {
+		id = args[len(args)-1]
+	}
 	f.snap.Panes = append(f.snap.Panes, herdr.Pane{
 		PaneID: pane, WorkspaceID: "w2", Agent: str(kind), AgentStatus: herdr.StatusIdle,
-		AgentSession: &herdr.AgentSession{Agent: kind, Kind: "id", Value: args[len(args)-1]},
+		AgentSession: &herdr.AgentSession{Agent: kind, Kind: "id", Value: id},
 	})
 	return nil
 }
 func (f *fakeHerdr) ReadVisible(context.Context, string) (string, error) { return "", nil }
-func (f *fakeHerdr) Prompt(context.Context, string, string) error        { return nil }
+func (f *fakeHerdr) Prompt(_ context.Context, _ string, text string) error {
+	f.calls = append(f.calls, "prompt:"+text)
+	return nil
+}
 func (f *fakeHerdr) Pane(_ context.Context, pane string) (*herdr.Pane, error) {
 	for i := range f.snap.Panes {
 		if f.snap.Panes[i].PaneID == pane {
@@ -406,6 +414,38 @@ func Test画像をアップロードしてメッセージに添付できる(t *t
 	resp, _ = do(t, ts, tok, "POST", "/v1/sessions/fake:old/messages", []byte(`{"text":"x"}`), "application/json")
 	if resp.StatusCode != http.StatusConflict {
 		t.Errorf("offline send status = %d", resp.StatusCode)
+	}
+}
+
+func Test新しいセッションの初回promptにアップロードを添付できる(t *testing.T) {
+	ts, _, fh, tok := newTestServer(t)
+	_, img := upload(t, ts, tok, []byte("\x89PNG..."), "image/png", "")
+	_, doc := upload(t, ts, tok, []byte("memo"), "text/plain", "notes.txt")
+
+	payload, _ := json.Marshal(map[string]any{"provider": "fake", "cwd": fh.snap.Panes[0].Cwd, "prompt": "見て", "trust": true, "uploads": []string{img, doc}})
+	resp, body := do(t, ts, tok, "POST", "/v1/sessions", payload, "application/json")
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("start status %d: %s", resp.StatusCode, body)
+	}
+	var prompt string
+	for _, c := range fh.calls {
+		if strings.HasPrefix(c, "prompt:") {
+			prompt = c
+		}
+	}
+	lines := strings.Split(strings.TrimPrefix(prompt, "prompt:"), "\n")
+	if len(lines) != 3 || lines[0] != "見て" || !strings.HasSuffix(lines[1], "notes.txt") || !strings.HasSuffix(lines[2], img+".png") {
+		t.Errorf("prompt = %q", prompt)
+	}
+
+	fh.calls = nil
+	payload, _ = json.Marshal(map[string]any{"provider": "fake", "cwd": fh.snap.Panes[0].Cwd, "prompt": "x", "uploads": []string{"missing"}})
+	resp, _ = do(t, ts, tok, "POST", "/v1/sessions", payload, "application/json")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("bad upload id status = %d", resp.StatusCode)
+	}
+	if len(fh.calls) != 0 {
+		t.Errorf("started despite a missing upload: %v", fh.calls)
 	}
 }
 

@@ -253,6 +253,10 @@ answered (or the gateway restarts), and returns `trustRequired: true`. The app t
 answers with `POST /v1/launches/{pane}/trust`, which continues the launch
 (first prompt, session id) or closes the workspace. The native session id is then read from the pane's
 `agent_session`, which the Herdr integration hook reports at startup.
+The first prompt can carry uploads like a message: Claude Code gets them the
+way `Send` enters them (images pasted, other paths in the text); the other
+agents get every path appended to the text, which their TUIs attach (Codex
+and Devin images) or read.
 An optional model id is passed as the CLI's `--model`. Devin returns model
 families from `devin models list`. Claude Code has no catalog API, so its list is the CLI aliases (`fable`, `opus`, `sonnet`,
 `haiku`); Codex's comes from `model/list`. Switching the model of a running
@@ -429,7 +433,7 @@ whole thing off, and `herdr-mobile-gateway usage` prints one read.
 |---|---|---|
 | GET | `/healthz` | no auth |
 | GET | `/v1/sessions` | live + recent offline sessions |
-| POST | `/v1/sessions` | start `{provider, cwd, prompt, model?, effort?, trust, worktree?}` in a new Herdr workspace → `{sessionId?, paneId, warning?, trustRequired?}` |
+| POST | `/v1/sessions` | start `{provider, cwd, prompt, uploads?[], model?, effort?, trust, worktree?}` in a new Herdr workspace → `{sessionId?, paneId, warning?, trustRequired?}` |
 | POST | `/v1/launches/{pane}/trust` | `{trust}` answer a start that returned `trustRequired`: continue it or close its workspace → `{sessionId?, paneId, warning?}` |
 | GET / POST | `/v1/launches/{pane}/terminal` | terminal fallback before a session id exists; only panes launched by this gateway |
 | POST | `/v1/launches/{pane}/continue` | retry readiness after manual terminal interaction, then send the retained initial prompt once |

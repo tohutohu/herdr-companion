@@ -498,7 +498,7 @@ func Test初回promptもブラケットペーストせず入力してEnterで送
 	p := New(t.TempDir(), term, deadletter.Nop{})
 	p.keyDelay = 0
 
-	if err := p.SendLaunchPrompt(context.Background(), "w1:p1", "abc123"); err != nil {
+	if err := p.SendLaunchPrompt(context.Background(), "w1:p1", model.Input{Text: "abc123"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := strings.Join(term.calls, "|"); got != "text:abc123|text:\x1b[13u" {
@@ -547,7 +547,7 @@ func Test行の長さはUTF16単位で数えて800までなら入力する(t *te
 	for text, pasted := range cases {
 		term := &fakeTerminal{}
 		p := New(t.TempDir(), term, deadletter.Nop{})
-		if err := p.SendLaunchPrompt(context.Background(), "w1:p1", text); err != nil {
+		if err := p.SendLaunchPrompt(context.Background(), "w1:p1", model.Input{Text: text}); err != nil {
 			t.Fatal(err)
 		}
 		if got := strings.HasPrefix(term.calls[0], "text:\x1b[200~"); got != pasted {
@@ -566,6 +566,21 @@ func Test画像はパスを個別にブラケットペーストしてから本�
 		t.Fatal(err)
 	}
 	want := "text:\x1b[200~/tmp/a.png\x1b[201~|text:\x1b[200~/tmp/b.jpg\x1b[201~|text:見て|text:\x1b[13u"
+	if got := strings.Join(term.calls, "|"); got != want {
+		t.Errorf("calls = %q, want %q", got, want)
+	}
+}
+
+func Test初回promptも画像をペーストしてからファイルのパスを添えた本文を入力する(t *testing.T) {
+	term := &fakeTerminal{}
+	p := New(t.TempDir(), term, deadletter.Nop{})
+	p.keyDelay = 0
+
+	in := model.Input{Text: "見て", Images: []string{"/tmp/a.png"}, Files: []string{"/tmp/notes.txt"}}
+	if err := p.SendLaunchPrompt(context.Background(), "w1:p1", in); err != nil {
+		t.Fatal(err)
+	}
+	want := "text:\x1b[200~/tmp/a.png\x1b[201~|text:見て|keys:shift+enter|text:/tmp/notes.txt|text:\x1b[13u"
 	if got := strings.Join(term.calls, "|"); got != want {
 		t.Errorf("calls = %q, want %q", got, want)
 	}

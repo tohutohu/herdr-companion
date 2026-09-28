@@ -2,7 +2,10 @@
 // Keep these small: anything provider specific must be converted to text.
 package model
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 type Status string
 
@@ -189,4 +192,9 @@ type Input struct {
 	Text   string
 	Images []string
 	Files  []string
+}
+
+// Empty reports whether there is nothing to send.
+func (in Input) Empty() bool {
+	return strings.TrimSpace(in.Text) == "" && len(in.Images) == 0 && len(in.Files) == 0
 }

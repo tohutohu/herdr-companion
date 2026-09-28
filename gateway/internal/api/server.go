@@ -320,6 +320,23 @@ type sendRequest struct {
 // needs a pause after each pasted image, so a message with several is slow.
 const sendTimeout = 2 * time.Minute
 
+// uploadPaths resolves upload ids to the stored files' paths, split into
+// images and other files.
+func (s *Server) uploadPaths(ids []string) (images, files []string, err error) {
+	for _, u := range ids {
+		f, err := s.Uploads.Get(u)
+		if err != nil {
+			return nil, nil, err
+		}
+		if f.IsImage() {
+			images = append(images, f.Path)
+		} else {
+			files = append(files, f.Path)
+		}
+	}
+	return images, files, nil
+}
+
 func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var req sendRequest
@@ -328,19 +345,12 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in := model.Input{Text: req.Text}
-	for _, u := range req.Uploads {
-		f, err := s.Uploads.Get(u)
-		if err != nil {
-			s.fail(w, r, id, "send_message", err)
-			return
-		}
-		if f.IsImage() {
-			in.Images = append(in.Images, f.Path)
-		} else {
-			in.Files = append(in.Files, f.Path)
-		}
+	var err error
+	if in.Images, in.Files, err = s.uploadPaths(req.Uploads); err != nil {
+		s.fail(w, r, id, "send_message", err)
+		return
 	}
-	if strings.TrimSpace(in.Text) == "" && len(in.Images) == 0 && len(in.Files) == 0 {
+	if in.Empty() {
 		s.fail(w, r, id, "send_message", badRequest("empty message"))
 		return
 	}
@@ -708,13 +718,24 @@ func (s *Server) unregisterDevice(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+type startRequest struct {
+	launcher.StartRequest
+	// Uploads are attached to the first prompt.
+	Uploads []string `json:"uploads,omitempty"`
+}
+
 func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
-	var req launcher.StartRequest
+	var req startRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil || req.Provider == "" || req.Cwd == "" {
 		s.fail(w, r, "", "start_session", badRequest("provider and cwd are required"))
 		return
 	}
-	res, err := s.Launcher.Start(r.Context(), req)
+	var err error
+	if req.Images, req.Files, err = s.uploadPaths(req.Uploads); err != nil {
+		s.fail(w, r, "", "start_session", err)
+		return
+	}
+	res, err := s.Launcher.Start(r.Context(), req.StartRequest)
 	if err != nil {
 		s.Sink.Record(req.Provider, "", deadletter.SendError, "start session: "+err.Error(), req)
 		s.fail(w, r, "", "start_session", err)

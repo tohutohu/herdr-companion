@@ -263,7 +263,7 @@ type Launchable interface {
 // after the TUI has started. Some TUIs treat Herdr's generic agent.prompt
 // transport as pasted content, so providers that need real typing can opt in.
 type LaunchPromptSender interface {
-	SendLaunchPrompt(ctx context.Context, paneID, text string) error
+	SendLaunchPrompt(ctx context.Context, paneID string, in model.Input) error
 }
 
 // PreparedLauncher can create a native session before starting its TUI when

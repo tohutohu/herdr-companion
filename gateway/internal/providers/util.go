@@ -49,3 +49,13 @@ func TextWithFiles(in model.Input) string {
 	}
 	return text
 }
+
+// TextWithAttachments is TextWithFiles with the image paths appended too, for
+// a TUI that attaches an image when its path is pasted into the composer.
+func TextWithAttachments(in model.Input) string {
+	text := TextWithFiles(in)
+	for _, img := range in.Images {
+		text = strings.TrimSpace(text + "\n" + img)
+	}
+	return text
+}

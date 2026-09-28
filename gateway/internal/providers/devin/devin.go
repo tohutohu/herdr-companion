@@ -198,15 +198,7 @@ func (p *Provider) Send(ctx context.Context, nativeID string, live *providers.Li
 	if strings.TrimSpace(in.Text) == "" && len(in.Images) == 0 && len(in.Files) == 0 {
 		return errors.New("empty message")
 	}
-	return p.term.Prompt(ctx, live.PaneID, promptText(in))
-}
-
-func promptText(in model.Input) string {
-	text := providers.TextWithFiles(in)
-	for _, image := range in.Images {
-		text = strings.TrimSpace(text + "\n" + image)
-	}
-	return text
+	return p.term.Prompt(ctx, live.PaneID, providers.TextWithAttachments(in))
 }
 
 func (*Provider) Respond(context.Context, string, *providers.Live, model.InteractionResponse) error {

@@ -250,8 +250,20 @@ func (p *Provider) Send(ctx context.Context, nativeID string, live *providers.Li
 		// check too, but ordinary prompts are sent through the PTY directly.
 		return &herdr.Error{Code: "agent_blocked", Message: "agent is waiting at a dialog"}
 	}
-	for _, img := range in.Images {
-		if err := p.term.SendText(ctx, live.PaneID, "\x1b[200~"+img+"\x1b[201~"); err != nil {
+	return p.enter(ctx, live.PaneID, text, in.Images)
+}
+
+// SendLaunchPrompt uses the same raw TUI input path as a follow-up prompt.
+// The generic Herdr prompt endpoint can be rendered as bracketed paste by
+// Claude Code, which changes how an otherwise ordinary first prompt behaves.
+func (p *Provider) SendLaunchPrompt(ctx context.Context, paneID string, in model.Input) error {
+	return p.enter(ctx, paneID, providers.TextWithFiles(in), in.Images)
+}
+
+// enter pastes each image path, then types and submits the text.
+func (p *Provider) enter(ctx context.Context, paneID, text string, images []string) error {
+	for _, img := range images {
+		if err := p.term.SendText(ctx, paneID, "\x1b[200~"+img+"\x1b[201~"); err != nil {
 			return err
 		}
 		// Claude Code reads the file asynchronously after each paste.
@@ -260,15 +272,8 @@ func (p *Provider) Send(ctx context.Context, nativeID string, live *providers.Li
 		}
 	}
 	if text == "" {
-		return p.submit(ctx, live.PaneID)
+		return p.submit(ctx, paneID)
 	}
-	return p.typePrompt(ctx, live.PaneID, text)
-}
-
-// SendLaunchPrompt uses the same raw TUI input path as a follow-up prompt.
-// The generic Herdr prompt endpoint can be rendered as bracketed paste by
-// Claude Code, which changes how an otherwise ordinary first prompt behaves.
-func (p *Provider) SendLaunchPrompt(ctx context.Context, paneID, text string) error {
 	return p.typePrompt(ctx, paneID, text)
 }
 
