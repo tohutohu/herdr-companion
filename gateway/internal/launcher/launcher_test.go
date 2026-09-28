@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -162,8 +163,8 @@ func (f *fakeHerdr) CloseWorkspace(_ context.Context, ws string) error {
 	f.record("close workspace " + ws)
 	return nil
 }
-func (f *fakeHerdr) ReportAgentSession(_ context.Context, pane, agent, id string) error {
-	f.record("report " + agent + " " + id)
+func (f *fakeHerdr) ReportAgentSession(_ context.Context, pane, agent, id, startSource string) error {
+	f.record("report " + agent + " " + id + " " + startSource)
 	f.mu.Lock()
 	f.session = &herdr.AgentSession{Agent: agent, Kind: "id", Value: id}
 	f.mu.Unlock()
@@ -486,6 +487,10 @@ func (p *locatingProvider) LocateLaunched(_ context.Context, cwd string, since t
 	return "thread-9"
 }
 
+// SendLaunchPrompt sends the first prompt itself, like Codex on the shared
+// daemon, so no hook reports the session to Herdr.
+func (p *locatingProvider) SendLaunchPrompt(context.Context, string, model.Input) error { return nil }
+
 func Testフックが報告しないセッションはproviderが見つけてHerdrに報告する(t *testing.T) {
 	fh := &fakeHerdr{status: herdr.StatusIdle}
 	l, root := newLauncher(t, fh)
@@ -511,6 +516,20 @@ func Testフックが報告しないセッションはproviderが見つけてHer
 	res, err = l.Resume(context.Background(), "claude", "known-1", root, false)
 	if err != nil || res.SessionID != "claude:known-1" {
 		t.Errorf("resume = %+v %v", res, err)
+	}
+	if !slices.Contains(fh.calls, "report claude known-1 resume") {
+		t.Errorf("calls = %v", fh.calls)
+	}
+
+	// 最初のプロンプトの後に見つけたセッションは新規の起動として報告する
+	fh = &fakeHerdr{status: herdr.StatusIdle}
+	l.Herdr = fh
+	res, err = l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: root, Prompt: "hello"})
+	if err != nil || res.SessionID != "claude:thread-9" {
+		t.Errorf("start = %+v %v", res, err)
+	}
+	if !slices.Contains(fh.calls, "report claude thread-9 startup") {
+		t.Errorf("calls = %v", fh.calls)
 	}
 }
 

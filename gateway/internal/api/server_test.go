@@ -94,7 +94,9 @@ func (f *fakeHerdr) FocusPane(_ context.Context, pane string) error {
 	}
 	return nil
 }
-func (f *fakeHerdr) ReportAgentSession(context.Context, string, string, string) error { return nil }
+func (f *fakeHerdr) ReportAgentSession(context.Context, string, string, string, string) error {
+	return nil
+}
 func (f *fakeHerdr) ClosePane(_ context.Context, pane string) error {
 	f.calls = append(f.calls, "close-pane:"+pane)
 	return nil

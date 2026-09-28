@@ -47,7 +47,7 @@ type Herdr interface {
 	Snapshot(ctx context.Context) (*herdr.Snapshot, error)
 	ClosePane(ctx context.Context, paneID string) error
 	CloseWorkspace(ctx context.Context, workspaceID string) error
-	ReportAgentSession(ctx context.Context, paneID, agent, sessionID string) error
+	ReportAgentSession(ctx context.Context, paneID, agent, sessionID, startSource string) error
 }
 
 type Launcher struct {
@@ -700,12 +700,13 @@ func (l *Launcher) waitIdentity(ctx context.Context, pane string, p providers.Pr
 		}
 		// Give the hook a moment before reporting on its behalf.
 		if polls++; locator != nil && polls > 2 {
-			id := knownID
+			// An id known before the start is a session the agent opens.
+			id, source := knownID, herdr.SessionResume
 			if id == "" {
-				id = locator.LocateLaunched(ctx, cwd, started.Add(-2*time.Second))
+				id, source = locator.LocateLaunched(ctx, cwd, started.Add(-2*time.Second)), herdr.SessionStartup
 			}
 			if id != "" {
-				if err := l.Herdr.ReportAgentSession(ctx, pane, p.HerdrAgent(), id); err != nil {
+				if err := l.Herdr.ReportAgentSession(ctx, pane, p.HerdrAgent(), id, source); err != nil {
 					slog.Warn("reporting agent session failed", "provider", p.Name(), "pane", pane, "session_id", id, "error", err)
 				}
 			}

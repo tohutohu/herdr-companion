@@ -375,6 +375,10 @@ with `pane.report_agent_session`. The creation time comes from the thread id
 (UUIDv7): a thread that has had no turn yet has no rollout, and the daemon
 then reports the time of the read as its `createdAt`, so a TUI left open
 without a prompt would otherwise pass for the session just launched.
+Reports carry a nanosecond `seq` and `session_start_source` (`startup`, or
+`resume` for an id known before the start) as the hooks' do: Herdr keeps the
+session a pane has unless a report names how the new one started and is
+newer.
 
 ## Archive and resume
 

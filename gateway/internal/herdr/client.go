@@ -370,10 +370,19 @@ func (c *Client) StartAgent(ctx context.Context, name, kind, paneID string, args
 	return c.Call(ctx, "agent.start", params, nil)
 }
 
+// How a reported session started, as the agent integration hooks say it.
+const (
+	SessionStartup = "startup"
+	SessionResume  = "resume"
+)
+
 // ReportAgentSession tells Herdr which native session runs in a pane, the
-// way the agent integration hooks do.
-func (c *Client) ReportAgentSession(ctx context.Context, paneID, agent, sessionID string) error {
-	params := map[string]any{"pane_id": paneID, "source": "herdr:" + agent, "agent": agent, "agent_session_id": sessionID}
+// way the agent integration hooks do. Herdr keeps the session a pane already
+// has unless the report says how the new one started (startSource) and
+// carries a newer seq, so both are sent like the hooks send them.
+func (c *Client) ReportAgentSession(ctx context.Context, paneID, agent, sessionID, startSource string) error {
+	params := map[string]any{"pane_id": paneID, "source": "herdr:" + agent, "agent": agent, "agent_session_id": sessionID,
+		"seq": time.Now().UnixNano(), "session_start_source": startSource}
 	return c.Call(ctx, "pane.report_agent_session", params, nil)
 }
 
