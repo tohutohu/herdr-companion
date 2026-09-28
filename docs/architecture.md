@@ -367,7 +367,10 @@ start timeout. A workspace whose agent fails to start is closed again.
 Codex TUIs on the shared daemon run their hooks inside the daemon, so Herdr
 never learns the thread id. The launcher then finds the newest non-ephemeral
 thread created in that directory (`providers.SessionLocator`) and reports it
-with `pane.report_agent_session`.
+with `pane.report_agent_session`. The creation time comes from the thread id
+(UUIDv7): a thread that has had no turn yet has no rollout, and the daemon
+then reports the time of the read as its `createdAt`, so a TUI left open
+without a prompt would otherwise pass for the session just launched.
 
 ## Archive and resume
 

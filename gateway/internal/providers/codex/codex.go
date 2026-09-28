@@ -483,9 +483,13 @@ type daemonConn struct {
 
 	mu         sync.Mutex
 	subscribed map[string]bool
-	status     map[string]ThreadStatus
-	pending    map[string]map[string]pendingRequest // thread -> request id -> request
-	settings   map[string]threadSettings
+	// resumeFailed marks threads whose subscribe failure was logged. A TUI
+	// left open without a prompt keeps a thread loaded that cannot be
+	// resumed until its first turn, and sync retries it every few seconds.
+	resumeFailed map[string]bool
+	status       map[string]ThreadStatus
+	pending      map[string]map[string]pendingRequest // thread -> request id -> request
+	settings     map[string]threadSettings
 }
 
 // threadSettings is the part of a loaded thread's settings shown as its mode.
@@ -525,11 +529,12 @@ func (s threadSettings) label() string {
 
 func newDaemonConn(sink deadletter.Sink) *daemonConn {
 	return &daemonConn{
-		sink:       sink,
-		subscribed: map[string]bool{},
-		status:     map[string]ThreadStatus{},
-		pending:    map[string]map[string]pendingRequest{},
-		settings:   map[string]threadSettings{},
+		sink:         sink,
+		subscribed:   map[string]bool{},
+		resumeFailed: map[string]bool{},
+		status:       map[string]ThreadStatus{},
+		pending:      map[string]map[string]pendingRequest{},
+		settings:     map[string]threadSettings{},
 	}
 }
 
@@ -560,11 +565,20 @@ func (d *daemonConn) sync(ctx context.Context) error {
 			Sandbox        *sandboxPolicy  `json:"sandbox"`
 		}
 		if err := d.c.call(cctx, "thread/resume", map[string]any{"threadId": id}, &r); err != nil {
-			slog.Warn("codex thread subscribe failed", "provider", providerName, "session_id", gatewayID(id), "operation", "thread/resume", "error", err)
+			d.mu.Lock()
+			logged := d.resumeFailed[id]
+			d.resumeFailed[id] = true
+			d.mu.Unlock()
+			level := slog.LevelWarn
+			if logged {
+				level = slog.LevelDebug
+			}
+			slog.Log(ctx, level, "codex thread subscribe failed", "provider", providerName, "session_id", gatewayID(id), "operation", "thread/resume", "error", err)
 			continue
 		}
 		d.mu.Lock()
 		d.subscribed[id] = true
+		delete(d.resumeFailed, id)
 		if r.Sandbox != nil {
 			if _, known := d.settings[id]; !known {
 				d.settings[id] = threadSettings{ApprovalPolicy: r.ApprovalPolicy, SandboxPolicy: r.Sandbox}
@@ -576,6 +590,11 @@ func (d *daemonConn) sync(ctx context.Context) error {
 		d.mu.Unlock()
 	}
 	d.mu.Lock()
+	for id := range d.resumeFailed {
+		if !current[id] {
+			delete(d.resumeFailed, id)
+		}
+	}
 	for id := range d.subscribed {
 		if !current[id] {
 			delete(d.subscribed, id)
@@ -835,18 +854,38 @@ func (p *Provider) LocateLaunched(ctx context.Context, cwd string, since time.Ti
 	if err := d.c.call(cctx, "thread/loaded/list", map[string]any{}, &loaded); err != nil {
 		return ""
 	}
-	best, bestAt := "", int64(0)
+	best, bestAt := "", time.Time{}
 	for _, id := range loaded.Data {
 		th, err := p.readThread(ctx, id, false)
 		// Codex also runs short-lived ephemeral threads in the same cwd.
-		if err != nil || th.Ephemeral || th.Cwd != cwd || th.CreatedAt < since.Unix() {
+		if err != nil || th.Ephemeral || th.Cwd != cwd {
 			continue
 		}
-		if th.CreatedAt >= bestAt {
-			best, bestAt = id, th.CreatedAt
+		created := threadCreated(id, th.CreatedAt)
+		if created.Before(since) {
+			continue
+		}
+		if !created.Before(bestAt) {
+			best, bestAt = id, created
 		}
 	}
 	return best
+}
+
+var uuidV7Pattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+
+// threadCreated is when a thread was created. A thread that has had no turn
+// yet has no rollout, and the daemon then reports the time of the read as its
+// createdAt, so a TUI left open without a prompt would look newer than the
+// session just launched. Codex thread ids are UUIDv7, whose first 48 bits are
+// the creation time in milliseconds; createdAt is only used for other ids.
+func threadCreated(id string, createdAt int64) time.Time {
+	if !uuidV7Pattern.MatchString(id) {
+		return time.Unix(createdAt, 0)
+	}
+	var ms int64
+	fmt.Sscanf(strings.ReplaceAll(id[:13], "-", ""), "%x", &ms)
+	return time.UnixMilli(ms)
 }
 
 type catalogModel struct {

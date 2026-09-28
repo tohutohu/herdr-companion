@@ -11,6 +11,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -276,8 +277,11 @@ func (p *pipeTransport) close() error {
 }
 
 type fakeServer struct {
-	t        *testing.T
-	thread   json.RawMessage
+	t      *testing.T
+	thread json.RawMessage
+	// threads, when set, answers thread/read and thread/loaded/list per id
+	// instead of the single thread.
+	threads  map[string]json.RawMessage
 	mu       sync.Mutex
 	calls    []string
 	answered []string
@@ -306,14 +310,30 @@ func (f *fakeServer) serve(p *pipeTransport, send func(any)) {
 		var result any = map[string]any{}
 		switch m.Method {
 		case "thread/loaded/list":
-			result = map[string]any{"data": []string{"thread-000001"}}
+			ids := []string{"thread-000001"}
+			f.mu.Lock()
+			if f.threads != nil {
+				ids = ids[:0]
+				for id := range f.threads {
+					ids = append(ids, id)
+				}
+				sort.Strings(ids)
+			}
+			f.mu.Unlock()
+			result = map[string]any{"data": ids}
 		case "thread/resume":
 			result = map[string]any{"approvalPolicy": "on-request", "sandbox": map[string]any{"type": "readOnly"},
 				"thread": map[string]any{"id": "thread-000001", "status": map[string]any{"type": "active", "activeFlags": []string{"waitingOnApproval"}}}}
 			send(map[string]any{"id": 0, "method": "item/commandExecution/requestApproval", "params": map[string]any{"threadId": "thread-000001", "turnId": "t1", "itemId": "i1", "startedAtMs": 1, "command": "rm -rf build"}})
 		case "thread/read":
+			var params struct{ ThreadID string }
+			json.Unmarshal(m.Params, &params)
 			f.mu.Lock()
-			result = map[string]any{"thread": f.thread}
+			if f.threads != nil {
+				result = map[string]any{"thread": f.threads[params.ThreadID]}
+			} else {
+				result = map[string]any{"thread": f.thread}
+			}
 			f.mu.Unlock()
 		case "model/list":
 			var params struct {
@@ -789,6 +809,43 @@ func TestDaemon上で指定ディレクトリに新しく作られたスレッ�
 	f.mu.Unlock()
 	if id := p.LocateLaunched(ctx, "/w/app", time.Unix(999, 0)); id != "" {
 		t.Errorf("ephemeral thread = %q", id)
+	}
+}
+
+func Test起動前から開いていたプロンプトなしのスレッドを新しいセッションと取り違えない(t *testing.T) {
+	// A TUI opened at 21:48:33 and never prompted: with no rollout the daemon
+	// reports the time of the read as createdAt.
+	idle := "01a0e80f-5496-7461-8fe9-9e700a1d5305"
+	// The session launched at 21:56:57, already prompted.
+	launched := "01a0e817-04f9-7d61-90e1-acb6f8057514"
+	readAt := int64(1790600227)
+	f := &fakeServer{t: t, threads: map[string]json.RawMessage{
+		idle:     json.RawMessage(fmt.Sprintf(`{"id":%q,"cwd":"/w/app","createdAt":%d,"status":{"type":"idle"}}`, idle, readAt)),
+		launched: json.RawMessage(fmt.Sprintf(`{"id":%q,"cwd":"/w/app","createdAt":1790600217,"status":{"type":"idle"}}`, launched)),
+	}}
+	pt := &pipeTransport{in: make(chan []byte, 16), out: make(chan []byte, 16), closed: make(chan struct{})}
+	go f.serve(pt, func(v any) {
+		b, _ := json.Marshal(v)
+		pt.in <- b
+	})
+	p := New("codex-not-used", "/nonexistent.sock", &fakeTerm{}, deadletter.Nop{})
+	d := newDaemonConn(deadletter.Nop{})
+	d.c = newRPCClient(pt, d)
+	defer d.c.close()
+	p.daemon = d
+
+	ctx := context.Background()
+	since := time.Unix(1790600215, 0)
+	if id := p.LocateLaunched(ctx, "/w/app", since); id != launched {
+		t.Errorf("located = %q, want %q", id, launched)
+	}
+	// Before the launched thread exists only the idle one is loaded; it is
+	// still older than the launch.
+	f.mu.Lock()
+	delete(f.threads, launched)
+	f.mu.Unlock()
+	if id := p.LocateLaunched(ctx, "/w/app", since); id != "" {
+		t.Errorf("idle thread located = %q", id)
 	}
 }
 
