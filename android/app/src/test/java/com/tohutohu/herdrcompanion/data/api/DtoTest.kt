@@ -29,6 +29,16 @@ class DtoTest {
     }
 
     @Test
+    fun `選択肢のプレビューを読み込み、ない選択肢はnullになる`() {
+        val q = GatewayApi.json.decodeFromString<QuestionDto>(
+            """{"id":"0","type":"select","question":"Which layout?",
+               "options":[{"label":"Grid","preview":"┌──┐\n└──┘"},{"label":"List"}]}""",
+        )
+        assertEquals("┌──┐\n└──┘", q.options[0].preview)
+        assertNull(q.options[1].preview)
+    }
+
+    @Test
     fun `ワークスペース外のファイルは表示名つきで読み込む`() {
         val block = GatewayApi.json.decodeFromString<BlockDto>(
             """{"type":"file","path":"/Users/me/.claude/plans/plan-add-subtract.md","text":"plan-add-subtract.md","size":15}""",

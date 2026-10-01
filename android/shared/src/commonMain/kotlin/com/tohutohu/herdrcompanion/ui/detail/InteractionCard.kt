@@ -9,12 +9,16 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -220,6 +224,28 @@ private fun Questions(interaction: InteractionDto, enabled: Boolean, onRespond: 
     ) { Text("Answer") }
 }
 
+/** An option's preview, kept unwrapped so ASCII mockups keep their shape. */
+@Composable
+private fun OptionPreview(label: String, preview: String) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp)
+            .background(LocalContentColor.current.copy(alpha = 0.08f), RoundedCornerShape(8.dp))
+            .padding(8.dp),
+    ) {
+        Text("Preview: $label", style = MaterialTheme.typography.labelMedium, color = Muted)
+        Text(
+            preview,
+            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.bodySmall,
+            softWrap = false,
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+        )
+    }
+}
+
 @Composable
 private fun QuestionView(
     q: QuestionDto,
@@ -281,6 +307,17 @@ private fun QuestionView(
                     }
                 }
             }
+        }
+        // Like Claude Code, show the preview of the chosen option, or of the
+        // first one until something is chosen.
+        val previewed = q.options.firstOrNull { it.label in selected && !it.preview.isNullOrBlank() }
+            ?: q.options.firstOrNull { !it.preview.isNullOrBlank() }.takeIf { selected.isEmpty() }
+        AnimatedContent(
+            targetState = previewed,
+            transitionSpec = { fadeIn() togetherWith fadeOut() using SizeTransform(clip = false) },
+            label = "preview",
+        ) { option ->
+            if (option != null) OptionPreview(option.label, option.preview.orEmpty())
         }
         AnimatedVisibility(
             visible = OTHER in selected || q.type == "text",

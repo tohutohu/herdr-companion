@@ -114,7 +114,12 @@ data class QuestionDto(
 )
 
 @Serializable
-data class OptionDto(val label: String, val description: String? = null)
+data class OptionDto(
+    val label: String,
+    val description: String? = null,
+    /** Monospace text, such as an ASCII mockup, to compare the options by. */
+    val preview: String? = null,
+)
 
 @Serializable
 data class AnswerDto(val selected: List<String> = emptyList(), val text: String? = null)
