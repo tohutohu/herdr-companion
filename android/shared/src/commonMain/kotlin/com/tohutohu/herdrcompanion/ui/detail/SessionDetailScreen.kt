@@ -54,6 +54,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -205,6 +206,21 @@ fun SessionDetailScreen(
         }
     }
     val scope = rememberCoroutineScope()
+    // While a row opens or closes, the rows above it move with it frame by
+    // frame. Animated as placements they would trail behind and overlap it.
+    var resizing by remember { mutableStateOf(false) }
+    var resizeCount by remember { mutableIntStateOf(0) }
+    LaunchedEffect(resizeCount) {
+        if (resizeCount == 0) return@LaunchedEffect
+        delay(RESIZE_MS + 100L)
+        resizing = false
+    }
+    val onRowResize: () -> Unit = remember {
+        {
+            resizing = true
+            resizeCount++
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -355,67 +371,70 @@ fun SessionDetailScreen(
                 label = "Loading…",
             )
             Box(Modifier.fillMaxSize()) {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(vertical = 8.dp),
-                    reverseLayout = true,
-                ) {
-                    itemsIndexed(pending.asReversed(), key = { _, p -> "pending:" + p.localId }) { r, p ->
-                        val i = pending.lastIndex - r
-                        PendingMessageItem(
-                            modifier = Modifier
-                                .animateContentSize(tween(ITEM_ANIMATION_MS))
-                                .animateItem(placementSpec = tween(ITEM_ANIMATION_MS)),
-                            message = p,
-                            showRole = i == 0 && messages.lastOrNull()?.role != "user",
-                            resolveAttachmentPreview = resolveAttachmentPreview,
-                            onRetry = { onAction(SessionDetailAction.Retry(p.localId)) },
-                            onDiscard = { onAction(SessionDetailAction.Discard(p.localId)) },
-                        )
-                    }
-                    itemsIndexed(rows.asReversed(), key = { _, row -> row.key }) { r, row ->
-                        val i = rows.lastIndex - r
-                        val itemModifier = if (settled) {
-                            Modifier
-                                .animateContentSize(tween(ITEM_ANIMATION_MS))
-                                .animateItem(placementSpec = tween(ITEM_ANIMATION_MS))
-                        } else {
-                            Modifier.animateContentSize(tween(ITEM_ANIMATION_MS))
+                CompositionLocalProvider(LocalRowResize provides onRowResize) {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(vertical = 8.dp),
+                        reverseLayout = true,
+                    ) {
+                        itemsIndexed(pending.asReversed(), key = { _, p -> "pending:" + p.localId }) { r, p ->
+                            val i = pending.lastIndex - r
+                            PendingMessageItem(
+                                modifier = Modifier
+                                    .animateContentSize(tween(ITEM_ANIMATION_MS))
+                                    .animateItem(placementSpec = tween(ITEM_ANIMATION_MS)),
+                                message = p,
+                                showRole = i == 0 && messages.lastOrNull()?.role != "user",
+                                resolveAttachmentPreview = resolveAttachmentPreview,
+                                onRetry = { onAction(SessionDetailAction.Retry(p.localId)) },
+                                onDiscard = { onAction(SessionDetailAction.Discard(p.localId)) },
+                            )
                         }
-                        val showRole = i == 0 || rows[i - 1].speaker != row.speaker
-                        val providerName = session?.providerName ?: "Agent"
-                        val onOpenFile = { path: String, line: Int -> onAction(SessionDetailAction.OpenFile(path, line)) }
-                        val onOpenImage = { url: String -> onAction(SessionDetailAction.OpenImage(url)) }
-                        val onOpenTerminal = { onAction(SessionDetailAction.OpenTerminal) }
-                        val onRespond = { it: InteractionResponseDto -> onAction(SessionDetailAction.Respond(it)) }
-                        when (row) {
-                            is MessageRow -> MessageItem(
-                                modifier = itemModifier,
-                                message = row.message,
-                                showRole = showRole,
-                                providerName = providerName,
-                                resolveUrl = resolveUrl,
-                                formatFileSize = formatFileSize,
-                                onOpenFile = onOpenFile,
-                                onOpenImage = onOpenImage,
-                                onOpenTerminal = onOpenTerminal,
-                                interactionsEnabled = !answering,
-                                onRespond = onRespond,
-                            )
-                            is ActivityRow -> ActivityGroupItem(
-                                row = row,
-                                modifier = itemModifier,
-                                showRole = showRole,
-                                providerName = providerName,
-                                resolveUrl = resolveUrl,
-                                formatFileSize = formatFileSize,
-                                onOpenFile = onOpenFile,
-                                onOpenImage = onOpenImage,
-                                onOpenTerminal = onOpenTerminal,
-                                interactionsEnabled = !answering,
-                                onRespond = onRespond,
-                            )
+                        itemsIndexed(rows.asReversed(), key = { _, row -> row.key }) { r, row ->
+                            val i = rows.lastIndex - r
+                            // A group animates its own opening; sizing it again here
+                            // would chase that animation and drag it out.
+                            val sizeModifier = if (row is MessageRow) Modifier.animateContentSize(tween(ITEM_ANIMATION_MS)) else Modifier
+                            val itemModifier = if (settled) {
+                                sizeModifier.animateItem(placementSpec = if (resizing) null else tween(ITEM_ANIMATION_MS))
+                            } else {
+                                sizeModifier
+                            }
+                            val showRole = i == 0 || rows[i - 1].speaker != row.speaker
+                            val providerName = session?.providerName ?: "Agent"
+                            val onOpenFile = { path: String, line: Int -> onAction(SessionDetailAction.OpenFile(path, line)) }
+                            val onOpenImage = { url: String -> onAction(SessionDetailAction.OpenImage(url)) }
+                            val onOpenTerminal = { onAction(SessionDetailAction.OpenTerminal) }
+                            val onRespond = { it: InteractionResponseDto -> onAction(SessionDetailAction.Respond(it)) }
+                            when (row) {
+                                is MessageRow -> MessageItem(
+                                    modifier = itemModifier,
+                                    message = row.message,
+                                    showRole = showRole,
+                                    providerName = providerName,
+                                    resolveUrl = resolveUrl,
+                                    formatFileSize = formatFileSize,
+                                    onOpenFile = onOpenFile,
+                                    onOpenImage = onOpenImage,
+                                    onOpenTerminal = onOpenTerminal,
+                                    interactionsEnabled = !answering,
+                                    onRespond = onRespond,
+                                )
+                                is ActivityRow -> ActivityGroupItem(
+                                    row = row,
+                                    modifier = itemModifier,
+                                    showRole = showRole,
+                                    providerName = providerName,
+                                    resolveUrl = resolveUrl,
+                                    formatFileSize = formatFileSize,
+                                    onOpenFile = onOpenFile,
+                                    onOpenImage = onOpenImage,
+                                    onOpenTerminal = onOpenTerminal,
+                                    interactionsEnabled = !answering,
+                                    onRespond = onRespond,
+                                )
+                            }
                         }
                     }
                 }

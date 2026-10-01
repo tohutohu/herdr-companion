@@ -3,6 +3,7 @@ package com.tohutohu.herdrcompanion.ui.detail
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -30,6 +31,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -95,6 +97,15 @@ fun MessageItem(
     }
 }
 
+/** How long a row takes to open or close. */
+internal const val RESIZE_MS = 200
+
+/**
+ * Called just before a row opens or closes, so the list can move the rows
+ * around it in step with it instead of animating them after it.
+ */
+internal val LocalRowResize = staticCompositionLocalOf<() -> Unit> { {} }
+
 @Composable
 private fun RoleLabel(role: String, providerName: String) {
     Text(
@@ -129,26 +140,48 @@ fun ActivityGroupItem(
     onRespond: (InteractionResponseDto) -> Unit,
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
+    val onResize = LocalRowResize.current
     Column(
         modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 2.dp),
     ) {
         if (showRole) RoleLabel("assistant", providerName)
+        // The list is anchored at the bottom, so a row grows upward. The calls
+        // open above the line, which stays under the finger, and unroll from
+        // the newest one next to it.
+        AnimatedVisibility(
+            visible = expanded,
+            enter = expandVertically(tween(RESIZE_MS), expandFrom = Alignment.Bottom) + fadeIn(tween(RESIZE_MS)),
+            exit = shrinkVertically(tween(RESIZE_MS), shrinkTowards = Alignment.Bottom) + fadeOut(tween(RESIZE_MS / 2)),
+        ) {
+            SelectionContainer {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(vertical = 4.dp)) {
+                    row.parts.forEach { part ->
+                        part.blocks.forEach { block ->
+                            BlockView(part.role, block, resolveUrl, formatFileSize, onOpenFile, onOpenImage, onOpenTerminal, interactionsEnabled, onRespond)
+                        }
+                    }
+                }
+            }
+        }
         val calls = row.callCount
         Row(
             Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(6.dp))
-                .clickable { expanded = !expanded }
+                .clickable {
+                    onResize()
+                    expanded = !expanded
+                }
                 .padding(horizontal = 4.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             val muted = MaterialTheme.colorScheme.onSurfaceVariant
             // While collapsed, each new call replaces the line.
-            Crossfade(if (expanded) null else row.latest, modifier = Modifier.weight(1f), label = "activity") { latest ->
+            Crossfade(if (expanded) null else row.latest, modifier = Modifier.weight(1f), animationSpec = tween(RESIZE_MS), label = "activity") { latest ->
                 Text(
-                    latest?.let { "⋯ $it" } ?: "⋯",
+                    latest?.let { "⋯ $it" } ?: "Hide",
                     fontFamily = FontFamily.Monospace,
                     style = MaterialTheme.typography.bodySmall,
                     color = muted,
@@ -165,27 +198,13 @@ fun ActivityGroupItem(
                     modifier = Modifier.padding(start = 8.dp),
                 )
             }
+            // The calls open upward, so the chevron points up until they do.
             ExpandChevron(
-                expanded = expanded,
+                expanded = !expanded,
                 contentDescription = if (expanded) "Hide tool calls" else "Show tool calls",
                 tint = muted,
                 modifier = Modifier.padding(start = 4.dp).size(16.dp),
             )
-        }
-        AnimatedVisibility(
-            visible = expanded,
-            enter = expandVertically() + fadeIn(),
-            exit = shrinkVertically() + fadeOut(),
-        ) {
-            SelectionContainer {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(bottom = 4.dp)) {
-                    row.parts.forEach { part ->
-                        part.blocks.forEach { block ->
-                            BlockView(part.role, block, resolveUrl, formatFileSize, onOpenFile, onOpenImage, onOpenTerminal, interactionsEnabled, onRespond)
-                        }
-                    }
-                }
-            }
         }
     }
 }
@@ -274,18 +293,22 @@ private fun BlockView(
 @Composable
 private fun CollapsibleTool(text: String, output: Boolean) {
     var expanded by rememberSaveable { mutableStateOf(false) }
+    val onResize = LocalRowResize.current
     val collapsible = text.trimEnd().contains('\n') || text.length > 80
     Surface(
         color = if (output) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surfaceContainerHigh,
         shape = RoundedCornerShape(6.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(enabled = collapsible) { expanded = !expanded }
-            .animateContentSize(),
+            .clickable(enabled = collapsible) {
+                onResize()
+                expanded = !expanded
+            }
+            .animateContentSize(tween(RESIZE_MS)),
     ) {
         Row(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.Top) {
             // The surface animates its size; this only cross-fades the text.
-            Crossfade(expanded, modifier = Modifier.weight(1f), label = "tool") { open ->
+            Crossfade(expanded, modifier = Modifier.weight(1f), animationSpec = tween(RESIZE_MS), label = "tool") { open ->
                 if (open) {
                     Text(
                         text.trimEnd(),
