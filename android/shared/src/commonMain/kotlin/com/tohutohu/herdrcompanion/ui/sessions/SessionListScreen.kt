@@ -65,6 +65,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.tohutohu.herdrcompanion.ui.changedInPlace
+import com.tohutohu.herdrcompanion.ui.itemPlacementSpec
+import com.tohutohu.herdrcompanion.ui.pausePlacementOnChange
 import com.tohutohu.herdrcompanion.model.SessionUiModel
 import com.tohutohu.herdrcompanion.ui.agentSettingsLabel
 import com.tohutohu.herdrcompanion.ui.contextLabel
@@ -98,6 +101,8 @@ fun SessionListScreen(
     }
 
     val sessions = state.sessions.filterSessionSearch(query)
+    // A row grows when its last message wraps onto a second line.
+    val rowsResized = pausePlacementOnChange(sessions) { a, b -> changedInPlace(a, b) { it.session.id } }
     val pendingStarts = state.pendingStarts.filter { it.matchesSessionSearch(query) }
     val refs = remember(sessions) { sessions.map { it.session.toSessionRef() } }
     LaunchedEffect(refs) { selection.keepOnly(refs.map { it.id }) }
@@ -241,6 +246,7 @@ fun SessionListScreen(
                             selection = selection,
                             busy = item.session.id in state.busySessionIds,
                             engaged = item.session.id in state.engagedSessionIds,
+                            pausePlacement = rowsResized,
                             onOpen = { onAction(SessionListAction.OpenSession(it)) },
                             onArchive = { onAction(SessionListAction.Archive(listOf(it))) },
                             onUnarchive = { onAction(SessionListAction.Unarchive(listOf(it))) },
@@ -260,6 +266,8 @@ fun LazyItemScope.SessionItem(
     selection: SessionSelection,
     busy: Boolean,
     engaged: Boolean,
+    /** While a row resizes in place; see [pausePlacementOnChange]. */
+    pausePlacement: Boolean = false,
     onOpen: (String) -> Unit,
     onArchive: (SessionRef) -> Unit,
     onUnarchive: (SessionRef) -> Unit,
@@ -268,7 +276,7 @@ fun LazyItemScope.SessionItem(
     val s = item.session
     val ref = s.toSessionRef()
     sessionContextMenu(item) {
-        Column(Modifier.animateItem()) {
+        Column(Modifier.animateItem(placementSpec = itemPlacementSpec(pausePlacement))) {
             SwipeableSessionRow(
                 action = swipeActionFor(ref),
                 engaged = engaged,

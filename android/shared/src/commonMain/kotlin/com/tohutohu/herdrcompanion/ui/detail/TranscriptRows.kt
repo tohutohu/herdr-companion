@@ -46,13 +46,6 @@ data class ActivityRow(
         }
 }
 
-/** Whether a row present in both [before] and [after] changed its content. */
-fun rowsChangedInPlace(before: List<TranscriptRow>, after: List<TranscriptRow>): Boolean {
-    if (before.isEmpty()) return false
-    val old = before.associateBy { it.key }
-    return after.any { row -> old[row.key]?.let { it != row } ?: false }
-}
-
 /**
  * Splits [messages] into rows. [messageKeys] holds the stable keys of
  * messages that replaced an optimistic pending row.

@@ -89,6 +89,8 @@ import com.tohutohu.herdrcompanion.ui.ExpandingContent
 import com.tohutohu.herdrcompanion.ui.SwapContent
 import com.tohutohu.herdrcompanion.ui.SyncIndicator
 import com.tohutohu.herdrcompanion.ui.agentSettingsLabel
+import com.tohutohu.herdrcompanion.ui.changedInPlace
+import com.tohutohu.herdrcompanion.ui.pausePlacementOnChange
 import com.tohutohu.herdrcompanion.ui.costLabel
 import com.tohutohu.herdrcompanion.ui.sessions.SessionActionMenuItems
 import com.tohutohu.herdrcompanion.ui.sessions.toSessionRef
@@ -221,18 +223,11 @@ fun SessionDetailScreen(
             resizeCount++
         }
     }
-    // A row can also change in place, as when a question is answered. That
-    // shows in this very frame, before an effect could pause the placements.
-    val lastRows = remember { LastRows() }
-    val rowsResized = remember(rows) { lastRows.replace(rows) }
-    var rowsSettled by remember { mutableStateOf<List<TranscriptRow>?>(null) }
-    LaunchedEffect(rows) {
-        if (rowsResized) {
-            delay(RESIZE_MS + 100L)
-            rowsSettled = rows
-        }
-    }
-    val pausePlacement = resizing || (rowsResized && rowsSettled !== rows)
+    // A row can also change in place, as when a question is answered or a
+    // message fails to send.
+    val rowsResized = pausePlacementOnChange(rows) { a, b -> changedInPlace(a, b) { it.key } }
+    val pendingResized = pausePlacementOnChange(pending) { a, b -> changedInPlace(a, b) { it.localId } }
+    val pausePlacement = resizing || rowsResized || pendingResized
 
     Scaffold(
         topBar = {
@@ -395,7 +390,7 @@ fun SessionDetailScreen(
                             PendingMessageItem(
                                 modifier = Modifier
                                     .animateContentSize(tween(ITEM_ANIMATION_MS))
-                                    .animateItem(placementSpec = tween(ITEM_ANIMATION_MS)),
+                                    .animateItem(placementSpec = if (pausePlacement) null else tween(ITEM_ANIMATION_MS)),
                                 message = p,
                                 showRole = i == 0 && messages.lastOrNull()?.role != "user",
                                 resolveAttachmentPreview = resolveAttachmentPreview,
@@ -476,12 +471,6 @@ fun SessionDetailScreen(
 
 private const val SETTLE_MS = 400L
 
-/** The rows of the previous composition, to tell which changed in place. */
-private class LastRows {
-    private var rows: List<TranscriptRow> = emptyList()
-
-    fun replace(next: List<TranscriptRow>): Boolean = rowsChangedInPlace(rows, next).also { rows = next }
-}
 private const val ITEM_ANIMATION_MS = 260
 
 @Composable

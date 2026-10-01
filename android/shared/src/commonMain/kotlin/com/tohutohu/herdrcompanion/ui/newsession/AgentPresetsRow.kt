@@ -1,6 +1,7 @@
 package com.tohutohu.herdrcompanion.ui.newsession
 
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -19,6 +20,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.tohutohu.herdrcompanion.data.AgentPreset
+import com.tohutohu.herdrcompanion.ui.itemPlacementSpec
+import com.tohutohu.herdrcompanion.ui.pausePlacementOnChange
 
 /**
  * Favorite agent / model / effort combinations as a chip row, with the way
@@ -38,6 +41,9 @@ fun AgentPresetsRow(
     @Composable
     fun Selected() = Icon(Icons.Default.Check, contentDescription = "Selected", Modifier.size(FilterChipDefaults.IconSize))
 
+    // Picking a preset moves the check mark to it: two chips change width,
+    // and the chips after them follow in step.
+    val paused = pausePlacementOnChange(current.key)
     Row(
         modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -60,7 +66,7 @@ fun AgentPresetsRow(
                             onClick = onCustomize,
                             label = { Text(presetLabel(current)) },
                             leadingIcon = { Selected() },
-                            modifier = Modifier.animateItem().animateContentSize(),
+                            modifier = Modifier.animateItem(placementSpec = itemPlacementSpec(paused)).animateContentSize(tween(CHIP_RESIZE_MS)),
                         )
                     }
                 }
@@ -73,7 +79,7 @@ fun AgentPresetsRow(
                     label = { Text(presetLabel(preset)) },
                     leadingIcon = if (selected) ({ Selected() }) else null,
                     // The check mark comes and goes; let the chip grow around it.
-                    modifier = reorderModifier.animateItem().animateContentSize(),
+                    modifier = reorderModifier.animateItem(placementSpec = itemPlacementSpec(paused)).animateContentSize(tween(CHIP_RESIZE_MS)),
                 )
             },
         )
@@ -82,3 +88,6 @@ fun AgentPresetsRow(
         }
     }
 }
+
+/** Within the placement pause, so the chips after it never trail behind. */
+private const val CHIP_RESIZE_MS = 200

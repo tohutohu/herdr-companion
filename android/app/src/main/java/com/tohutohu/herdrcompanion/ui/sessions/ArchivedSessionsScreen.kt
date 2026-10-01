@@ -34,6 +34,8 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.tohutohu.herdrcompanion.container
+import com.tohutohu.herdrcompanion.ui.changedInPlace
+import com.tohutohu.herdrcompanion.ui.pausePlacementOnChange
 import com.tohutohu.herdrcompanion.data.api.SessionDto
 import com.tohutohu.herdrcompanion.data.toEntity
 import com.tohutohu.herdrcompanion.ui.toUiModel
@@ -88,6 +90,7 @@ fun ArchivedSessionsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
         }
     }
     val rows = remember(allRows, query) { allRows.filter { it.session.matchesSessionSearch(query) } }
+    val rowsResized = pausePlacementOnChange(rows) { a, b -> changedInPlace(a, b) { it.session.id } }
     val selection = rememberSessionSelection()
     val refs = remember(rows) { rows.map { it.session.toSessionRef() } }
     LaunchedEffect(refs) { selection.keepOnly(refs.map { it.id }) }
@@ -176,6 +179,7 @@ fun ArchivedSessionsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
                             selection = selection,
                             busy = actions.busy(s.session.id),
                             engaged = actions.engaged(s.session.id),
+                            pausePlacement = rowsResized,
                             onOpen = onOpen,
                             onArchive = actions::archive,
                             onUnarchive = actions::unarchive,
