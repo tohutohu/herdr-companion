@@ -221,6 +221,18 @@ fun SessionDetailScreen(
             resizeCount++
         }
     }
+    // A row can also change in place, as when a question is answered. That
+    // shows in this very frame, before an effect could pause the placements.
+    val lastRows = remember { LastRows() }
+    val rowsResized = remember(rows) { lastRows.replace(rows) }
+    var rowsSettled by remember { mutableStateOf<List<TranscriptRow>?>(null) }
+    LaunchedEffect(rows) {
+        if (rowsResized) {
+            delay(RESIZE_MS + 100L)
+            rowsSettled = rows
+        }
+    }
+    val pausePlacement = resizing || (rowsResized && rowsSettled !== rows)
 
     Scaffold(
         topBar = {
@@ -393,11 +405,16 @@ fun SessionDetailScreen(
                         }
                         itemsIndexed(rows.asReversed(), key = { _, row -> row.key }) { r, row ->
                             val i = rows.lastIndex - r
-                            // A group animates its own opening; sizing it again here
-                            // would chase that animation and drag it out.
-                            val sizeModifier = if (row is MessageRow) Modifier.animateContentSize(tween(ITEM_ANIMATION_MS)) else Modifier
+                            // Only a sent message is sized here, as it takes the place of
+                            // its pending row. Other rows animate their own changes;
+                            // sizing them again would chase that and drag it out.
+                            val sizeModifier = if (row is MessageRow && row.message.role == "user") {
+                                Modifier.animateContentSize(tween(ITEM_ANIMATION_MS))
+                            } else {
+                                Modifier
+                            }
                             val itemModifier = if (settled) {
-                                sizeModifier.animateItem(placementSpec = if (resizing) null else tween(ITEM_ANIMATION_MS))
+                                sizeModifier.animateItem(placementSpec = if (pausePlacement) null else tween(ITEM_ANIMATION_MS))
                             } else {
                                 sizeModifier
                             }
@@ -458,6 +475,13 @@ fun SessionDetailScreen(
 }
 
 private const val SETTLE_MS = 400L
+
+/** The rows of the previous composition, to tell which changed in place. */
+private class LastRows {
+    private var rows: List<TranscriptRow> = emptyList()
+
+    fun replace(next: List<TranscriptRow>): Boolean = rowsChangedInPlace(rows, next).also { rows = next }
+}
 private const val ITEM_ANIMATION_MS = 260
 
 @Composable

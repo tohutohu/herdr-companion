@@ -1,9 +1,12 @@
 package com.tohutohu.herdrcompanion.ui.detail
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -99,7 +102,7 @@ fun InteractionCard(
                 interaction.title?.let { Text(it, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold) }
                 AnimatedContent(
                     targetState = pending,
-                    transitionSpec = { fadeIn() togetherWith fadeOut() using SizeTransform(clip = false) },
+                    transitionSpec = { resizeFade() },
                     label = "interaction",
                 ) { open ->
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -116,6 +119,11 @@ fun InteractionCard(
         }
     }
 }
+
+/** Swaps content in the same time a row takes to open, without bouncing. */
+private fun AnimatedContentTransitionScope<*>.resizeFade(): ContentTransform =
+    fadeIn(tween(RESIZE_MS)) togetherWith fadeOut(tween(RESIZE_MS / 2)) using
+        SizeTransform(clip = false) { _, _ -> tween(RESIZE_MS) }
 
 @Composable
 private fun AnsweredSummary(interaction: InteractionDto) {
@@ -261,7 +269,10 @@ private fun QuestionView(
         }
         Text(q.question, style = MaterialTheme.typography.bodyLarge)
 
+        val onResize = LocalRowResize.current
         fun toggle(key: String) {
+            // A choice can bring up its preview or the text field.
+            onResize()
             onSelect(
                 if (multi) {
                     if (key in selected) selected - key else selected + key
@@ -314,15 +325,15 @@ private fun QuestionView(
             ?: q.options.firstOrNull { !it.preview.isNullOrBlank() }.takeIf { selected.isEmpty() }
         AnimatedContent(
             targetState = previewed,
-            transitionSpec = { fadeIn() togetherWith fadeOut() using SizeTransform(clip = false) },
+            transitionSpec = { resizeFade() },
             label = "preview",
         ) { option ->
             if (option != null) OptionPreview(option.label, option.preview.orEmpty())
         }
         AnimatedVisibility(
             visible = OTHER in selected || q.type == "text",
-            enter = expandVertically() + fadeIn(),
-            exit = shrinkVertically() + fadeOut(),
+            enter = expandVertically(tween(RESIZE_MS)) + fadeIn(tween(RESIZE_MS)),
+            exit = shrinkVertically(tween(RESIZE_MS)) + fadeOut(tween(RESIZE_MS / 2)),
         ) {
             OutlinedTextField(
                 value = otherText,

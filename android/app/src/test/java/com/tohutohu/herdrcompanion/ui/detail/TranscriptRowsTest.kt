@@ -80,4 +80,16 @@ class TranscriptRowsTest {
         val rows = transcriptRows(listOf(msg("u1", "user", text("続けて"))), mapOf("u1" to "pending:local"))
         assertEquals("pending:local", rows.single().key)
     }
+
+    @Test
+    fun `既存の行の中身が変わった時だけその場での変化とみなす`() {
+        val before = transcriptRows(listOf(msg("a1", "assistant", text("確認します。")), msg("u1", "user", text("続けて"))))
+        val grown = transcriptRows(listOf(msg("a1", "assistant", text("確認しました。")), msg("u1", "user", text("続けて"))))
+        val appended = transcriptRows(
+            listOf(msg("a1", "assistant", text("確認します。")), msg("u1", "user", text("続けて")), msg("a2", "assistant", text("はい"))),
+        )
+        assertEquals(true, rowsChangedInPlace(before, grown))
+        assertEquals(false, rowsChangedInPlace(before, appended))
+        assertEquals(false, rowsChangedInPlace(emptyList(), before))
+    }
 }
