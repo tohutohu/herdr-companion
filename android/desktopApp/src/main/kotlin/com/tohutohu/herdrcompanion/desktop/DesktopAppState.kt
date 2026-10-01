@@ -416,7 +416,7 @@ class DesktopAppState(
                     delay(DETAIL_POLL_MS)
                     continue
                 }
-                messages = mergeMessages(messages, response.messages.map(MessageDto::toMessage))
+                messages = mergeMessages(messages, response.messages.map(MessageDto::toMessage), since)
                 anchor = messages.lastOrNull()?.id
                 settlePending(id, messages)
                 updateDetail(id, SessionDetailUiState(
@@ -840,11 +840,16 @@ internal fun DesktopAttachment.toUiState() = AttachmentUiState(
 
 private fun normalize(value: String): String = value.replace(Regex("\\s+"), " ").trim()
 
-private fun mergeMessages(old: List<Message>, incoming: List<Message>): List<Message> {
-    val merged = LinkedHashMap<String, Message>()
-    old.forEach { merged[it.id] = it }
-    incoming.forEach { merged[it.id] = it }
-    return merged.values.toList()
+/**
+ * Applies a messages response. An incremental response starts at [anchor] and
+ * replaces the tail from it; anything else is the whole conversation. Rows the
+ * gateway no longer returns, like a queued prompt the agent has taken in, are
+ * dropped rather than kept beside their replacement.
+ */
+internal fun mergeMessages(old: List<Message>, incoming: List<Message>, anchor: String?): List<Message> {
+    val at = anchor?.let { id -> old.indexOfLast { it.id == id } } ?: -1
+    if (at < 0 || incoming.firstOrNull()?.id != anchor) return incoming
+    return old.take(at) + incoming
 }
 
 private fun relativeTime(value: String): String {
