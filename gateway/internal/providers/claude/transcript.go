@@ -1198,9 +1198,19 @@ func (t *Transcript) imageAt(messageID string, index int) (*imageSource, bool) {
 	return nil, false
 }
 
+// startCwd is the directory the session was started in. Claude Code keeps
+// the session under that project and starts there again on resume; a later
+// cwd is only where its shell was moved to.
+func (t *Transcript) startCwd() string {
+	if len(t.cwds) == 0 {
+		return ""
+	}
+	return t.cwds[0]
+}
+
 // summary extracts list information.
 func (t *Transcript) summary(opt ParseOptions) providers.Summary {
-	s := providers.Summary{Cwd: t.Cwd, Title: t.Title, UpdatedAt: t.Updated,
+	s := providers.Summary{Cwd: t.startCwd(), Title: t.Title, UpdatedAt: t.Updated,
 		Model: t.Model, Effort: t.Effort, Mode: modeLabel(t.PermissionMode),
 		Context: model.NewContextUsage(t.ContextTokens, contextWindow(t.ModelID, t.Model)),
 		Cost:    t.cost()}

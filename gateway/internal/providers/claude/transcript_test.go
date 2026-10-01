@@ -936,6 +936,20 @@ func Test使用量の記録がないセッションはコンテキスト不明�
 	}
 }
 
+func Testセッションのディレクトリは途中でcdしても開始時のディレクトリになる(t *testing.T) {
+	// claude --resume はこのディレクトリで開くので、最後のcd先では別の場所で復帰してしまう。
+	tr, err := Decode(strings.NewReader(strings.Join([]string{
+		`{"type":"user","uuid":"u1","cwd":"/repo","timestamp":"2026-09-01T00:00:00Z","message":{"role":"user","content":"hi"}}`,
+		`{"type":"assistant","uuid":"a1","cwd":"/repo/android","timestamp":"2026-09-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"hello"}]}}`,
+	}, "\n")), "claude:test", deadletter.Nop{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := tr.summary(ParseOptions{}).Cwd; got != "/repo" {
+		t.Errorf("cwd = %q, want /repo", got)
+	}
+}
+
 func TestClaudeのコストは応答ごとのトークン数から見積もる(t *testing.T) {
 	// 同じ応答がブロックごとに複数行書かれるので、message.idで一度だけ数える。
 	usage := `"usage":{"input_tokens":1000,"cache_read_input_tokens":1000000,"output_tokens":10000,` +
