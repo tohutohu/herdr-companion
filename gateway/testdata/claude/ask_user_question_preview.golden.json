@@ -1,0 +1,90 @@
+[
+  {
+    "id": "524e91b1-f499-4a49-b1d3-ff95b67c11ed",
+    "role": "user",
+    "timestamp": "2026-10-01T10:52:30.849Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "Use the AskUserQuestion tool exactly once with one single-select question: header 'Layout', question 'Which layout?', options 'Grid' and 'List' and 'Cards', and give every option a short ASCII-art preview field. After the answer, just repeat what I chose."
+      }
+    ]
+  },
+  {
+    "id": "607634c4-a287-479a-a84b-a00987e37361",
+    "role": "assistant",
+    "timestamp": "2026-10-01T10:52:39.9Z",
+    "blocks": [
+      {
+        "type": "interaction",
+        "interaction": {
+          "id": "toolu_01EGHSkbSkoY1E3naCcEV9NN",
+          "type": "questions",
+          "state": "answered",
+          "title": "Claude needs input",
+          "questions": [
+            {
+              "id": "0",
+              "type": "select",
+              "header": "Layout",
+              "question": "Which layout?",
+              "options": [
+                {
+                  "label": "Grid",
+                  "description": "複数列のグリッドレイアウト",
+                  "preview": "┌──┐ ┌──┐ ┌──┐\n│  │ │  │ │  │\n└──┘ └──┘ └──┘\n┌──┐ ┌──┐ ┌──┐\n│  │ │  │ │  │\n└──┘ └──┘ └──┘"
+                },
+                {
+                  "label": "List",
+                  "description": "1列のリストレイアウト",
+                  "preview": "┌─────────────┐\n│ Item 1      │\n├─────────────┤\n│ Item 2      │\n├─────────────┤\n│ Item 3      │\n└─────────────┘"
+                },
+                {
+                  "label": "Cards",
+                  "description": "カード形式のレイアウト",
+                  "preview": "┌────────┐ ┌────────┐\n│ Card 1 │ │ Card 2 │\n└────────┘ └────────┘\n┌────────┐ ┌────────┐\n│ Card 3 │ │ Card 4 │\n└────────┘ └────────┘"
+                }
+              ],
+              "allowOther": true
+            }
+          ],
+          "supported": true,
+          "answer": "Not answered"
+        }
+      }
+    ]
+  },
+  {
+    "id": "f95875b2-0f96-4e83-8b55-e1ff0e813bb4",
+    "role": "user",
+    "timestamp": "2026-10-01T10:52:51.652Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "[Request interrupted by user for tool use]"
+      }
+    ]
+  },
+  {
+    "id": "b3abaf7d-8749-48c7-be5d-c68c58d9de08",
+    "role": "user",
+    "timestamp": "2026-10-01T10:52:53.471Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "Which layout?: Something like a timeline instead"
+      }
+    ]
+  },
+  {
+    "id": "479b06ec-0343-403d-85f4-8d03155e663c",
+    "role": "assistant",
+    "timestamp": "2026-10-01T10:52:58.884Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "タイムラインレイアウトですね。了解しました。\n\nタイムラインレイアウトのようなデザインでしたら、以下のようなイメージになります：\n\n```\n2026-10-01 ●━━━ イベント 1\n             ┃\n2026-10-02 ●━━━ イベント 2\n             ┃\n2026-10-03 ●━━━ イベント 3\n             ┃\n2026-10-04 ●━━━ イベント 4\n```\n\n時系列で項目を縦に並べ、左側に日付や時刻、右側にコンテンツを配置するレイアウトでよろしいですか？それとも、別のタイムラインスタイルをお考えでしたら、お知らせください。"
+      }
+    ]
+  }
+]

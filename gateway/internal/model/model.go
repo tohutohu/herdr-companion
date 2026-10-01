@@ -166,6 +166,8 @@ type Question struct {
 type Option struct {
 	Label       string `json:"label"`
 	Description string `json:"description,omitempty"`
+	// Preview is monospace text (such as an ASCII mockup) to compare options by.
+	Preview string `json:"preview,omitempty"`
 }
 
 const (

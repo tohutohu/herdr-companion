@@ -962,6 +962,7 @@ type auqInput struct {
 		Options     []struct {
 			Label       string `json:"label"`
 			Description string `json:"description"`
+			Preview     string `json:"preview"`
 		} `json:"options"`
 	} `json:"questions"`
 }
@@ -1090,7 +1091,7 @@ func askUserQuestionInteraction(b contentBlock) (*model.Interaction, error) {
 			mq.Type = model.QuestionMultiSelect
 		}
 		for _, o := range q.Options {
-			mq.Options = append(mq.Options, model.Option{Label: o.Label, Description: o.Description})
+			mq.Options = append(mq.Options, model.Option{Label: o.Label, Description: o.Description, Preview: o.Preview})
 		}
 		if len(mq.Options) == 0 {
 			mq.Type = model.QuestionText

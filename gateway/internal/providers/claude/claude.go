@@ -404,9 +404,15 @@ func (p *Provider) Respond(ctx context.Context, nativeID string, live *providers
 				return err
 			}
 		}
-		if st.text != "" {
+		switch {
+		case st.prompt != "":
+			if err := p.waitDialogClosed(ctx, live.PaneID); err != nil {
+				return err
+			}
+			err = p.typePrompt(ctx, live.PaneID, st.prompt)
+		case st.text != "":
 			err = p.term.SendText(ctx, live.PaneID, st.text)
-		} else {
+		default:
 			err = p.term.SendKeys(ctx, live.PaneID, st.keys...)
 		}
 		if err != nil {
@@ -427,10 +433,31 @@ func findInteraction(msgs []model.Message, id string) *model.Interaction {
 	return nil
 }
 
-// step is either a batch of keys or literal text.
+// dialogFooter is the key hint line of Claude Code's question dialog.
+const dialogFooter = "Enter to select"
+
+// waitDialogClosed waits until the question dialog has left the screen, so a
+// prompt typed next reaches the composer instead of the dialog, where "n"
+// would open a notes field. A pane that cannot be read is not waited for.
+func (p *Provider) waitDialogClosed(ctx context.Context, paneID string) error {
+	for range 8 {
+		res, err := p.term.ReadPane(ctx, paneID, 40)
+		if err != nil || res == nil || !strings.Contains(res.Text, dialogFooter) {
+			return nil
+		}
+		if err := p.wait(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// step is a batch of keys, literal text, or a prompt typed and submitted in
+// the composer.
 type step struct {
-	keys []string
-	text string
+	keys   []string
+	text   string
+	prompt string
 }
 
 func keys(k ...string) step { return step{keys: k} }
@@ -466,6 +493,15 @@ func dialogKeys(ia *model.Interaction, r model.InteractionResponse) ([]step, err
 		}
 	default:
 		return nil, providers.ErrUnsupported
+	}
+	if typedPreviewAnswer(ia, r) {
+		// The dialog has no row to type this answer into. Cancel it and send
+		// every answer as the next prompt instead.
+		prompt, err := answersPrompt(ia, r)
+		if err != nil {
+			return nil, err
+		}
+		return []step{keys("esc"), {prompt: prompt}}, nil
 	}
 
 	var steps []step
@@ -519,6 +555,61 @@ func dialogKeys(ia *model.Interaction, r model.InteractionResponse) ([]step, err
 		steps = append(steps, keys("enter")) // review tab: "Submit answers"
 	}
 	return steps, nil
+}
+
+// previewLayout reports whether Claude Code shows a question beside its
+// options' previews. That layout lists only the options: there is no
+// "Type something." row, and moving down from the last option focuses
+// "Chat about this", where typed text is ignored (verified with Claude Code
+// 2.1.286). Multi-select questions keep the ordinary layout.
+func previewLayout(q model.Question) bool {
+	if q.Type != model.QuestionSelect {
+		return false
+	}
+	for _, o := range q.Options {
+		if o.Preview != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// typedPreviewAnswer reports whether a question shown beside previews is
+// answered with text rather than one of its options.
+func typedPreviewAnswer(ia *model.Interaction, r model.InteractionResponse) bool {
+	for _, q := range ia.Questions {
+		a := r.Answers[q.ID]
+		if previewLayout(q) && len(a.Selected) == 0 && strings.TrimSpace(a.Text) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// answersPrompt writes each question with its answer on a line of its own.
+func answersPrompt(ia *model.Interaction, r model.InteractionResponse) (string, error) {
+	var lines []string
+	for _, q := range ia.Questions {
+		a, ok := r.Answers[q.ID]
+		if !ok {
+			return "", fmt.Errorf("missing answer for question %s", q.ID)
+		}
+		var parts []string
+		for _, s := range a.Selected {
+			if optionIndex(q, s) < 0 {
+				return "", fmt.Errorf("unknown option %q", s)
+			}
+			parts = append(parts, s)
+		}
+		if t := strings.TrimSpace(a.Text); t != "" {
+			parts = append(parts, t)
+		}
+		if len(parts) == 0 {
+			return "", fmt.Errorf("empty answer for question %s", q.ID)
+		}
+		lines = append(lines, q.Question+" → "+strings.Join(parts, ", "))
+	}
+	return strings.Join(lines, "\n"), nil
 }
 
 func optionIndex(q model.Question, label string) int {

@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -347,6 +348,88 @@ func TestAskUserQuestionへの回答をキー操作に変換できる(t *testing
 
 	if _, err := dialogKeys(ia, model.InteractionResponse{Answers: map[string]model.Answer{"0": {Selected: []string{"Pink"}}}}); err == nil {
 		t.Error("unknown option should fail")
+	}
+}
+
+func TestAskUserQuestionの選択肢のpreviewを表示用に残す(t *testing.T) {
+	tr, rec, _ := loadFixture(t, "ask_user_question_preview.jsonl")
+	msgs := tr.Messages(ParseOptions{SessionID: "claude:test", Sink: rec})
+	assertGolden(t, "ask_user_question_preview.golden.json", msgs)
+	if len(rec.Entries) != 0 {
+		t.Errorf("dead letters = %+v, want none", rec.Entries)
+	}
+	ia := findInteraction(msgs, "toolu_01EGHSkbSkoY1E3naCcEV9NN")
+	if ia == nil || len(ia.Questions) != 1 || len(ia.Questions[0].Options) != 3 {
+		t.Fatalf("interaction = %+v", ia)
+	}
+	for _, o := range ia.Questions[0].Options {
+		if !strings.Contains(o.Preview, "┌") {
+			t.Errorf("option %q preview = %q", o.Label, o.Preview)
+		}
+	}
+}
+
+func TestPreview付きの質問への自由記述はダイアログを閉じて次のpromptで送る(t *testing.T) {
+	preview := model.Question{ID: "0", Type: model.QuestionSelect, Question: "Which layout?", Options: []model.Option{
+		{Label: "Grid", Preview: "┌┐"}, {Label: "List", Preview: "──"}, {Label: "Cards", Preview: "▢"},
+	}}
+	ia := &model.Interaction{Type: model.InteractionQuestions, Questions: []model.Question{
+		preview,
+		{ID: "1", Type: model.QuestionMultiSelect, Question: "Which fruits?", Options: []model.Option{{Label: "Apple"}, {Label: "Banana"}}},
+	}}
+	steps, err := dialogKeys(ia, model.InteractionResponse{Answers: map[string]model.Answer{
+		"0": {Text: "  Something like\na timeline  "},
+		"1": {Selected: []string{"Apple", "Banana"}, Text: "Cherry"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []step{keys("esc"), {prompt: "Which layout? → Something like\na timeline\nWhich fruits? → Apple, Banana, Cherry"}}
+	if !reflect.DeepEqual(steps, want) {
+		t.Errorf("steps\n got %#v\nwant %#v", steps, want)
+	}
+
+	// Choosing an option works in the preview layout as usual.
+	steps, err = dialogKeys(ia, model.InteractionResponse{Answers: map[string]model.Answer{
+		"0": {Selected: []string{"Cards"}},
+		"1": {Selected: []string{"Banana"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = []step{keys("down", "down", "enter"), keys("down", "space", "down"), keys("down", "enter"), keys("enter")}
+	if !reflect.DeepEqual(steps, want) {
+		t.Errorf("steps\n got %#v\nwant %#v", steps, want)
+	}
+
+	if _, err := dialogKeys(ia, model.InteractionResponse{Answers: map[string]model.Answer{"0": {Text: "x"}}}); err == nil {
+		t.Error("missing answer should fail")
+	}
+}
+
+func TestPreview付きの質問への自由記述はダイアログが閉じてから入力する(t *testing.T) {
+	dir := t.TempDir()
+	proj := filepath.Join(dir, "projects", "-work-playground")
+	os.MkdirAll(proj, 0o755)
+	raw, _ := os.ReadFile(filepath.Join(testdata, "ask_user_question_preview.jsonl"))
+	// Keep the transcript up to the question so that it is still pending.
+	lines := strings.SplitAfter(string(raw), "\n")
+	id := "b322f6a0-a367-4671-9c55-08fe4cac3c70"
+	os.WriteFile(filepath.Join(proj, id+".jsonl"), []byte(strings.Join(lines[:3], "")), 0o644)
+
+	term := &fakeTerminal{}
+	p := New(dir, term, deadletter.Nop{})
+	p.keyDelay = 0
+	live := &providers.Live{PaneID: "w1:p1", HerdrStatus: herdr.StatusBlocked}
+	err := p.Respond(context.Background(), id, live, model.InteractionResponse{
+		InteractionID: "toolu_01EGHSkbSkoY1E3naCcEV9NN",
+		Answers:       map[string]model.Answer{"0": {Text: "timeline"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Join(term.calls, "|"), "keys:esc|text:Which layout? → timeline|text:\x1b[13u"; got != want {
+		t.Errorf("calls = %q, want %q", got, want)
 	}
 }
 
