@@ -21,6 +21,23 @@ Mac 上の Gateway（`gateway/`）が提供する HTTP API の仕様と、Mac �
 新規インストールのメニューバーアプリは既定でポート `8766` を使う（この Mac は移行時の
 `8765` を維持）。CLI の `serve` は `--listen` 未指定かつ設定が空なら `:8765`。
 
+### Cloudflare Tunnel（tailnet の外から）
+
+Tailscale に入っていない端末からは、名前付きトンネル `Herdr-Mobile-Gateway` 経由で同じ Gateway に届く。
+
+| 項目 | 値 |
+|---|---|
+| ベース URL | `https://<公開ホスト名>`（`~/.cloudflared/herdr-gateway.yml` の `ingress[0].hostname`） |
+| 転送先 | `http://100.99.15.34:8765`（上の Gateway そのもの。API・トークンは共通） |
+| 実体 | LaunchAgent `com.herdr-mobile.cloudflare-tunnel`（`/opt/homebrew/bin/cloudflared --config ~/.cloudflared/herdr-gateway.yml tunnel run Herdr-Mobile-Gateway`、`KeepAlive`） |
+| 認証情報 | `~/.cloudflared/<tunnel id>.json`（コミットしない） |
+| ログ | `~/.local/state/herdr-mobile/desktop/cloudflared-tunnel.log` |
+| 状態確認 | `launchctl list \| grep cloudflare-tunnel`、`curl https://<公開ホスト名>/healthz` → `ok` |
+
+- Cloudflare Access は前段に置いていない。インターネットから届くので、守りは Bearer トークンだけになる（`/healthz` と `/pair` は認証なしで応答する）。トークンが漏れたら `token --rotate` する。
+- 公開リポジトリなのでホスト名はここに書かない。上の設定ファイルで確認する。
+- メニューバーアプリが作る QR の `url` は常に待ち受けアドレス（`http://100.99.15.34:8765`）で、トンネルの URL にはならない。トンネル経由で使う端末は、Android の設定で Gateway URL をトンネルの URL にし、同じトークンを使う。
+
 ### 認証
 
 `/v1/*` はすべて Bearer トークン必須。ネットワーク経路に関係なく要求される。
@@ -47,7 +64,7 @@ Authorization: Bearer <token>
 |---|---|---|
 | Tailscale（推奨） | `http://100.x.y.z:8765` / `http://<host>.<tailnet>.ts.net:8765` | WireGuard で暗号化される。両端末を同じ tailnet に入れる |
 | 信頼できる LAN | `http://192.168.1.20:8765` | 平文 HTTP。Gateway の `listen` を LAN の IP にする必要がある |
-| Cloudflare Tunnel 等 | `https://gateway.example.com` | 公開経路では必ず HTTPS。平文 HTTP をインターネットに直接出さない |
+| Cloudflare Tunnel 等 | `https://gateway.example.com` | 公開経路では必ず HTTPS。平文 HTTP をインターネットに直接出さない。この Mac の設定は上の節 |
 
 Android エミュレータからホストのループバックは `10.0.2.2` で届く（使い捨て Gateway を
 `127.0.0.1:18765` で動かした場合は `http://10.0.2.2:18765`）。本番 Gateway は Tailscale IP
