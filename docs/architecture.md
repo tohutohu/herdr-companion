@@ -433,6 +433,8 @@ whole thing off, and `herdr-mobile-gateway usage` prints one read.
 
 ## HTTP API
 
+Full request and response shapes, auth and connection details: [api.md](api.md).
+
 | Method | Path | |
 |---|---|---|
 | GET | `/healthz` | no auth |
