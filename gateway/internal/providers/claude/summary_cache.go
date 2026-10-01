@@ -10,8 +10,9 @@ import (
 
 // Store only small summaries, never transcripts or image payloads. Live and
 // blocked state affect queued prompts and pending approvals even when the file
-// has not changed.
-const maxCachedSummaries = 96
+// has not changed. The limit fits a long archive list: those transcripts no
+// longer change, and a large one takes seconds to parse again.
+const maxCachedSummaries = 1024
 
 type summaryKey struct {
 	path          string

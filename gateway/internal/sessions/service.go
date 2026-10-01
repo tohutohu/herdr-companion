@@ -263,15 +263,33 @@ func (s *Service) recentSessions(ctx context.Context, p providers.Provider, live
 	return out
 }
 
-// Archived lists archived sessions, most recently archived first. Sessions
-// the provider no longer knows are skipped.
-func (s *Service) Archived(ctx context.Context) []model.Session {
+// archivedConcurrency bounds the summaries read at once for the archive list.
+const archivedConcurrency = 8
+
+// Archived lists archived sessions, most recently archived first, starting at
+// the offset-th archived id. A limit <= 0 lists the rest. next is the offset
+// of the following page, or 0 when there is none. Sessions the provider no
+// longer knows are skipped, so a page may hold fewer than limit sessions.
+func (s *Service) Archived(ctx context.Context, offset, limit int) (out []model.Session, next int) {
 	if s.Archive == nil {
-		return nil
+		return nil, 0
+	}
+	ids := s.Archive.IDs()
+	if offset >= len(ids) {
+		return nil, 0
+	}
+	ids = ids[max(offset, 0):]
+	if limit > 0 && limit < len(ids) {
+		ids = ids[:limit]
+		next = max(offset, 0) + limit
 	}
 	live := s.live(s.snapshot(ctx))
-	var out []model.Session
-	for _, id := range s.Archive.IDs() {
+	// Summaries read transcripts or call the Codex app-server; reading them
+	// one by one made a long archive take seconds.
+	found := make([]*model.Session, len(ids))
+	sem := make(chan struct{}, archivedConcurrency)
+	var wg sync.WaitGroup
+	for i, id := range ids {
 		r, ok := live[id]
 		if !ok {
 			pname, native, valid := SplitID(id)
@@ -281,14 +299,26 @@ func (s *Service) Archived(ctx context.Context) []model.Session {
 			}
 			r = &Resolved{Provider: p, NativeID: native}
 		}
-		sess, err := s.Session(ctx, r)
-		if err != nil {
-			slog.Debug("archived session unavailable", "session_id", id, "error", err)
-			continue
-		}
-		out = append(out, sess)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			sess, err := s.Session(ctx, r)
+			if err != nil {
+				slog.Debug("archived session unavailable", "session_id", id, "error", err)
+				return
+			}
+			found[i] = &sess
+		}()
 	}
-	return out
+	wg.Wait()
+	for _, sess := range found {
+		if sess != nil {
+			out = append(out, *sess)
+		}
+	}
+	return out, next
 }
 
 func (s *Service) archived(id string) bool { return s.Archive != nil && s.Archive.Has(id) }

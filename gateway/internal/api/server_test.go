@@ -741,6 +741,41 @@ func Test複数のセッションを一度のリクエストでアーカイブ�
 	}
 }
 
+func Testアーカイブ一覧をページごとに取得できる(t *testing.T) {
+	ts, _, _, tok := newTestServer(t)
+	do(t, ts, tok, "POST", "/v1/sessions/archive", []byte(`{"ids":["fake:s1","fake:old"]}`), "application/json")
+
+	page := func(query string) ([]string, *int) {
+		t.Helper()
+		resp, body := do(t, ts, tok, "GET", "/v1/sessions?archived=true"+query, nil, "")
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status %d: %s", resp.StatusCode, body)
+		}
+		var got struct {
+			NextOffset *int `json:"nextOffset"`
+		}
+		json.Unmarshal(body, &got)
+		return sessionIDs(t, body), got.NextOffset
+	}
+
+	// 新しくアーカイブした順に並ぶ
+	ids, next := page("&limit=1")
+	if strings.Join(ids, ",") != "fake:old" || next == nil || *next != 1 {
+		t.Errorf("first page = %v, next %v", ids, next)
+	}
+	ids, next = page("&offset=1&limit=1")
+	if strings.Join(ids, ",") != "fake:s1" || next != nil {
+		t.Errorf("second page = %v, next %v", ids, next)
+	}
+	ids, next = page("")
+	if strings.Join(ids, ",") != "fake:old,fake:s1" || next != nil {
+		t.Errorf("all = %v, next %v", ids, next)
+	}
+	if resp, _ := do(t, ts, tok, "GET", "/v1/sessions?archived=true&limit=-1", nil, ""); resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("negative limit status = %d", resp.StatusCode)
+	}
+}
+
 func Test実行中のセッションをアーカイブすると停止して一覧から外れ戻せる(t *testing.T) {
 	ts, _, fh, tok := newTestServer(t)
 	resp, body := do(t, ts, tok, "POST", "/v1/sessions/fake:s1/archive", nil, "")

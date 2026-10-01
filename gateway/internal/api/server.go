@@ -246,13 +246,12 @@ var (
 func badRequest(msg string) error { return errors.Join(errBadRequest, errors.New(msg)) }
 
 func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
-	var list []model.Session
-	var err error
-	if r.URL.Query().Get("archived") == "true" {
-		list = s.Sessions.Archived(r.Context())
-	} else {
-		list, err = s.Sessions.List(r.Context())
+	q := r.URL.Query()
+	if q.Get("archived") == "true" {
+		s.listArchived(w, r)
+		return
 	}
+	list, err := s.Sessions.List(r.Context())
 	if err != nil {
 		s.fail(w, r, "", "list_sessions", err)
 		return
@@ -261,6 +260,34 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 		list = []model.Session{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"sessions": list})
+}
+
+// listArchived lists archived sessions. With limit, it returns one page and
+// nextOffset when more remain; without it, every archived session.
+func (s *Server) listArchived(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	var offset, limit int
+	for name, v := range map[string]*int{"offset": &offset, "limit": &limit} {
+		raw := q.Get(name)
+		if raw == "" {
+			continue
+		}
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 {
+			s.fail(w, r, "", "list_archived", badRequest(name+" must be a non-negative integer"))
+			return
+		}
+		*v = n
+	}
+	list, next := s.Sessions.Archived(r.Context(), offset, limit)
+	if list == nil {
+		list = []model.Session{}
+	}
+	resp := map[string]any{"sessions": list}
+	if next > 0 {
+		resp["nextOffset"] = next
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) getSession(w http.ResponseWriter, r *http.Request) {
