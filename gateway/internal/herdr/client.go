@@ -337,13 +337,16 @@ func (c *Client) CreateWorktree(ctx context.Context, cwd, label string) (workspa
 }
 
 // OpenWorktree opens a workspace (without focusing it) in an existing linked
-// worktree. alreadyOpen means a workspace was open there before.
-func (c *Client) OpenWorktree(ctx context.Context, path string) (workspaceID string, alreadyOpen bool, err error) {
+// worktree of the repository whose main checkout is repo. Herdr resolves the
+// worktree from that checkout; without it Herdr starts from the active
+// workspace and refuses (linked_worktree_source) when that is itself a
+// linked worktree. alreadyOpen means a workspace was open there before.
+func (c *Client) OpenWorktree(ctx context.Context, repo, path string) (workspaceID string, alreadyOpen bool, err error) {
 	var r struct {
 		AlreadyOpen bool      `json:"already_open"`
 		Workspace   Workspace `json:"workspace"`
 	}
-	params := map[string]any{"path": path, "focus": false}
+	params := map[string]any{"cwd": repo, "path": path, "focus": false}
 	if err := c.Call(ctx, "worktree.open", params, &r); err != nil {
 		return "", false, err
 	}

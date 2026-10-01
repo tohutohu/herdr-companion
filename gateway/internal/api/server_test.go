@@ -104,7 +104,7 @@ func (f *fakeHerdr) ClosePane(_ context.Context, pane string) error {
 
 // OpenWorktree reports a worktree as open when a pane is in it, as Herdr
 // does for the workspace open there.
-func (f *fakeHerdr) OpenWorktree(_ context.Context, path string) (string, bool, error) {
+func (f *fakeHerdr) OpenWorktree(_ context.Context, _, path string) (string, bool, error) {
 	f.calls = append(f.calls, "open-worktree")
 	for _, p := range f.snap.Panes {
 		if rel, err := filepath.Rel(path, p.WorkingDir()); err == nil && !strings.HasPrefix(rel, "..") {

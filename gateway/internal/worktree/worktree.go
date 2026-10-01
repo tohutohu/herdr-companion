@@ -107,7 +107,7 @@ func Mark(ctx context.Context, dir, provider string) error {
 
 // Herdr is the part of the Herdr client that removes worktrees.
 type Herdr interface {
-	OpenWorktree(ctx context.Context, path string) (workspaceID string, alreadyOpen bool, err error)
+	OpenWorktree(ctx context.Context, repo, path string) (workspaceID string, alreadyOpen bool, err error)
 	RemoveWorktree(ctx context.Context, workspaceID string) error
 	CloseWorkspace(ctx context.Context, workspaceID string) error
 }
@@ -149,7 +149,7 @@ func Cleanup(ctx context.Context, h Herdr, dir string) (*Outcome, error) {
 	}
 	out := &Outcome{Path: c.top}
 	// Herdr removes a worktree through the workspace open in it.
-	ws, alreadyOpen, err := h.OpenWorktree(ctx, c.top)
+	ws, alreadyOpen, err := h.OpenWorktree(ctx, c.main(), c.top)
 	if err != nil {
 		return nil, err
 	}

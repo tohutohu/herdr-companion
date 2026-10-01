@@ -51,7 +51,8 @@ func exists(p string) bool {
 }
 
 // fakeHerdr removes worktrees the way Herdr does: `git worktree remove`
-// without --force, through the workspace open in the worktree.
+// without --force, through the workspace open in the worktree. Like Herdr it
+// opens a worktree only from the repository's main checkout.
 type fakeHerdr struct {
 	open   map[string]bool // worktrees a workspace is open in
 	fail   error           // returned by RemoveWorktree instead of removing
@@ -60,8 +61,11 @@ type fakeHerdr struct {
 	nextWS int
 }
 
-func (h *fakeHerdr) OpenWorktree(_ context.Context, path string) (string, bool, error) {
+func (h *fakeHerdr) OpenWorktree(ctx context.Context, repo, path string) (string, bool, error) {
 	h.calls = append(h.calls, "open "+path)
+	if c, err := inspect(ctx, repo); err != nil || c.linked() {
+		return "", false, &herdr.Error{Code: "linked_worktree_source", Message: "New and open worktree actions start from the repo parent workspace."}
+	}
 	if h.open[path] {
 		return "w-open", true, nil
 	}
