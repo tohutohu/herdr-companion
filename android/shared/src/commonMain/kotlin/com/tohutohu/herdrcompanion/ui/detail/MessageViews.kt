@@ -1,7 +1,12 @@
 package com.tohutohu.herdrcompanion.ui.detail
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -63,19 +68,7 @@ fun MessageItem(
             .padding(horizontal = 12.dp, vertical = 2.dp),
         horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
     ) {
-        if (showRole && message.role != "tool") {
-            Text(
-                when (message.role) {
-                    "user" -> "You"
-                    "assistant" -> providerName.substringBefore(' ')
-                    else -> "System"
-                },
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(top = 12.dp, bottom = 2.dp),
-            )
-        }
+        if (showRole && message.role != "tool") RoleLabel(message.role, providerName)
         val content: @Composable () -> Unit = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 message.blocks.forEach { block ->
@@ -98,6 +91,101 @@ fun MessageItem(
             if (message.queued) QueuedLine()
         } else {
             selectableContent()
+        }
+    }
+}
+
+@Composable
+private fun RoleLabel(role: String, providerName: String) {
+    Text(
+        when (role) {
+            "user" -> "You"
+            "assistant" -> providerName.substringBefore(' ')
+            else -> "System"
+        },
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(top = 12.dp, bottom = 2.dp),
+    )
+}
+
+/**
+ * The tool calls between two reports, folded to the newest call as the CLI
+ * shows it. Tapping opens every call and output, each still collapsible.
+ */
+@Composable
+fun ActivityGroupItem(
+    row: ActivityRow,
+    modifier: Modifier = Modifier,
+    showRole: Boolean,
+    providerName: String,
+    resolveUrl: (String) -> String,
+    formatFileSize: (Long) -> String,
+    onOpenFile: (String, Int) -> Unit,
+    onOpenImage: (String) -> Unit,
+    onOpenTerminal: () -> Unit,
+    interactionsEnabled: Boolean,
+    onRespond: (InteractionResponseDto) -> Unit,
+) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    Column(
+        modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 2.dp),
+    ) {
+        if (showRole) RoleLabel("assistant", providerName)
+        val calls = row.callCount
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(6.dp))
+                .clickable { expanded = !expanded }
+                .padding(horizontal = 4.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val muted = MaterialTheme.colorScheme.onSurfaceVariant
+            // While collapsed, each new call replaces the line.
+            Crossfade(if (expanded) null else row.latest, modifier = Modifier.weight(1f), label = "activity") { latest ->
+                Text(
+                    latest?.let { "⋯ $it" } ?: "⋯",
+                    fontFamily = FontFamily.Monospace,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (calls > 0) {
+                Text(
+                    if (calls == 1) "1 tool call" else "$calls tool calls",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = muted,
+                    maxLines = 1,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            }
+            ExpandChevron(
+                expanded = expanded,
+                contentDescription = if (expanded) "Hide tool calls" else "Show tool calls",
+                tint = muted,
+                modifier = Modifier.padding(start = 4.dp).size(16.dp),
+            )
+        }
+        AnimatedVisibility(
+            visible = expanded,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut(),
+        ) {
+            SelectionContainer {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(bottom = 4.dp)) {
+                    row.parts.forEach { part ->
+                        part.blocks.forEach { block ->
+                            BlockView(part.role, block, resolveUrl, formatFileSize, onOpenFile, onOpenImage, onOpenTerminal, interactionsEnabled, onRespond)
+                        }
+                    }
+                }
+            }
         }
     }
 }

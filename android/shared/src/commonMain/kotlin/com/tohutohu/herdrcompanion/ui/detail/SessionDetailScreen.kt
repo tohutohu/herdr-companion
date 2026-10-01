@@ -79,6 +79,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.tohutohu.herdrcompanion.data.api.InteractionResponseDto
 import com.tohutohu.herdrcompanion.data.api.Status
 import com.tohutohu.herdrcompanion.model.headline
 import com.tohutohu.herdrcompanion.ui.ContextBar
@@ -186,17 +187,20 @@ fun SessionDetailScreen(
         listState.animateScrollToItem(0)
     }
 
+    // Tool calls between two reports share one row.
+    val rows = remember(messages, state.messageKeys) { transcriptRows(messages, state.messageKeys) }
     // Pending messages sit below the conversation, as the first items of the
-    // bottom-up list; message indexes in the list are shifted by them.
+    // bottom-up list; row indexes in the list are shifted by them.
     val tail = pending.size
-    val stack by remember(messages, tail) {
+    val stack by remember(messages, rows, tail) {
         derivedStateOf {
             val info = listState.layoutInfo
             val top = info.visibleItemsInfo.maxOfOrNull { it.index }
             if (top == null) {
                 FlowStack.EMPTY
             } else {
-                flowStack(messages, messages.lastIndex - (top - tail))
+                val r = rows.lastIndex - (top - tail)
+                flowStack(messages, if (r > rows.lastIndex) messages.size else rows.getOrNull(r)?.messageIndex ?: 0)
             }
         }
     }
@@ -370,27 +374,49 @@ fun SessionDetailScreen(
                             onDiscard = { onAction(SessionDetailAction.Discard(p.localId)) },
                         )
                     }
-                    itemsIndexed(messages.asReversed(), key = { _, m -> state.messageKeys[m.id] ?: "message:${m.id}" }) { r, m ->
-                        val i = messages.lastIndex - r
-                        MessageItem(
-                            modifier = if (settled) {
-                                Modifier
-                                    .animateContentSize(tween(ITEM_ANIMATION_MS))
-                                    .animateItem(placementSpec = tween(ITEM_ANIMATION_MS))
-                            } else {
-                                Modifier.animateContentSize(tween(ITEM_ANIMATION_MS))
-                            },
-                            message = m,
-                            showRole = i == 0 || messages[i - 1].role != m.role,
-                            providerName = session?.providerName ?: "Agent",
-                            resolveUrl = resolveUrl,
-                            formatFileSize = formatFileSize,
-                            onOpenFile = { path, line -> onAction(SessionDetailAction.OpenFile(path, line)) },
-                            onOpenImage = { url -> onAction(SessionDetailAction.OpenImage(url)) },
-                            onOpenTerminal = { onAction(SessionDetailAction.OpenTerminal) },
-                            interactionsEnabled = !answering,
-                            onRespond = { onAction(SessionDetailAction.Respond(it)) },
-                        )
+                    itemsIndexed(rows.asReversed(), key = { _, row -> row.key }) { r, row ->
+                        val i = rows.lastIndex - r
+                        val itemModifier = if (settled) {
+                            Modifier
+                                .animateContentSize(tween(ITEM_ANIMATION_MS))
+                                .animateItem(placementSpec = tween(ITEM_ANIMATION_MS))
+                        } else {
+                            Modifier.animateContentSize(tween(ITEM_ANIMATION_MS))
+                        }
+                        val showRole = i == 0 || rows[i - 1].speaker != row.speaker
+                        val providerName = session?.providerName ?: "Agent"
+                        val onOpenFile = { path: String, line: Int -> onAction(SessionDetailAction.OpenFile(path, line)) }
+                        val onOpenImage = { url: String -> onAction(SessionDetailAction.OpenImage(url)) }
+                        val onOpenTerminal = { onAction(SessionDetailAction.OpenTerminal) }
+                        val onRespond = { it: InteractionResponseDto -> onAction(SessionDetailAction.Respond(it)) }
+                        when (row) {
+                            is MessageRow -> MessageItem(
+                                modifier = itemModifier,
+                                message = row.message,
+                                showRole = showRole,
+                                providerName = providerName,
+                                resolveUrl = resolveUrl,
+                                formatFileSize = formatFileSize,
+                                onOpenFile = onOpenFile,
+                                onOpenImage = onOpenImage,
+                                onOpenTerminal = onOpenTerminal,
+                                interactionsEnabled = !answering,
+                                onRespond = onRespond,
+                            )
+                            is ActivityRow -> ActivityGroupItem(
+                                row = row,
+                                modifier = itemModifier,
+                                showRole = showRole,
+                                providerName = providerName,
+                                resolveUrl = resolveUrl,
+                                formatFileSize = formatFileSize,
+                                onOpenFile = onOpenFile,
+                                onOpenImage = onOpenImage,
+                                onOpenTerminal = onOpenTerminal,
+                                interactionsEnabled = !answering,
+                                onRespond = onRespond,
+                            )
+                        }
                     }
                 }
                 PinnedFlowStack(
@@ -399,11 +425,11 @@ fun SessionDetailScreen(
                     providerName = session?.providerName ?: "Agent",
                     onHeight = { panelHeight = it },
                     onJump = { id ->
-                        val i = messages.indexOfFirst { it.id == id }
+                        val i = rows.indexOfFirst { it is MessageRow && it.message.id == id }
                         if (i >= 0) {
                             readFromStart = false
-                            followNewest = i == messages.lastIndex
-                            scope.launch { listState.animateScrollToItem(tail + messages.lastIndex - i) }
+                            followNewest = i == rows.lastIndex
+                            scope.launch { listState.animateScrollToItem(tail + rows.lastIndex - i) }
                         }
                     },
                 )
