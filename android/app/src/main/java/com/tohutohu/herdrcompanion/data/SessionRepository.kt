@@ -5,6 +5,7 @@ import com.tohutohu.herdrcompanion.data.api.GatewayApi
 import com.tohutohu.herdrcompanion.data.api.InteractionResponseDto
 import com.tohutohu.herdrcompanion.data.api.MessageDto
 import com.tohutohu.herdrcompanion.data.api.SessionDto
+import com.tohutohu.herdrcompanion.data.api.SessionsResponse
 import com.tohutohu.herdrcompanion.data.db.AppDatabase
 import com.tohutohu.herdrcompanion.data.db.MessageEntity
 import com.tohutohu.herdrcompanion.data.db.SessionEntity
@@ -81,7 +82,7 @@ class SessionRepository(
         db.messages().replaceFrom(sessionId, start, rows)
     }
 
-    suspend fun archivedSessions(): List<SessionDto> = api.archivedSessions()
+    suspend fun archivedSessions(offset: Int, limit: Int): SessionsResponse = api.archivedSessions(offset, limit)
 
     suspend fun archive(sessionId: String) = archive(listOf(sessionId))
 

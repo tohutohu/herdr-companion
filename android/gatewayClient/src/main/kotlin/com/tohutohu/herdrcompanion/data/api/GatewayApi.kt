@@ -92,8 +92,13 @@ class GatewayApi(
 
     suspend fun session(id: String): SessionDto = get(url("v1", "sessions", id))
 
-    suspend fun archivedSessions(): List<SessionDto> =
-        get<SessionsResponse>(url("v1", "sessions", query = mapOf("archived" to "true"))).sessions
+    /**
+     * One page of archived sessions, most recently archived first. A limit of
+     * 0 asks for the rest. Gateways without paging return every session and
+     * no [SessionsResponse.nextOffset].
+     */
+    suspend fun archivedSessions(offset: Int, limit: Int): SessionsResponse =
+        get(url("v1", "sessions", query = mapOf("archived" to "true", "offset" to "$offset", "limit" to "$limit")))
 
     /**
      * Archiving a running session closes its Herdr pane and removes the

@@ -52,7 +52,11 @@ data class ContextUsageDto(
 data class CostDto(val usd: Double = 0.0, val estimated: Boolean = false)
 
 @Serializable
-data class SessionsResponse(val sessions: List<SessionDto>)
+data class SessionsResponse(
+    val sessions: List<SessionDto>,
+    /** Where the next archived page starts; absent on the last page. */
+    val nextOffset: Int? = null,
+)
 
 @Serializable
 data class ArchiveSessionsRequest(val ids: List<String>)

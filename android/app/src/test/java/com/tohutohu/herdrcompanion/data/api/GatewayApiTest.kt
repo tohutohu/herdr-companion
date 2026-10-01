@@ -221,9 +221,11 @@ class GatewayApiTest {
     @Test
     fun `アーカイブ一覧の取得とアーカイブ解除と再開のリクエストを送る`() = runBlocking {
         val session = """{"id":"claude:s1","provider":"claude","status":"offline","updatedAt":"2026-09-17T10:00:00Z","archived":true}"""
-        server.enqueue(MockResponse.Builder().body("""{"sessions":[$session]}""").build())
-        val archived = api.archivedSessions()
-        assertEquals("/v1/sessions?archived=true", server.takeRequest().target)
+        server.enqueue(MockResponse.Builder().body("""{"sessions":[$session],"nextOffset":30}""").build())
+        val page = api.archivedSessions(offset = 0, limit = 30)
+        assertEquals("/v1/sessions?archived=true&offset=0&limit=30", server.takeRequest().target)
+        assertEquals(30, page.nextOffset)
+        val archived = page.sessions
         assertTrue(archived.single().archived)
         assertTrue(!archived.single().isLive)
 
