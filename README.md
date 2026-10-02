@@ -100,6 +100,16 @@ With a distributed DMG, drag Herdr Companion Gateway.app into Applications, laun
 
 Herdr Companion.app (the Compose Desktop UI) is a separate app and DMG. Install it separately if you want to use it. The menu-bar app manages Firebase import, login-item startup, and Gateway start/stop. See [macos/README.md](macos/README.md) for details.
 
+The same desktop UI also runs on Linux. jpackage only packages for the OS it runs on, so build the `.deb` on Linux (JDK 17, plus an Android SDK because the Gradle build includes the Android app). Install `libegl1` before building: jpackage derives the package's dependencies from the libraries installed at build time.
+
+```bash
+cd android
+./gradlew :desktopApp:packageReleaseDeb   # desktopApp/build/compose/binaries/main-release/deb/herdr-companion_*.deb
+sudo apt install ./desktopApp/build/compose/binaries/main-release/deb/herdr-companion_*.deb
+```
+
+On a machine without the menu-bar app, open **Settings** and enter the Gateway address (for example `http://100.x.y.z:8766`) and the token printed by `herdr-mobile-gateway token` on the Mac. Notifications use `notify-send`, and opening a Herdr pane uses `$TERMINAL` or the first terminal emulator found. The Linux app does not update itself.
+
 ### CLI / launchd
 
 If you do not use the distributed app and want to run the Gateway from source:

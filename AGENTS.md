@@ -33,6 +33,8 @@ export JAVA_HOME=$HOME/Library/Java/JavaVirtualMachines/jbr-17.0.14/Contents/Hom
 osascript -e 'tell application id "com.tohutohu.herdrcompanion.desktop" to quit'
 ditto "$(find desktopApp/build/compose/binaries -type d -name 'Herdr Companion.app' -print | sort | tail -n 1)" "/Applications/Herdr Companion.app"
 open "/Applications/Herdr Companion.app"
+# Linux .deb of the same UI: must be built on Linux, with libegl1 installed so jpackage records it as a dependency
+./gradlew --console=plain :desktopApp:packageReleaseDeb
 
 # Mac menu-bar app (macOS 13+, Swift and Go)
 bash macos/scripts/build-dmg.sh                 # native-architecture DMG, ad-hoc signed by default
