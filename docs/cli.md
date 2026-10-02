@@ -16,7 +16,22 @@ env -u GOROOT go build -o ~/.local/bin/hc ./cmd/hc
 
 この Mac ではそのまま動く。接続先とトークンは Gateway の設定
 （`HERDR_MOBILE_CONFIG`、なければ `~/.config/herdr-mobile/desktop/config.json`）から読む。
-別の端末からは `HC_URL` と `HC_TOKEN` を設定する。
+
+### Linux / Windows から
+
+依存は標準ライブラリだけ（cgo なし）なので、クロスコンパイルした単体バイナリをコピーすれば動く。
+
+```bash
+GOOS=linux   GOARCH=amd64 env -u GOROOT go build -o hc            ./cmd/hc   # arm64 も可
+GOOS=windows GOARCH=amd64 env -u GOROOT go build -o hc.exe        ./cmd/hc
+```
+
+- `HC_URL`（Tailscale の `http://100.99.15.34:8765` か Cloudflare Tunnel の URL）と `HC_TOKEN` を設定する。
+- `hc start` の `--cwd` は必須（Gateway の Mac 上のパスを渡す。手元のカレントディレクトリは使わない）。
+- `--file` の添付はアップロードされるので、手元のファイルを渡してよい。`export` も手元に書き出す。
+- 状態は Linux では `~/.local/state/herdr-mobile/hc`、Windows では `%LOCALAPPDATA%\herdr-mobile\hc`。
+- Windows の標準入力の CRLF は LF にして送る。出力は UTF-8（`⋯` `→` などを含む）なので、古いコードページのコンソールでは化けることがある。
+- Linux（amd64 / arm64）はコンテナでテストを実行して確認済み。Windows はビルドのみ確認。
 
 ## 設計
 

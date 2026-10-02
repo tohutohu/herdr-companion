@@ -22,6 +22,9 @@ import (
 type connection struct {
 	baseURL string
 	token   string
+	// local is true when the Gateway was found through its config file on
+	// this machine, so local paths mean the same to it.
+	local bool
 }
 
 // resolveConnection finds the Gateway: flags, then HC_URL/HC_TOKEN, then
@@ -41,6 +44,7 @@ func resolveConnection(flagURL, flagToken string) (connection, error) {
 		}
 		if c.baseURL == "" {
 			c.baseURL = listenURL(listen)
+			c.local = true
 		}
 		if c.token == "" {
 			c.token = token

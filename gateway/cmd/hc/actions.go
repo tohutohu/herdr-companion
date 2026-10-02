@@ -29,7 +29,9 @@ func (a *app) textArg(words []string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return strings.TrimRight(string(b), "\n"), nil
+		// Windows pipes end lines with CRLF; the agent should get plain LF.
+		text := strings.ReplaceAll(string(b), "\r\n", "\n")
+		return strings.TrimRight(text, "\n"), nil
 	}
 	return strings.Join(words, " "), nil
 }
@@ -346,6 +348,9 @@ func (a *app) cmdStart(args []string) error {
 	}
 	dir := *cwd
 	if dir == "" {
+		if !a.client.conn.local {
+			return usagef("--cwd is required when the Gateway runs on another machine: give a directory on that machine")
+		}
 		if dir, err = os.Getwd(); err != nil {
 			return err
 		}

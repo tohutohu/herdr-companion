@@ -508,3 +508,24 @@ func Test停止中のセッションの出入りは変化として扱わない(t
 		t.Fatalf("aged-out offline sessions reported:\n%s", got)
 	}
 }
+
+func Test別マシンのGatewayに起動するときは作業ディレクトリの指定を求める(t *testing.T) {
+	g := sampleGateway()
+	a, out := newTestApp(t, g)
+	if code := a.run([]string{"start", "hello"}); code != 2 || !strings.Contains(out.String(), "--cwd is required") {
+		t.Fatalf("code %d: %s", code, out.String())
+	}
+	if len(g.posted) != 0 {
+		t.Errorf("posted %v", g.posted)
+	}
+}
+
+func Test標準入力のCRLFはLFにして送る(t *testing.T) {
+	g := sampleGateway()
+	a, _ := newTestApp(t, g)
+	a.in = strings.NewReader("1行目\r\n2行目\r\n")
+	a.mustRun(t, "send", "aaaa1111", "-")
+	if got := g.posted[0].Body["text"]; got != "1行目\n2行目" {
+		t.Errorf("sent %q", got)
+	}
+}
