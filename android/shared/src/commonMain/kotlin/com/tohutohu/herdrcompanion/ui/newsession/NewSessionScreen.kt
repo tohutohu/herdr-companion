@@ -24,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Star
@@ -225,18 +226,27 @@ fun NewSessionScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         if (state.worktreeAvailable) {
+                            // The default selected tint is close to the bar's own surface,
+                            // so "on" uses the primary colour and a check, and says so.
                             FilterChip(
                                 selected = state.worktree,
                                 enabled = !state.starting && !state.checking,
                                 onClick = { onAction(NewSessionAction.ToggleWorktree) },
-                                label = { Text("Worktree") },
+                                label = { Text(worktreeChipLabel(state.worktree)) },
                                 leadingIcon = {
-                                    Icon(
-                                        Icons.Default.AccountTree,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(FilterChipDefaults.IconSize),
-                                    )
+                                    SwapContent(state.worktree) { on ->
+                                        Icon(
+                                            if (on) Icons.Default.Check else Icons.Default.AccountTree,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(FilterChipDefaults.IconSize),
+                                        )
+                                    }
                                 },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                                    selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimary,
+                                ),
                             )
                         }
                         Button(
@@ -368,6 +378,9 @@ fun NewSessionScreen(
         }
     }
 }
+
+/** The worktree chip's text, which names the state as well as the colour does. */
+internal fun worktreeChipLabel(on: Boolean): String = if (on) "Worktree: on" else "Worktree: off"
 
 /** The Start button's text: which agent starts where. */
 internal fun startLabel(state: NewSessionUiState): String {

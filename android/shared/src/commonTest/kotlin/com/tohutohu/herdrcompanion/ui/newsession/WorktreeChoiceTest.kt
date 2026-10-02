@@ -43,6 +43,12 @@ class WorktreeChoiceTest {
     }
 
     @Test
+    fun `worktreeチップは色だけでなく文言でもオンオフを表す`() {
+        assertEquals("Worktree: on", worktreeChipLabel(true))
+        assertEquals("Worktree: off", worktreeChipLabel(false))
+    }
+
+    @Test
     fun `リポジトリでないフォルダや一覧の読み込み前は選択が残っていてもworktreeで始めない`() {
         for (git in listOf(false, null)) {
             val s = state(git = git, worktree = true)
