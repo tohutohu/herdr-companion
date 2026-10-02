@@ -227,9 +227,56 @@ jobs:
             dist/Herdr-*.deb
             dist/Herdr-*.deb.sha256
 
+  cli:
+    needs: metadata
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache-dependency-path: gateway/go.sum
+
+      # hc is pure Go with no cgo, so one runner builds every platform.
+      - name: Test and build hc for every platform
+        working-directory: gateway
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+          CGO_ENABLED: "0"
+        run: |
+          go test ./cmd/hc
+          go vet ./cmd/hc
+
+          mkdir -p ../dist
+          for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
+            GOOS="${target%/*}" GOARCH="${target#*/}"
+            EXT=""
+            [[ "$GOOS" == windows ]] && EXT=".exe"
+            OUTPUT="../dist/hc-$GOOS-$GOARCH$EXT"
+            GOOS="$GOOS" GOARCH="$GOARCH" go build -trimpath \
+              -ldflags "-s -w -X main.version=$VERSION" -o "$OUTPUT" ./cmd/hc
+            (cd ../dist && sha256sum "$(basename "$OUTPUT")" > "$(basename "$OUTPUT").sha256")
+          done
+
+          ../dist/hc-linux-amd64 version | grep -qx "hc $VERSION" \
+            || { echo "hc does not report version $VERSION" >&2; exit 1; }
+          ls -l ../dist
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Herdr-cli-${{ github.ref_name }}
+          if-no-files-found: error
+          path: |
+            dist/hc-*
+
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [metadata, macos, linux]
+    needs: [metadata, macos, linux, cli]
     runs-on: ubuntu-24.04
 
     steps:
@@ -257,6 +304,10 @@ jobs:
             "dist/Herdr-Companion-Linux-$VERSION-arm64.deb"
             "dist/Herdr-Companion-Linux-$VERSION-arm64.deb.sha256"
           )
+          # hc keeps a version-free name so releases/latest/download/hc-<os>-<arch> stays stable.
+          for target in darwin-arm64 darwin-amd64 linux-amd64 linux-arm64 windows-amd64.exe windows-arm64.exe; do
+            ASSETS+=("dist/hc-$target" "dist/hc-$target.sha256")
+          done
           ls -l dist
 
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then

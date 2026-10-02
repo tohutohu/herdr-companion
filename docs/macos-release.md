@@ -168,16 +168,18 @@ Gatewayも使う場合は、別途`Herdr-Companion-Gateway-x.y.z.dmg`を開い�
 
 ## GitHub Actions / GitHub Release
 
-[`.github/workflows/macos-release.yml`](../.github/workflows/macos-release.yml)は`v*` tag pushまたはmanual dispatchで動きます。`macos-14` arm64 runner上で、JDK 17、Gradle cache、Go 1.24、Android/shared regression、Gateway test/vet、release APK生成、temporary keychain、2つのrelease DMG生成、verification、artifact uploadを順に実行します。tag push時は次の6ファイルをGitHub Releaseへ添付します。
+[`.github/workflows/macos-release.yml`](../.github/workflows/macos-release.yml)は`v*` tag pushまたはmanual dispatchで動きます。`macos-14` arm64 runner上で、JDK 17、Gradle cache、Go 1.24、Android/shared regression、Gateway test/vet、release APK生成、temporary keychain、2つのrelease DMG生成、verification、artifact uploadを順に実行します。Linux .debとエージェント向けCLI `hc`（[cli.md](cli.md)）は別jobで作ります。tag push時は次のファイルをGitHub Releaseへ添付します（それぞれ`.sha256`付き）。
 
 ```text
 Herdr-Companion-x.y.z.dmg
-Herdr-Companion-x.y.z.dmg.sha256
 Herdr-Companion-Gateway-x.y.z.dmg
-Herdr-Companion-Gateway-x.y.z.dmg.sha256
 Herdr-Companion-Android-x.y.z.apk
-Herdr-Companion-Android-x.y.z.apk.sha256
+Herdr-Companion-Linux-x.y.z-amd64.deb
+Herdr-Companion-Linux-x.y.z-arm64.deb
+hc-darwin-arm64  hc-darwin-amd64  hc-linux-amd64  hc-linux-arm64  hc-windows-amd64.exe  hc-windows-arm64.exe
 ```
+
+`hc`はcgoなしの純Goなので、1台のUbuntu runnerで全プラットフォーム向けにクロスコンパイルし、`-X main.version`でreleaseのversionを埋め込みます（`hc version`で確認できる）。`releases/latest/download/hc-<os>-<arch>`で常に最新版を取れるよう、asset名にversionを入れません。
 
 Android APKは`assembleRelease`で生成し、R8とリソース圧縮を有効にした状態で配布します。現在のプロジェクト設定ではreleaseもdebug署名キーを使うため、Play Store提出用ではなく、直接インストールできる共有APKです。Firebase設定は内蔵せず、Macとのペアリング時に取り込みます。
 

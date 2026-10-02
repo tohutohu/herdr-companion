@@ -42,12 +42,16 @@ Acting:
 Other:
   hc usage                            subscription limits
   hc guide                            how to use hc as a resident agent
+  hc version                          the release this hc was built for
 
 ID: any unique prefix of the session id, a full id (claude:…), or a Herdr pane id.
 Global flags (anywhere): --json  --url URL  --token TOKEN  --cursor NAME
 Environment: HC_URL, HC_TOKEN, HC_CURSOR, HC_STATE_DIR. Without HC_URL/HC_TOKEN the
 local Gateway's config is used (HERDR_MOBILE_CONFIG or ~/.config/herdr-mobile/...).
 `
+
+// version is set at release build time (-ldflags "-X main.version=1.3.0").
+var version = "dev"
 
 // errUsage marks a mistake in the command line; it exits with 2.
 var errUsage = errors.New("usage")
@@ -158,6 +162,9 @@ func (a *app) dispatch(cmd string, args []string, g globalFlags) error {
 		return nil
 	case "guide":
 		fmt.Fprint(a.out, guideText)
+		return nil
+	case "version", "--version", "-v":
+		fmt.Fprintf(a.out, "hc %s\n", version)
 		return nil
 	}
 	cmds := map[string]func([]string) error{

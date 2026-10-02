@@ -9,6 +9,18 @@
 
 ## インストール
 
+GitHub Release に各プラットフォームのバイナリが添付される（`hc version` でリリースのバージョンを表示）。
+asset 名にバージョンを含まないので、次の URL で常に最新版を取れる。
+
+```bash
+# macOS (Apple Silicon)。ほかは hc-darwin-amd64 / hc-linux-amd64 / hc-linux-arm64 / hc-windows-amd64.exe / hc-windows-arm64.exe
+curl -fsSL -o ~/.local/bin/hc https://github.com/tohutohu/herdr-companion/releases/latest/download/hc-darwin-arm64
+chmod +x ~/.local/bin/hc
+```
+
+macOS のバイナリは署名していない。curl で取れば quarantine 属性は付かないが、ブラウザで落とした場合は
+`xattr -d com.apple.quarantine hc` が要る。ソースからは次のとおり。
+
 ```bash
 cd gateway
 env -u GOROOT go build -o ~/.local/bin/hc ./cmd/hc
@@ -19,12 +31,7 @@ env -u GOROOT go build -o ~/.local/bin/hc ./cmd/hc
 
 ### Linux / Windows から
 
-依存は標準ライブラリだけ（cgo なし）なので、クロスコンパイルした単体バイナリをコピーすれば動く。
-
-```bash
-GOOS=linux   GOARCH=amd64 env -u GOROOT go build -o hc            ./cmd/hc   # arm64 も可
-GOOS=windows GOARCH=amd64 env -u GOROOT go build -o hc.exe        ./cmd/hc
-```
+依存は標準ライブラリだけ（cgo なし）なので、リリースの単体バイナリを置けば動く。
 
 - `HC_URL`（Tailscale の `http://100.99.15.34:8765` か Cloudflare Tunnel の URL）と `HC_TOKEN` を設定する。
 - `hc start` の `--cwd` は必須（Gateway の Mac 上のパスを渡す。手元のカレントディレクトリは使わない）。

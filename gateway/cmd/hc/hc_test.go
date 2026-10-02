@@ -529,3 +529,11 @@ func Test標準入力のCRLFはLFにして送る(t *testing.T) {
 		t.Errorf("sent %q", got)
 	}
 }
+
+func Testバージョンは接続設定なしで表示できる(t *testing.T) {
+	out := &bytes.Buffer{}
+	a := &app{out: out, errOut: out}
+	if code := a.run([]string{"--version"}); code != 0 || out.String() != "hc dev\n" {
+		t.Fatalf("code %d: %q", code, out.String())
+	}
+}
