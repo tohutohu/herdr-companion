@@ -227,7 +227,9 @@ fun NewSessionScreen(
                     ) {
                         if (state.worktreeAvailable) {
                             // The default selected tint is close to the bar's own surface,
-                            // so "on" uses the primary colour and a check, and says so.
+                            // so "on" is outlined and tinted in the primary colour, with a
+                            // check, and says so. A solid fill would look like a second
+                            // Start button beside the real one.
                             FilterChip(
                                 selected = state.worktree,
                                 enabled = !state.starting && !state.checking,
@@ -243,9 +245,15 @@ fun NewSessionScreen(
                                     }
                                 },
                                 colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = MaterialTheme.colorScheme.primary,
-                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
-                                    selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimary,
+                                    selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
+                                    selectedLabelColor = MaterialTheme.colorScheme.primary,
+                                    selectedLeadingIconColor = MaterialTheme.colorScheme.primary,
+                                ),
+                                border = FilterChipDefaults.filterChipBorder(
+                                    enabled = !state.starting && !state.checking,
+                                    selected = state.worktree,
+                                    selectedBorderColor = MaterialTheme.colorScheme.primary,
+                                    selectedBorderWidth = 1.5.dp,
                                 ),
                             )
                         }
