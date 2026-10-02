@@ -7,6 +7,8 @@
 | `Herdr Companion.app` / `Herdr-Companion-x.y.z.dmg` | Compose Multiplatform UI、同梱JRE | `com.tohutohu.herdrcompanion.desktop` |
 | `Herdr Companion Gateway.app` / `Herdr-Companion-Gateway-x.y.z.dmg` | SwiftUI Gateway Manager、同梱Herdr Companion Gateway | `com.tohutohu.herdrcompanion.gateway` |
 
+同じRelease workflowは、同じUIのLinux版`Herdr-Companion-Linux-x.y.z-amd64.deb`／`-arm64.deb`（とその`.sha256`）も、それぞれのアーキテクチャのUbuntu runnerで作ります。jpackageは実行中のOS・アーキテクチャ向けにしかパッケージを作れないためです。Linux版にアプリ内アップデートはありません。
+
 `Herdr Companion.app`はGatewayを内包せず、既存の`Herdr Companion Gateway.app`が起動したGatewayへ接続します。Gatewayが不要な利用者はUI DMGだけ、DesktopからMac上のセッションへ接続する利用者は2つのDMGを個別にインストールできます。
 
 ## 固定しているビルド条件

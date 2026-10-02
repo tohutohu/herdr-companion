@@ -10,7 +10,37 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  metadata:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      build: ${{ steps.release.outputs.build }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Read release metadata
+        id: release
+        shell: bash
+        run: |
+          VERSION="$(awk -F= '$1 == "version" { print $2; exit }' version.properties)"
+          BUILD="${GITHUB_RUN_NUMBER:-$(awk -F= '$1 == "build" { print $2; exit }' version.properties)}"
+
+          if [[ -z "$VERSION" || -z "$BUILD" ]]; then
+            echo "version.properties must define version and build." >&2
+            exit 1
+          fi
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "${GITHUB_REF_NAME#v}" != "$VERSION" ]]; then
+            echo "Git tag $GITHUB_REF_NAME does not match version.properties ($VERSION)." >&2
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
+          echo "Release version: $VERSION (build $BUILD)"
+
+  macos:
+    needs: metadata
     # Compose Multiplatform 1.12.0 supports macOS arm64 for this project.
     runs-on: macos-14
     env:
@@ -36,26 +66,6 @@ jobs:
         with:
           go-version: "1.24.x"
 
-      - name: Read release metadata
-        id: release
-        shell: bash
-        run: |
-          VERSION="$(awk -F= '$1 == "version" { print $2; exit }' version.properties)"
-          BUILD="${GITHUB_RUN_NUMBER:-$(awk -F= '$1 == "build" { print $2; exit }' version.properties)}"
-
-          if [[ -z "$VERSION" || -z "$BUILD" ]]; then
-            echo "version.properties must define version and build." >&2
-            exit 1
-          fi
-          if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "${GITHUB_REF_NAME#v}" != "$VERSION" ]]; then
-            echo "Git tag $GITHUB_REF_NAME does not match version.properties ($VERSION)." >&2
-            exit 1
-          fi
-
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
-          echo "Release version: $VERSION (build $BUILD)"
-
       - name: Run Android and shared regression checks
         working-directory: android
         run: ./gradlew --console=plain test assembleDebug
@@ -73,8 +83,8 @@ jobs:
       - name: Build Android release APK
         working-directory: android
         env:
-          VERSION: ${{ steps.release.outputs.version }}
-          BUILD: ${{ steps.release.outputs.build }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+          BUILD: ${{ needs.metadata.outputs.build }}
         run: |
           ./gradlew --console=plain :app:assembleRelease \
             "-Pherdr.version=$VERSION" \
@@ -131,35 +141,13 @@ jobs:
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Herdr-release-${{ github.ref_name }}
+          name: Herdr-macos-${{ github.ref_name }}
           if-no-files-found: error
           path: |
             dist/Herdr-*.dmg
             dist/Herdr-*.dmg.sha256
             dist/Herdr-*.apk
             dist/Herdr-*.apk.sha256
-
-      - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          VERSION="${{ steps.release.outputs.version }}"
-          ASSETS=(
-            "dist/Herdr-Companion-$VERSION.dmg"
-            "dist/Herdr-Companion-$VERSION.dmg.sha256"
-            "dist/Herdr-Companion-Gateway-$VERSION.dmg"
-            "dist/Herdr-Companion-Gateway-$VERSION.dmg.sha256"
-            "dist/Herdr-Companion-Android-$VERSION.apk"
-            "dist/Herdr-Companion-Android-$VERSION.apk.sha256"
-          )
-
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" "${ASSETS[@]}" --clobber
-          else
-            gh release create "$GITHUB_REF_NAME" "${ASSETS[@]}" \
-              --verify-tag --generate-notes
-          fi
 
       - name: Delete temporary keychain
         if: always()
@@ -168,3 +156,112 @@ jobs:
             security delete-keychain "$HERDR_CI_KEYCHAIN" >/dev/null 2>&1 || true
           fi
           rm -f "$RUNNER_TEMP/herdr-developer-id.p12"
+
+  linux:
+    needs: metadata
+    name: linux (${{ matrix.arch }})
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    # jpackage only builds packages for the OS and architecture it runs on.
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # The Gradle build includes the Android app, so configuring it needs the SDK platform.
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platforms;android-37.0"
+
+      # jpackage derives the .deb dependencies from the libraries installed here,
+      # so libegl1 (needed by Skiko) must be present at build time.
+      - name: Install packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fakeroot libegl1 libgl1
+
+      - name: Test and build the desktop .deb
+        working-directory: android
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+          BUILD: ${{ needs.metadata.outputs.build }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          ./gradlew --console=plain :desktopApp:test :desktopApp:packageReleaseDeb \
+            "-Pherdr.version=$VERSION" \
+            "-Pherdr.build=$BUILD"
+
+          DEB="$(find desktopApp/build/compose/binaries/main-release/deb -name '*.deb' | head -n 1)"
+          [[ -f "$DEB" ]] || { echo "Missing .deb under desktopApp/build/compose/binaries" >&2; exit 1; }
+          dpkg-deb --info "$DEB"
+          dpkg-deb --field "$DEB" Depends | grep -q libegl1 \
+            || { echo "The .deb does not depend on libegl1" >&2; exit 1; }
+
+          mkdir -p ../dist
+          OUTPUT="../dist/Herdr-Companion-Linux-$VERSION-$ARCH.deb"
+          cp "$DEB" "$OUTPUT"
+          (cd ../dist && sha256sum "$(basename "$OUTPUT")" > "$(basename "$OUTPUT").sha256")
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Herdr-linux-${{ matrix.arch }}-${{ github.ref_name }}
+          if-no-files-found: error
+          path: |
+            dist/Herdr-*.deb
+            dist/Herdr-*.deb.sha256
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [metadata, macos, linux]
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          ASSETS=(
+            "dist/Herdr-Companion-$VERSION.dmg"
+            "dist/Herdr-Companion-$VERSION.dmg.sha256"
+            "dist/Herdr-Companion-Gateway-$VERSION.dmg"
+            "dist/Herdr-Companion-Gateway-$VERSION.dmg.sha256"
+            "dist/Herdr-Companion-Android-$VERSION.apk"
+            "dist/Herdr-Companion-Android-$VERSION.apk.sha256"
+            "dist/Herdr-Companion-Linux-$VERSION-amd64.deb"
+            "dist/Herdr-Companion-Linux-$VERSION-amd64.deb.sha256"
+            "dist/Herdr-Companion-Linux-$VERSION-arm64.deb"
+            "dist/Herdr-Companion-Linux-$VERSION-arm64.deb.sha256"
+          )
+          ls -l dist
+
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${ASSETS[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${ASSETS[@]}" \
+              --verify-tag --generate-notes
+          fi
