@@ -98,6 +98,9 @@ object DesktopPlatformActions {
         }.getOrDefault(false)
     }
 
+    /** The menu-bar manager, Finder and `open` exist only on macOS. */
+    val isMacOs: Boolean = System.getProperty("os.name").orEmpty().contains("mac", ignoreCase = true)
+
     /** Ask the separately installed SwiftUI manager to start its owned Gateway. */
     fun requestGatewayStart(): Boolean = runCatching {
         ProcessBuilder(

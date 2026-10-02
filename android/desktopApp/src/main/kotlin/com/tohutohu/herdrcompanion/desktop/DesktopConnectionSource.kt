@@ -18,4 +18,16 @@ class DesktopConnectionSource(
         current = DesktopConnectionConfig.load(home, environment, properties)
         return current
     }
+
+    /** Stores an address and token entered in Settings; they win over the manager's config. */
+    fun saveManual(connection: DesktopManualConnection): DesktopGatewayConnection {
+        DesktopManualConnectionStore.save(home, connection)
+        return reload()
+    }
+
+    /** Goes back to the config written by the menu-bar manager. */
+    fun clearManual(): DesktopGatewayConnection {
+        DesktopManualConnectionStore.clear(home)
+        return reload()
+    }
 }

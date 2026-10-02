@@ -68,6 +68,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.FrameWindowScope
 import androidx.compose.ui.window.MenuBar
@@ -396,7 +397,7 @@ private fun FrameWindowScope.DesktopShell(
                                 content = content,
                             )
                         },
-                        onAction = { action -> handleListAction(state, action) },
+                        onAction = { action -> handleListAction(state, action, openSettings = { settingsOpen = true }) },
                     )
                 }
                 VerticalDivider(
@@ -422,7 +423,7 @@ private fun FrameWindowScope.DesktopShell(
                 ) {
                     val detailIds = state.openSessionIds
                     if (detailIds.isEmpty()) {
-                        EmptyDetail(state)
+                        EmptyDetail(state, openSettings = { settingsOpen = true })
                     } else {
                         val paneCount = detailIds.size
                         val weights = state.paneWeights.takeIf { it.size == paneCount }
@@ -701,6 +702,65 @@ private fun ConnectionIndicator(status: DesktopConnectionState, label: String) {
     }
 }
 
+/** Shows where the connection comes from and lets the user enter an address and token by hand. */
+@Composable
+private fun DesktopConnectionSettings(state: DesktopAppState) {
+    val connection = state.connection
+    var gatewayUrl by remember { mutableStateOf(connection.baseUrl) }
+    var token by remember { mutableStateOf(if (connection.manual) connection.token else "") }
+    var error by remember { mutableStateOf<String?>(null) }
+    var saved by remember { mutableStateOf(false) }
+    Text("Gateway", style = MaterialTheme.typography.titleSmall)
+    Text(
+        when {
+            connection.manual -> "Using the address and token entered below."
+            connection.configPath != null -> "Using the Gateway manager's config: ${connection.configPath}"
+            else -> "No Gateway manager config was found. Enter the Gateway address and token below."
+        },
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    OutlinedTextField(
+        value = gatewayUrl,
+        onValueChange = { gatewayUrl = it; error = null; saved = false },
+        label = { Text("Gateway address") },
+        placeholder = { Text("http://100.x.y.z:8766") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    OutlinedTextField(
+        value = token,
+        onValueChange = { token = it; error = null; saved = false },
+        label = { Text("Auth token") },
+        placeholder = { Text(if (connection.manual) "" else "Leave the manager's config in use") },
+        singleLine = true,
+        visualTransformation = PasswordVisualTransformation(),
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Text(
+        "Print the token on the Mac with `herdr-mobile-gateway token`.",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+    if (saved) Text("Saved. Reconnecting…", style = MaterialTheme.typography.bodySmall)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(onClick = {
+            error = state.saveManualConnection(gatewayUrl, token)
+            saved = error == null
+        }) { Text("Save connection") }
+        if (connection.manual) {
+            TextButton(onClick = {
+                state.clearManualConnection()
+                gatewayUrl = state.connection.baseUrl
+                token = ""
+                error = null
+                saved = false
+            }) { Text("Use the Gateway manager's config") }
+        }
+    }
+}
+
 @Composable
 private fun DesktopSettingsDialog(state: DesktopAppState, api: GatewayApi, onDismiss: () -> Unit) {
     var notifications by remember { mutableStateOf(DesktopPreferences.notificationsEnabled) }
@@ -714,14 +774,7 @@ private fun DesktopSettingsDialog(state: DesktopAppState, api: GatewayApi, onDis
         title = { Text("Settings") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Gateway", style = MaterialTheme.typography.titleSmall)
-                Text(state.connection.baseUrl, style = MaterialTheme.typography.bodySmall)
-                Text(
-                    state.connection.configPath?.toString()
-                        ?: "Gateway config not found; start the existing macOS manager first.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                DesktopConnectionSettings(state)
                 HorizontalDivider()
                 Text("Session presets", style = MaterialTheme.typography.titleSmall)
                 Text(
@@ -772,11 +825,6 @@ private fun DesktopSettingsDialog(state: DesktopAppState, api: GatewayApi, onDis
                     Text("Check for updates automatically", modifier = Modifier.weight(1f))
                     Switch(checked = updateChecks, onCheckedChange = { updateChecks = it })
                 }
-                Text(
-                    "Gateway host and port are owned by the macOS menu-bar manager.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
         },
         confirmButton = {
@@ -825,7 +873,7 @@ private fun DesktopSettingsDialog(state: DesktopAppState, api: GatewayApi, onDis
 }
 
 @Composable
-private fun EmptyDetail(state: DesktopAppState) {
+private fun EmptyDetail(state: DesktopAppState, openSettings: () -> Unit) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         if (!state.listLoaded && state.listError == null) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -837,8 +885,10 @@ private fun EmptyDetail(state: DesktopAppState) {
                 Text("Gateway connection needs attention", style = MaterialTheme.typography.titleMedium)
                 Text(state.listError!!, color = MaterialTheme.colorScheme.error)
                 TextButton(onClick = { state.refreshSessions(userInitiated = true) }) { Text("Retry") }
-                if (state.connectionState == DesktopConnectionState.OFFLINE ||
-                    state.connectionState == DesktopConnectionState.RECONNECTING
+                TextButton(onClick = openSettings) { Text("Connection Settings…") }
+                if (DesktopPlatformActions.isMacOs && !state.connection.manual &&
+                    (state.connectionState == DesktopConnectionState.OFFLINE ||
+                        state.connectionState == DesktopConnectionState.RECONNECTING)
                 ) {
                     Button(onClick = state::startGateway) { Text("Start Herdr Companion Gateway") }
                 }
@@ -852,7 +902,7 @@ private fun EmptyDetail(state: DesktopAppState) {
     }
 }
 
-private fun handleListAction(state: DesktopAppState, action: SessionListAction) {
+private fun handleListAction(state: DesktopAppState, action: SessionListAction, openSettings: () -> Unit = {}) {
     when (action) {
         is SessionListAction.OpenSession -> state.openSession(action.sessionId)
         is SessionListAction.Archive -> action.sessions.firstOrNull()?.let(state::requestArchive)
@@ -861,7 +911,7 @@ private fun handleListAction(state: DesktopAppState, action: SessionListAction) 
         SessionListAction.OpenNewSession -> state.openNewSession()
         SessionListAction.Refresh -> state.refreshSessions(userInitiated = true)
         SessionListAction.OpenArchived -> state.reportError("Archived session browsing is not yet available on Desktop.")
-        SessionListAction.OpenSettings -> state.reportError("Use the Herdr Companion menu's Settings item for Desktop connection status.")
+        SessionListAction.OpenSettings -> openSettings()
         is SessionListAction.OpenStarting -> state.reportError("Session startup is handled in the New Session window.")
     }
 }

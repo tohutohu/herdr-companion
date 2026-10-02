@@ -3,9 +3,13 @@ package com.tohutohu.herdrcompanion.desktop
 import com.tohutohu.herdrcompanion.data.Settings
 import com.tohutohu.herdrcompanion.data.api.GatewayApi
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import java.net.URI
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.nio.file.StandardCopyOption
+import java.nio.file.attribute.PosixFilePermissions
 
 /** The fields the existing macOS menu-bar manager writes to its config. */
 @Serializable
@@ -24,6 +28,8 @@ data class DesktopGatewayConnection(
     val token: String,
     val configPath: Path?,
     val configIssue: String? = null,
+    /** True when the address and token were entered in Settings rather than read from the manager's config. */
+    val manual: Boolean = false,
 ) {
     val settings: Settings get() = Settings(gatewayUrl = baseUrl, token = token)
 }
@@ -48,6 +54,17 @@ object DesktopConnectionConfig {
         environment: Map<String, String> = System.getenv(),
         properties: Map<String, String> = System.getProperties().stringPropertyNames().associateWith { System.getProperty(it).orEmpty() },
     ): DesktopGatewayConnection {
+        val explicitUrl = properties["herdr.gateway.url"]?.trim()?.takeIf { it.isNotEmpty() }
+            ?: environment["HERDR_DESKTOP_GATEWAY_URL"]?.trim()?.takeIf { it.isNotEmpty() }
+        DesktopManualConnectionStore.load(home)?.let { manual ->
+            return DesktopGatewayConnection(
+                baseUrl = explicitUrl ?: manual.gatewayUrl,
+                token = manual.token,
+                configPath = DesktopManualConnectionStore.path(home),
+                manual = true,
+            )
+        }
+
         val desktopPath = home.resolve(".config/herdr-mobile/desktop/config.json")
         val legacyPath = home.resolve(".config/herdr-mobile/config.json")
         val selected = when {
@@ -55,8 +72,6 @@ object DesktopConnectionConfig {
             Files.isRegularFile(legacyPath) -> legacyPath to LEGACY_PORT
             else -> null
         }
-        val explicitUrl = properties["herdr.gateway.url"]?.trim()?.takeIf { it.isNotEmpty() }
-            ?: environment["HERDR_DESKTOP_GATEWAY_URL"]?.trim()?.takeIf { it.isNotEmpty() }
         val defaultPort = selected?.second ?: DESKTOP_PORT
 
         if (selected == null) {
@@ -64,7 +79,7 @@ object DesktopConnectionConfig {
                 baseUrl = explicitUrl ?: "http://127.0.0.1:$defaultPort",
                 token = "",
                 configPath = null,
-                configIssue = "Gateway config not found. Start Herdr Companion Gateway first.",
+                configIssue = "Gateway config not found. Start Herdr Companion Gateway, or enter the Gateway address and token in Settings.",
             )
         }
 
@@ -114,4 +129,56 @@ object DesktopConnectionConfig {
         if (value.isEmpty() || value.startsWith(":")) return null
         return "http://$value"
     }
+}
+
+/** A Gateway address and token entered in Settings, for machines without the menu-bar manager (e.g. Windows). */
+@Serializable
+data class DesktopManualConnection(val gatewayUrl: String, val token: String)
+
+/**
+ * Keeps the manual connection in its own file so the Gateway manager's config
+ * is never rewritten by the UI. It holds the auth token, so it is owner-only
+ * where the filesystem supports POSIX permissions.
+ */
+object DesktopManualConnectionStore {
+    private val json = Json { ignoreUnknownKeys = true }
+
+    fun path(home: Path): Path = home.resolve(".config/herdr-mobile/desktop-ui/connection.json")
+
+    fun load(home: Path): DesktopManualConnection? {
+        val text = runCatching { Files.readString(path(home)) }.getOrNull() ?: return null
+        val stored = runCatching { json.decodeFromString<DesktopManualConnection>(text) }.getOrNull() ?: return null
+        return validateManualConnection(stored.gatewayUrl, stored.token).getOrNull()
+    }
+
+    fun save(home: Path, connection: DesktopManualConnection) {
+        val target = path(home)
+        Files.createDirectories(target.parent)
+        val temp = Files.createTempFile(target.parent, "connection", ".tmp")
+        try {
+            runCatching { Files.setPosixFilePermissions(temp, PosixFilePermissions.fromString("rw-------")) }
+            Files.writeString(temp, json.encodeToString(connection))
+            Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+        } finally {
+            Files.deleteIfExists(temp)
+        }
+    }
+
+    fun clear(home: Path) {
+        Files.deleteIfExists(path(home))
+    }
+}
+
+/** Normalizes what the user typed into a connection, or explains what is wrong with it. */
+internal fun validateManualConnection(gatewayUrl: String, token: String): Result<DesktopManualConnection> = runCatching {
+    val trimmedUrl = gatewayUrl.trim().trimEnd('/')
+    val uri = runCatching { URI(trimmedUrl) }.getOrNull()
+    require(
+        uri != null && (uri.scheme == "http" || uri.scheme == "https") && !uri.host.isNullOrEmpty() &&
+            uri.rawUserInfo == null && uri.rawPath.isNullOrEmpty() && uri.rawQuery == null && uri.rawFragment == null,
+    ) { "Enter the Gateway address as http://host:port or https://host." }
+    val trimmedToken = token.trim()
+    require(trimmedToken.isNotEmpty()) { "Enter the Gateway auth token." }
+    require(trimmedToken.none(Char::isWhitespace)) { "The auth token cannot contain spaces." }
+    DesktopManualConnection(trimmedUrl, trimmedToken)
 }

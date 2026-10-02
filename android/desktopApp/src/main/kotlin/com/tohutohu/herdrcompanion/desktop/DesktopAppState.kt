@@ -159,6 +159,30 @@ class DesktopAppState(
         scope.launch { refreshSessionsNow(userInitiated) }
     }
 
+    /** Saves a Gateway address and token typed in Settings; returns a message when they are unusable. */
+    fun saveManualConnection(gatewayUrl: String, token: String): String? {
+        val manual = validateManualConnection(gatewayUrl, token).getOrElse { return it.message }
+        val saved = runCatching { connectionSource.saveManual(manual) }
+            .getOrElse { return "Could not save the connection settings." }
+        applyConnectionChange(saved)
+        return null
+    }
+
+    fun clearManualConnection() {
+        val restored = runCatching { connectionSource.clearManual() }
+            .getOrElse { return reportError("Could not remove the saved connection settings.") }
+        applyConnectionChange(restored)
+    }
+
+    private fun applyConnectionChange(next: DesktopGatewayConnection) {
+        if (closed) return
+        gatewayStartJob?.cancel()
+        connection = next
+        listError = next.configIssue
+        connectionState = if (next.configIssue == null) DesktopConnectionState.CONNECTING else DesktopConnectionState.OFFLINE
+        refreshSessions(userInitiated = true)
+    }
+
     /** Starts the separately installed manager and waits for its config/API to become ready. */
     fun startGateway() {
         if (closed) return
