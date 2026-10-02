@@ -443,3 +443,68 @@ func Test待ち受けアドレスから接続先URLを作る(t *testing.T) {
 		}
 	}
 }
+
+func Test走る様子が見えない短いターンでも応答が増えれば待機を終える(t *testing.T) {
+	g := sampleGateway()
+	a, _ := newTestApp(t, g)
+	a.mustRun(t, "read", "aaaa1111")
+	id := "claude:aaaa1111-0000"
+	g.onPost = func(path string, body map[string]any) {
+		// The prompt lands first and the session stays idle a while.
+		g.messages[id] = append(g.messages[id], text("u", model.RoleUser, 9, "色は？"))
+		g.sessions[0].UpdatedAt = t0.Add(9 * time.Minute)
+		go func() {
+			time.Sleep(30 * time.Millisecond)
+			g.set(func() {
+				g.messages[id] = append(g.messages[id], text("r", model.RoleAssistant, 10, "BLUE"))
+				g.sessions[0].UpdatedAt = t0.Add(10 * time.Minute)
+			})
+		}()
+	}
+	got := a.mustRun(t, "send", "aaaa1111", "色は？", "--wait", "--timeout", "5s")
+	if !strings.Contains(got, "BLUE") {
+		t.Fatalf("got:\n%s", got)
+	}
+}
+
+func TestID指定の待機は既に回答待ちなら即座に返す(t *testing.T) {
+	g := sampleGateway()
+	g.sessions[0].Status = model.StatusWaitingInput
+	a, _ := newTestApp(t, g)
+	a.mustRun(t, "changes")
+	got := a.mustRun(t, "wait", "aaaa1111", "--timeout", "5s")
+	if !strings.Contains(got, "! aaaa1111 waiting_input") {
+		t.Fatalf("got:\n%s", got)
+	}
+}
+
+func Test一覧は既定で停止中のセッションを件数だけにする(t *testing.T) {
+	g := sampleGateway()
+	g.sessions[2].Status = model.StatusOffline
+	a, _ := newTestApp(t, g)
+	got := a.mustRun(t, "ls")
+	if strings.Contains(got, "bbbb3333") || !strings.Contains(got, "(+1 offline: hc ls --all)") || !strings.Contains(got, "ffff0000") {
+		t.Fatalf("ls:\n%s", got)
+	}
+	if got := a.mustRun(t, "ls", "--all"); !strings.Contains(got, "bbbb3333") {
+		t.Fatalf("ls --all:\n%s", got)
+	}
+}
+
+func Test停止中のセッションの出入りは変化として扱わない(t *testing.T) {
+	g := sampleGateway()
+	g.sessions[2].Status = model.StatusOffline
+	a, _ := newTestApp(t, g)
+	a.mustRun(t, "changes")
+	g.set(func() {
+		g.sessions[2].UpdatedAt = t0.Add(time.Hour)
+		g.sessions = append(g.sessions, model.Session{ID: "claude:cccc0000", Status: model.StatusOffline, UpdatedAt: t0})
+	})
+	if got := a.mustRun(t, "changes"); !strings.Contains(got, "no changes") {
+		t.Fatalf("offline churn reported:\n%s", got)
+	}
+	g.set(func() { g.sessions = []model.Session{g.sessions[0], g.sessions[1], g.sessions[3]} })
+	if got := a.mustRun(t, "changes"); !strings.Contains(got, "no changes") {
+		t.Fatalf("aged-out offline sessions reported:\n%s", got)
+	}
+}

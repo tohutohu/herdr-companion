@@ -20,7 +20,7 @@ import (
 const usageText = `hc — Herdr Companion CLI for agents (run "hc guide" first)
 
 Sessions:
-  hc ls [--archived]                  sessions, one line each ("!" = needs you)
+  hc ls [--all|--archived]            running sessions, one line each ("!" = needs you)
   hc show ID                          status, pending question with answer hint, last report
   hc read ID [--all|--last N] [--tools] [--full] [--peek]
                                       messages new since your last read of ID

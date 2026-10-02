@@ -150,6 +150,7 @@ type sessionJSON struct {
 func (a *app) cmdList(args []string) error {
 	fs := flag.NewFlagSet("ls", flag.ContinueOnError)
 	archived := fs.Bool("archived", false, "list archived sessions")
+	all := fs.Bool("all", false, "include sessions that are not running (offline)")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -158,6 +159,18 @@ func (a *app) cmdList(args []string) error {
 		return err
 	}
 	shorts := shortIDs(list)
+	hidden := 0
+	if !*all && !*archived {
+		var live []model.Session
+		for _, s := range list {
+			if s.Status == model.StatusOffline {
+				hidden++
+				continue
+			}
+			live = append(live, s)
+		}
+		list = live
+	}
 	if a.json {
 		out := []sessionJSON{}
 		for _, s := range list {
@@ -166,11 +179,13 @@ func (a *app) cmdList(args []string) error {
 		return a.printJSON(map[string]any{"sessions": out})
 	}
 	if len(list) == 0 {
-		fmt.Fprintln(a.out, "no sessions")
-		return nil
+		fmt.Fprintln(a.out, "no running sessions")
 	}
 	for _, s := range list {
 		fmt.Fprintln(a.out, a.sessionLine(s, shorts[s.ID]))
+	}
+	if hidden > 0 {
+		fmt.Fprintf(a.out, "(+%d offline: hc ls --all)\n", hidden)
 	}
 	return nil
 }
@@ -197,10 +212,21 @@ func (a *app) cmdShow(args []string) error {
 	pending := pendingInteractions(msgs)
 	var last *model.Message
 	rows := foldRows(msgs)
-	for i := len(rows) - 1; i >= 0; i-- {
-		if !rows[i].isTools() && rows[i].msg.Role == model.RoleAssistant {
-			last = &rows[i].msg
-			break
+	for i := len(rows) - 1; i >= 0 && last == nil; i-- {
+		if rows[i].isTools() || rows[i].msg.Role != model.RoleAssistant {
+			continue
+		}
+		// Questions are shown on their own above; the report is the prose.
+		m := rows[i].msg
+		var prose []model.Block
+		for _, b := range m.Blocks {
+			if b.Type != model.BlockInteraction {
+				prose = append(prose, b)
+			}
+		}
+		if len(prose) > 0 {
+			m.Blocks = prose
+			last = &m
 		}
 	}
 	if a.json {
@@ -457,6 +483,10 @@ func (a *app) diffSessions(prev *snapshot, cur []model.Session) []event {
 		}
 		old, ok := prev.Sessions[s.ID]
 		switch {
+		case s.Status == model.StatusOffline && (!ok || old.Status == model.StatusOffline):
+			// Sessions outside Herdr come and go from the list as they age;
+			// only a session that stops running is news.
+			continue
 		case !ok:
 			ev.Kind, ev.Attention = "new", attention(model.StatusRunning, s.Status) && s.Status != model.StatusOffline
 		case old.Status != s.Status:
@@ -481,6 +511,9 @@ func (a *app) diffSessions(prev *snapshot, cur []model.Session) []event {
 		sort.Strings(gone)
 		for _, id := range gone {
 			old := prev.Sessions[id]
+			if old.Status == model.StatusOffline {
+				continue
+			}
 			provider, _, _ := strings.Cut(id, ":")
 			out = append(out, event{Kind: "gone", From: old.Status, Short: clipID(nativeID(id), 8),
 				Session: model.Session{ID: id, Provider: provider, Status: old.Status, UpdatedAt: old.UpdatedAt}})
@@ -520,7 +553,7 @@ func (a *app) printEvents(w io.Writer, evs []event) {
 			line += " · " + clip(oneLine(s.Title), 50)
 		}
 		fmt.Fprintln(w, line)
-		if ev.Attention && s.LastMessage != "" && ev.Kind != "gone" {
+		if ev.Attention && s.LastMessage != "" && ev.Kind != "gone" && len(ev.Pending) == 0 {
 			fmt.Fprintf(w, "    last: %s\n", clip(oneLine(s.LastMessage), 300))
 		}
 		for _, ia := range ev.Pending {
@@ -617,6 +650,25 @@ func (a *app) cmdWait(args []string) error {
 			return err
 		}
 	}
+	if len(only) > 0 {
+		cur, err := a.client.sessions(ctx, false)
+		if err != nil {
+			return err
+		}
+		var waiting []event
+		shorts := shortIDs(cur)
+		for _, s := range cur {
+			if only[s.ID] && needsYou(s.Status) {
+				waiting = append(waiting, event{Kind: "status", Session: s, Short: shorts[s.ID], Attention: true})
+			}
+		}
+		if len(waiting) > 0 {
+			if err := a.saveWaitSnapshot(prev, cur, only); err != nil {
+				return err
+			}
+			return a.reportWait(ctx, waiting, only)
+		}
+	}
 	started := time.Now()
 	deadline := started.Add(*timeout)
 	for {
@@ -711,8 +763,40 @@ func filterEvents(evs []event, only map[string]bool) []event {
 	return out
 }
 
+// turnEnded says whether a session that is not running has finished the
+// turn the reader started. Idle alone proves nothing: the prompt itself
+// makes the session newer before the agent starts working on it. A status
+// that only a turn produces, or having seen the turn run, does.
+func turnEnded(s model.Session, sawRunning bool, before time.Time) bool {
+	if sawRunning {
+		return true
+	}
+	switch s.Status {
+	case model.StatusWaitingInput, model.StatusWaitingApproval, model.StatusCompleted, model.StatusFailed:
+		return s.UpdatedAt.After(before)
+	}
+	return false
+}
+
+// repliedAfter reports whether the agent has said something since before.
+// It catches a turn too short to be seen running that ends idle (Herdr
+// reports idle rather than completed when the pane is focused).
+func (a *app) repliedAfter(ctx context.Context, id string, before time.Time) bool {
+	_, msgs, err := a.client.messages(ctx, id)
+	if err != nil {
+		return false
+	}
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Queued {
+			continue
+		}
+		return msgs[i].Role != model.RoleUser && msgs[i].Timestamp.After(before)
+	}
+	return false
+}
+
 // waitSettled waits for a session to finish the turn that began after
-// before: it has been seen running or got newer, and is no longer running.
+// before: it has been seen running, or shows a turn's outcome that is newer.
 func (a *app) waitSettled(ctx context.Context, id string, before time.Time, timeout time.Duration) (model.Session, bool, error) {
 	deadline := time.Now().Add(timeout)
 	sawRunning := false
@@ -727,7 +811,7 @@ func (a *app) waitSettled(ctx context.Context, id string, before time.Time, time
 		}
 		if s.Status == model.StatusRunning {
 			sawRunning = true
-		} else if s.ID != "" && (sawRunning || s.UpdatedAt.After(before)) {
+		} else if s.ID != "" && (turnEnded(s, sawRunning, before) || (s.UpdatedAt.After(before) && a.repliedAfter(ctx, id, before))) {
 			return s, true, nil
 		}
 		if time.Now().After(deadline) {
