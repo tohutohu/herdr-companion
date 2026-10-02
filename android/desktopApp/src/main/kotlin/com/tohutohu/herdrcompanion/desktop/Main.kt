@@ -522,7 +522,7 @@ private fun FrameWindowScope.DesktopShell(
         )
     }
 
-    if (settingsOpen) DesktopSettingsDialog(state, api, onDismiss = { settingsOpen = false })
+    if (settingsOpen) DesktopSettingsDialog(state, api, updatesSupported = updater.supported, onDismiss = { settingsOpen = false })
     if (updateDialogOpen) DesktopUpdateDialog(updater, onDismiss = { updateDialogOpen = false })
     if (aboutOpen) {
         AlertDialog(
@@ -777,7 +777,12 @@ private fun DesktopConnectionSettings(state: DesktopAppState) {
 }
 
 @Composable
-private fun DesktopSettingsDialog(state: DesktopAppState, api: GatewayApi, onDismiss: () -> Unit) {
+private fun DesktopSettingsDialog(
+    state: DesktopAppState,
+    api: GatewayApi,
+    updatesSupported: Boolean,
+    onDismiss: () -> Unit,
+) {
     var notifications by remember { mutableStateOf(DesktopPreferences.notificationsEnabled) }
     var updateChecks by remember { mutableStateOf(DesktopPreferences.automaticUpdateChecks) }
     var presets by remember { mutableStateOf(DesktopPreferences.loadAgentPresets()) }
@@ -836,9 +841,12 @@ private fun DesktopSettingsDialog(state: DesktopAppState, api: GatewayApi, onDis
                     Text("Desktop notifications", modifier = Modifier.weight(1f))
                     Switch(checked = notifications, onCheckedChange = { notifications = it })
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Check for updates automatically", modifier = Modifier.weight(1f))
-                    Switch(checked = updateChecks, onCheckedChange = { updateChecks = it })
+                // Only a packaged macOS app can update itself.
+                if (updatesSupported) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Check for updates automatically", modifier = Modifier.weight(1f))
+                        Switch(checked = updateChecks, onCheckedChange = { updateChecks = it })
+                    }
                 }
             }
         },
