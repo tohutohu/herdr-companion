@@ -18,6 +18,7 @@ go vet ./...
 env -u GOROOT go test ./...                    # avoid inherited GOROOT/toolchain mismatch
 # Production updates: rebuild the Mac Gateway app, replace /Applications/Herdr Companion Gateway.app, reopen it.
 herdr-mobile-gateway token | devices | usage | notify-test | debug replay FILE
+env -u GOROOT go build -o ~/.local/bin/hc ./cmd/hc  # agent-facing client CLI (docs/cli.md); `hc guide`
 
 # Android (JDK 17 required; the default `java` is 24)
 cd android

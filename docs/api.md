@@ -3,7 +3,7 @@
 Mac 上の Gateway（`gateway/`）が提供する HTTP API の仕様と、Mac の外（Android・
 他端末・スクリプト）から接続するための情報をまとめる。実装の正は
 `gateway/internal/api/server.go` と `gateway/internal/model/`。設計の背景は
-[architecture.md](architecture.md) を参照。
+[architecture.md](architecture.md) を参照。AI エージェントから使う CLI は [cli.md](cli.md)。
 
 ## 接続情報
 
