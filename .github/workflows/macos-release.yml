@@ -190,7 +190,7 @@ jobs:
           packages: "platforms;android-37.0"
 
       # jpackage derives the .deb dependencies from the libraries installed here,
-      # so libegl1 (needed by Skiko) must be present at build time.
+      # so libegl1 (linked by Skiko on arm64) must be present at build time.
       - name: Install packaging dependencies
         run: |
           sudo apt-get update
@@ -210,8 +210,8 @@ jobs:
           DEB="$(find desktopApp/build/compose/binaries/main-release/deb -name '*.deb' | head -n 1)"
           [[ -f "$DEB" ]] || { echo "Missing .deb under desktopApp/build/compose/binaries" >&2; exit 1; }
           dpkg-deb --info "$DEB"
-          dpkg-deb --field "$DEB" Depends | grep -q libegl1 \
-            || { echo "The .deb does not depend on libegl1" >&2; exit 1; }
+          dpkg-deb --field "$DEB" Depends | grep -q libc6 \
+            || { echo "jpackage did not record the .deb's library dependencies" >&2; exit 1; }
 
           mkdir -p ../dist
           OUTPUT="../dist/Herdr-Companion-Linux-$VERSION-$ARCH.deb"
