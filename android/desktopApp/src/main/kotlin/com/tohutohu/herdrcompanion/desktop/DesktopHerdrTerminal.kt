@@ -19,27 +19,37 @@ internal object DesktopHerdrTerminal {
 
     /** Returns null once the terminal app was asked to attach, otherwise a message for the user. */
     fun attach(paneId: String): String? {
-        val herdr = findHerdr() ?: return "Could not find the herdr command on this Mac."
+        if (DesktopOs.current == DesktopOs.WINDOWS) return "Herdr panes can only be opened on macOS or Linux."
+        val herdr = findHerdr() ?: return "Could not find the herdr command on this computer."
         val terminalId = runCatching { lookupTerminalId(herdr, paneId) }.getOrNull()
-            ?: return "This session's Herdr pane is not open on this Mac."
+            ?: return "This session's Herdr pane is not open on this computer."
         return runCatching {
-            // An extension-less executable opens in the default terminal app (the
-            // handler for public.unix-executable, e.g. after iTerm2's "Make iTerm2
-            // Default Term") and needs no Apple Events permission.
             val script = Files.createTempDirectory("herdr-attach-").resolve("herdr-attach")
             Files.writeString(script, attachScript(herdr.toString(), terminalId))
             Files.setPosixFilePermissions(script, PosixFilePermissions.fromString("rwx------"))
-            ProcessBuilder("/usr/bin/open", script.toString()).start()
+            val command = if (DesktopOs.current == DesktopOs.MAC) {
+                // An extension-less executable opens in the default terminal app (the
+                // handler for public.unix-executable, e.g. after iTerm2's "Make iTerm2
+                // Default Term") and needs no Apple Events permission.
+                listOf("/usr/bin/open", script.toString())
+            } else {
+                linuxTerminalCommand(script.toString()) ?: run {
+                    Files.deleteIfExists(script)
+                    Files.deleteIfExists(script.parent)
+                    return "Could not find a terminal app. Set \$TERMINAL to one that accepts -e."
+                }
+            }
+            ProcessBuilder(command).start()
             null
         }.getOrElse { "Could not open a terminal app." }
     }
 
-    /** GUI apps do not inherit the login shell PATH, so look in the usual install locations. */
+    /** macOS GUI apps do not inherit the login shell PATH, so look in the usual install locations. */
     private fun findHerdr(): Path? = listOf(
         Paths.get(System.getProperty("user.home"), ".local", "bin", "herdr"),
         Paths.get("/opt/homebrew/bin/herdr"),
         Paths.get("/usr/local/bin/herdr"),
-    ).firstOrNull(Files::isExecutable)
+    ).firstOrNull(Files::isExecutable) ?: findOnPath("herdr")
 
     private fun lookupTerminalId(herdr: Path, paneId: String): String? {
         val process = ProcessBuilder(herdr.toString(), "pane", "get", paneId)

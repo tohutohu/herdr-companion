@@ -53,13 +53,24 @@ compose.desktop {
         mainClass = "com.tohutohu.herdrcompanion.desktop.MainKt"
 
         nativeDistributions {
-            targetFormats(TargetFormat.Dmg)
+            // jpackage builds only the current OS's formats: the DMG on macOS, the .deb on Linux.
+            targetFormats(TargetFormat.Dmg, TargetFormat.Deb)
             modules("java.instrument", "java.prefs", "jdk.unsupported")
             packageName = "Herdr Companion"
             packageVersion = herdrVersion
             description = "Desktop client for Herdr coding-agent sessions"
             vendor = "Tohuto H.U."
             copyright = "Copyright © 2026 Tohuto H.U."
+
+            linux {
+                packageName = "herdr-companion"
+                packageVersion = herdrVersion
+                appRelease = herdrBuild
+                debPackageVersion = herdrVersion
+                menuGroup = "Development"
+                shortcut = true
+                iconFile.set(project.file("src/main/resources/herdr-companion.png"))
+            }
 
             macOS {
                 packageName = "Herdr Companion"

@@ -26,8 +26,8 @@ internal class DesktopInstanceLock private constructor(
     companion object {
         private const val BUNDLE_ID = "com.tohutohu.herdrcompanion.desktop"
 
-        fun tryAcquire(home: Path = defaultHome()): DesktopInstanceLock? {
-            val directory = home.resolve("Library/Application Support/Herdr Companion")
+        fun tryAcquire(home: Path = defaultHome(), os: DesktopOs = DesktopOs.current): DesktopInstanceLock? {
+            val directory = desktopStateDirectory(home, os)
             runCatching { Files.createDirectories(directory) }.getOrNull() ?: return null
             val channel = runCatching {
                 FileChannel.open(directory.resolve("instance.lock"), CREATE, WRITE)
@@ -44,7 +44,12 @@ internal class DesktopInstanceLock private constructor(
             return DesktopInstanceLock(channel, lock)
         }
 
+        /** macOS can bring the running app forward by bundle ID; elsewhere the second launch just exits. */
         fun activateExisting() {
+            if (DesktopOs.current != DesktopOs.MAC) {
+                System.err.println("Herdr Companion is already running.")
+                return
+            }
             runCatching {
                 ProcessBuilder("/usr/bin/open", "-b", BUNDLE_ID).start()
             }

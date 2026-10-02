@@ -34,24 +34,30 @@ fun notificationForStatusTransition(
     )
 }
 
-/** macOS notification bridge. It deliberately does not create another tray/menu-bar owner. */
+/**
+ * Notification bridge for macOS (`osascript`) and Linux (`notify-send`). It
+ * deliberately does not create another tray/menu-bar owner, so Windows has none.
+ */
 object DesktopNotificationService {
     suspend fun show(event: DesktopNotificationEvent) = withContext(Dispatchers.IO) {
-        if (!System.getProperty("os.name").contains("mac", ignoreCase = true)) return@withContext
+        val command = notificationCommand(event, DesktopOs.current) ?: return@withContext
+        runCatching { ProcessBuilder(command).start().waitFor() }
+    }
+}
+
+internal fun notificationCommand(event: DesktopNotificationEvent, os: DesktopOs): List<String>? = when (os) {
+    DesktopOs.MAC -> {
         val title = appleScriptString(event.title)
         val body = appleScriptString(event.body)
-        runCatching {
-            ProcessBuilder(
-                "/usr/bin/osascript",
-                "-e",
-                "display notification \"$body\" with title \"$title\"",
-            ).start().waitFor()
-        }
+        listOf("/usr/bin/osascript", "-e", "display notification \"$body\" with title \"$title\"")
     }
-
-    private fun appleScriptString(value: String): String = value
-        .replace("\\", "\\\\")
-        .replace("\"", "\\\"")
-        .replace('\n', ' ')
-        .take(240)
+    // `--` keeps a title that starts with `-` from being read as an option.
+    DesktopOs.LINUX -> listOf("notify-send", "--app-name=Herdr Companion", "--", event.title.take(240), event.body.take(240))
+    DesktopOs.WINDOWS -> null
 }
+
+private fun appleScriptString(value: String): String = value
+    .replace("\\", "\\\\")
+    .replace("\"", "\\\"")
+    .replace('\n', ' ')
+    .take(240)

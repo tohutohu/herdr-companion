@@ -291,7 +291,7 @@ fun DesktopNewSessionWindow(
                         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("Choose a working folder from Gateway or Finder.")
+                        Text("Choose a working folder from Gateway or this computer.")
                         TextButton(
                             onClick = {
                                 DesktopFilePicker.pickDirectory(window)?.let { selected ->

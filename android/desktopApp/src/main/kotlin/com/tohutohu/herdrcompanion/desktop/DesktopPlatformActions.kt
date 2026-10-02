@@ -70,23 +70,13 @@ object DesktopPlatformActions {
     fun openUrl(url: String): Boolean = runCatching {
         val uri = URI(url)
         require(uri.scheme == "http" || uri.scheme == "https")
-        if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
-            Desktop.getDesktop().browse(uri)
-        } else {
-            ProcessBuilder("/usr/bin/open", url).start()
-        }
-        true
+        openExternally(url) { Desktop.getDesktop().browse(uri) }
     }.getOrDefault(false)
 
     fun openPath(path: String, baseDirectory: String? = null): Boolean {
         val resolved = resolvePath(path, baseDirectory) ?: return false
         return runCatching {
-            if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.OPEN)) {
-                Desktop.getDesktop().open(resolved.toFile())
-            } else {
-                ProcessBuilder("/usr/bin/open", resolved.toString()).start()
-            }
-            true
+            openExternally(resolved.toString()) { Desktop.getDesktop().open(resolved.toFile()) }
         }.getOrDefault(false)
     }
 
@@ -99,7 +89,24 @@ object DesktopPlatformActions {
     }
 
     /** The menu-bar manager, Finder and `open` exist only on macOS. */
-    val isMacOs: Boolean = System.getProperty("os.name").orEmpty().contains("mac", ignoreCase = true)
+    val isMacOs: Boolean get() = DesktopOs.current == DesktopOs.MAC
+
+    /**
+     * On Linux AWT's Desktop goes through GTK and is often unsupported or a no-op
+     * outside GNOME, so `xdg-open` (which follows the user's desktop settings)
+     * comes first there. Elsewhere Desktop is the native path.
+     */
+    private fun openExternally(target: String, viaDesktop: () -> Unit): Boolean {
+        val command = systemOpenCommand(target)
+        if (DesktopOs.current == DesktopOs.LINUX && runCatching { ProcessBuilder(command).start() }.isSuccess) return true
+        val action = if (target.startsWith("http://") || target.startsWith("https://")) Desktop.Action.BROWSE else Desktop.Action.OPEN
+        if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(action)) {
+            viaDesktop()
+        } else {
+            ProcessBuilder(command).start()
+        }
+        return true
+    }
 
     /** Ask the separately installed SwiftUI manager to start its owned Gateway. */
     fun requestGatewayStart(): Boolean = runCatching {

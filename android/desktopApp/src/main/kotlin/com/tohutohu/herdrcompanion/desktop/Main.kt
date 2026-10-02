@@ -60,6 +60,9 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.KeyShortcut
@@ -98,6 +101,7 @@ import java.awt.event.ComponentAdapter
 import java.awt.event.ComponentEvent
 import java.awt.event.WindowEvent
 import java.awt.event.WindowStateListener
+import javax.imageio.ImageIO
 
 private val MIN_SIDEBAR_WIDTH = 240.dp
 private val MIN_DETAIL_WIDTH = 420.dp
@@ -122,6 +126,7 @@ fun main() {
                 onCloseRequest = ::exitApplication,
                 title = "Herdr Companion",
                 state = windowState,
+                icon = remember { desktopWindowIcon() },
             ) {
                 window.minimumSize = java.awt.Dimension(880, 560)
                 val connectionSource = remember { DesktopConnectionSource() }
@@ -156,6 +161,16 @@ fun main() {
     } finally {
         instanceLock.close()
     }
+}
+
+/** macOS takes the Dock icon from the bundle; Linux and Windows window managers need it from the window. */
+private fun desktopWindowIcon(): Painter? {
+    if (DesktopOs.current == DesktopOs.MAC) return null
+    return runCatching {
+        DesktopOs::class.java.getResourceAsStream("/herdr-companion.png")
+            ?.use(ImageIO::read)
+            ?.let { BitmapPainter(it.toComposeImageBitmap()) }
+    }.getOrNull()
 }
 
 @Composable
@@ -391,7 +406,7 @@ private fun FrameWindowScope.DesktopShell(
                                 onOpenDirectory = {
                                     val path = item.session.cwd ?: item.session.project
                                     if (path.isBlank() || !DesktopPlatformActions.openPath(path)) {
-                                        state.reportError("Project directory is not available on this Mac.")
+                                        state.reportError("Project directory is not available on this computer.")
                                     }
                                 },
                                 content = content,
@@ -656,7 +671,7 @@ private class DesktopActions(
         val session = state.detail?.session ?: return
         val directory = session.cwd ?: session.project
         if (directory.isBlank() || !DesktopPlatformActions.openPath(directory)) {
-            state.reportError("Project directory is not available on this Mac.")
+            state.reportError("Project directory is not available on this computer.")
         }
     }
 }
@@ -938,7 +953,7 @@ private fun handleDetailAction(
         is SessionDetailAction.RemoveAttachment -> state.removeAttachment(sessionId, action.id)
         is SessionDetailAction.OpenFile -> {
             val cwd = state.detailFor(sessionId)?.session?.cwd
-            if (!DesktopPlatformActions.openPath(action.path, cwd)) state.reportError("Could not open ${action.path} on this Mac.")
+            if (!DesktopPlatformActions.openPath(action.path, cwd)) state.reportError("Could not open ${action.path} on this computer.")
         }
         is SessionDetailAction.OpenImage -> {
             if (!DesktopPlatformActions.openUrl(api.absolute(action.url))) state.reportError("Could not open the image in the browser.")
