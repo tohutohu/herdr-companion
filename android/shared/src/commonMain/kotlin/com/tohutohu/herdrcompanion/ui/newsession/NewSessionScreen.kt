@@ -59,6 +59,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.style.TextOverflow
@@ -79,6 +86,7 @@ fun NewSessionScreen(
     initialPromptFocusRequester: FocusRequester? = null,
     showStartInSplit: Boolean = false,
     resolveAttachmentPreview: (String) -> Any? = { null },
+    onPasteImage: (() -> Boolean)? = null,
 ) {
     var promptValue by remember { mutableStateOf(TextFieldValue(state.prompt)) }
     LaunchedEffect(state.prompt) {
@@ -213,10 +221,15 @@ fun NewSessionScreen(
                             enabled = editable,
                             label = { Text("First prompt (optional)") },
                             maxLines = 4,
-                            modifier = if (initialPromptFocusRequester != null) {
+                            modifier = (if (initialPromptFocusRequester != null) {
                                 Modifier.weight(1f).focusRequester(initialPromptFocusRequester)
                             } else {
                                 Modifier.weight(1f)
+                            }).onPreviewKeyEvent { event ->
+                                editable && state.attachmentsEnabled &&
+                                    event.type == KeyEventType.KeyDown &&
+                                    event.key == Key.V && event.isMetaPressed && !event.isShiftPressed &&
+                                    onPasteImage?.invoke() == true
                             },
                         )
                     }

@@ -825,7 +825,7 @@ internal suspend fun uploadDesktopAttachments(api: GatewayApi, attachments: List
         api.upload(bytes, attachment.mimeType, attachment.name)
     }
 
-private fun cleanupAttachments(attachments: Iterable<DesktopAttachment>) {
+internal fun cleanupAttachments(attachments: Iterable<DesktopAttachment>) {
     attachments.filter { it.deleteWhenDone }.forEach { attachment ->
         runCatching { Files.deleteIfExists(attachment.path) }
     }

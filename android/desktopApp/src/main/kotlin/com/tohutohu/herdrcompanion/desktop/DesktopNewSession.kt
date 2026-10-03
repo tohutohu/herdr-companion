@@ -16,6 +16,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -86,6 +87,10 @@ fun DesktopNewSessionWindow(
     var trustRequest by remember { mutableStateOf<StartSessionResponse?>(null) }
     var startInSplit by remember { mutableStateOf(false) }
     var attachments by remember { mutableStateOf(emptyList<DesktopAttachment>()) }
+
+    DisposableEffect(Unit) {
+        onDispose { cleanupAttachments(attachments) }
+    }
 
     suspend fun load(nextPath: String?) {
         loading = true
@@ -304,6 +309,13 @@ fun DesktopNewSessionWindow(
                 initialPromptFocusRequester = promptFocusRequester,
                 showStartInSplit = true,
                 resolveAttachmentPreview = { id -> attachments.firstOrNull { it.id == id }?.previewModel },
+                onPasteImage = {
+                    val image = DesktopPlatformActions.pasteImage()
+                    if (image != null) {
+                        attachments = attachments + image.toDesktopAttachment(deleteWhenDone = true)
+                    }
+                    image != null
+                },
                 onAction = { action ->
                     when (action) {
                         NewSessionAction.Back -> onDismiss()
@@ -327,7 +339,10 @@ fun DesktopNewSessionWindow(
                                 .map { it.toDesktopAttachment() }
                             attachments = attachments + picked.filterNot { new -> attachments.any { it.id == new.id } }
                         }
-                        is NewSessionAction.RemoveAttachment -> attachments = attachments.filterNot { it.id == action.id }
+                        is NewSessionAction.RemoveAttachment -> {
+                            cleanupAttachments(attachments.filter { it.id == action.id })
+                            attachments = attachments.filterNot { it.id == action.id }
+                        }
                         is NewSessionAction.SelectPreset -> {
                             provider = action.preset.provider
                             model = action.preset.model
