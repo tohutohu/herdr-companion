@@ -236,6 +236,9 @@ func (p *Provider) Summary(ctx context.Context, nativeID string, live *providers
 		s.Pending, s.Status = d.state(nativeID, live)
 		s.Mode = d.mode(nativeID, s.Mode)
 	}
+	if s.Pending == "" && live != nil && p.asyncInteraction(ctx, th, live) != nil {
+		s.Pending, s.Status = model.InteractionQuestions, model.StatusWaitingInput
+	}
 	if s.Pending == "" && p.planPrompt(ctx, th, live) != nil {
 		s.Pending, s.Status = model.InteractionApproval, model.StatusWaitingApproval
 	}

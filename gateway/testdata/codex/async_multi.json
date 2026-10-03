@@ -1,0 +1,41 @@
+{
+  "thread": {
+    "id": "thread-async-multi",
+    "turns": [
+      {
+        "id": "turn-multi",
+        "status": "inProgress",
+        "items": [
+          {
+            "type": "agentMessage",
+            "id": "call_multi",
+            "text": "Color?\n- Red\n- Blue\n\nName?\n\nShape?\n- Circle\n- Square",
+            "phase": "final_answer",
+            "memoryCitation": null,
+            "delivery": "async",
+            "questions": [
+              {
+                "title": "Color?",
+                "options": [
+                  "Red",
+                  "Blue"
+                ]
+              },
+              {
+                "title": "Name?",
+                "options": null
+              },
+              {
+                "title": "Shape?",
+                "options": [
+                  "Circle",
+                  "Square"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

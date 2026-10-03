@@ -123,13 +123,17 @@ identity; the native database schema selects the history format.
   `turn/start` (or `turn/steer` during an active turn) including `localImage`.
   Non-image attachments have no structured form, so their paths are appended to
   the text item.
-- Without the daemon, messages go through the pane. A single queued async
-  question (`agentMessage` with `delivery: "async"` and `questions`) is shown
-  as a question card after checking the current visible terminal screen.
-  Answers open the queue with Alt+Up, verify the question, and submit through
-  the TUI. Existing drafts are not overwritten. This also works after the
-  originating turn completes. Multi-question queues and other unsupported
-  dialogs retain the terminal fallback. Keys were checked against Codex 0.154.0.
+- Without the daemon, messages go through the pane. Queued async questions
+  (`agentMessage` with `delivery: "async"` and `questions`) are answered from
+  question cards one at a time, including multi-question calls and queues
+  spanning multiple calls. The visible queue count, position and question text
+  select the current card; each original question index has its own card ID.
+  Answers open the queue using its displayed shortcut (Alt+Up on 0.154.0,
+  Shift+Left on 0.160.0), verify the question, and submit through the TUI.
+  The next card appears after submission. Existing drafts are not overwritten.
+  A visible queue can still be answered after its originating turn completes;
+  discarded queues do not become pending solely from unanswered history.
+  The multi-question flow was checked against an isolated Codex 0.160.0 TUI.
   Tagged `send_user_message_question_reply` user messages are rendered as
   answered question cards, retaining the original options when available.
   Answered question IDs are excluded from the pending queue, including replies

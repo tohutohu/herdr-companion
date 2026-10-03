@@ -17,10 +17,11 @@ const collapsedAsync = "• Queued follow-up inputs\n  ? 1 question\n    ⌥ + �
 
 type asyncTerminal struct {
 	fakeTerm
-	screen string
-	opened string
-	keys   []string
-	text   string
+	screen      string
+	opened      string
+	keys        []string
+	text        string
+	afterSubmit []string
 }
 
 func (f *asyncTerminal) ReadVisiblePane(context.Context, string) (*herdr.ReadResult, error) {
@@ -29,11 +30,14 @@ func (f *asyncTerminal) ReadVisiblePane(context.Context, string) (*herdr.ReadRes
 func (f *asyncTerminal) SendKeys(_ context.Context, _ string, keys ...string) error {
 	f.keys = append(f.keys, keys...)
 	for _, k := range keys {
-		if k == "alt+up" {
+		if k == "alt+up" || k == "shift+left" {
 			f.screen = f.opened
 		}
 		if k == "enter" {
 			f.screen = "› Ask Codex to do anything"
+			if len(f.afterSubmit) > 0 {
+				f.screen, f.afterSubmit = f.afterSubmit[0], f.afterSubmit[1:]
+			}
 		}
 	}
 	return nil
@@ -43,6 +47,11 @@ func (f *asyncTerminal) SendText(_ context.Context, _, text string) error { f.te
 func asyncTestProvider(t *testing.T, term *asyncTerminal) (*Provider, *Thread) {
 	t.Helper()
 	th, _ := loadThread(t, "async_question.json")
+	return asyncProviderWithThread(t, term, th), th
+}
+
+func asyncProviderWithThread(t *testing.T, term *asyncTerminal, th *Thread) *Provider {
+	t.Helper()
 	raw, _ := json.Marshal(th)
 	f := &fakeServer{t: t, thread: raw}
 	pt := &pipeTransport{in: make(chan []byte, 16), out: make(chan []byte, 16), closed: make(chan struct{})}
@@ -50,7 +59,7 @@ func asyncTestProvider(t *testing.T, term *asyncTerminal) (*Provider, *Thread) {
 	p := New("unused", "/nonexistent", term, deadletter.Nop{})
 	p.reader = newRPCClient(pt, nil)
 	t.Cleanup(p.reader.close)
-	return p, th
+	return p
 }
 
 func Test単独TUIの非同期質問は完了ターンでも回答できる(t *testing.T) {
@@ -114,19 +123,112 @@ func Test非同期質問の未入力と選択肢を検証する(t *testing.T) {
 	}
 }
 
-func Test非同期質問の複数待ちを単一質問として扱わない(t *testing.T) {
+func Test非同期質問の本文一致と複数待ちを確認する(t *testing.T) {
 	if focusedQuestion("• Queued follow-up inputs\n\n  Test another\n\n  Type your answer\n\n  enter submit   ⌥ + ↓ main prompt", model.Question{Question: "Test"}) {
 		t.Fatal("partial title matches a different question")
 	}
 	if !collapsedQuestion(strings.Replace(collapsedAsync, "1 question", "1 question · 20s", 1)) {
 		t.Fatal("countdown hides pending question")
 	}
-	if collapsedQuestion(strings.Replace(collapsedAsync, "1 question", "2 questions", 1)) {
-		t.Fatal("ambiguous queue")
+	if !collapsedQuestion(strings.Replace(collapsedAsync, "1 question", "2 questions", 1)) {
+		t.Fatal("multi-question queue not detected")
 	}
 	th, _ := loadThread(t, "async_question.json")
 	th.Turns[0].Items[0] = json.RawMessage(`{"type":"agentMessage","id":"q","delivery":"async","questions":[{"title":"a"},{"title":"b"}]}`)
-	if latestAsyncQuestion(th) != nil {
-		t.Fatal("multi-question queue is ambiguous")
+	if ia := asyncQuestionOnScreen(pendingAsyncQuestions(th), strings.Replace(collapsedAsync, "1 question", "2 questions", 1)); ia == nil || ia.Questions[0].Question != "a" {
+		t.Fatal("first question not shown")
+	}
+}
+
+// Visible queue fragments verified with an isolated Codex 0.160.0 TUI.
+const multiCollapsed = "• Queued follow-up inputs\n  ? 3 questions\n    shift+← to answer\n\n› Ask Codex to do anything"
+const multiColor = "• Queued follow-up inputs\n\n\n  1 of 3\n  Color?\n\n  › 1. Red\n    2. Blue\n    3. Other\n\n  enter submit   ctrl+] skip   shift+→ main prompt   shift+← next question"
+const multiName = "• Queued follow-up inputs\n\n\n  1 of 2\n\n  Name?\n\n  Type your answer\n\n  enter submit   ctrl+] skip   shift+→ main prompt   shift+← next question"
+const multiShape = "• Queued follow-up inputs\n\n  Shape?\n\n  › 1. Circle\n    2. Square\n    3. Other\n\n  enter submit   ctrl+] skip   shift+→ main prompt"
+
+func multiThread(t *testing.T) *Thread {
+	t.Helper()
+	th, _ := loadThread(t, "async_multi.json")
+	return th
+}
+
+func Test複数非同期質問をUIから順番に回答する(t *testing.T) {
+	th := multiThread(t)
+	term := &asyncTerminal{screen: multiCollapsed, opened: multiColor, afterSubmit: []string{multiName, multiShape}}
+	p := asyncProviderWithThread(t, term, th)
+	live := &providers.Live{PaneID: "test"}
+	var first model.InteractionResponse
+	for i, tc := range []struct {
+		title  string
+		answer model.Answer
+	}{
+		{"Color?", model.Answer{Selected: []string{"Red"}}},
+		{"Name?", model.Answer{Text: "UI test"}},
+		{"Shape?", model.Answer{Selected: []string{"Circle"}}},
+	} {
+		msgs, err := p.Messages(context.Background(), th.ID, live)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ia := msgs[len(msgs)-1].Blocks[0].Interaction
+		if ia == nil || ia.Questions[0].Question != tc.title {
+			t.Fatalf("question %d: %+v", i, ia)
+		}
+		r := model.InteractionResponse{InteractionID: ia.ID, Answers: map[string]model.Answer{ia.Questions[0].ID: tc.answer}}
+		if i == 0 {
+			first = r
+		}
+		if err := p.Respond(context.Background(), th.ID, live, r); err != nil {
+			t.Fatal(err)
+		}
+		if err := p.Respond(context.Background(), th.ID, live, first); !errors.Is(err, providers.ErrInteractionGone) {
+			t.Fatalf("stale reply: %v", err)
+		}
+	}
+	if got := strings.Join(term.keys, ","); got != "shift+left,enter,enter,enter" {
+		t.Fatalf("keys: %s", got)
+	}
+	if term.text != "\x1b[200~UI test\x1b[201~" {
+		t.Fatalf("text: %q", term.text)
+	}
+	if p.asyncInteraction(context.Background(), th, live) != nil {
+		t.Fatal("queue still pending")
+	}
+}
+
+func Test非同期質問の手動移動と複数呼出を区別する(t *testing.T) {
+	th := multiThread(t)
+	// A manual move can focus any question, not only the first one.
+	screen := strings.Replace(multiName, "1 of 2", "2 of 3", 1)
+	if ia := asyncQuestionOnScreen(pendingAsyncQuestions(th), screen); ia == nil || ia.ID != asyncInputPrefix+"call_multi:1" {
+		t.Fatalf("focused: %+v", ia)
+	}
+	// The reply has not reached thread/read yet, so resolve a remaining old
+	// question by its actual title when the queue shrinks out of order.
+	screen = strings.Replace(multiColor, "1 of 3", "1 of 2", 1)
+	if ia := asyncQuestionOnScreen(pendingAsyncQuestions(th), screen); ia == nil || ia.Questions[0].ID != "0" {
+		t.Fatalf("remaining: %+v", ia)
+	}
+	th.Turns = append(th.Turns, Turn{Items: []json.RawMessage{json.RawMessage(`{"type":"agentMessage","id":"later_call","delivery":"async","questions":[{"title":"Another?"}]}`)}})
+	if ia := asyncQuestionOnScreen(pendingAsyncQuestions(th), strings.Replace(multiCollapsed, "3 questions", "4 questions", 1)); ia == nil || ia.ID != asyncInputPrefix+"call_multi:0" {
+		t.Fatalf("multiple calls: %+v", ia)
+	}
+	if ia := asyncQuestionOnScreen(pendingAsyncQuestions(th), strings.Replace(multiCollapsed, "3 questions", "1 question", 1)); ia == nil || ia.ID != asyncInputPrefix+"later_call" {
+		t.Fatalf("expired history: %+v", ia)
+	}
+}
+
+func Test非同期質問の既存下書きや回答中の別質問へ送らない(t *testing.T) {
+	for _, screen := range []string{
+		strings.Replace(multiName, "Type your answer", "Existing draft", 1),
+		strings.Replace(multiName, "Name?", "Different?", 1),
+	} {
+		th := multiThread(t)
+		term := &asyncTerminal{screen: screen}
+		p := asyncProviderWithThread(t, term, th)
+		err := p.Respond(context.Background(), th.ID, &providers.Live{PaneID: "test"}, model.InteractionResponse{InteractionID: asyncInputPrefix + "call_multi:1", Answers: map[string]model.Answer{"1": {Text: "replacement"}}})
+		if err == nil || term.text != "" || len(term.keys) != 0 {
+			t.Fatalf("sent to draft/other question: %v", err)
+		}
 	}
 }

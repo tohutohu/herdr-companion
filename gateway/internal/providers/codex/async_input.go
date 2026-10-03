@@ -20,15 +20,19 @@ type asyncQuestion struct {
 	Options []string `json:"options"`
 }
 
-// Unlike blocking requestUserInput, async questions survive turn completion
-// and are recorded as agentMessage items, even for standalone TUIs.
-func latestAsyncQuestion(th *Thread) *model.Interaction {
+// Async questions can outlive their originating turn. Keep each unanswered
+// question separately; the visible queue selects the card to show next.
+func pendingAsyncQuestions(th *Thread) []*model.Interaction {
+	type entry struct {
+		call string
+		card *model.Interaction
+	}
+	var pending []entry
 	answered := map[string]map[int]bool{}
-	for ti := len(th.Turns) - 1; ti >= 0; ti-- {
-		items := th.Turns[ti].Items
-		for i := len(items) - 1; i >= 0; i-- {
+	for _, turn := range th.Turns {
+		for _, raw := range turn.Items {
 			var it item
-			if json.Unmarshal(items[i], &it) != nil {
+			if json.Unmarshal(raw, &it) != nil {
 				continue
 			}
 			if it.Type == "userMessage" {
@@ -44,33 +48,36 @@ func latestAsyncQuestion(th *Thread) *model.Interaction {
 					}
 				}
 			}
-			if it.Type != "agentMessage" || it.Delivery != "async" || len(it.Questions) == 0 {
+			if it.Type != "agentMessage" || it.Delivery != "async" || it.ID == "" {
 				continue
 			}
-			complete := true
-			for index := range it.Questions {
-				complete = complete && answered[it.ID][index]
+			for index, q := range it.Questions {
+				if strings.TrimSpace(q.Title) == "" {
+					continue
+				}
+				mq := model.Question{ID: strconv.Itoa(index), Type: model.QuestionText, Question: q.Title, AllowOther: true}
+				for _, label := range q.Options {
+					mq.Options = append(mq.Options, model.Option{Label: label})
+				}
+				if len(mq.Options) > 0 {
+					mq.Type = model.QuestionSelect
+				}
+				id := asyncInputPrefix + it.ID
+				if len(it.Questions) > 1 {
+					id += ":" + strconv.Itoa(index)
+				}
+				pending = append(pending, entry{it.ID, &model.Interaction{ID: id, Type: model.InteractionQuestions, State: model.InteractionPending, Title: "Codex needs input", Supported: true, Questions: []model.Question{mq}}})
 			}
-			if complete {
-				continue
-			}
-			// The terminal fallback currently handles one question. Do not guess
-			// the cursor or answered subset of a multi-question queue.
-			if len(it.Questions) != 1 || it.ID == "" || strings.TrimSpace(it.Questions[0].Title) == "" {
-				return nil
-			}
-			q := it.Questions[0]
-			mq := model.Question{ID: "0", Type: model.QuestionText, Question: q.Title, AllowOther: true}
-			for _, label := range q.Options {
-				mq.Options = append(mq.Options, model.Option{Label: label})
-			}
-			if len(mq.Options) > 0 {
-				mq.Type = model.QuestionSelect
-			}
-			return &model.Interaction{ID: asyncInputPrefix + it.ID, Type: model.InteractionQuestions, State: model.InteractionPending, Title: "Codex needs input", Supported: true, Questions: []model.Question{mq}}
 		}
 	}
-	return nil
+	var out []*model.Interaction
+	for _, q := range pending {
+		index, _ := strconv.Atoi(q.card.Questions[0].ID)
+		if !answered[q.call][index] {
+			out = append(out, q.card)
+		}
+	}
+	return out
 }
 
 func (p *Provider) visible(ctx context.Context, pane string) (string, error) {
@@ -91,29 +98,88 @@ func queueBody(screen string) string {
 	return body
 }
 
-var singleQueuedQuestion = regexp.MustCompile(`(?m)^\s*\? 1 question(?: · [^\n]*)?\s*$`)
+var queuedQuestionCount = regexp.MustCompile(`(?m)^\s*\? ([1-9][0-9]*) questions?(?: · [^\n]*)?\s*$`)
+var queuePosition = regexp.MustCompile(`^([1-9][0-9]*) of ([1-9][0-9]*)$`)
 
-func collapsedQuestion(screen string) bool {
+// Codex 0.160 changed the queue shortcut from Alt+Up to Shift+Left.
+func openQueueKey(screen string) string {
 	body := queueBody(screen)
-	return singleQueuedQuestion.MatchString(body) && strings.Contains(body, "↑ to answer")
+	if !queuedQuestionCount.MatchString(body) {
+		return ""
+	}
+	if strings.Contains(body, "shift+← to answer") {
+		return "shift+left"
+	}
+	if strings.Contains(body, "↑ to answer") {
+		return "alt+up"
+	}
+	return ""
+}
+
+func collapsedQuestion(screen string) bool { return openQueueKey(screen) != "" }
+
+func focusedQueue(screen string) (title string, position, count int) {
+	body := queueBody(screen)
+	if !strings.Contains(body, "enter submit") || (!strings.Contains(body, "↓ main prompt") && !strings.Contains(body, "shift+→ main prompt")) {
+		return "", 0, 0
+	}
+	body = strings.TrimSpace(body)
+	position, count = 1, 1
+	first, rest, _ := strings.Cut(body, "\n")
+	if m := queuePosition.FindStringSubmatch(strings.TrimSpace(first)); len(m) == 3 {
+		position, _ = strconv.Atoi(m[1])
+		count, _ = strconv.Atoi(m[2])
+		if position > count {
+			return "", 0, 0
+		}
+		body = strings.TrimSpace(rest)
+	}
+	title = strings.SplitN(body, "\n\n", 2)[0]
+	return title, position, count
 }
 
 func focusedQuestion(screen string, q model.Question) bool {
-	body := queueBody(screen)
-	title := strings.SplitN(strings.TrimSpace(body), "\n\n", 2)[0]
-	return strings.Contains(body, "enter submit") && strings.Contains(body, "↓ main prompt") && compactSpace(title) == compactSpace(q.Question)
+	title, _, count := focusedQueue(screen)
+	return count > 0 && compactSpace(title) == compactSpace(q.Question)
+}
+
+func asyncQuestionOnScreen(pending []*model.Interaction, screen string) *model.Interaction {
+	title, position, count := focusedQueue(screen)
+	if collapsedQuestion(screen) {
+		m := queuedQuestionCount.FindStringSubmatch(queueBody(screen))
+		count, _ = strconv.Atoi(m[1])
+		position = 1
+	}
+	if count < 1 || count > len(pending) {
+		return nil
+	}
+	// Old unanswered history can remain after Codex discards a queue. Only
+	// the visible queue's newest questions are eligible, never that history.
+	ia := pending[len(pending)-count+position-1]
+	if title != "" && compactSpace(title) != compactSpace(ia.Questions[0].Question) {
+		// The user may have skipped or answered another queue entry before the
+		// corresponding history is persisted. Resolve the visible title instead.
+		ia = nil
+		for i := len(pending) - 1; i >= 0; i-- {
+			if compactSpace(pending[i].Questions[0].Question) == compactSpace(title) {
+				ia = pending[i]
+				break
+			}
+		}
+	}
+	return ia
 }
 
 func (p *Provider) asyncInteraction(ctx context.Context, th *Thread, live *providers.Live) *model.Interaction {
-	ia := latestAsyncQuestion(th)
-	if ia == nil {
+	pending := pendingAsyncQuestions(th)
+	if len(pending) == 0 {
 		return nil
 	}
 	screen, err := p.visible(ctx, live.PaneID)
-	if err != nil || (!collapsedQuestion(screen) && !focusedQuestion(screen, ia.Questions[0])) {
+	if err != nil {
 		return nil
 	}
-	return ia
+	return asyncQuestionOnScreen(pending, screen)
 }
 
 func waitInput(ctx context.Context) error {
@@ -185,8 +251,8 @@ func (p *Provider) respondAsync(ctx context.Context, nativeID string, live *prov
 	if err != nil {
 		return err
 	}
-	if collapsedQuestion(screen) {
-		if err := p.term.SendKeys(ctx, live.PaneID, "alt+up"); err != nil {
+	if key := openQueueKey(screen); key != "" {
+		if err := p.term.SendKeys(ctx, live.PaneID, key); err != nil {
 			return err
 		}
 		if err := waitInput(ctx); err != nil {
