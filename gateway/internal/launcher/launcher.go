@@ -47,6 +47,7 @@ type Herdr interface {
 	Snapshot(ctx context.Context) (*herdr.Snapshot, error)
 	ClosePane(ctx context.Context, paneID string) error
 	CloseWorkspace(ctx context.Context, workspaceID string) error
+	CreateTab(ctx context.Context, workspaceID string) error
 	ReportAgentSession(ctx context.Context, paneID, agent, sessionID, startSource string) error
 }
 
@@ -598,7 +599,8 @@ func (l *Launcher) startAgent(ctx context.Context, p providers.Provider, pane st
 }
 
 // Stop closes the pane running a session, and its workspace when the pane
-// was the only one there.
+// was the only one there. A parent workspace with linked worktrees keeps
+// a shell tab so the other workspaces in its group remain open.
 func (l *Launcher) Stop(ctx context.Context, paneID string) error {
 	snap, err := l.Herdr.Snapshot(ctx)
 	if err != nil {
@@ -619,7 +621,17 @@ func (l *Launcher) Stop(ctx context.Context, paneID string) error {
 		}
 	}
 	if others == 0 {
-		return l.Herdr.CloseWorkspace(ctx, ws)
+		err := l.Herdr.CloseWorkspace(ctx, ws)
+		var herr *herdr.Error
+		if !errors.As(err, &herr) || herr.Code != "workspace_group_close_required" {
+			return err
+		}
+		// A linked worktree group can contain unrelated sessions. Stop only
+		// the requested pane instead of opting into closing the whole group.
+		// Herdr also protects the last pane, so retain a shell in a new tab.
+		if err := l.Herdr.CreateTab(ctx, ws); err != nil {
+			return err
+		}
 	}
 	return l.Herdr.ClosePane(ctx, paneID)
 }

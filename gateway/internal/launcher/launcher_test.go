@@ -3,6 +3,7 @@ package launcher
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -88,11 +89,14 @@ func Testディレクトリを作成でき不正な名前は拒否する(t *test
 }
 
 type fakeHerdr struct {
-	mu       sync.Mutex
-	screen   string
-	status   string
-	session  *herdr.AgentSession
-	startErr error
+	mu                sync.Mutex
+	screen            string
+	status            string
+	session           *herdr.AgentSession
+	startErr          error
+	closeWorkspaceErr error
+	closePaneErr      error
+	createTabErr      error
 	// startErrs are returned by successive StartAgent calls before startErr.
 	startErrs []error
 	snap      *herdr.Snapshot
@@ -148,7 +152,7 @@ func (f *fakeHerdr) Prompt(_ context.Context, _ string, text string) error {
 func (f *fakeHerdr) Snapshot(context.Context) (*herdr.Snapshot, error) { return f.snap, nil }
 func (f *fakeHerdr) ClosePane(_ context.Context, pane string) error {
 	f.record("close pane " + pane)
-	return nil
+	return f.closePaneErr
 }
 
 // RemoveWorktree removes the checkout the way Herdr does, without --force.
@@ -159,9 +163,13 @@ func (f *fakeHerdr) RemoveWorktree(_ context.Context, ws string) error {
 	}
 	return nil
 }
+func (f *fakeHerdr) CreateTab(_ context.Context, ws string) error {
+	f.record("create tab " + ws)
+	return f.createTabErr
+}
 func (f *fakeHerdr) CloseWorkspace(_ context.Context, ws string) error {
 	f.record("close workspace " + ws)
-	return nil
+	return f.closeWorkspaceErr
 }
 func (f *fakeHerdr) ReportAgentSession(_ context.Context, pane, agent, id, startSource string) error {
 	f.record("report " + agent + " " + id + " " + startSource)
@@ -473,6 +481,37 @@ func Test停止はペインだけのワークスペースなら丸ごと閉じ�
 	}
 	if got := strings.Join(fh.calls, "|"); got != "close workspace w1|close pane w2:p2" {
 		t.Errorf("calls = %s", got)
+	}
+}
+
+func Test関連worktreeがある停止は対象ペインだけを閉じる(t *testing.T) {
+	groupErr := &herdr.Error{Code: "workspace_group_close_required", Message: "use --group"}
+	otherErr := errors.New("connection lost")
+	for _, tt := range []struct {
+		name                                   string
+		workspaceErr, paneErr, tabErr, wantErr error
+		wantCalls                              string
+	}{
+		{"タブ作成の失敗は返す", groupErr, nil, otherErr, otherErr, "close workspace w1|create tab w1"},
+		{"グループ保護", groupErr, nil, nil, nil, "close workspace w1|create tab w1|close pane w1:p1"},
+		{"ラップされたエラー", fmt.Errorf("close: %w", groupErr), nil, nil, nil, "close workspace w1|create tab w1|close pane w1:p1"},
+		{"別のエラーは返す", otherErr, nil, nil, otherErr, "close workspace w1"},
+		{"ペイン停止の失敗は返す", groupErr, otherErr, nil, otherErr, "close workspace w1|create tab w1|close pane w1:p1"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fh := &fakeHerdr{closeWorkspaceErr: tt.workspaceErr, closePaneErr: tt.paneErr, createTabErr: tt.tabErr,
+				snap: &herdr.Snapshot{Panes: []herdr.Pane{
+					{PaneID: "w1:p1", WorkspaceID: "w1"},
+					{PaneID: "w2:p1", WorkspaceID: "w2"},
+				}}}
+			l, _ := newLauncher(t, fh)
+			if err := l.Stop(context.Background(), "w1:p1"); !errors.Is(err, tt.wantErr) {
+				t.Fatalf("Stop = %v, want %v", err, tt.wantErr)
+			}
+			if got := strings.Join(fh.calls, "|"); got != tt.wantCalls {
+				t.Fatalf("calls = %s, want %s", got, tt.wantCalls)
+			}
+		})
 	}
 }
 

@@ -121,6 +121,10 @@ func (f *fakeHerdr) RemoveWorktree(_ context.Context, ws string) error {
 	}
 	return nil
 }
+func (f *fakeHerdr) CreateTab(_ context.Context, ws string) error {
+	f.calls = append(f.calls, "create-tab:"+ws)
+	return nil
+}
 func (f *fakeHerdr) CloseWorkspace(_ context.Context, ws string) error {
 	f.calls = append(f.calls, "close-workspace:"+ws)
 	var keep []herdr.Pane

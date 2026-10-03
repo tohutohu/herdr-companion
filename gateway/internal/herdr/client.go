@@ -400,6 +400,11 @@ func (c *Client) FocusPane(ctx context.Context, paneID string) error {
 	return c.Call(ctx, "pane.focus", map[string]any{"pane_id": paneID}, nil)
 }
 
+// CreateTab leaves a shell in a workspace without changing focus.
+func (c *Client) CreateTab(ctx context.Context, workspaceID string) error {
+	return c.Call(ctx, "tab.create", map[string]any{"workspace_id": workspaceID, "focus": false}, nil)
+}
+
 // CloseWorkspace closes a workspace and all of its panes.
 func (c *Client) CloseWorkspace(ctx context.Context, workspaceID string) error {
 	return c.Call(ctx, "workspace.close", map[string]any{"workspace_id": workspaceID}, nil)
