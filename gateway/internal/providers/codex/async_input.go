@@ -23,11 +23,35 @@ type asyncQuestion struct {
 // Unlike blocking requestUserInput, async questions survive turn completion
 // and are recorded as agentMessage items, even for standalone TUIs.
 func latestAsyncQuestion(th *Thread) *model.Interaction {
+	answered := map[string]map[int]bool{}
 	for ti := len(th.Turns) - 1; ti >= 0; ti-- {
 		items := th.Turns[ti].Items
 		for i := len(items) - 1; i >= 0; i-- {
 			var it item
-			if json.Unmarshal(items[i], &it) != nil || it.Type != "agentMessage" || it.Delivery != "async" || len(it.Questions) == 0 {
+			if json.Unmarshal(items[i], &it) != nil {
+				continue
+			}
+			if it.Type == "userMessage" {
+				for _, content := range it.Content {
+					if content.Type != "text" {
+						continue
+					}
+					for _, reply := range parseAsyncReplies(content.Text) {
+						if answered[reply.callID] == nil {
+							answered[reply.callID] = map[int]bool{}
+						}
+						answered[reply.callID][reply.index] = true
+					}
+				}
+			}
+			if it.Type != "agentMessage" || it.Delivery != "async" || len(it.Questions) == 0 {
+				continue
+			}
+			complete := true
+			for index := range it.Questions {
+				complete = complete && answered[it.ID][index]
+			}
+			if complete {
 				continue
 			}
 			// The terminal fallback currently handles one question. Do not guess

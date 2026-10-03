@@ -1,0 +1,41 @@
+{
+  "thread": {
+    "id": "thread-async-reply",
+    "turns": [
+      {
+        "id": "turn-1",
+        "status": "completed",
+        "items": [
+          {
+            "type": "agentMessage",
+            "id": "call_async_1",
+            "text": "Issueの保存先は、このプロジェクトのリポジトリでよいですか？\n- このプロジェクトのリポジトリ\n- 別のリポジトリ",
+            "phase": "final_answer",
+            "memoryCitation": null,
+            "delivery": "async",
+            "questions": [
+              {
+                "title": "Issueの保存先は、このプロジェクトのリポジトリでよいですか？",
+                "options": [
+                  "このプロジェクトのリポジトリ",
+                  "別のリポジトリ"
+                ]
+              }
+            ]
+          },
+          {
+            "type": "userMessage",
+            "id": "reply-1",
+            "content": [
+              {
+                "type": "text",
+                "text": "<send_user_message_question_reply>\n[{\"answer\":\"このプロジェクトのリポジトリ\",\"question\":\"Issueの保存先は、このプロジェクトのリポジトリでよいですか？\",\"questionItemId\":\"[\\\"request_user_input_async\\\",\\\"call_async_1\\\",0]\"}]\n</send_user_message_question_reply>",
+                "text_elements": []
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

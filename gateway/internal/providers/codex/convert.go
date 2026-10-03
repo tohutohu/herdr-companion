@@ -110,7 +110,8 @@ type convertOptions struct {
 	Root      string
 	Sink      deadletter.Sink
 	// Answered are prompts answered in this thread, read from its rollout.
-	Answered []answeredInput
+	Answered       []answeredInput
+	asyncQuestions map[string][]asyncQuestion
 }
 
 // ConvertThread flattens turns into messages. Unknown items become text
@@ -120,6 +121,15 @@ func ConvertThread(th *Thread, opt convertOptions) []model.Message {
 		opt.Sink = deadletter.Nop{}
 	}
 	var out []model.Message
+	opt.asyncQuestions = map[string][]asyncQuestion{}
+	for _, turn := range th.Turns {
+		for _, raw := range turn.Items {
+			var it item
+			if json.Unmarshal(raw, &it) == nil && it.Type == "agentMessage" && it.Delivery == "async" {
+				opt.asyncQuestions[it.ID] = it.Questions
+			}
+		}
+	}
 	for _, turn := range th.Turns {
 		ts := time.Time{}
 		if turn.StartedAt != nil {
@@ -173,6 +183,12 @@ func convertItem(raw json.RawMessage, ts time.Time, opt convertOptions) (model.M
 		for i, in := range it.Content {
 			switch in.Type {
 			case "text":
+				if replies := parseAsyncReplies(in.Text); len(replies) > 0 {
+					for j, reply := range replies {
+						blocks = append(blocks, asyncReplyBlock(reply, fmt.Sprintf("%s#reply-%d-%d", it.ID, i, j), opt.asyncQuestions))
+					}
+					continue
+				}
 				if strings.TrimSpace(in.Text) != "" {
 					blocks = append(blocks, model.TextBlock(in.Text))
 				}

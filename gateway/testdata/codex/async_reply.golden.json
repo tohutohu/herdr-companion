@@ -1,0 +1,47 @@
+[
+  {
+    "id": "call_async_1",
+    "role": "assistant",
+    "timestamp": "0001-01-01T00:00:00Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "Issueの保存先は、このプロジェクトのリポジトリでよいですか？\n- このプロジェクトのリポジトリ\n- 別のリポジトリ"
+      }
+    ]
+  },
+  {
+    "id": "reply-1",
+    "role": "user",
+    "timestamp": "0001-01-01T00:00:00Z",
+    "blocks": [
+      {
+        "type": "interaction",
+        "interaction": {
+          "id": "reply-1#reply-0-0",
+          "type": "questions",
+          "state": "answered",
+          "title": "Codex needs input",
+          "questions": [
+            {
+              "id": "0",
+              "type": "select",
+              "question": "Issueの保存先は、このプロジェクトのリポジトリでよいですか？",
+              "options": [
+                {
+                  "label": "このプロジェクトのリポジトリ"
+                },
+                {
+                  "label": "別のリポジトリ"
+                }
+              ],
+              "allowOther": false
+            }
+          ],
+          "supported": true,
+          "answer": "このプロジェクトのリポジトリ"
+        }
+      }
+    ]
+  }
+]

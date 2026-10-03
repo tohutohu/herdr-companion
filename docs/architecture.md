@@ -130,6 +130,10 @@ identity; the native database schema selects the history format.
   the TUI. Existing drafts are not overwritten. This also works after the
   originating turn completes. Multi-question queues and other unsupported
   dialogs retain the terminal fallback. Keys were checked against Codex 0.154.0.
+  Tagged `send_user_message_question_reply` user messages are rendered as
+  answered question cards, retaining the original options when available.
+  Answered question IDs are excluded from the pending queue, including replies
+  received in a later turn. Invalid or quoted payloads remain ordinary text.
 - After a Plan mode turn ends with a `plan` item the TUI asks "Implement this
   plan?" on its own; the app-server never sees it. While it is on the visible
   screen of the session's pane it is a `questions` interaction with
