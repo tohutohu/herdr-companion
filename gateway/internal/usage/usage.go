@@ -157,33 +157,45 @@ func (s *Service) fetch(ctx context.Context) ([]model.UsageProvider, error) {
 	cmd := exec.CommandContext(ctx, s.cmd, s.args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
+	runErr := cmd.Run()
+	providers, parseErr := parse(stdout.Bytes())
+	if runErr != nil {
+		err := runErr
 		if errors.Is(err, exec.ErrNotFound) {
 			return nil, fmt.Errorf("%s not found; install it with `brew install --cask codexbar`", s.cmd)
+		}
+		// CodexBar exits nonzero when any provider fails, but still writes
+		// successful readings and provider-specific errors as JSON.
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && ctx.Err() == nil && parseErr == nil && len(providers) > 0 {
+			return s.addReserve(ctx, providers), nil
 		}
 		if msg := firstLine(stderr.String()); msg != "" {
 			return nil, fmt.Errorf("%s: %w: %s", s.cmd, err, msg)
 		}
 		return nil, fmt.Errorf("%s: %w", s.cmd, err)
 	}
-	providers, err := parse(stdout.Bytes())
-	if err != nil {
-		return nil, err
+	if parseErr != nil {
+		return nil, parseErr
 	}
+	return s.addReserve(ctx, providers), nil
+}
+
+func (s *Service) addReserve(ctx context.Context, providers []model.UsageProvider) []model.UsageProvider {
 	if s.reserve == nil || !hasProvider(providers, "codex") || hasReserveWindow(providers) {
-		return providers, nil
+		return providers
 	}
 	reserve, err := s.reserve.ReadReserveWindow(ctx)
 	if err != nil {
 		// CodexBar is still the source for the normal limits. Reserve is an
 		// additive window, so an app-server error should not hide those values.
 		slog.Debug("reserve limit refresh failed", "operation", "usage.reserve", "error", err)
-		return providers, nil
+		return providers
 	}
 	if reserve != nil {
 		appendReserveWindow(providers, *reserve)
 	}
-	return providers, nil
+	return providers
 }
 
 func hasProvider(providers []model.UsageProvider, name string) bool {
@@ -238,8 +250,27 @@ func firstLine(s string) string {
 
 type cbEntry struct {
 	Provider string   `json:"provider"`
-	Error    string   `json:"error"`
+	Error    cbError  `json:"error"`
 	Usage    *cbUsage `json:"usage"`
+}
+
+// Older reporters used a string; current CodexBar reports a structured error.
+type cbError string
+
+func (e *cbError) UnmarshalJSON(b []byte) error {
+	var message string
+	if err := json.Unmarshal(b, &message); err == nil {
+		*e = cbError(message)
+		return nil
+	}
+	var detail struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(b, &detail); err != nil {
+		return err
+	}
+	*e = cbError(detail.Message)
+	return nil
 }
 
 type cbUsage struct {
@@ -285,7 +316,7 @@ func parse(b []byte) ([]model.UsageProvider, error) {
 			Provider:    e.Provider,
 			DisplayName: displayName(e.Provider),
 			Windows:     []model.UsageWindow{},
-			Error:       e.Error,
+			Error:       string(e.Error),
 		}
 		if e.Usage == nil {
 			if p.Error == "" {

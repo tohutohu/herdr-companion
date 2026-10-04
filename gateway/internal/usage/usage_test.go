@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -170,6 +171,53 @@ func Test取得に失敗しても前回の値を保持する(t *testing.T) {
 	}
 	if snap.FetchedAt == nil || !snap.FetchedAt.Equal(*fetchedAt) {
 		t.Errorf("fetchedAt = %v, want %v", snap.FetchedAt, fetchedAt)
+	}
+}
+
+func Test一部のプロバイダーが失敗しても成功した使用量とエラーを取得する(t *testing.T) {
+	const partial = `[
+	  {"provider":"codex","usage":{"secondary":{"usedPercent":34,"windowMinutes":10080}}},
+	  {"provider":"claude","error":{"code":1,"kind":"provider","message":"No Claude session key found in browser cookies."}}
+	]`
+	reader := fakeReserveReader{window: &model.UsageWindow{Key: "gpt-reserve", UsedPercent: 6}}
+	svc := New(fakeCommand(t, partial, "", 1), time.Hour, reader)
+	snap := svc.Refresh(context.Background())
+	if snap.Error != "" || snap.FetchedAt == nil || len(snap.Providers) != 2 {
+		t.Fatalf("refresh = %+v", snap)
+	}
+	claude, codex := snap.Providers[0], snap.Providers[1]
+	if claude.Error != "No Claude session key found in browser cookies." || len(claude.Windows) != 0 {
+		t.Errorf("claude = %+v", claude)
+	}
+	if codex.Error != "" || len(codex.Windows) != 2 || codex.Windows[0].UsedPercent != 34 || codex.Windows[1].Key != "gpt-reserve" {
+		t.Errorf("codex = %+v", codex)
+	}
+}
+
+func Testすべてのプロバイダーが失敗しても個別の理由を表示する(t *testing.T) {
+	const failed = `[
+	  {"provider":"codex","error":"not logged in"},
+	  {"provider":"claude","error":{"message":"token expired","code":3,"kind":"provider"}}
+	]`
+	svc := New(fakeCommand(t, failed, "", 3), time.Hour)
+	snap := svc.Refresh(context.Background())
+	if snap.Error != "" || len(snap.Providers) != 2 {
+		t.Fatalf("refresh = %+v", snap)
+	}
+	if snap.Providers[0].Error != "token expired" || snap.Providers[1].Error != "not logged in" {
+		t.Errorf("providers = %+v", snap.Providers)
+	}
+}
+
+func Test失敗したコマンドの不正な出力は成功として扱わない(t *testing.T) {
+	for _, output := range []string{"not json", "[]", "null", `[{"provider":"claude","error":42}]`} {
+		t.Run(output, func(t *testing.T) {
+			svc := New(fakeCommand(t, output, "reporter failed", 1), time.Hour)
+			snap := svc.Refresh(context.Background())
+			if !strings.Contains(snap.Error, "reporter failed") || len(snap.Providers) != 0 {
+				t.Fatalf("refresh = %+v", snap)
+			}
+		})
 	}
 }
 
