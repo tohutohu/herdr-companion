@@ -47,8 +47,8 @@ type Session struct {
 	// Unread is Herdr's view: the agent finished (done) and its pane has not
 	// been focused since.
 	Unread bool `json:"unread,omitempty"`
-	// CompletionID is internal notification deduplication state, not an API field.
-	CompletionID string `json:"-"`
+	// CompletionRevision is internal notification deduplication state, not an API field.
+	CompletionRevision string `json:"-"`
 	// Context is how full the model's context window is; nil when unknown.
 	Context *ContextUsage `json:"context,omitempty"`
 	// Cost is what the session's tokens are worth; nil when nothing is known.

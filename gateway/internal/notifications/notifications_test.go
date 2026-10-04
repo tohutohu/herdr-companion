@@ -129,7 +129,7 @@ func Test古い完了ターンの状態が揺れても再通知しない(t *test
 				w, _ := newWatcher(t, fs, sender)
 				for i, status := range []model.Status{initial, model.StatusRunning, terminal, model.StatusRunning, terminal} {
 					s := sess(status)
-					s.CompletionID = "old-turn"
+					s.CompletionRevision = "old-turn"
 					// Resuming/redrawing can touch metadata without executing a turn.
 					s.UpdatedAt = time.Unix(int64(i), 0)
 					fs.list = []model.Session{s}
@@ -166,7 +166,7 @@ func Test新しいターンの完了は同じ本文でも通知する(t *testing
 			for _, step := range steps {
 				// Text and timestamps are deliberately identical across turns.
 				s := sess(step.status)
-				s.CompletionID = step.turn
+				s.CompletionRevision = step.turn
 				fs.list = []model.Session{s}
 				w.Evaluate(context.Background())
 			}
@@ -192,12 +192,47 @@ func Test完了ターンが同じでも入力と承認の要求は通知する(t
 	w, _ := newWatcher(t, fs, sender)
 	for _, status := range []model.Status{model.StatusIdle, model.StatusWaitingInput, model.StatusWaitingApproval} {
 		s := sess(status)
-		s.CompletionID = "old-turn"
+		s.CompletionRevision = "old-turn"
 		fs.list = []model.Session{s}
 		w.Evaluate(context.Background())
 	}
 	if len(sender.sent) != 2 {
 		t.Fatalf("attention notifications = %+v", sender.sent)
+	}
+}
+
+func Test同一ターンでもバックグラウンド結果が更新されて再完了したら通知する(t *testing.T) {
+	for _, terminal := range []model.Status{model.StatusCompleted, model.StatusIdle, model.StatusFailed} {
+		t.Run(string(terminal), func(t *testing.T) {
+			fs := &fakeSessions{}
+			sender := &fakeSender{}
+			w, _ := newWatcher(t, fs, sender)
+			steps := []struct {
+				status   model.Status
+				revision string
+			}{
+				{model.StatusRunning, ""},
+				// Main work is done while a background task is still running.
+				{terminal, "same-turn:initial-result"},
+				{model.StatusRunning, "same-turn:initial-result"},
+				// Tool output changes before Herdr observes done again.
+				{model.StatusRunning, "same-turn:background-result"},
+				{terminal, "same-turn:background-result"},
+				// Subsequent lifecycle fluctuations with no new output are noise.
+				{model.StatusRunning, "same-turn:background-result"},
+				{terminal, "same-turn:background-result"},
+			}
+			for _, step := range steps {
+				// A tool result can change while notification body stays the same.
+				s := sess(step.status)
+				s.CompletionRevision = step.revision
+				fs.list = []model.Session{s}
+				w.Evaluate(context.Background())
+			}
+			if len(sender.sent) != 2 {
+				t.Fatalf("main and background completion should each notify once: %+v", sender.sent)
+			}
+		})
 	}
 }
 

@@ -71,7 +71,7 @@ func TestCodexの実スレッドを共通メッセージに変換できる(t *te
 	}
 }
 
-func Test要約は最後に終了したターンの識別子を通知の重複判定用に返す(t *testing.T) {
+func Test要約は最後に終了したターンの内容の版を通知の重複判定用に返す(t *testing.T) {
 	p := New("unused", "/nonexistent.sock", &fakeTerm{}, deadletter.Nop{})
 	for _, status := range []string{"completed", "interrupted", "failed", "inProgress", ""} {
 		t.Run(status, func(t *testing.T) {
@@ -81,17 +81,17 @@ func Test要約は最後に終了したターンの識別子を通知の重複�
 			}}
 			// A terminal redraw may make Herdr claim a finished turn is working.
 			sum := p.summaryFromText(context.Background(), th, &providers.Live{HerdrStatus: herdr.StatusWorking}, "same text")
-			want := "latest-turn"
+			finished := true
 			if status == "inProgress" || status == "" {
-				want = ""
+				finished = false
 			}
-			if sum.CompletionID != want || sum.LastTurnFailed != (status == "failed") {
-				t.Fatalf("summary = %+v, completion ID want %q", sum, want)
+			if (sum.CompletionRevision != "") != finished || (finished && !strings.HasPrefix(sum.CompletionRevision, "latest-turn:")) || sum.LastTurnFailed != (status == "failed") {
+				t.Fatalf("summary = %+v, finished = %v", sum, finished)
 			}
 		})
 	}
-	if sum := p.summaryFromText(context.Background(), &Thread{ID: "new"}, nil, ""); sum.CompletionID != "" {
-		t.Fatalf("new session completion ID = %q", sum.CompletionID)
+	if sum := p.summaryFromText(context.Background(), &Thread{ID: "new"}, nil, ""); sum.CompletionRevision != "" {
+		t.Fatalf("new session completion revision = %q", sum.CompletionRevision)
 	}
 }
 

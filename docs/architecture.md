@@ -225,10 +225,12 @@ with Android priority `HIGH`. `body` starts with the session title (the
 project name only stands in until there is one) because that first line is all
 a collapsed notification shows, then the last message. `running → idle` counts as completion because Herdr turns `done` into
 `idle` once the pane was looked at. The first observation after start never
-pushes. For Codex, the watcher also remembers the latest finished turn ID:
-terminal redraws can briefly make old sessions look `running`, but returning
-to completion or failure for the same turn does not send another push. A new
-turn still notifies even if its final text matches the previous turn.
+pushes. For Codex, the watcher also remembers the latest finished turn's
+content revision (turn ID, status, error, and items). Herdr can briefly report
+old sessions as `running`, but returning to completion or failure with the
+same revision does not send another push. A new turn still notifies even if
+its final text matches the previous turn. Background task results that update
+the same turn can notify again when the session returns to completion.
 
 On Android, `PushService` shows the notification (channels *Completed*,
 *Needs attention*, *Errors*) and enqueues an expedited `PrefetchWorker` that

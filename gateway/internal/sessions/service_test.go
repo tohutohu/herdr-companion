@@ -70,10 +70,10 @@ func Test稼働中セッションのcwdはファイルリンクと同じペイ�
 	}
 }
 
-func Test終了ターンの識別子をセッションへ引き継ぐ(t *testing.T) {
+func Test終了ターンの内容の版をセッションへ引き継ぐ(t *testing.T) {
 	r := &Resolved{Provider: stubProvider{}, NativeID: "x"}
-	if got := toSession(r, &providers.Summary{CompletionID: "turn-1"}).CompletionID; got != "turn-1" {
-		t.Fatalf("completion ID = %q", got)
+	if got := toSession(r, &providers.Summary{CompletionRevision: "turn-1"}).CompletionRevision; got != "turn-1" {
+		t.Fatalf("completion revision = %q", got)
 	}
 }
 

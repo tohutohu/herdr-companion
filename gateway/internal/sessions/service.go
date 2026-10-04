@@ -360,20 +360,20 @@ func (s *Service) toSession(r *Resolved, sum *providers.Summary) model.Session {
 
 func toSession(r *Resolved, sum *providers.Summary) model.Session {
 	sess := model.Session{
-		ID:           r.ID(),
-		Provider:     r.Provider.Name(),
-		ProviderName: r.Provider.DisplayName(),
-		Title:        sum.Title,
-		Cwd:          sum.Cwd,
-		UpdatedAt:    sum.UpdatedAt,
-		LastMessage:  sum.LastMessage,
-		CompletionID: sum.CompletionID,
-		Model:        sum.Model,
-		Effort:       sum.Effort,
-		Mode:         sum.Mode,
-		Context:      sum.Context,
-		Cost:         sum.Cost,
-		Status:       Normalize(r.Live, sum),
+		ID:                 r.ID(),
+		Provider:           r.Provider.Name(),
+		ProviderName:       r.Provider.DisplayName(),
+		Title:              sum.Title,
+		Cwd:                sum.Cwd,
+		UpdatedAt:          sum.UpdatedAt,
+		LastMessage:        sum.LastMessage,
+		CompletionRevision: sum.CompletionRevision,
+		Model:              sum.Model,
+		Effort:             sum.Effort,
+		Mode:               sum.Mode,
+		Context:            sum.Context,
+		Cost:               sum.Cost,
+		Status:             Normalize(r.Live, sum),
 	}
 	if r.Live != nil {
 		sess.PaneID = r.Live.PaneID

@@ -33,7 +33,7 @@ type Subscriber interface {
 }
 
 // Watcher notices state transitions of live sessions and pushes them.
-// Statuses and finished turn identities are kept in memory per session.
+// Statuses and finished turn revisions are kept in memory per session.
 type Watcher struct {
 	Herdr    Subscriber
 	Sessions Sessions
@@ -51,8 +51,8 @@ type Watcher struct {
 }
 
 type observation struct {
-	status       model.Status
-	completionID string
+	status             model.Status
+	completionRevision string
 }
 
 func (w *Watcher) Run(ctx context.Context) {
@@ -146,12 +146,12 @@ func (w *Watcher) Evaluate(ctx context.Context) {
 		seen[s.ID] = true
 		w.mu.Lock()
 		prev, known := w.last[s.ID]
-		next := observation{status: s.Status, completionID: prev.completionID}
+		next := observation{status: s.Status, completionRevision: prev.completionRevision}
 		// Seed from the first read, including an old finished turn in a pane
 		// Herdr temporarily calls running. Later running observations must not
 		// consume a new completion before Herdr reports its terminal state.
-		if s.CompletionID != "" && (!known || s.Status == model.StatusCompleted || s.Status == model.StatusIdle || s.Status == model.StatusFailed) {
-			next.completionID = s.CompletionID
+		if s.CompletionRevision != "" && (!known || s.Status == model.StatusCompleted || s.Status == model.StatusIdle || s.Status == model.StatusFailed) {
+			next.completionRevision = s.CompletionRevision
 		}
 		w.last[s.ID] = next
 		w.mu.Unlock()
@@ -160,8 +160,8 @@ func (w *Watcher) Evaluate(ctx context.Context) {
 		}
 		slog.Info("session status changed", "provider", s.Provider, "session_id", s.ID, "operation", "watch", "from", prev.status, "to", s.Status)
 		if kind, ok := notificationKind(prev.status, s.Status); ok {
-			if (kind == model.StatusCompleted || kind == model.StatusFailed) && s.CompletionID != "" && s.CompletionID == prev.completionID {
-				slog.Info("push skipped: turn already observed", "provider", s.Provider, "session_id", s.ID, "operation", "push", "completion_id", s.CompletionID)
+			if (kind == model.StatusCompleted || kind == model.StatusFailed) && s.CompletionRevision != "" && s.CompletionRevision == prev.completionRevision {
+				slog.Info("push skipped: completion already observed", "provider", s.Provider, "session_id", s.ID, "operation", "push", "completion_revision", s.CompletionRevision)
 				continue
 			}
 			w.push(ctx, s, kind)
