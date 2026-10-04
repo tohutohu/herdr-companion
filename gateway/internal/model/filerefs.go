@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // fileRefPattern matches things like src/auth.go, ./a/b.kt:42, /abs/path/x.md:10:3
@@ -70,11 +71,18 @@ func FileRef(root, p string, line int) (Block, bool) {
 
 // Truncate shortens s to at most n runes, marking the cut.
 func Truncate(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
+	count := 0
+	for end := range s {
+		if count == n {
+			if utf8.ValidString(s[:end]) {
+				return s[:end] + "\n… (truncated)"
+			}
+			// Normalize only the prefix, as the previous rune conversion did.
+			return string([]rune(s[:end])) + "\n… (truncated)"
+		}
+		count++
 	}
-	return string(r[:n]) + "\n… (truncated)"
+	return s
 }
 
 // DisplayPath returns p relative to root when it lies inside root.

@@ -2,7 +2,7 @@ package codex
 
 import (
 	"context"
-	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -31,8 +31,8 @@ func pendingAsyncQuestions(th *Thread) []*model.Interaction {
 	answered := map[string]map[int]bool{}
 	for _, turn := range th.Turns {
 		for _, raw := range turn.Items {
-			var it item
-			if json.Unmarshal(raw, &it) != nil {
+			var it asyncHistoryItem
+			if jsonv2.Unmarshal(raw, &it) != nil {
 				continue
 			}
 			if it.Type == "userMessage" {

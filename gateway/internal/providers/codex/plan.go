@@ -2,7 +2,7 @@ package codex
 
 import (
 	"context"
-	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -114,7 +114,7 @@ func latestPlanItem(th *Thread) string {
 	}
 	for i := len(lt.Items) - 1; i >= 0; i-- {
 		var it itemHead
-		if json.Unmarshal(lt.Items[i], &it) == nil && it.Type == "plan" && it.ID != "" {
+		if jsonv2.Unmarshal(lt.Items[i], &it) == nil && it.Type == "plan" && it.ID != "" {
 			return it.ID
 		}
 	}

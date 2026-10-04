@@ -112,6 +112,97 @@ func Test会話の要約とメッセージを一度のスレッド取得で返�
 	}
 }
 
+type readWaitContext struct {
+	context.Context
+	waiting chan struct{}
+	once    sync.Once
+}
+
+func (c *readWaitContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.waiting) })
+	return c.Context.Done()
+}
+
+func Test同じ履歴の並行取得を共有し一方の切断で他方を中断しない(t *testing.T) {
+	pt := &pipeTransport{in: make(chan []byte, 16), out: make(chan []byte, 16), closed: make(chan struct{})}
+	p := New("unused", "/nonexistent.sock", &fakeTerm{}, deadletter.Nop{})
+	p.reader = newRPCClient(pt, nil)
+	t.Cleanup(p.reader.close)
+	base, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	first := &readWaitContext{Context: base, waiting: make(chan struct{})}
+	second := &readWaitContext{Context: context.Background(), waiting: make(chan struct{})}
+	firstErr := make(chan error, 1)
+	secondErr := make(chan error, 1)
+	go func() { _, err := p.readThread(first, "thread-000001", true); firstErr <- err }()
+	select {
+	case <-first.waiting:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first read did not wait")
+	}
+	var request wireMessage
+	select {
+	case raw := <-pt.out:
+		json.Unmarshal(raw, &request)
+	case <-time.After(2 * time.Second):
+		t.Fatal("no RPC")
+	}
+	go func() {
+		th, err := p.readThread(second, "thread-000001", true)
+		if err == nil && th.ID != "thread-000001" {
+			err = fmt.Errorf("wrong thread")
+		}
+		secondErr <- err
+	}()
+	select {
+	case <-second.waiting:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second read did not wait")
+	}
+	select {
+	case <-pt.out:
+		t.Fatal("duplicate RPC")
+	default:
+	}
+	cancel()
+	if err := <-firstErr; !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	response, _ := json.Marshal(map[string]any{"id": request.ID, "result": map[string]any{"thread": map[string]any{"id": "thread-000001"}}})
+	pt.in <- response
+	select {
+	case err := <-secondErr:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("shared read did not complete")
+	}
+	// Completed flights are removed, so a later read sees new agent output.
+	go func() { _, err := p.readThread(context.Background(), "thread-000001", true); secondErr <- err }()
+	select {
+	case raw := <-pt.out:
+		json.Unmarshal(raw, &request)
+	case <-time.After(2 * time.Second):
+		t.Fatal("next read reused old history")
+	}
+	response, _ = json.Marshal(map[string]any{"id": request.ID, "result": map[string]any{"thread": map[string]any{"id": "thread-000001"}}})
+	pt.in <- response
+	if err := <-secondErr; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func Test要約の末尾テキストは全メッセージ変換と一致する(t *testing.T) {
+	for _, name := range []string{"normal.json", "rich.json"} {
+		th, _ := loadThread(t, name)
+		want := lastText(ConvertThread(th, convertOptions{SessionID: gatewayID(th.ID)}))
+		if got := lastThreadText(th); got != want {
+			t.Fatalf("%s: %q != %q", name, got, want)
+		}
+	}
+}
+
 func TestCodexの多様なitemと失敗ターンと未知itemを変換できる(t *testing.T) {
 	th, ws := loadThread(t, "rich.json")
 	rec := &deadletter.Recorder{}

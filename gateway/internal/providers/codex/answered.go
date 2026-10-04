@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
-	"errors"
 	"io"
 	"os"
 	"strings"
@@ -62,33 +61,67 @@ type userInputOutput struct {
 
 var answeredCache = struct {
 	sync.Mutex
-	entries map[string]answeredCacheEntry
-}{entries: map[string]answeredCacheEntry{}}
+	entries map[string]*answeredCacheEntry
+}{entries: map[string]*answeredCacheEntry{}}
 
 type answeredCacheEntry struct {
-	size  int64
-	mod   time.Time
-	items []answeredInput
+	mu     sync.Mutex
+	info   os.FileInfo
+	offset int64 // bytes through the last complete record
+	parser answeredParser
 }
 
-// answeredInputs reads the answered prompts of a rollout, reusing the last
-// read while the file is unchanged.
+type answeredParser struct {
+	out   []answeredInput
+	turn  string
+	calls map[string]userInputArgs
+	open  []int // answers awaiting the next agent message
+}
+
+// answeredInputs consumes only appended records. A changed file identity,
+// truncation or rewrite resets the parser; an incomplete last line is retried.
 func answeredInputs(path string) []answeredInput {
 	if path == "" {
 		return nil
 	}
-	st, err := os.Stat(path)
+	answeredCache.Lock()
+	e := answeredCache.entries[path]
+	if e == nil {
+		e = &answeredCacheEntry{}
+		answeredCache.entries[path] = e
+	}
+	answeredCache.Unlock()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	f, err := os.Open(path)
 	if err != nil {
 		return nil
 	}
-	answeredCache.Lock()
-	defer answeredCache.Unlock()
-	if e, ok := answeredCache.entries[path]; ok && e.size == st.Size() && e.mod.Equal(st.ModTime()) {
-		return e.items
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return nil
 	}
-	items := readAnsweredInputs(path)
-	answeredCache.entries[path] = answeredCacheEntry{size: st.Size(), mod: st.ModTime(), items: items}
-	return items
+	if e.info != nil && os.SameFile(e.info, st) && e.info.Size() == st.Size() && e.info.ModTime().Equal(st.ModTime()) {
+		return append([]answeredInput(nil), e.parser.out...)
+	}
+	if e.info == nil || !os.SameFile(e.info, st) || st.Size() < e.info.Size() || (st.Size() == e.info.Size() && !st.ModTime().Equal(e.info.ModTime())) {
+		e.offset, e.parser = 0, answeredParser{}
+	}
+	r := bufio.NewReaderSize(io.NewSectionReader(f, e.offset, st.Size()-e.offset), 64<<10)
+	for {
+		line, err := r.ReadBytes('\n')
+		if len(line) > 0 && line[len(line)-1] == '\n' {
+			e.parser.consume(line)
+			e.offset += int64(len(line))
+		}
+		if err != nil {
+			break
+		}
+	}
+	e.info = st
+	// Before can change on the next append. Do not mutate a caller's slice.
+	return append([]answeredInput(nil), e.parser.out...)
 }
 
 func readAnsweredInputs(path string) []answeredInput {
@@ -97,49 +130,52 @@ func readAnsweredInputs(path string) []answeredInput {
 		return nil
 	}
 	defer f.Close()
-	var (
-		out   []answeredInput
-		turn  string
-		calls = map[string]userInputArgs{}
-		open  []int // answered in this turn, waiting for the next agent message
-	)
+	var p answeredParser
 	r := bufio.NewReaderSize(f, 64<<10)
 	for {
 		line, err := r.ReadBytes('\n')
-		if len(line) > 0 && relevantRecord(line, len(calls) > 0, len(open) > 0) {
-			var rec rolloutRecord
-			if json.Unmarshal(line, &rec) == nil {
-				p := rec.Payload
-				switch {
-				case rec.Type == "turn_context":
-					turn, open = p.TurnID, nil
-				case p.Type == "function_call" && p.Name == "request_user_input":
-					var args userInputArgs
-					if json.Unmarshal([]byte(p.Arguments), &args) == nil && len(args.Questions) > 0 {
-						calls[p.CallID] = args
-					}
-				case p.Type == "function_call_output":
-					if args, ok := calls[p.CallID]; ok {
-						delete(calls, p.CallID)
-						out = append(out, answeredInput{Turn: turn, Interaction: answeredInteraction(p.CallID, args, p.Output)})
-						open = append(open, len(out)-1)
-					}
-				case p.Type == "message" && p.Role == "assistant" && p.ID != "":
-					for _, i := range open {
-						out[i].Before = p.ID
-					}
-					open = nil
-				}
-			}
+		if len(line) > 0 {
+			p.consume(line)
 		}
 		if err != nil {
-			if !errors.Is(err, io.EOF) {
-				return out
-			}
 			break
 		}
 	}
-	return out
+	return p.out
+}
+
+func (r *answeredParser) consume(line []byte) {
+	if !relevantRecord(line, len(r.calls) > 0, len(r.open) > 0) {
+		return
+	}
+	var rec rolloutRecord
+	if json.Unmarshal(line, &rec) != nil {
+		return
+	}
+	p := rec.Payload
+	switch {
+	case rec.Type == "turn_context":
+		r.turn, r.open = p.TurnID, nil
+	case p.Type == "function_call" && p.Name == "request_user_input":
+		var args userInputArgs
+		if json.Unmarshal([]byte(p.Arguments), &args) == nil && len(args.Questions) > 0 {
+			if r.calls == nil {
+				r.calls = map[string]userInputArgs{}
+			}
+			r.calls[p.CallID] = args
+		}
+	case p.Type == "function_call_output":
+		if args, ok := r.calls[p.CallID]; ok {
+			delete(r.calls, p.CallID)
+			r.out = append(r.out, answeredInput{Turn: r.turn, Interaction: answeredInteraction(p.CallID, args, p.Output)})
+			r.open = append(r.open, len(r.out)-1)
+		}
+	case p.Type == "message" && p.Role == "assistant" && p.ID != "":
+		for _, i := range r.open {
+			r.out[i].Before = p.ID
+		}
+		r.open = nil
+	}
 }
 
 // relevantRecord skips decoding the bulk of a rollout: only turn starts,

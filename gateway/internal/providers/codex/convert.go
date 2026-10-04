@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"strings"
 	"time"
@@ -50,6 +51,16 @@ type TurnError struct {
 type itemHead struct {
 	Type string `json:"type"`
 	ID   string `json:"id"`
+}
+
+// asyncHistoryItem omits tool output, which can be many megabytes and is
+// irrelevant when scanning for queued questions or their answers.
+type asyncHistoryItem struct {
+	Type      string          `json:"type"`
+	ID        string          `json:"id"`
+	Delivery  string          `json:"delivery"`
+	Questions []asyncQuestion `json:"questions"`
+	Content   []userInput     `json:"content"`
 }
 
 type userInput struct {
@@ -124,8 +135,13 @@ func ConvertThread(th *Thread, opt convertOptions) []model.Message {
 	opt.asyncQuestions = map[string][]asyncQuestion{}
 	for _, turn := range th.Turns {
 		for _, raw := range turn.Items {
-			var it item
-			if json.Unmarshal(raw, &it) == nil && it.Type == "agentMessage" && it.Delivery == "async" {
+			var it struct {
+				Type      string          `json:"type"`
+				ID        string          `json:"id"`
+				Delivery  string          `json:"delivery"`
+				Questions []asyncQuestion `json:"questions"`
+			}
+			if jsonv2.Unmarshal(raw, &it) == nil && it.Type == "agentMessage" && it.Delivery == "async" {
 				opt.asyncQuestions[it.ID] = it.Questions
 			}
 		}
@@ -168,7 +184,7 @@ func errorText(s string) string {
 
 func convertItem(raw json.RawMessage, ts time.Time, opt convertOptions) (model.Message, bool) {
 	var it item
-	if err := json.Unmarshal(raw, &it); err != nil {
+	if err := jsonv2.Unmarshal(raw, &it); err != nil {
 		opt.Sink.Record(providerName, opt.SessionID, deadletter.ParseError, err.Error(), raw)
 		var head itemHead
 		json.Unmarshal(raw, &head)
@@ -345,7 +361,7 @@ func dataURLImage(th *Thread, messageID string, index int) (string, []byte, bool
 	for _, turn := range th.Turns {
 		for _, raw := range turn.Items {
 			var it item
-			if json.Unmarshal(raw, &it) != nil || it.ID != messageID || it.Type != "userMessage" {
+			if jsonv2.Unmarshal(raw, &it) != nil || it.ID != messageID || it.Type != "userMessage" {
 				continue
 			}
 			if index < 0 || index >= len(it.Content) {
@@ -383,6 +399,30 @@ func lastText(msgs []model.Message) string {
 		for _, b := range m.Blocks {
 			if b.Type == model.BlockText {
 				return providers.OneLine(b.Text, 160)
+			}
+		}
+	}
+	return ""
+}
+
+// lastThreadText converts only the newest user/assistant text for list
+// summaries. Building every tool block here allocated large discarded output.
+func lastThreadText(th *Thread) string {
+	for ti := len(th.Turns) - 1; ti >= 0; ti-- {
+		items := th.Turns[ti].Items
+		for i := len(items) - 1; i >= 0; i-- {
+			var head itemHead
+			if jsonv2.Unmarshal(items[i], &head) != nil || (head.Type != "userMessage" && head.Type != "agentMessage") {
+				continue
+			}
+			m, ok := convertItem(items[i], time.Time{}, convertOptions{SessionID: gatewayID(th.ID), Sink: deadletter.Nop{}})
+			if !ok {
+				continue
+			}
+			for _, b := range m.Blocks {
+				if b.Type == model.BlockText {
+					return providers.OneLine(b.Text, 160)
+				}
 			}
 		}
 	}

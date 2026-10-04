@@ -3,8 +3,36 @@ package model
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func Test長い出力は先頭の指定文字数だけを切り出す(t *testing.T) {
+	for _, tc := range []struct {
+		text string
+		n    int
+		want string
+	}{
+		{"abc", 3, "abc"},
+		{"あいうえお", 3, "あいう\n… (truncated)"},
+		{"abc", 0, "\n… (truncated)"},
+		{"", 0, ""},
+		{string([]byte{0xff, 0xff, 'x'}), 2, "��\n… (truncated)"},
+		{strings.Repeat("あ", 1<<20), 3, "あああ\n… (truncated)"},
+	} {
+		if got := Truncate(tc.text, tc.n); got != tc.want {
+			t.Errorf("truncate=%q, want %q", got, tc.want)
+		}
+	}
+}
+
+func BenchmarkTruncateLarge(b *testing.B) {
+	text := strings.Repeat("tool output\n", 1<<17)
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = Truncate(text, 1500)
+	}
+}
 
 func Testテキスト中の存在するファイル参照だけをリンクにする(t *testing.T) {
 	root := t.TempDir()

@@ -50,6 +50,18 @@ type Provider struct {
 	reader          *rpcClient
 	daemon          *daemonConn
 	terminalInputMu sync.Mutex
+	readMu          sync.Mutex
+	reads           map[threadReadKey]*threadReadFlight
+}
+
+type threadReadKey struct {
+	id    string
+	turns bool
+}
+type threadReadFlight struct {
+	done   chan struct{}
+	thread *Thread
+	err    error
 }
 
 func codexHome() string {
@@ -195,6 +207,40 @@ func (p *Provider) readThread(ctx context.Context, id string, turns bool) (*Thre
 	if !threadIDPattern.MatchString(id) {
 		return nil, providers.ErrNotFound
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	key := threadReadKey{id, turns}
+	p.readMu.Lock()
+	f := p.reads[key]
+	if f == nil {
+		f = &threadReadFlight{done: make(chan struct{})}
+		if p.reads == nil {
+			p.reads = map[threadReadKey]*threadReadFlight{}
+		}
+		p.reads[key] = f
+		// A closed phone request must not cancel the read shared by other
+		// clients and the notification watcher. The RPC still has a deadline.
+		go func() {
+			readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), callTimeout)
+			defer cancel()
+			f.thread, f.err = p.fetchThread(readCtx, id, turns)
+			p.readMu.Lock()
+			delete(p.reads, key)
+			close(f.done)
+			p.readMu.Unlock()
+		}()
+	}
+	p.readMu.Unlock()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-f.done:
+		return f.thread, f.err
+	}
+}
+
+func (p *Provider) fetchThread(ctx context.Context, id string, turns bool) (*Thread, error) {
 	c, err := p.client(ctx)
 	if err != nil {
 		return nil, err
@@ -226,13 +272,12 @@ func (p *Provider) Summary(ctx context.Context, nativeID string, live *providers
 	if err != nil {
 		return nil, err
 	}
-	msgs := ConvertThread(th, convertOptions{SessionID: gatewayID(nativeID)})
-	return p.summaryFromMessages(ctx, th, live, msgs), nil
+	return p.summaryFromText(ctx, th, live, lastThreadText(th)), nil
 }
 
-func (p *Provider) summaryFromMessages(ctx context.Context, th *Thread, live *providers.Live, msgs []model.Message) *providers.Summary {
+func (p *Provider) summaryFromText(ctx context.Context, th *Thread, live *providers.Live, text string) *providers.Summary {
 	s := summaryFromThread(th)
-	s.LastMessage = lastText(msgs)
+	s.LastMessage = text
 	if lt := lastTurn(th); lt != nil {
 		s.LastTurnFailed = lt.Status == "failed"
 	}
@@ -325,7 +370,7 @@ func (p *Provider) Conversation(ctx context.Context, nativeID string, live *prov
 		return nil, nil, err
 	}
 	msgs := p.messagesFromThread(ctx, th, live)
-	return p.summaryFromMessages(ctx, th, live, msgs), msgs, nil
+	return p.summaryFromText(ctx, th, live, lastText(msgs)), msgs, nil
 }
 
 func (p *Provider) messagesFromThread(ctx context.Context, th *Thread, live *providers.Live) []model.Message {
