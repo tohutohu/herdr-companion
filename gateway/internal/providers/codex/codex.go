@@ -280,6 +280,10 @@ func (p *Provider) summaryFromText(ctx context.Context, th *Thread, live *provid
 	s.LastMessage = text
 	if lt := lastTurn(th); lt != nil {
 		s.LastTurnFailed = lt.Status == "failed"
+		switch lt.Status {
+		case "completed", "interrupted", "failed":
+			s.CompletionID = lt.ID
+		}
 	}
 	if d := p.currentDaemon(); d != nil {
 		s.Pending, s.Status = d.state(th.ID, live)

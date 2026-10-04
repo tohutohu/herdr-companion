@@ -33,7 +33,7 @@ type Subscriber interface {
 }
 
 // Watcher notices state transitions of live sessions and pushes them.
-// Its only state is the last status seen per session, in memory.
+// Statuses and finished turn identities are kept in memory per session.
 type Watcher struct {
 	Herdr    Subscriber
 	Sessions Sessions
@@ -47,7 +47,12 @@ type Watcher struct {
 	Resync time.Duration
 
 	mu   sync.Mutex
-	last map[string]model.Status
+	last map[string]observation
+}
+
+type observation struct {
+	status       model.Status
+	completionID string
 }
 
 func (w *Watcher) Run(ctx context.Context) {
@@ -57,7 +62,7 @@ func (w *Watcher) Run(ctx context.Context) {
 	if w.Resync == 0 {
 		w.Resync = 15 * time.Second
 	}
-	w.last = map[string]model.Status{}
+	w.last = map[string]observation{}
 	trigger := make(chan struct{}, 1)
 	kick := func() {
 		select {
@@ -141,13 +146,24 @@ func (w *Watcher) Evaluate(ctx context.Context) {
 		seen[s.ID] = true
 		w.mu.Lock()
 		prev, known := w.last[s.ID]
-		w.last[s.ID] = s.Status
+		next := observation{status: s.Status, completionID: prev.completionID}
+		// Seed from the first read, including an old finished turn in a pane
+		// Herdr temporarily calls running. Later running observations must not
+		// consume a new completion before Herdr reports its terminal state.
+		if s.CompletionID != "" && (!known || s.Status == model.StatusCompleted || s.Status == model.StatusIdle || s.Status == model.StatusFailed) {
+			next.completionID = s.CompletionID
+		}
+		w.last[s.ID] = next
 		w.mu.Unlock()
-		if !known || prev == s.Status {
+		if !known || prev.status == s.Status {
 			continue // first sighting after (re)start: no push
 		}
-		slog.Info("session status changed", "provider", s.Provider, "session_id", s.ID, "operation", "watch", "from", prev, "to", s.Status)
-		if kind, ok := notificationKind(prev, s.Status); ok {
+		slog.Info("session status changed", "provider", s.Provider, "session_id", s.ID, "operation", "watch", "from", prev.status, "to", s.Status)
+		if kind, ok := notificationKind(prev.status, s.Status); ok {
+			if (kind == model.StatusCompleted || kind == model.StatusFailed) && s.CompletionID != "" && s.CompletionID == prev.completionID {
+				slog.Info("push skipped: turn already observed", "provider", s.Provider, "session_id", s.ID, "operation", "push", "completion_id", s.CompletionID)
+				continue
+			}
 			w.push(ctx, s, kind)
 		}
 	}

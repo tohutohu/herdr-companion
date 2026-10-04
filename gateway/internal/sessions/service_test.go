@@ -70,6 +70,13 @@ func Test稼働中セッションのcwdはファイルリンクと同じペイ�
 	}
 }
 
+func Test終了ターンの識別子をセッションへ引き継ぐ(t *testing.T) {
+	r := &Resolved{Provider: stubProvider{}, NativeID: "x"}
+	if got := toSession(r, &providers.Summary{CompletionID: "turn-1"}).CompletionID; got != "turn-1" {
+		t.Fatalf("completion ID = %q", got)
+	}
+}
+
 func (stubProvider) DisplayName() string { return "Claude Code" }
 
 type listSnapshot struct{}

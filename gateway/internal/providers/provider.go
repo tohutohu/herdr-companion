@@ -82,6 +82,9 @@ type Summary struct {
 	LastMessage string
 	// LastTurnFailed marks the latest turn as ended by an error.
 	LastTurnFailed bool
+	// CompletionID identifies the latest finished turn, when the provider
+	// exposes one. It stays unchanged when a terminal merely redraws.
+	CompletionID string
 	// Pending is the kind of interaction waiting for the user, if any.
 	Pending model.InteractionType
 	// Status, when set, is an authoritative provider status (e.g. Codex daemon).

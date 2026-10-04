@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/config"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
@@ -51,7 +52,7 @@ func newWatcher(t *testing.T, sessions *fakeSessions, sender *fakeSender) (*Watc
 		t.Fatal(err)
 	}
 	store.UpsertDevice("Pixel", "tok-1")
-	w := &Watcher{Sessions: sessions, Sender: sender, Config: store, Sink: deadletter.Nop{}, last: map[string]model.Status{}}
+	w := &Watcher{Sessions: sessions, Sender: sender, Config: store, Sink: deadletter.Nop{}, last: map[string]observation{}}
 	return w, store
 }
 
@@ -116,6 +117,87 @@ func Testペイロードの見出しはセッションタイトルにする(t *t
 	got = Payload(s, model.StatusCompleted)
 	if got["body"] != "my-project\n認証処理の修正が完了しました" || got["canSend"] != "false" {
 		t.Errorf("payload = %+v", got)
+	}
+}
+
+func Test古い完了ターンの状態が揺れても再通知しない(t *testing.T) {
+	for _, terminal := range []model.Status{model.StatusCompleted, model.StatusIdle, model.StatusFailed} {
+		for _, initial := range []model.Status{terminal, model.StatusRunning} {
+			t.Run(string(terminal)+"/初回="+string(initial), func(t *testing.T) {
+				fs := &fakeSessions{}
+				sender := &fakeSender{}
+				w, _ := newWatcher(t, fs, sender)
+				for i, status := range []model.Status{initial, model.StatusRunning, terminal, model.StatusRunning, terminal} {
+					s := sess(status)
+					s.CompletionID = "old-turn"
+					// Resuming/redrawing can touch metadata without executing a turn.
+					s.UpdatedAt = time.Unix(int64(i), 0)
+					fs.list = []model.Session{s}
+					w.Evaluate(context.Background())
+				}
+				if len(sender.sent) != 0 {
+					t.Fatalf("old turn was notified: %+v", sender.sent)
+				}
+			})
+		}
+	}
+}
+
+func Test新しいターンの完了は同じ本文でも通知する(t *testing.T) {
+	for _, terminal := range []model.Status{model.StatusCompleted, model.StatusIdle, model.StatusFailed} {
+		t.Run(string(terminal), func(t *testing.T) {
+			fs := &fakeSessions{}
+			sender := &fakeSender{}
+			w, _ := newWatcher(t, fs, sender)
+			steps := []struct {
+				status model.Status
+				turn   string
+			}{
+				{model.StatusCompleted, "old-turn"},
+				{model.StatusRunning, ""},
+				// Transcript can finish before Herdr notices completion.
+				{model.StatusRunning, "new-turn"},
+				{terminal, "new-turn"},
+				{model.StatusRunning, "new-turn"},
+				{terminal, "new-turn"},
+				{model.StatusRunning, ""},
+				{terminal, "another-turn"},
+			}
+			for _, step := range steps {
+				// Text and timestamps are deliberately identical across turns.
+				s := sess(step.status)
+				s.CompletionID = step.turn
+				fs.list = []model.Session{s}
+				w.Evaluate(context.Background())
+			}
+			if len(sender.sent) != 2 {
+				t.Fatalf("new turns should each notify once: %+v", sender.sent)
+			}
+			want := terminal
+			if terminal == model.StatusIdle {
+				want = model.StatusCompleted
+			}
+			for _, push := range sender.sent {
+				if push.data["status"] != string(want) {
+					t.Fatalf("status = %s, want %s", push.data["status"], want)
+				}
+			}
+		})
+	}
+}
+
+func Test完了ターンが同じでも入力と承認の要求は通知する(t *testing.T) {
+	fs := &fakeSessions{}
+	sender := &fakeSender{}
+	w, _ := newWatcher(t, fs, sender)
+	for _, status := range []model.Status{model.StatusIdle, model.StatusWaitingInput, model.StatusWaitingApproval} {
+		s := sess(status)
+		s.CompletionID = "old-turn"
+		fs.list = []model.Session{s}
+		w.Evaluate(context.Background())
+	}
+	if len(sender.sent) != 2 {
+		t.Fatalf("attention notifications = %+v", sender.sent)
 	}
 }
 

@@ -367,6 +367,7 @@ func toSession(r *Resolved, sum *providers.Summary) model.Session {
 		Cwd:          sum.Cwd,
 		UpdatedAt:    sum.UpdatedAt,
 		LastMessage:  sum.LastMessage,
+		CompletionID: sum.CompletionID,
 		Model:        sum.Model,
 		Effort:       sum.Effort,
 		Mode:         sum.Mode,
