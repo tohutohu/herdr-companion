@@ -227,14 +227,18 @@ func (p *Provider) Summary(ctx context.Context, nativeID string, live *providers
 		return nil, err
 	}
 	msgs := ConvertThread(th, convertOptions{SessionID: gatewayID(nativeID)})
+	return p.summaryFromMessages(ctx, th, live, msgs), nil
+}
+
+func (p *Provider) summaryFromMessages(ctx context.Context, th *Thread, live *providers.Live, msgs []model.Message) *providers.Summary {
 	s := summaryFromThread(th)
 	s.LastMessage = lastText(msgs)
 	if lt := lastTurn(th); lt != nil {
 		s.LastTurnFailed = lt.Status == "failed"
 	}
 	if d := p.currentDaemon(); d != nil {
-		s.Pending, s.Status = d.state(nativeID, live)
-		s.Mode = d.mode(nativeID, s.Mode)
+		s.Pending, s.Status = d.state(th.ID, live)
+		s.Mode = d.mode(th.ID, s.Mode)
 	}
 	if s.Pending == "" && live != nil && p.asyncInteraction(ctx, th, live) != nil {
 		s.Pending, s.Status = model.InteractionQuestions, model.StatusWaitingInput
@@ -247,7 +251,7 @@ func (p *Provider) Summary(ctx context.Context, nativeID string, live *providers
 			s.Pending, s.Status = model.InteractionQuestions, model.StatusWaitingInput
 		}
 	}
-	return &s, nil
+	return &s
 }
 
 // planLabel is the mode label of a thread in Plan mode.
@@ -311,6 +315,21 @@ func (p *Provider) Messages(ctx context.Context, nativeID string, live *provider
 	if err != nil {
 		return nil, err
 	}
+	return p.messagesFromThread(ctx, th, live), nil
+}
+
+// Conversation reads and converts the thread once for GET /messages.
+func (p *Provider) Conversation(ctx context.Context, nativeID string, live *providers.Live) (*providers.Summary, []model.Message, error) {
+	th, err := p.readThread(ctx, nativeID, true)
+	if err != nil {
+		return nil, nil, err
+	}
+	msgs := p.messagesFromThread(ctx, th, live)
+	return p.summaryFromMessages(ctx, th, live, msgs), msgs, nil
+}
+
+func (p *Provider) messagesFromThread(ctx context.Context, th *Thread, live *providers.Live) []model.Message {
+	nativeID := th.ID
 	root := th.Cwd
 	if live != nil && live.Cwd != "" && !inManagedWorktree(th.Cwd) {
 		root = live.Cwd
@@ -348,7 +367,7 @@ func (p *Provider) Messages(ctx context.Context, nativeID string, live *provider
 			}}},
 		}}
 	}
-	return append(msgs, pending...), nil
+	return append(msgs, pending...)
 }
 
 func (p *Provider) Image(ctx context.Context, nativeID, messageID string, index int) (string, []byte, error) {

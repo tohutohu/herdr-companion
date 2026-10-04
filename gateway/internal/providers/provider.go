@@ -109,6 +109,12 @@ type FilteredRecentProvider interface {
 	RecentExcluding(ctx context.Context, since time.Time, exclude map[string]bool) ([]Summary, error)
 }
 
+// ConversationProvider builds the summary and messages from one history read.
+// Providers without it use their separate Summary and Messages methods.
+type ConversationProvider interface {
+	Conversation(ctx context.Context, nativeID string, live *Live) (*Summary, []model.Message, error)
+}
+
 type Provider interface {
 	Name() string        // id prefix, e.g. "claude"
 	DisplayName() string // e.g. "Claude Code"

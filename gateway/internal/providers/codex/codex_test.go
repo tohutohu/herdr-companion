@@ -11,6 +11,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -67,6 +68,47 @@ func TestCodexの実スレッドを共通メッセージに変換できる(t *te
 	assertGolden(t, "normal.golden.json", msgs)
 	if len(rec.Entries) != 0 {
 		t.Errorf("dead letters: %+v", rec.Entries)
+	}
+}
+
+func Test会話の要約とメッセージを一度のスレッド取得で返す(t *testing.T) {
+	for _, fixture := range []string{"normal.json", "rich.json"} {
+		t.Run(fixture, func(t *testing.T) {
+			th, _ := loadThread(t, fixture)
+			raw, err := json.Marshal(th)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f := &fakeServer{t: t, thread: raw}
+			pt := &pipeTransport{in: make(chan []byte, 16), out: make(chan []byte, 16), closed: make(chan struct{})}
+			go f.serve(pt, func(v any) {
+				b, _ := json.Marshal(v)
+				pt.in <- b
+			})
+			p := New("codex-not-used", "/nonexistent.sock", &fakeTerm{}, deadletter.Nop{})
+			p.reader = newRPCClient(pt, nil)
+			t.Cleanup(p.reader.close)
+			ctx := context.Background()
+			sum, msgs, err := p.Conversation(ctx, th.ID, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			calls := f.callList()
+			if len(calls) != 1 || !strings.HasPrefix(calls[0], "thread/read ") || !strings.Contains(calls[0], `"includeTurns":true`) {
+				t.Fatalf("history requests = %v", calls)
+			}
+			wantSum, err := p.Summary(ctx, th.ID, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantMsgs, err := p.Messages(ctx, th.ID, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(sum, wantSum) || !reflect.DeepEqual(msgs, wantMsgs) {
+				t.Fatal("combined conversation differs from separate summary and messages")
+			}
+		})
 	}
 }
 
@@ -445,17 +487,17 @@ func TestDaemon接続時は構造化APIで送信と承認を行う(t *testing.T)
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	sum, err := p.Summary(ctx, "thread-000001", nil)
+	before := len(f.callList())
+	sum, msgs, err := p.Conversation(ctx, "thread-000001", nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if calls := f.callList()[before:]; len(calls) != 1 || !strings.HasPrefix(calls[0], "thread/read ") {
+		t.Fatalf("conversation requests = %v", calls)
 	}
 	// 購読時の approvalPolicy / sandbox からモードが分かる
 	if sum.Status != model.StatusWaitingApproval || sum.LastMessage != "build" || sum.Mode != "Read only" {
 		t.Errorf("summary = %+v", sum)
-	}
-	msgs, err := p.Messages(ctx, "thread-000001", nil)
-	if err != nil {
-		t.Fatal(err)
 	}
 	ia := msgs[len(msgs)-1].Blocks[0].Interaction
 	if ia == nil || ia.ID != "codex-request:0" || ia.Detail != "rm -rf build" {

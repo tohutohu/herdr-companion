@@ -148,6 +148,35 @@ func (s *Service) Get(ctx context.Context, id string) (model.Session, *Resolved,
 	return sess, r, err
 }
 
+// Conversation returns the session and messages from the same provider read
+// when supported, avoiding a full history read just to build the summary.
+func (s *Service) Conversation(ctx context.Context, id string) (model.Session, []model.Message, error) {
+	r, err := s.Resolve(ctx, id)
+	if err != nil {
+		return model.Session{}, nil, err
+	}
+	if p, ok := r.Provider.(providers.ConversationProvider); ok {
+		sum, msgs, err := p.Conversation(ctx, r.NativeID, r.Live)
+		if errors.Is(err, providers.ErrNotFound) && r.Live != nil {
+			// A live agent may not have saved its first history yet.
+			sum, msgs, err = liveFallback(r), nil, nil
+		}
+		if err != nil {
+			return model.Session{}, nil, err
+		}
+		return s.toSession(r, sum), msgs, nil
+	}
+	sess, err := s.Session(ctx, r)
+	if err != nil {
+		return model.Session{}, nil, err
+	}
+	msgs, err := r.Provider.Messages(ctx, r.NativeID, r.Live)
+	if errors.Is(err, providers.ErrNotFound) && r.Live != nil {
+		msgs, err = nil, nil
+	}
+	return sess, msgs, err
+}
+
 // LiveSessions returns only sessions currently hosted by Herdr.
 func (s *Service) LiveSessions(ctx context.Context) ([]model.Session, error) {
 	snap, err := s.herdr.Snapshot(ctx)

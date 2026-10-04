@@ -305,16 +305,7 @@ func (s *Server) getSession(w http.ResponseWriter, r *http.Request) {
 // in-progress updates to it are seen). Unknown anchors return everything.
 func (s *Server) getMessages(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	sess, res, err := s.Sessions.Get(r.Context(), id)
-	if err != nil {
-		s.fail(w, r, id, "get_messages", err)
-		return
-	}
-	msgs, err := res.Provider.Messages(r.Context(), res.NativeID, res.Live)
-	if errors.Is(err, providers.ErrNotFound) && res.Live != nil {
-		// A live session with no saved history yet has no messages.
-		msgs, err = nil, nil
-	}
+	sess, msgs, err := s.Sessions.Conversation(r.Context(), id)
 	if err != nil {
 		s.fail(w, r, id, "get_messages", err)
 		return

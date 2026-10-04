@@ -2,6 +2,7 @@ package sessions
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -76,6 +77,39 @@ type listSnapshot struct{}
 func (listSnapshot) Snapshot(context.Context) (*herdr.Snapshot, error) {
 	agent := "claude"
 	return &herdr.Snapshot{Panes: []herdr.Pane{{PaneID: "pane", Agent: &agent, AgentSession: &herdr.AgentSession{Agent: agent, Kind: "id", Value: "live"}}}}, nil
+}
+
+type conversationProvider struct {
+	stubProvider
+	err error
+}
+
+func (p conversationProvider) Conversation(context.Context, string, *providers.Live) (*providers.Summary, []model.Message, error) {
+	return nil, nil, p.err
+}
+
+func Test一括取得でも履歴未保存の稼働中セッションを開ける(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		id      string
+		err     error
+		wantErr error
+	}{
+		{"稼働中の履歴未保存", "claude:live", providers.ErrNotFound, nil},
+		{"停止中の履歴なし", "claude:offline", providers.ErrNotFound, providers.ErrNotFound},
+		{"稼働中の取得失敗", "claude:live", context.DeadlineExceeded, context.DeadlineExceeded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := New(listSnapshot{}, 0, conversationProvider{err: tc.err})
+			sess, msgs, err := s.Conversation(context.Background(), tc.id)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("error = %v, want %v", err, tc.wantErr)
+			}
+			if tc.wantErr == nil && (sess.ID != tc.id || sess.PaneID != "pane" || len(msgs) != 0) {
+				t.Fatalf("session = %+v, messages = %+v", sess, msgs)
+			}
+		})
+	}
 }
 
 type listArchive struct{}

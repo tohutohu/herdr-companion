@@ -846,6 +846,69 @@ func Test履歴がまだない実行中のセッションも開いてアーカ�
 	}
 }
 
+type combinedProvider struct {
+	*fakeProvider
+	conversationCalls, summaryCalls, messageCalls int
+}
+
+func (p *combinedProvider) Summary(context.Context, string, *providers.Live) (*providers.Summary, error) {
+	p.summaryCalls++
+	return nil, providers.ErrNotFound
+}
+
+func (p *combinedProvider) Messages(context.Context, string, *providers.Live) ([]model.Message, error) {
+	p.messageCalls++
+	return nil, providers.ErrNotFound
+}
+
+func (p *combinedProvider) Conversation(ctx context.Context, id string, live *providers.Live) (*providers.Summary, []model.Message, error) {
+	p.conversationCalls++
+	sum, err := p.fakeProvider.Summary(ctx, id, live)
+	if err != nil {
+		return nil, nil, err
+	}
+	msgs, err := p.fakeProvider.Messages(ctx, id, live)
+	return sum, msgs, err
+}
+
+func Test会話APIは一括取得で差分とETagを返す(t *testing.T) {
+	cfg, err := config.Load(filepath.Join(t.TempDir(), "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &combinedProvider{fakeProvider: &fakeProvider{root: t.TempDir()}}
+	srv := &Server{Config: cfg, Sessions: sessions.New(&fakeHerdr{snap: &herdr.Snapshot{}}, 0, p)}
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	path := "/v1/sessions/fake:s1/messages?after=m2"
+	resp, body := do(t, ts, cfg.Get().AuthToken, "GET", path, nil, "")
+	var page struct {
+		Session  model.Session   `json:"session"`
+		Messages []model.Message `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &page); err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != 200 || page.Session.ID != "fake:s1" || len(page.Messages) != 2 || page.Messages[0].ID != "m2" {
+		t.Fatalf("status %d: %s", resp.StatusCode, body)
+	}
+	etag := resp.Header.Get("ETag")
+	if etag == "" {
+		t.Fatal("missing ETag")
+	}
+	req, _ := http.NewRequest("GET", ts.URL+path, nil)
+	req.Header.Set("Authorization", "Bearer "+cfg.Get().AuthToken)
+	req.Header.Set("If-None-Match", etag)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 304 || p.conversationCalls != 2 || p.summaryCalls != 0 || p.messageCalls != 0 {
+		t.Fatalf("status %d, combined=%d summary=%d messages=%d", resp.StatusCode, p.conversationCalls, p.summaryCalls, p.messageCalls)
+	}
+}
+
 func Test停止中のセッションを再開しアーカイブからも外す(t *testing.T) {
 	ts, _, fh, tok := newTestServer(t)
 	do(t, ts, tok, "POST", "/v1/sessions/fake:old/archive", nil, "")
