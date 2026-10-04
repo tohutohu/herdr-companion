@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os/exec"
@@ -74,7 +76,7 @@ func (c *rpcClient) loop() {
 			break
 		}
 		var m wireMessage
-		if json.Unmarshal(b, &m) != nil {
+		if jsonv2.Unmarshal(b, &m) != nil {
 			continue
 		}
 		switch {
@@ -119,6 +121,15 @@ func (c *rpcClient) alive() bool {
 }
 
 func (c *rpcClient) call(ctx context.Context, method string, params, out any) error {
+	started := time.Now()
+	var writeTime, decodeTime time.Duration
+	var resultBytes int
+	defer func() {
+		if elapsed := time.Since(started); elapsed >= time.Second {
+			slog.Info("slow codex rpc", "operation", method, "duration_ms", elapsed.Milliseconds(),
+				"write_ms", writeTime.Milliseconds(), "decode_ms", decodeTime.Milliseconds(), "result_bytes", resultBytes)
+		}
+	}()
 	id := c.nextID.Add(1)
 	idRaw := json.RawMessage(strconv.FormatInt(id, 10))
 	ch := make(chan wireMessage, 1)
@@ -140,6 +151,7 @@ func (c *rpcClient) call(ctx context.Context, method string, params, out any) er
 		c.mu.Unlock()
 		return err
 	}
+	writeTime = time.Since(started)
 	select {
 	case <-ctx.Done():
 		c.mu.Lock()
@@ -153,8 +165,12 @@ func (c *rpcClient) call(ctx context.Context, method string, params, out any) er
 		if m.Error != nil {
 			return m.Error
 		}
+		resultBytes = len(m.Result)
 		if out != nil {
-			return json.Unmarshal(m.Result, out)
+			startDecode := time.Now()
+			err := jsonv2.Unmarshal(m.Result, out)
+			decodeTime = time.Since(startDecode)
+			return err
 		}
 		return nil
 	}

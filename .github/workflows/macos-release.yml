@@ -64,7 +64,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.24.x"
+          go-version: "1.27.x"
 
       - name: Run Android and shared regression checks
         working-directory: android
@@ -238,7 +238,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.24.x"
+          go-version: "1.27.x"
           cache-dependency-path: gateway/go.sum
 
       # hc is pure Go with no cgo, so one runner builds every platform.

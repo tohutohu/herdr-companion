@@ -290,6 +290,22 @@ func Test認証トークンがないリクエストは拒否される(t *testing
 	}
 }
 
+func Test実行時プロファイルは認証トークンが必要(t *testing.T) {
+	ts, _, _, token := newTestServer(t)
+	for _, path := range []string{"/debug/pprof/", "/debug/pprof/goroutine", "/debug/pprof/heap", "/debug/pprof/profile", "/debug/pprof/trace", "/debug/pprof/symbol"} {
+		for _, tok := range []string{"", "wrong"} {
+			resp, _ := do(t, ts, tok, "GET", path, nil, "")
+			if resp.StatusCode != http.StatusUnauthorized {
+				t.Fatalf("%s: unauthenticated status = %d", path, resp.StatusCode)
+			}
+		}
+	}
+	resp, body := do(t, ts, token, "GET", "/debug/pprof/goroutine?debug=1", nil, "")
+	if resp.StatusCode != http.StatusOK || !bytes.HasPrefix(body, []byte("goroutine profile:")) {
+		t.Fatalf("authenticated profile: status = %d", resp.StatusCode)
+	}
+}
+
 func Testセッション一覧はHerdrの状態とオフラインセッションを返す(t *testing.T) {
 	ts, _, _, tok := newTestServer(t)
 	resp, body := do(t, ts, tok, "GET", "/v1/sessions", nil, "")

@@ -59,7 +59,7 @@ docs/      architecture and macOS release documentation
 
 | Target | Requirements |
 |---|---|
-| Mac | Go 1.24+, Herdr 0.9+, Claude Code, Codex CLI, OpenCode and/or Devin CLI, and network connectivity (Tailscale recommended) |
+| Mac | Go 1.27+, Herdr 0.9+, Claude Code, Codex CLI, OpenCode and/or Devin CLI, and network connectivity (Tailscale recommended) |
 | Usage limits | CodexBar (brew install --cask codexbar, optional) |
 | Android | Android 10 (API 29) or newer, with a network route to the Mac (Tailscale recommended) |
 | Building | JDK 17 and Android SDK (compileSdk 37) |

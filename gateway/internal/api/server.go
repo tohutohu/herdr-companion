@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -107,6 +108,11 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("POST /v1/devices", s.registerDevice)
 	api.HandleFunc("DELETE /v1/devices", s.unregisterDevice)
 	mux.Handle("/v1/", s.auth(api))
+	// Profiles contain runtime details and require the same token as the API.
+	mux.Handle("GET /debug/pprof/", s.auth(http.HandlerFunc(pprof.Index)))
+	mux.Handle("GET /debug/pprof/profile", s.auth(http.HandlerFunc(pprof.Profile)))
+	mux.Handle("GET /debug/pprof/trace", s.auth(http.HandlerFunc(pprof.Trace)))
+	mux.Handle("GET /debug/pprof/symbol", s.auth(http.HandlerFunc(pprof.Symbol)))
 	return logRequests(mux)
 }
 

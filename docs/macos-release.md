@@ -32,7 +32,7 @@ build=1
 
 ## ローカルビルド
 
-必要なものはJDK 17、Xcode Command Line Tools、Go 1.24以上、arm64 macOSです。アイコンを再生成するときだけ`librsvg`（`brew install librsvg`）も必要です。
+必要なものはJDK 17、Xcode Command Line Tools、Go 1.27以上、arm64 macOSです。アイコンを再生成するときだけ`librsvg`（`brew install librsvg`）も必要です。
 
 通常のrelease成果物は次の1コマンドで生成します。
 
@@ -168,7 +168,7 @@ Gatewayも使う場合は、別途`Herdr-Companion-Gateway-x.y.z.dmg`を開い�
 
 ## GitHub Actions / GitHub Release
 
-[`.github/workflows/macos-release.yml`](../.github/workflows/macos-release.yml)は`v*` tag pushまたはmanual dispatchで動きます。`macos-14` arm64 runner上で、JDK 17、Gradle cache、Go 1.24、Android/shared regression、Gateway test/vet、release APK生成、temporary keychain、2つのrelease DMG生成、verification、artifact uploadを順に実行します。Linux .debとエージェント向けCLI `hc`（[cli.md](cli.md)）は別jobで作ります。tag push時は次のファイルをGitHub Releaseへ添付します（それぞれ`.sha256`付き）。
+[`.github/workflows/macos-release.yml`](../.github/workflows/macos-release.yml)は`v*` tag pushまたはmanual dispatchで動きます。`macos-14` arm64 runner上で、JDK 17、Gradle cache、Go 1.27、Android/shared regression、Gateway test/vet、release APK生成、temporary keychain、2つのrelease DMG生成、verification、artifact uploadを順に実行します。Linux .debとエージェント向けCLI `hc`（[cli.md](cli.md)）は別jobで作ります。tag push時は次のファイルをGitHub Releaseへ添付します（それぞれ`.sha256`付き）。
 
 ```text
 Herdr-Companion-x.y.z.dmg
