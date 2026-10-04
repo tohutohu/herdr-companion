@@ -24,7 +24,7 @@ Heapの保持量は、比較後の12:57:12時点で約25 MB、12:59:38時点で�
 - **回答履歴ログの全読み直し**: 比較前の`bufio.ReadBytes`累計割り当ては約995 MB/30秒。追記時にrollout全体を再走査していた。ファイルごとに最後の完全な行までのoffsetと質問の解析状態を保持し、追記分だけ読む。未完の行は次回に再試行し、ファイルの置換・縮小・同サイズでのmtime変更時は読み直す。通常のrolloutは追記専用であることを前提とする。
 - **一覧で捨てるツール出力の変換**: Summaryは末尾のユーザー／アシスタント本文だけを変換する。質問の探索ではツール出力フィールドを持たない型を使う。`pendingAsyncQuestions`の割り当ては約869 MBから約18.5 MB/30秒へ減った。
 - **切り捨て前の巨大なrune配列**: `Truncate`は文字列全体を`[]rune`へ変換していた。必要な文字数まで走査し、切り出した接頭辞だけを返す。日本語・不正UTF-8・境界値の従来の出力をテストで確認した。
-- **JSON復号**: CodexのRPC受信と履歴item解析に`encoding/json/v2`を明示的に使用する。送信側は既存のJSON形式を維持した。
+- **JSON復号**: 初回の修正ではCodexのRPC受信と履歴item解析に`encoding/json/v2`を明示的に使用した。その後のgoccy/go-json比較に基づく最終構成は下記の通り。送信側は既存のJSON形式を維持した。
 
 4 MBの過去ログに短いレコードを追記する`BenchmarkAnsweredAppend`では、全走査が約5–9 ms / 8.5 MB割り当て、増分読み取りが約0.06 ms / 66 KB割り当てだった。質問への回答・未完の行・次の発言への紐づけ・以前に返した結果の不変性・縮小後のリセットをテストしている。
 
@@ -39,6 +39,32 @@ Heapの保持量は、比較後の12:57:12時点で約25 MB、12:59:38時点で�
 [`github.com/mazrean/odjson`](https://pkg.go.dev/github.com/mazrean/odjson) v0.2.0を一時的に導入し、RPC・Thread・itemおよび質問探索用の型に生成したcodecを、Go 1.27.1の標準JSON v1/v2と比較した。入力は約2.36 MBのツール出力中心の合成履歴。
 
 今回の型と入力では、標準v2よりRPC／Threadの復号が遅くなるケースが多かった。itemで時間が改善するケースもあったが割り当てが増え、生成コードの追加に見合う改善を確認できなかったため採用していない。生成コードと依存は除去済み。標準v1/v2の比較用`BenchmarkCodexJSON`は残している。別のデータ構造でも同じ結果になるとは限らない。
+
+## goccy/go-jsonの追加比較と採用
+
+[`github.com/goccy/go-json`](https://github.com/goccy/go-json) v0.11.2をGo 1.27.1 / Apple M1 Max上で比較した。標準v1/v2/goccyを同じ型・入力・新規の出力先で3回ずつ計測した中央値は以下の通り。通常の`Unmarshal`を使用し、入力を参照したままにする`DecodeNoCopyString`等のオプションは使用していない。
+
+| 合成履歴の復号対象 | 標準v2の時間 | goccyの時間 | 標準v2 / goccyの割り当て |
+|---|---:|---:|---:|
+| Thread (約2.36 MB) | 3.33 ms | 2.27 ms | 2.63 / 2.64 MB |
+| tool item (約74 KB) | 232 µs | 97 µs | 156 / 74 KB |
+| 質問探索用projection | 93 µs | 58 µs | 96 / 131 bytes |
+| 日本語・引用符・バックスラッシュ入りThread (約3.35 MB) | 8.81 ms | 5.12 ms | 3.41 / 3.45 MB |
+| 同じ日本語入りtool item | 783 µs | 461 µs | 205 / 107 KB |
+
+Threadや小さいprojectionの割り当ては若干増える一方、繰り返し変換する大きなtool itemの割り当てがほぼ半分になった。
+
+本番の`ConvertThread`・`pendingAsyncQuestions`・`lastThreadText`を連続で実行する`BenchmarkCodexHistory`も追加した。約2.36 MBのツール履歴と末尾のアシスタント本文を使い、標準v2版とgoccy版の別のテスト実行ファイルを作成し、実行順を交互にして各3回、1秒ずつ計測した。
+
+RPCの型付き結果・履歴item・軽量な探索へ広くgoccyを使用した合成ベンチマークでは31.73→16.94 ms、5.12→2.50 MB/opとなった。一方、この構成を実負荷で測ると、goccyの`RuntimeContext.SetInput`による作業バッファへのコピーだけで約250 MB/30秒の追加割り当てがあった。固定サイズの入力を繰り返すベンチマークはバッファを再利用しやすく、巨大なThreadと様々なitemを並行処理する実負荷のコストを十分に表していなかった。通常HTTP完了数も47→28件と異なり、総割り当て1,700→1,435 MB、CPU時間4.00→2.34秒だけを根拠に全体が改善したとは判断できない。大型RPCの結果復号は中央値22→9 msだったが、総RPC時間は3.9→6.2秒とむしろ増えた。13:33にはMacのload averageが約106に戻っていた。
+
+最終的には **`convertItem`の完全なitem復号だけにgoccyを採用**し、RPC全体・Thread・質問／plan／末尾本文の軽量探索・画像取得には標準v2を維持した。この構成と標準v2のみの構成を改めて交互に比較すると、中央値は **27.33→18.22 ms（約33%短縮）、5.12→2.51 MB/op（約51%削減）**。このMacの負荷で絶対時間は変動するため、Gateway全体の応答がこの割合で改善するという意味ではない。
+
+限定した最終構成の実負荷pprof (13:38:01–13:38:31) はCPU時間3.16秒、累計割り当て1,323.68 MB、保持heap約23 MBだった。goccyの`SetInput`割り当ては **約250→24 MB/30秒**へ減り、軽量な探索や巨大なThreadで生じていた余分なコピーを抑えられた。この窓の通常HTTPは26件、所要時間中央値2.74秒、最大10.08秒で、エラーはなかった。前の窓とは処理数・出力・起動からの時間が異なり、秒単位のCodex応答待ちが解消したとは言えない。残る割り当ての約79%はRPCのRawMessageコピーとWebSocket受信の`io.ReadAll`だった。
+
+RPCの入口で結果の内部まで重複キー・不正UTF-8を拒否することをテストしている。goccyは標準`encoding/json`との互換性を目指すライブラリで、標準v2とすべての入力で同じ意味になるわけではない。既存の正常なCodex fixtureについて、Thread・RPC・item・画像／質問フィールドの値の一致、入力バッファとdecoderの再利用後も値が保持されること、壊れたJSONの拒否、従来のgolden出力を確認した。
+
+Go全テスト・vet・Codexのrace detectorは成功し、goccyを含むGateway Managerを再ビルド・署名検証して、このMacへ反映した。ベンチマークと追加の生pprofは`/private/tmp/herdr-go-json-evaluation/`に保存している。
 
 ## 再計測
 
@@ -81,7 +107,7 @@ env -u GOROOT go tool pprof -top -alloc_space -nodecount=20 \
   '/Applications/Herdr Companion Gateway.app/Contents/Resources/herdr-mobile-gateway' \
   /private/tmp/herdr-gateway-profile/allocs.pprof
 env -u GOROOT go test ./internal/providers/codex -run '^$' \
-  -bench 'Benchmark(CodexJSON|AnsweredAppend)' -benchmem -count=3
+  -bench 'Benchmark(CodexJSON|CodexHistory|AnsweredAppend)' -benchmem -count=3
 ```
 
 今回の生プロファイルは`/private/tmp/herdr-gateway-pprof-20261004/`に保存した。プロファイルとgoroutine dumpは内部パス等を含むためGitへは追加していない。比較前の実行ファイルも同じディレクトリに保存している。Mac Gatewayの再ビルド・署名検証、Go全テスト・vet、Codex/model/APIのrace detectorは成功した。

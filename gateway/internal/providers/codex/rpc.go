@@ -75,6 +75,8 @@ func (c *rpcClient) loop() {
 		if err != nil {
 			break
 		}
+		// Validate the complete RPC, including nested duplicate names and UTF-8,
+		// before decoding items with a different codec.
 		var m wireMessage
 		if jsonv2.Unmarshal(b, &m) != nil {
 			continue

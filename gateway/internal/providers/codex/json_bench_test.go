@@ -6,14 +6,20 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	goccyjson "github.com/goccy/go-json"
 )
 
 // Model a long thread with large tool results, the expensive part of polling.
 // Maps keep the benchmark input independent of generated codecs on our types.
 func benchmarkThreadJSON(b *testing.B) ([]byte, []byte, []byte) {
+	return benchmarkThreadWithOutput(b, strings.Repeat("test output line\n", 4096))
+}
+
+func benchmarkThreadWithOutput(b *testing.B, output string) ([]byte, []byte, []byte) {
 	b.Helper()
 	it := map[string]any{"id": "command-1", "type": "commandExecution", "command": "go test ./...",
-		"aggregatedOutput": strings.Repeat("test output line\n", 4096), "exitCode": 0, "status": "completed"}
+		"aggregatedOutput": output, "exitCode": 0, "status": "completed"}
 	turns := make([]any, 32)
 	for i := range turns {
 		turns[i] = map[string]any{"id": "turn-1", "status": "completed", "items": []any{it}}
@@ -32,6 +38,15 @@ func benchmarkThreadJSON(b *testing.B) ([]byte, []byte, []byte) {
 
 func BenchmarkCodexJSON(b *testing.B) {
 	wire, thread, rawItem := benchmarkThreadJSON(b)
+	benchmarkCodexDecoders(b, wire, thread, rawItem)
+}
+
+func BenchmarkCodexJSONUnicode(b *testing.B) {
+	wire, thread, rawItem := benchmarkThreadWithOutput(b, strings.Repeat("テスト出力: \"日本語\" / path\\file\t🙂\n", 2048))
+	benchmarkCodexDecoders(b, wire, thread, rawItem)
+}
+
+func benchmarkCodexDecoders(b *testing.B, wire, thread, rawItem []byte) {
 	for _, tc := range []struct {
 		name string
 		raw  []byte
@@ -49,6 +64,7 @@ func BenchmarkCodexJSON(b *testing.B) {
 		}{
 			{"v1", json.Unmarshal},
 			{"v2", func(raw []byte, out any) error { return jsonv2.Unmarshal(raw, out) }},
+			{"goccy", goccyjson.Unmarshal},
 		} {
 			b.Run(tc.name+"/"+codec.name, func(b *testing.B) {
 				b.SetBytes(int64(len(tc.raw)))
@@ -60,6 +76,30 @@ func BenchmarkCodexJSON(b *testing.B) {
 					}
 				}
 			})
+		}
+	}
+}
+
+// Exercise the production passes, including lightweight question projections.
+func BenchmarkCodexHistory(b *testing.B) {
+	_, raw, _ := benchmarkThreadJSON(b)
+	var th Thread
+	if err := jsonv2.Unmarshal(raw, &th); err != nil {
+		b.Fatal(err)
+	}
+	th.Turns = append(th.Turns, Turn{Items: []json.RawMessage{
+		json.RawMessage(`{"type":"agentMessage","id":"last","text":"テストが完了しました。"}`),
+	}})
+	b.ReportAllocs()
+	for b.Loop() {
+		if got := ConvertThread(&th, convertOptions{}); len(got) != 33 {
+			b.Fatal("lost messages")
+		}
+		if got := pendingAsyncQuestions(&th); len(got) != 0 {
+			b.Fatal("unexpected pending questions")
+		}
+		if got := lastThreadText(&th); got != "テストが完了しました。" {
+			b.Fatal("lost last text")
 		}
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	goccyjson "github.com/goccy/go-json"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
@@ -184,7 +185,7 @@ func errorText(s string) string {
 
 func convertItem(raw json.RawMessage, ts time.Time, opt convertOptions) (model.Message, bool) {
 	var it item
-	if err := jsonv2.Unmarshal(raw, &it); err != nil {
+	if err := goccyjson.Unmarshal(raw, &it); err != nil {
 		opt.Sink.Record(providerName, opt.SessionID, deadletter.ParseError, err.Error(), raw)
 		var head itemHead
 		json.Unmarshal(raw, &head)
