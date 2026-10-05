@@ -21,8 +21,8 @@ Herdr Companion Gateway (Go, on the Mac)
 
 - **Providers are the source of truth.** The gateway keeps no session,
   message, event or attachment database. Every request reads Herdr and the
-  provider's own storage and converts on the fly. Restarting the gateway loses
-  nothing.
+  provider's own storage, reusing bounded in-memory projections when their
+  source is unchanged. Restarting the gateway loses nothing.
 - **Persistent gateway state** is limited to `~/.config/herdr-mobile/config.json`
   (listen address, auth token, FCM device tokens, optional paths), the set of
   archived session ids (`~/.local/state/herdr-mobile/archive.json`) and
@@ -30,7 +30,8 @@ Herdr Companion Gateway (Go, on the Mac)
 - **In-memory only:** last seen status per session (push de-duplication),
   the FCM access token, and — for Codex — pending server requests received on
   the daemon connection (the daemon replays them on reconnect).
-- **Android caches**, the gateway does not. Room is the UI's read source.
+- **Android caches persistently.** Room is the UI's read source. Gateway
+  transcript/history projections are disposable and can be reconstructed.
 
 ## Identity
 
@@ -115,6 +116,22 @@ identity; the native database schema selects the history format.
 
 - History: `thread/read {includeTurns:true}` through a private
   `codex app-server` (stdio) or the shared daemon when connected.
+- Display reads reuse history and converted messages while the rollout file
+  identity, size, mtime and daemon event/connection generation remain unchanged.
+  The cache holds at most 64 entries and approximately 64 MiB of history and
+  message projections, with a 30-second reconciliation deadline. Small metadata
+  (`includeTurns:false`) has a 5-second deadline. Actions always read fresh data
+  and invalidate display reads. Pending requests, mode and terminal dialogs are
+  recomputed rather than cached with the history.
+- Lists and notification watching consume an incremental rollout projection:
+  latest text, turn state, token accounting and question/plan hints. Oversized
+  tool records are skipped without retaining output. Finished content revisions
+  are reconciled against app-server once per content change, preserving detection
+  of background results within the same turn. Missing/unrecognized rollouts,
+  compaction, reversion and reconnects fall back to canonical reads. Partial
+  records are retried; file replacement, truncation and same-size rewrites reset
+  the projection. Projection entries are bounded to 64 and question data to
+  1 MiB per entry; oversized relevant records use canonical reconciliation.
 - When the TUI runs on the shared daemon (`codex --remote unix://`), the
   gateway subscribes to loaded threads (`thread/loaded/list` +
   `thread/resume`). Server requests (`item/tool/requestUserInput`, command /

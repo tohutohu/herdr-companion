@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
@@ -52,6 +53,11 @@ type Provider struct {
 	terminalInputMu sync.Mutex
 	readMu          sync.Mutex
 	reads           map[threadReadKey]*threadReadFlight
+	displayMu       sync.Mutex
+	metadataEntries map[string]*metadataEntry
+	historyEntries  map[string]*historyEntry
+	actionVersion   atomic.Uint64
+	summaryEntries  map[string]*summaryRolloutEntry
 }
 
 type threadReadKey struct {
@@ -268,15 +274,58 @@ func (p *Provider) fetchThread(ctx context.Context, id string, turns bool) (*Thr
 // --- Provider ---
 
 func (p *Provider) Summary(ctx context.Context, nativeID string, live *providers.Live) (*providers.Summary, error) {
-	th, err := p.readThread(ctx, nativeID, true)
+	meta, err := p.metadata(ctx, nativeID)
 	if err != nil {
 		return nil, err
 	}
+	state, scanErr := p.rolloutSummary(ctx, meta.Path)
+	if scanErr == nil {
+		state = p.checkSummaryVersion(meta.ID, meta.Path, state)
+	}
+	if scanErr == nil && state.available && state.turnID != "" && !state.unsupported {
+		th := state.thread(meta)
+		if d := p.currentDaemon(); d != nil {
+			d.mu.Lock()
+			if turn, ok := d.latestTurns[nativeID]; ok && turn.Status != "" && (turn.ID == state.turnID || d.latestTurnTimes[nativeID].After(state.turnAt)) {
+				if turn.ID != state.turnID {
+					state.planID = ""
+					th = state.thread(meta)
+				}
+				th.Turns[0].ID, th.Turns[0].Status = turn.ID, turn.Status
+			}
+			d.mu.Unlock()
+		}
+		base := summaryFromMetadata(th)
+		base.Context, base.Cost = state.tokens.context(), state.tokens.cost(th.Model)
+		if state.mode == "plan" {
+			base.Mode = planLabel
+		}
+		sum := p.summaryWithBase(ctx, th, live, state.lastText, base)
+		if lt := lastTurn(th); lt != nil && (lt.Status == "completed" || lt.Status == "failed" || lt.Status == "interrupted") {
+			if sum.CompletionRevision, err = p.rolloutCompletion(ctx, meta, state, lt); err != nil {
+				return nil, err
+			}
+		}
+		return sum, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	// Missing/unrecognized rollouts keep the canonical app-server behavior.
+	before := rolloutStat(meta.Path)
+	th, err := p.displayThread(ctx, nativeID)
+	if err != nil {
+		return nil, err
+	}
+	p.seedRolloutSummary(meta.Path, before, th)
 	return p.summaryFromText(ctx, th, live, lastThreadText(th)), nil
 }
 
 func (p *Provider) summaryFromText(ctx context.Context, th *Thread, live *providers.Live, text string) *providers.Summary {
-	s := summaryFromThread(th)
+	return p.summaryWithBase(ctx, th, live, text, summaryFromThread(th))
+}
+
+func (p *Provider) summaryWithBase(ctx context.Context, th *Thread, live *providers.Live, text string, s providers.Summary) *providers.Summary {
 	s.LastMessage = text
 	if lt := lastTurn(th); lt != nil {
 		s.LastTurnFailed = lt.Status == "failed"
@@ -308,11 +357,17 @@ const planLabel = "Plan"
 func summaryFromThread(th *Thread) providers.Summary {
 	lines := rolloutTailLines(th.Path)
 	info := tokenInfoFrom(lines)
-	s := providers.Summary{NativeID: th.ID, Cwd: th.Cwd, Model: th.Model, LastMessage: providers.OneLine(th.Preview, 160),
-		Context: info.context(), Cost: info.cost(th.Model), PinnedCwd: inManagedWorktree(th.Cwd)}
+	s := summaryFromMetadata(th)
+	s.Context, s.Cost = info.context(), info.cost(th.Model)
 	if collaborationModeFrom(lines) == "plan" {
 		s.Mode = planLabel
 	}
+	return s
+}
+
+func summaryFromMetadata(th *Thread) providers.Summary {
+	s := providers.Summary{NativeID: th.ID, Cwd: th.Cwd, Model: th.Model, LastMessage: providers.OneLine(th.Preview, 160), PinnedCwd: inManagedWorktree(th.Cwd)}
+
 	if th.Name != nil {
 		s.Title = *th.Name
 	}
@@ -357,7 +412,7 @@ func (p *Provider) Recent(ctx context.Context, since time.Time) ([]providers.Sum
 }
 
 func (p *Provider) Messages(ctx context.Context, nativeID string, live *providers.Live) ([]model.Message, error) {
-	th, err := p.readThread(ctx, nativeID, true)
+	th, err := p.displayThread(ctx, nativeID)
 	if err != nil {
 		return nil, err
 	}
@@ -366,7 +421,7 @@ func (p *Provider) Messages(ctx context.Context, nativeID string, live *provider
 
 // Conversation reads and converts the thread once for GET /messages.
 func (p *Provider) Conversation(ctx context.Context, nativeID string, live *providers.Live) (*providers.Summary, []model.Message, error) {
-	th, err := p.readThread(ctx, nativeID, true)
+	th, err := p.displayThread(ctx, nativeID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -380,7 +435,7 @@ func (p *Provider) messagesFromThread(ctx context.Context, th *Thread, live *pro
 	if live != nil && live.Cwd != "" && !inManagedWorktree(th.Cwd) {
 		root = live.Cwd
 	}
-	msgs := ConvertThread(th, convertOptions{SessionID: gatewayID(nativeID), Root: root, Sink: p.sink, Answered: answeredInputs(th.Path)})
+	msgs := p.convertedHistory(th, root)
 
 	var pending []model.Message
 	if d := p.currentDaemon(); d != nil {
@@ -429,6 +484,7 @@ func (p *Provider) Image(ctx context.Context, nativeID, messageID string, index 
 }
 
 func (p *Provider) Send(ctx context.Context, nativeID string, live *providers.Live, in model.Input) error {
+	defer p.actionVersion.Add(1)
 	if d := p.currentDaemon(); d != nil && d.loaded(nativeID) {
 		return p.sendStructured(ctx, d, nativeID, in)
 	}
@@ -445,6 +501,7 @@ func (p *Provider) Send(ctx context.Context, nativeID string, live *providers.Li
 // unexpectedly change max/medium effort. Standalone TUIs still use the native
 // shortcut because they have no structured settings channel.
 func (p *Provider) CycleMode(ctx context.Context, nativeID string, live *providers.Live) error {
+	defer p.actionVersion.Add(1)
 	if live == nil {
 		return providers.ErrNotLive
 	}
@@ -499,6 +556,7 @@ func (p *Provider) sendStructured(ctx context.Context, d *daemonConn, id string,
 }
 
 func (p *Provider) Respond(ctx context.Context, nativeID string, live *providers.Live, r model.InteractionResponse) error {
+	defer p.actionVersion.Add(1)
 	if strings.HasPrefix(r.InteractionID, asyncInputPrefix) {
 		return p.respondAsync(ctx, nativeID, live, r)
 	}
@@ -550,10 +608,15 @@ type daemonConn struct {
 	// resumeFailed marks threads whose subscribe failure was logged. A TUI
 	// left open without a prompt keeps a thread loaded that cannot be
 	// resumed until its first turn, and sync retries it every few seconds.
-	resumeFailed map[string]bool
-	status       map[string]ThreadStatus
-	pending      map[string]map[string]pendingRequest // thread -> request id -> request
-	settings     map[string]threadSettings
+	resumeFailed     map[string]bool
+	status           map[string]ThreadStatus
+	pending          map[string]map[string]pendingRequest // thread -> request id -> request
+	settings         map[string]threadSettings
+	historyVersions  map[string]uint64
+	metadataVersions map[string]uint64
+	latestTurns      map[string]Turn
+	latestTurnTimes  map[string]time.Time
+	summaryVersions  map[string]uint64
 }
 
 // threadSettings is the part of a loaded thread's settings shown as its mode.
@@ -593,12 +656,17 @@ func (s threadSettings) label() string {
 
 func newDaemonConn(sink deadletter.Sink) *daemonConn {
 	return &daemonConn{
-		sink:         sink,
-		subscribed:   map[string]bool{},
-		resumeFailed: map[string]bool{},
-		status:       map[string]ThreadStatus{},
-		pending:      map[string]map[string]pendingRequest{},
-		settings:     map[string]threadSettings{},
+		sink:             sink,
+		subscribed:       map[string]bool{},
+		resumeFailed:     map[string]bool{},
+		status:           map[string]ThreadStatus{},
+		pending:          map[string]map[string]pendingRequest{},
+		settings:         map[string]threadSettings{},
+		historyVersions:  map[string]uint64{},
+		metadataVersions: map[string]uint64{},
+		latestTurns:      map[string]Turn{},
+		latestTurnTimes:  map[string]time.Time{},
+		summaryVersions:  map[string]uint64{},
 	}
 }
 
@@ -716,7 +784,31 @@ func (d *daemonConn) Notification(method string, params json.RawMessage) {
 		RequestID json.RawMessage `json:"requestId"`
 		Status    ThreadStatus    `json:"status"`
 		Settings  threadSettings  `json:"threadSettings"`
+		Turn      struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"turn"`
 	}
+	json.Unmarshal(params, &p)
+	d.mu.Lock()
+	if p.ThreadID != "" {
+		if strings.HasPrefix(method, "item/") || strings.HasPrefix(method, "turn/") || method == "thread/reverted" || method == "thread/compacted" || method == "thread/closed" {
+			d.historyVersions[p.ThreadID]++
+		}
+		if method == "thread/reverted" || method == "thread/compacted" || method == "thread/closed" {
+			d.summaryVersions[p.ThreadID]++
+			delete(d.latestTurns, p.ThreadID)
+			delete(d.latestTurnTimes, p.ThreadID)
+		}
+		if strings.HasPrefix(method, "thread/") || method == "turn/started" || method == "turn/completed" {
+			d.metadataVersions[p.ThreadID]++
+		}
+		if (method == "turn/started" || method == "turn/completed") && p.Turn.ID != "" {
+			d.latestTurns[p.ThreadID] = Turn{ID: p.Turn.ID, Status: p.Turn.Status}
+			d.latestTurnTimes[p.ThreadID] = time.Now()
+		}
+	}
+	d.mu.Unlock()
 	switch method {
 	case "serverRequest/resolved":
 		json.Unmarshal(params, &p)

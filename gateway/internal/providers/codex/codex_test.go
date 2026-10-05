@@ -118,7 +118,7 @@ func Test会話の要約とメッセージを一度のスレッド取得で返�
 				t.Fatal(err)
 			}
 			calls := f.callList()
-			if len(calls) != 1 || !strings.HasPrefix(calls[0], "thread/read ") || !strings.Contains(calls[0], `"includeTurns":true`) {
+			if len(calls) != 2 || !strings.Contains(calls[0], `"includeTurns":false`) || !strings.Contains(calls[1], `"includeTurns":true`) {
 				t.Fatalf("history requests = %v", calls)
 			}
 			wantSum, err := p.Summary(ctx, th.ID, nil)
@@ -607,7 +607,7 @@ func TestDaemon接続時は構造化APIで送信と承認を行う(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if calls := f.callList()[before:]; len(calls) != 1 || !strings.HasPrefix(calls[0], "thread/read ") {
+	if calls := f.callList()[before:]; len(calls) != 2 || !strings.Contains(calls[0], `"includeTurns":false`) || !strings.Contains(calls[1], `"includeTurns":true`) {
 		t.Fatalf("conversation requests = %v", calls)
 	}
 	// 購読時の approvalPolicy / sandbox からモードが分かる
