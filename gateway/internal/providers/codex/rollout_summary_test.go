@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
@@ -83,6 +84,60 @@ func Test一覧の要約は追記分だけ読み終了結果を一度だけ照�
 	}
 	if _, err = p.Summary(ctx, th.ID, nil); err != nil || historyCalls(f) != 2 {
 		t.Fatal("repeated background reconciliation", err)
+	}
+}
+
+func Test同じ終了ターンのログ書換えと置換で通知の版を再照合する(t *testing.T) {
+	th, raw := summaryTestThread(t)
+	p, f := cacheTestProvider(t, th)
+	ctx := context.Background()
+	first, err := p.Summary(ctx, th.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, output := range []string{"ng", "xx"} {
+		th.Turns[0].Items[1] = json.RawMessage(`{"type":"commandExecution","id":"cmd-1","status":"completed","aggregatedOutput":"` + output + `","exitCode":0}`)
+		setCacheThread(f, th)
+		// Preserve the turn ID, record count, and file size while changing output.
+		updated := strings.Replace(string(raw), `"aggregated_output":"ok"`, `"aggregated_output":"`+output+`"`, 1)
+		if i == 0 {
+			if err := os.WriteFile(th.Path, []byte(updated), 0600); err != nil {
+				t.Fatal(err)
+			}
+			future := time.Now().Add(time.Second)
+			if err := os.Chtimes(th.Path, future, future); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			if err := os.WriteFile(th.Path+".new", []byte(updated), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(th.Path+".new", th.Path); err != nil {
+				t.Fatal(err)
+			}
+		}
+		next, err := p.Summary(ctx, th.ID, nil)
+		if err != nil || next.CompletionRevision == first.CompletionRevision || next.CompletionRevision != completionRevision(lastTurn(th)) {
+			t.Fatalf("rewritten completion: %+v, %v", next, err)
+		}
+		first = next
+	}
+}
+
+func Test同一ターンの完了イベントで結果が更新されたら通知の版を再照合する(t *testing.T) {
+	th, _ := summaryTestThread(t)
+	p, f := cacheTestProvider(t, th)
+	ctx := context.Background()
+	first, err := p.Summary(ctx, th.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	th.Turns[0].Items = append(th.Turns[0].Items, json.RawMessage(`{"type":"agentMessage","id":"background-answer","text":"バックグラウンド処理も完了しました"}`))
+	setCacheThread(f, th)
+	appendRollout(t, th.Path, `{"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-1","last_agent_message":"バックグラウンド処理も完了しました"}}`+"\n")
+	next, err := p.Summary(ctx, th.ID, nil)
+	if err != nil || next.CompletionRevision == first.CompletionRevision || next.CompletionRevision != completionRevision(lastTurn(th)) || historyCalls(f) != 2 {
+		t.Fatalf("updated completion: %+v, %v, %v", next, err, f.callList())
 	}
 }
 

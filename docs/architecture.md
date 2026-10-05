@@ -27,7 +27,8 @@ Herdr Companion Gateway (Go, on the Mac)
   (listen address, auth token, FCM device tokens, optional paths), the set of
   archived session ids (`~/.local/state/herdr-mobile/archive.json`) and
   dead-letter / log files under `~/.local/state/herdr-mobile/`.
-- **In-memory only:** last seen status per session (push de-duplication),
+- **In-memory only:** last seen status and completion revision per session
+  (push de-duplication), bounded Codex display and rollout projections,
   the FCM access token, and — for Codex — pending server requests received on
   the daemon connection (the daemon replays them on reconnect).
 - **Android caches persistently.** Room is the UI's read source. Gateway

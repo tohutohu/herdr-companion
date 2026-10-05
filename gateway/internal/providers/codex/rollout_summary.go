@@ -110,7 +110,10 @@ func (p *Provider) rolloutSummary(ctx context.Context, path string) (rolloutSumm
 		return e.state, nil
 	}
 	if e.info == nil || !os.SameFile(e.info, st) || st.Size() < e.info.Size() || (st.Size() == e.info.Size() && !st.ModTime().Equal(e.info.ModTime())) {
-		e.offset, e.state = 0, rolloutSummary{}
+		// Preserve monotonic revisions: a rewritten file can contain the same
+		// number of records describing different results within the same turn.
+		version := e.state.contentVersion + 1
+		e.offset, e.state = 0, rolloutSummary{contentVersion: version}
 	}
 	r := bufio.NewReaderSize(io.NewSectionReader(f, e.offset, st.Size()-e.offset), 64<<10)
 	for {
@@ -227,7 +230,11 @@ func summaryRecordHeader(line []byte) (head summaryRecordHead) {
 
 func (s *rolloutSummary) consume(line []byte) {
 	head := summaryRecordHeader(line)
-	if head.record == "response_item" || head.payload == "item_completed" || head.record == "compacted" {
+	if head.record == "response_item" || head.record == "compacted" {
+		s.contentVersion++
+	}
+	switch head.payload {
+	case "item_completed", "task_complete", "turn_aborted", "agent_message", "user_message", "error":
 		s.contentVersion++
 	}
 	if head.record == "response_item" && head.payload != "message" {
