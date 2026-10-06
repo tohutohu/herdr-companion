@@ -709,6 +709,79 @@ func Testモード設定に失敗しても起動は続ける(t *testing.T) {
 	}
 }
 
+// reportingProvider stands for Claude Code, whose hook reports the session
+// once the TUI reads its input.
+type reportingProvider struct{ fakeProvider }
+
+func (reportingProvider) ReportsSessionAtStartup() {}
+
+func Test起動時にセッションを報告するエージェントにはidleでも報告まで初回promptを送らない(t *testing.T) {
+	// Herdr reports idle while the TUI still starts and discards input.
+	fh := &fakeHerdr{status: herdr.StatusIdle}
+	l, root := newLauncher(t, fh)
+	l.Providers = []providers.Provider{reportingProvider{}}
+	report := time.AfterFunc(50*time.Millisecond, func() {
+		fh.record("session reported")
+		fh.mu.Lock()
+		fh.session = &herdr.AgentSession{Agent: "claude", Kind: "id", Value: "abc-123"}
+		fh.mu.Unlock()
+	})
+	defer report.Stop()
+	res, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: root, Prompt: "hi"})
+	if err != nil || res.SessionID != "claude:abc-123" || res.Warning != "" {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if got, want := strings.Join(fh.calls, "|"), "create workspace|start claude --default|session reported|prompt hi"; got != want {
+		t.Errorf("calls = %s", got)
+	}
+}
+
+func Test起動時のセッション報告があればHerdrがidleと判定する前に初回promptを送る(t *testing.T) {
+	fh := &fakeHerdr{status: herdr.StatusUnknown, session: &herdr.AgentSession{Agent: "claude", Kind: "id", Value: "abc-123"}}
+	l, root := newLauncher(t, fh)
+	l.Providers = []providers.Provider{reportingProvider{}}
+	res, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: root, Prompt: "hi"})
+	if err != nil || res.SessionID != "claude:abc-123" || res.Warning != "" {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if got := strings.Join(fh.calls, "|"); !strings.HasSuffix(got, "|prompt hi") {
+		t.Errorf("calls = %s", got)
+	}
+}
+
+func Test連携フックがなくセッション報告が来なくても待ち時間の後は状態で判定して送る(t *testing.T) {
+	fh := &fakeHerdr{status: herdr.StatusIdle}
+	l, root := newLauncher(t, fh)
+	l.Providers = []providers.Provider{reportingProvider{}}
+	l.SessionReportWait = 300 * time.Millisecond
+	started := time.Now()
+	res, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: root, Prompt: "hi"})
+	if err != nil || res.SessionID != "claude:abc-123" {
+		t.Fatalf("%+v %v", res, err)
+	}
+	// Waiting once, not again before typing.
+	if elapsed := time.Since(started); elapsed < l.SessionReportWait || elapsed > 2*l.SessionReportWait-50*time.Millisecond {
+		t.Errorf("sent after %v", elapsed)
+	}
+	if got := strings.Join(fh.calls, "|"); !strings.HasSuffix(got, "|prompt hi") {
+		t.Errorf("calls = %s", got)
+	}
+}
+
+func Test起動時のセッション報告があってもダイアログ表示中は送らない(t *testing.T) {
+	fh := &fakeHerdr{status: herdr.StatusBlocked, screen: "Update now?", session: &herdr.AgentSession{Agent: "claude", Kind: "id", Value: "abc-123"}}
+	l, root := newLauncher(t, fh)
+	l.Providers = []providers.Provider{reportingProvider{}}
+	l.StartTimeout = 25 * time.Millisecond
+	res, err := l.Start(context.Background(), StartRequest{Provider: "claude", Cwd: root, Prompt: "hi"})
+	if err != nil || res.Warning == "" || res.SessionID != "" {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if strings.Contains(strings.Join(fh.calls, "|"), "prompt ") {
+		t.Fatal("sent into a dialog")
+	}
+}
+
 func gitRun(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)

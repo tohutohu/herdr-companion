@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -58,8 +59,14 @@ type Launcher struct {
 
 	// Timings (overridable in tests).
 	StartTimeout time.Duration
+	// PollInterval paces identity polling, and is how long Herdr's status
+	// must hold before a starting agent counts as ready.
 	PollInterval time.Duration
 	IdentityWait time.Duration
+	// SessionReportWait is how long a StartupSessionReporter whose hook has
+	// not reported is given before Herdr's status alone counts, for a
+	// missing integration.
+	SessionReportWait time.Duration
 
 	mu sync.Mutex
 	// pending holds launches waiting on trust, readiness or identity, by pane
@@ -397,7 +404,7 @@ func (l *Launcher) launch(ctx context.Context, plan launchPlan) (*StartResult, e
 	l.panes[pane] = true
 	l.mu.Unlock()
 	pl := &pendingLaunch{p: p, lp: lp, ws: ws, cwd: cwd, prompt: plan.prompt, knownID: plan.knownID, mode: plan.mode, started: started, worktree: wt, logKV: plan.logKV}
-	switch l.passStartupDialog(ctx, lp, pane, plan.trust) {
+	switch l.passStartupDialog(ctx, p, lp, pane, plan.trust) {
 	case startupTrust:
 		l.putPending(pane, pl)
 		res.TrustRequired = true
@@ -446,7 +453,7 @@ func (l *Launcher) AnswerTrust(ctx context.Context, pane string, accept bool) (*
 		slog.Info("folder trust declined", "provider", pl.p.Name(), "pane", pane, "cwd", pl.cwd)
 		return &StartResult{PaneID: pane}, l.discard(ctx, pl.ws, pl.worktree, pl.p)
 	}
-	if l.passStartupDialog(ctx, pl.lp, pane, true) != startupReady {
+	if l.passStartupDialog(ctx, pl.p, pl.lp, pane, true) != startupReady {
 		l.putPending(pane, pl)
 		return &StartResult{PaneID: pane, Warning: "The agent is waiting on a startup dialog. Open the terminal to continue."}, nil
 	}
@@ -474,7 +481,7 @@ func (l *Launcher) Continue(ctx context.Context, pane string) (*StartResult, err
 	if pl == nil {
 		return nil, ErrNoPendingTrust
 	}
-	switch l.passStartupDialog(ctx, pl.lp, pane, false) {
+	switch l.passStartupDialog(ctx, pl.p, pl.lp, pane, false) {
 	case startupTrust:
 		l.putPending(pane, pl)
 		return &StartResult{PaneID: pane, TrustRequired: true}, nil
@@ -517,7 +524,7 @@ func (l *Launcher) finish(ctx context.Context, pane string, pl *pendingLaunch) *
 		res.Warning = w
 	}
 	if !pl.prompt.Empty() {
-		if err := l.waitReady(ctx, pane); err != nil {
+		if err := l.waitReady(ctx, pane, pl.p); err != nil {
 			res.Warning = "The agent did not become ready; the prompt was not sent."
 			return res
 		}
@@ -566,7 +573,7 @@ func (l *Launcher) applyMode(ctx context.Context, pane string, pl *pendingLaunch
 	// Only one attempt: a retry through Continue must not toggle it again.
 	mode := pl.mode
 	pl.mode = ""
-	if err := l.waitReady(ctx, pane); err != nil {
+	if err := l.waitReady(ctx, pane, pl.p); err != nil {
 		return "The agent did not become ready; it started in its usual mode."
 	}
 	if err := setter.SetLaunchMode(ctx, pane, mode); err != nil {
@@ -592,7 +599,7 @@ func (l *Launcher) startAgent(ctx context.Context, p providers.Provider, pane st
 		if !errors.As(err, &herr) || herr.Code != "agent_pane_busy" || time.Now().After(deadline) {
 			return err
 		}
-		if !sleep(ctx, l.pollInterval()) {
+		if !sleep(ctx, l.readyPoll()) {
 			return ctx.Err()
 		}
 	}
@@ -646,10 +653,10 @@ const (
 
 // passStartupDialog answers a folder-trust dialog when allowed and waits
 // until the agent is ready. Dialogs can appear a moment after Herdr reports
-// the agent, so readiness must be observed on consecutive polls.
-func (l *Launcher) passStartupDialog(ctx context.Context, lp providers.Launchable, pane string, trust bool) startupOutcome {
+// the agent, so a status must hold for a poll interval to count.
+func (l *Launcher) passStartupDialog(ctx context.Context, p providers.Provider, lp providers.Launchable, pane string, trust bool) startupOutcome {
 	deadline := time.Now().Add(l.startTimeout())
-	readyPolls := 0
+	r := readiness{p: p, statuses: []string{herdr.StatusIdle, herdr.StatusDone, herdr.StatusWorking}, hold: l.pollInterval(), reportWait: l.sessionReportWait()}
 	for time.Now().Before(deadline) {
 		if screen, err := l.Herdr.ReadVisible(ctx, pane); err == nil {
 			if keys := lp.StartupKeys(screen); keys != nil {
@@ -659,43 +666,84 @@ func (l *Launcher) passStartupDialog(ctx context.Context, lp providers.Launchabl
 				if err := l.Herdr.SendKeys(ctx, pane, keys...); err != nil {
 					return startupStuck
 				}
-				readyPolls = 0
-				if !sleep(ctx, l.pollInterval()) {
+				r.reset()
+				if !sleep(ctx, l.readyPoll()) {
 					return startupStuck
 				}
 				continue
 			}
 		}
-		pi, err := l.Herdr.Pane(ctx, pane)
-		if err == nil && pi.AgentName() != "" && (pi.AgentStatus == herdr.StatusIdle || pi.AgentStatus == herdr.StatusDone || pi.AgentStatus == herdr.StatusWorking) {
-			readyPolls++
-			if readyPolls >= 2 {
-				return startupReady
-			}
-		} else {
-			readyPolls = 0
+		if r.ready(l.Herdr.Pane(ctx, pane)) {
+			return startupReady
 		}
-		if !sleep(ctx, l.pollInterval()) {
+		if !sleep(ctx, l.readyPoll()) {
 			return startupStuck
 		}
 	}
 	return startupStuck
 }
 
-func (l *Launcher) waitReady(ctx context.Context, pane string) error {
+// waitReady waits until the agent takes input, before the launcher types.
+// passStartupDialog has already waited for a session report.
+func (l *Launcher) waitReady(ctx context.Context, pane string, p providers.Provider) error {
 	deadline := time.Now().Add(l.startTimeout())
+	r := readiness{p: p, statuses: []string{herdr.StatusIdle, herdr.StatusDone}}
 	for time.Now().Before(deadline) {
-		if pi, err := l.Herdr.Pane(ctx, pane); err == nil {
-			switch pi.AgentStatus {
-			case herdr.StatusIdle, herdr.StatusDone:
-				return nil
-			}
+		if r.ready(l.Herdr.Pane(ctx, pane)) {
+			return nil
 		}
-		if !sleep(ctx, l.pollInterval()) {
+		if !sleep(ctx, l.readyPoll()) {
 			return ctx.Err()
 		}
 	}
 	return errors.New("agent not ready")
+}
+
+// readiness tells from successive pane polls whether a starting agent reads
+// its input. Herdr reports a new agent idle a fixed time after it sees the
+// process, even while the TUI is still starting and discards input, so the
+// session report of a StartupSessionReporter is what counts for it. Without
+// that report its status counts only after reportWait.
+type readiness struct {
+	p        providers.Provider
+	statuses []string
+	// hold is how long one of statuses must last.
+	hold       time.Duration
+	reportWait time.Duration
+	since      time.Time
+}
+
+func (r *readiness) reset() { r.since = time.Time{} }
+
+func (r *readiness) ready(pi *herdr.Pane, err error) bool {
+	if err != nil || pi.AgentName() == "" || pi.AgentStatus == herdr.StatusBlocked {
+		r.reset()
+		return false
+	}
+	hold := r.hold
+	if _, ok := r.p.(providers.StartupSessionReporter); ok {
+		if reportedSession(pi, r.p) != "" {
+			return true
+		}
+		hold = max(hold, r.reportWait)
+	}
+	if !slices.Contains(r.statuses, pi.AgentStatus) {
+		r.reset()
+		return false
+	}
+	if r.since.IsZero() {
+		r.since = time.Now()
+	}
+	return time.Since(r.since) >= hold
+}
+
+// reportedSession is the native id Herdr holds for the provider's agent in
+// the pane, or "".
+func reportedSession(pi *herdr.Pane, p providers.Provider) string {
+	if s := pi.AgentSession; s != nil && s.Agent == p.HerdrAgent() && s.Kind == "id" {
+		return s.Value
+	}
+	return ""
 }
 
 // waitIdentity waits for the integration hook to report the native session
@@ -706,9 +754,10 @@ func (l *Launcher) waitIdentity(ctx context.Context, pane string, p providers.Pr
 	deadline := time.Now().Add(l.identityWait())
 	polls := 0
 	for time.Now().Before(deadline) {
-		if pi, err := l.Herdr.Pane(ctx, pane); err == nil && pi.AgentSession != nil &&
-			pi.AgentSession.Agent == p.HerdrAgent() && pi.AgentSession.Kind == "id" && pi.AgentSession.Value != "" {
-			return p.Name() + ":" + pi.AgentSession.Value
+		if pi, err := l.Herdr.Pane(ctx, pane); err == nil {
+			if id := reportedSession(pi, p); id != "" {
+				return p.Name() + ":" + id
+			}
 		}
 		// Give the hook a moment before reporting on its behalf.
 		if polls++; locator != nil && polls > 2 {
@@ -749,3 +798,9 @@ func orDefault(d, def time.Duration) time.Duration {
 func (l *Launcher) startTimeout() time.Duration { return orDefault(l.StartTimeout, 60*time.Second) }
 func (l *Launcher) pollInterval() time.Duration { return orDefault(l.PollInterval, time.Second) }
 func (l *Launcher) identityWait() time.Duration { return orDefault(l.IdentityWait, 20*time.Second) }
+func (l *Launcher) sessionReportWait() time.Duration {
+	return orDefault(l.SessionReportWait, 10*time.Second)
+}
+
+// readyPoll paces the polls of a starting agent, which hold up the response.
+func (l *Launcher) readyPoll() time.Duration { return min(l.pollInterval(), 200*time.Millisecond) }

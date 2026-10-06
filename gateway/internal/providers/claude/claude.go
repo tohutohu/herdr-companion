@@ -260,6 +260,11 @@ func (p *Provider) SendLaunchPrompt(ctx context.Context, paneID string, in model
 	return p.enter(ctx, paneID, providers.TextWithFiles(in), in.Images)
 }
 
+// ReportsSessionAtStartup marks that the Herdr SessionStart hook reports a
+// new session once Claude Code reads its input. Input sent before that is
+// dropped (verified with Claude Code 2.1.291).
+func (p *Provider) ReportsSessionAtStartup() {}
+
 // enter pastes each image path, then types and submits the text.
 func (p *Provider) enter(ctx context.Context, paneID, text string, images []string) error {
 	for _, img := range images {

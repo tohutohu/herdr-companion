@@ -276,6 +276,15 @@ type LaunchPromptSender interface {
 	SendLaunchPrompt(ctx context.Context, paneID string, in model.Input) error
 }
 
+// StartupSessionReporter is implemented by providers whose integration hook
+// reports the session to Herdr as the TUI starts reading input (Claude Code's
+// SessionStart). Herdr marks a new agent idle a fixed time after it sees the
+// process, whether or not the TUI reads input yet, and a TUI discards what
+// arrives before that. The launcher sends their first prompt on the report.
+type StartupSessionReporter interface {
+	ReportsSessionAtStartup()
+}
+
 // PreparedLauncher can create a native session before starting its TUI when
 // model selection is an API operation rather than a command-line option.
 type PreparedLauncher interface {
