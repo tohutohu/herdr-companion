@@ -42,6 +42,11 @@ for each pane (`agent_session` in `session.snapshot`). A pane id is only
 *where* a session currently runs; a resumed session in another pane keeps its
 id. A stored `agent_session` is trusted only while the same agent still
 occupies the pane.
+Codex references are also checked against the thread's working directory
+(allowing filesystem aliases and Codex-managed worktrees). A shared daemon
+started inside a Herdr pane inherits that pane's hook environment and can
+report other threads to it. Mismatched references are ignored; when multiple
+valid panes still claim one session, none is selected for pane operations.
 
 ## Status
 

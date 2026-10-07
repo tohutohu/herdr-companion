@@ -45,7 +45,7 @@ func Test別のエージェントに置き換わったペインのセッショ�
 		{PaneID: "w1:p2", Agent: &claude, AgentSession: &herdr.AgentSession{Agent: "claude", Kind: "id", Value: "new"}},
 	}}
 	s := New(nil, 0, stubProvider{})
-	live := s.live(snap)
+	live := s.live(context.Background(), snap)
 	if _, ok := live["claude:old"]; ok {
 		t.Error("stale session reference should be ignored")
 	}
@@ -58,6 +58,65 @@ type stubProvider struct{ providers.Provider }
 
 func (stubProvider) Name() string       { return "claude" }
 func (stubProvider) HerdrAgent() string { return "claude" }
+
+type validatedProvider struct {
+	stubProvider
+	err error
+}
+
+func (p validatedProvider) ValidateLiveSession(_ context.Context, _ string, live *providers.Live) (bool, error) {
+	return live.Cwd == "/work/app", p.err
+}
+
+type fixedSnapshot struct{ snap *herdr.Snapshot }
+
+func (s fixedSnapshot) Snapshot(context.Context) (*herdr.Snapshot, error) { return s.snap, nil }
+
+func Test履歴と異なるディレクトリの参照は除外して正しいペインへ紐づける(t *testing.T) {
+	agent, wrong, correct := "claude", "/work/other", "/work/app"
+	ref := &herdr.AgentSession{Agent: agent, Kind: "id", Value: "session"}
+	bad := herdr.Pane{PaneID: "wrong", Agent: &agent, AgentSession: ref, Cwd: &wrong}
+	good := herdr.Pane{PaneID: "correct", Agent: &agent, AgentSession: ref, Cwd: &wrong, ForegroundCwd: &correct}
+	for _, panes := range [][]herdr.Pane{{bad, good}, {good, bad}, {bad}} {
+		s := New(fixedSnapshot{&herdr.Snapshot{Panes: panes}}, 0, validatedProvider{})
+		r, err := s.Resolve(context.Background(), "claude:session")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(panes) == 1 {
+			if r.Live != nil {
+				t.Fatalf("wrong pane attached: %+v", r.Live)
+			}
+		} else if r.Live == nil || r.Live.PaneID != "correct" {
+			t.Fatalf("correct pane missing: %+v", r.Live)
+		}
+	}
+}
+
+func Test同じセッションの参照が曖昧なら任意のペインを操作対象にしない(t *testing.T) {
+	agent, cwd := "claude", "/work/app"
+	ref := &herdr.AgentSession{Agent: agent, Kind: "id", Value: "session"}
+	snap := &herdr.Snapshot{Panes: []herdr.Pane{
+		{PaneID: "first", Agent: &agent, AgentSession: ref, Cwd: &cwd},
+		{PaneID: "second", Agent: &agent, AgentSession: ref, Cwd: &cwd},
+		{PaneID: "third", Agent: &agent, AgentSession: ref, Cwd: &cwd},
+	}}
+	for _, p := range []providers.Provider{stubProvider{}, validatedProvider{}} {
+		s := New(fixedSnapshot{snap}, 0, p)
+		r, err := s.Resolve(context.Background(), "claude:session")
+		if err != nil || r.Live != nil {
+			t.Fatalf("ambiguous reference attached: %+v, err=%v", r, err)
+		}
+	}
+}
+
+func Test紐づけの検証に失敗したペインは操作対象にしない(t *testing.T) {
+	s := New(listSnapshot{}, 0, validatedProvider{err: context.DeadlineExceeded})
+	r, err := s.Resolve(context.Background(), "claude:live")
+	if err != nil || r.Live != nil {
+		t.Fatalf("unverified reference attached: %+v, err=%v", r, err)
+	}
+}
 
 func Test稼働中セッションのcwdはファイルリンクと同じペインのcwdを使う(t *testing.T) {
 	r := &Resolved{Provider: stubProvider{}, NativeID: "x", Live: &providers.Live{PaneID: "w1:p1", Cwd: "/work/app"}}

@@ -857,6 +857,36 @@ func TestCodexが作ったworktreeのスレッドはペインではなくスレ�
 	}
 }
 
+func TestCodexのペイン参照はスレッドのディレクトリと照合する(t *testing.T) {
+	home, root := t.TempDir(), t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(root, alias); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, threadCwd, paneCwd string
+		want                     bool
+	}{
+		{"同じディレクトリ", root, root, true},
+		{"末尾スラッシュ", root + "/", root, true},
+		{"シンボリックリンク", root, alias, true},
+		{"他プロジェクト", root, t.TempDir(), false},
+		{"不明なペインcwd", root, "", true},
+		{"不明なスレッドcwd", "", root, true},
+		{"Codex管理worktree", filepath.Join(home, "worktrees", "branch", "repo"), root, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := New("", "", nil, deadletter.Nop{})
+			p.metadataEntries = map[string]*metadataEntry{"session": {thread: &Thread{ID: "session", Cwd: tc.threadCwd}, at: time.Now()}}
+			got, err := p.ValidateLiveSession(context.Background(), "session", &providers.Live{Cwd: tc.paneCwd})
+			if err != nil || got != tc.want {
+				t.Fatalf("match = %v, err = %v, want %v", got, err, tc.want)
+			}
+		})
+	}
+}
+
 func Testスレッド設定からモードの表示名を決める(t *testing.T) {
 	cases := map[string]string{
 		`{"approvalPolicy":"on-request","sandboxPolicy":{"type":"workspaceWrite"},"collaborationMode":{"mode":"plan","settings":{}}}`:    "Plan",

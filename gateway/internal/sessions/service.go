@@ -74,11 +74,12 @@ func (s *Service) snapshot(ctx context.Context) *herdr.Snapshot {
 }
 
 // live returns sessions currently hosted by Herdr panes, keyed by gateway id.
-func (s *Service) live(snap *herdr.Snapshot) map[string]*Resolved {
+func (s *Service) live(ctx context.Context, snap *herdr.Snapshot) map[string]*Resolved {
 	out := map[string]*Resolved{}
 	if snap == nil {
 		return out
 	}
+	var candidates []*Resolved
 	for _, pane := range snap.Panes {
 		ref := pane.AgentSession
 		if ref == nil || ref.Kind != "id" || ref.Value == "" {
@@ -96,10 +97,40 @@ func (s *Service) live(snap *herdr.Snapshot) map[string]*Resolved {
 				Live:     &providers.Live{PaneID: pane.PaneID, HerdrStatus: pane.AgentStatus, Cwd: pane.WorkingDir()},
 				Label:    snap.WorkspaceLabel(pane.WorkspaceID),
 			}
-			if _, dup := out[r.ID()]; !dup {
-				out[r.ID()] = r
-			}
+			candidates = append(candidates, r)
 		}
+	}
+	// Validate concurrently and reuse the provider's metadata cache. Never
+	// select the first pane when multiple valid references remain: sending
+	// input or stopping that arbitrary pane would act on another session.
+	valid := make([]bool, len(candidates))
+	var wg sync.WaitGroup
+	for i, r := range candidates {
+		valid[i] = true
+		if p, ok := r.Provider.(providers.LiveSessionValidator); ok {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				match, err := p.ValidateLiveSession(ctx, r.NativeID, r.Live)
+				valid[i] = err == nil && match
+				if !valid[i] {
+					slog.Debug("ignoring unverified pane session reference", "session_id", r.ID(), "pane", r.Live.PaneID, "error", err)
+				}
+			}()
+		}
+	}
+	wg.Wait()
+	ambiguous := map[string]bool{}
+	for i, r := range candidates {
+		if !valid[i] || ambiguous[r.ID()] {
+			continue
+		}
+		if _, dup := out[r.ID()]; dup {
+			delete(out, r.ID())
+			ambiguous[r.ID()] = true
+			continue
+		}
+		out[r.ID()] = r
 	}
 	return out
 }
@@ -113,7 +144,7 @@ func (s *Service) Resolve(ctx context.Context, id string) (*Resolved, error) {
 	if p == nil {
 		return nil, providers.ErrNotFound
 	}
-	if r, ok := s.live(s.snapshot(ctx))[id]; ok {
+	if r, ok := s.live(ctx, s.snapshot(ctx))[id]; ok {
 		return r, nil
 	}
 	return &Resolved{Provider: p, NativeID: native}, nil
@@ -183,7 +214,7 @@ func (s *Service) LiveSessions(ctx context.Context) ([]model.Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s.liveSessions(ctx, s.live(snap)), nil
+	return s.liveSessions(ctx, s.live(ctx, snap)), nil
 }
 
 // liveSessions summarizes each live session concurrently: providers read
@@ -217,7 +248,7 @@ func (s *Service) liveSessions(ctx context.Context, live map[string]*Resolved) [
 // List returns live sessions first plus recently updated offline ones. Live
 // summaries and each provider's recent sessions are read concurrently.
 func (s *Service) List(ctx context.Context) ([]model.Session, error) {
-	live := s.live(s.snapshot(ctx))
+	live := s.live(ctx, s.snapshot(ctx))
 	var liveOut []model.Session
 	offline := make([][]model.Session, len(s.providers))
 	var wg sync.WaitGroup
@@ -312,7 +343,7 @@ func (s *Service) Archived(ctx context.Context, offset, limit int) (out []model.
 		ids = ids[:limit]
 		next = max(offset, 0) + limit
 	}
-	live := s.live(s.snapshot(ctx))
+	live := s.live(ctx, s.snapshot(ctx))
 	// Summaries read transcripts or call the Codex app-server; reading them
 	// one by one made a long archive take seconds.
 	found := make([]*model.Session, len(ids))

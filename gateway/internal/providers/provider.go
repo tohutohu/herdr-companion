@@ -113,6 +113,12 @@ type FilteredRecentProvider interface {
 	RecentExcluding(ctx context.Context, since time.Time, exclude map[string]bool) ([]Summary, error)
 }
 
+// LiveSessionValidator checks stored pane references against provider data.
+// Shared servers can run hooks with another pane's inherited environment.
+type LiveSessionValidator interface {
+	ValidateLiveSession(ctx context.Context, nativeID string, live *Live) (bool, error)
+}
+
 // ConversationProvider builds the summary and messages from one history read.
 // Providers without it use their separate Summary and Messages methods.
 type ConversationProvider interface {

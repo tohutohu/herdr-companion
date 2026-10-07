@@ -273,6 +273,30 @@ func (p *Provider) fetchThread(ctx context.Context, id string, turns bool) (*Thr
 
 // --- Provider ---
 
+func (p *Provider) ValidateLiveSession(ctx context.Context, nativeID string, live *providers.Live) (bool, error) {
+	th, err := p.metadata(ctx, nativeID)
+	if err != nil {
+		return false, err
+	}
+	// Managed worktrees intentionally differ from the TUI process cwd.
+	if live.Cwd == "" || th.Cwd == "" || inManagedWorktree(th.Cwd) {
+		return true, nil
+	}
+	return sameDirectory(th.Cwd, live.Cwd), nil
+}
+
+func sameDirectory(a, b string) bool {
+	if filepath.Clean(a) == filepath.Clean(b) {
+		return true
+	}
+	left, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	right, err := os.Stat(b)
+	return err == nil && os.SameFile(left, right)
+}
+
 func (p *Provider) Summary(ctx context.Context, nativeID string, live *providers.Live) (*providers.Summary, error) {
 	meta, err := p.metadata(ctx, nativeID)
 	if err != nil {
