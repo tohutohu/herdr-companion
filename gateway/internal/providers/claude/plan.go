@@ -1,7 +1,7 @@
 package claude
 
 import (
-	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,13 +9,13 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
-	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 )
 
 // ExitPlanMode opens Claude Code's plan dialog. Verified against Claude Code
-// 2.1.281:
+// 2.1.292:
 //
 //	Claude has written up a plan and is ready to execute. Would you like to proceed?
 //
@@ -112,42 +112,111 @@ func (p *Provider) FileRoots() []string {
 }
 
 var planRow = regexp.MustCompile(`^\s*(?:❯\s*)?(\d+)\.\s+(.*\S)\s*$`)
+var planBodyStart = regexp.MustCompile(`Here\s+is\s+Claude's\s+plan:`)
+var planBodyEnd = regexp.MustCompile(`Claude\s+has\s+written\s+up\s+a\s+plan`)
 
 // planRows reads the dialog's rows from the screen, without the trailing
 // feedback row. ok is false when the dialog is not visible.
 func planRows(screen string) (rows []model.Option, ok bool) {
-	i := strings.LastIndex(screen, "Would you like to proceed?")
-	if i < 0 {
+	lines := strings.Split(screen, "\n")
+	// Visible panes preserve soft wraps. Locate the complete heading even
+	// when "Would you like to proceed?" spans multiple terminal rows.
+	header, found, end := "", -1, -1
+	for i, line := range lines {
+		header += strings.Join(strings.Fields(line), "")
+		if at := strings.LastIndex(header, "Wouldyouliketoproceed?"); at > found {
+			found, end = at, i
+		}
+	}
+	if end < 0 {
 		return nil, false
 	}
 	var labels []string
-	for _, line := range strings.Split(screen[i:], "\n")[1:] {
+	focused, feedbackHint := false, false
+	for _, line := range lines[end+1:] {
+		text := strings.TrimSpace(line)
+		if strings.HasPrefix(text, "shift+tab") {
+			feedbackHint = strings.Contains(text, "approve with this feedback")
+			continue
+		}
+		if strings.HasPrefix(text, "ctrl+g") {
+			continue
+		}
 		m := planRow.FindStringSubmatch(line)
 		if m == nil {
-			if len(labels) > 0 && strings.TrimSpace(line) != "" && !strings.HasPrefix(strings.TrimSpace(line), "shift+tab") {
-				break
+			// A normal composer after a quoted dialog is not an active plan.
+			if strings.HasPrefix(text, "❯") {
+				return nil, false
+			}
+			if len(labels) > 0 && text != "" && !feedbackHint {
+				labels[len(labels)-1] += " " + text
 			}
 			continue
 		}
 		if n, _ := strconv.Atoi(m[1]); n != len(labels)+1 {
-			break
+			return nil, false
 		}
+		focused = focused || strings.HasPrefix(text, "❯")
 		labels = append(labels, m[2])
 	}
-	if len(labels) < 2 {
+	if len(labels) < 2 || !focused || !feedbackHint {
 		return nil, false
 	}
 	for _, l := range labels[:len(labels)-1] {
+		if !strings.HasPrefix(l, "Yes,") {
+			return nil, false
+		}
 		rows = append(rows, model.Option{Label: l})
 	}
 	return rows, true
 }
 
-// withScreenPlanRows replaces a pending plan's default rows with the ones on
-// screen, so answers map to the rows Claude Code actually shows.
-func (p *Provider) withScreenPlanRows(ctx context.Context, msgs []model.Message, live *providers.Live) {
-	if !live.Blocked() {
-		return
+const screenPlanPrefix = "claude-plan-screen:"
+
+// screenPlan recovers a plan approval even when its tool call has not been
+// written to the transcript, or compaction/resume hid the original call.
+func screenPlan(screen string) *model.Interaction {
+	rows, ok := planRows(screen)
+	if !ok {
+		return nil
+	}
+	body := ""
+	if start := planBodyStart.FindStringIndex(screen); start != nil {
+		plan := screen[start[1]:]
+		if end := planBodyEnd.FindStringIndex(plan); end != nil {
+			plan = plan[:end[0]]
+		}
+		var lines []string
+		for _, line := range strings.Split(plan, "\n") {
+			line = strings.TrimSpace(line)
+			if strings.Trim(line, "─╌▔ ") != "" {
+				lines = append(lines, line)
+			}
+		}
+		body = strings.Join(lines, "\n")
+	}
+	identity := strings.Join(strings.Fields(body), "")
+	for _, row := range rows {
+		identity += "\n" + strings.Join(strings.Fields(row.Label), "")
+	}
+	// The file name also identifies a plan when a long plan body is above
+	// the viewport. Different plans can otherwise have identical choices.
+	if _, footer, ok := strings.Cut(screen, "ctrl+g"); ok {
+		identity += "\n" + strings.Join(strings.Fields(footer), "")
+	}
+	id := fmt.Sprintf("%s%x", screenPlanPrefix, sha256.Sum256([]byte(identity)))
+	ia := planInteraction(id)
+	ia.State = model.InteractionPending
+	ia.Detail = model.Truncate(body, 8000)
+	ia.Questions[0].Options = planOptions(rows)
+	return ia
+}
+
+// Prefer the transcript's plan card so its answer remains in history. If it
+// is missing, append a screen-derived card with the actual dialog choices.
+func withScreenPlan(msgs []model.Message, plan *model.Interaction, updated time.Time) []model.Message {
+	if plan == nil {
+		return msgs
 	}
 	for i := len(msgs) - 1; i >= 0; i-- {
 		for _, b := range msgs[i].Blocks {
@@ -155,16 +224,25 @@ func (p *Provider) withScreenPlanRows(ctx context.Context, msgs []model.Message,
 			if b.Type != model.BlockInteraction || ia.Kind != model.KindPlan || ia.State != model.InteractionPending {
 				continue
 			}
-			screen, err := providers.Screen(ctx, p.term, live.PaneID)
-			if err != nil {
-				return
-			}
-			if rows, ok := planRows(screen); ok {
-				ia.Questions[0].Options = planOptions(rows)
-			}
-			return
+			ia.Questions[0].Options = plan.Questions[0].Options
+			return msgs
 		}
 	}
+	return append(msgs, model.Message{ID: plan.ID, Role: model.RoleAssistant, Timestamp: updated.UTC(), Blocks: []model.Block{{Type: model.BlockInteraction, Interaction: plan}}})
+}
+
+func planFocusedRow(screen string) int {
+	focused := 0
+	for _, line := range strings.Split(screen, "\n") {
+		if !strings.HasPrefix(strings.TrimSpace(line), "❯") {
+			continue
+		}
+		if m := planRow.FindStringSubmatch(line); m != nil {
+			n, _ := strconv.Atoi(m[1])
+			focused = n - 1
+		}
+	}
+	return focused
 }
 
 func planKeys(ia *model.Interaction, r model.InteractionResponse) ([]step, error) {

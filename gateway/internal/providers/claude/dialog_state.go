@@ -13,16 +13,36 @@ import (
 // question against the visible pane before closing it or typing a new prompt.
 // A transcript alone cannot distinguish a dialog from an interrupted tool.
 func (p *Provider) dialogLive(ctx context.Context, id string, live *providers.Live) *providers.Live {
-	if live == nil || live.Blocked() {
-		return live
+	resolved, _ := p.dialogState(ctx, id, live)
+	return resolved
+}
+
+func (p *Provider) dialogState(ctx context.Context, id string, live *providers.Live) (*providers.Live, *model.Interaction) {
+	if live == nil {
+		return live, nil
+	}
+	// Plans can survive compaction/resume without an unanswered tool call.
+	// Inspect every live pane, independently of transcript mode and hooks.
+	screen, err := providers.Screen(ctx, p.term, live.PaneID)
+	if err != nil {
+		return live, nil
+	}
+	plan := screenPlan(screen)
+	if plan != nil {
+		resolved := *live
+		resolved.HerdrStatus = herdr.StatusBlocked
+		return &resolved, plan
+	}
+	if live.Blocked() || !strings.Contains(screen, dialogFooter) {
+		return live, nil
 	}
 	path, err := p.transcriptPath(id)
 	if err != nil {
-		return live
+		return live, nil
 	}
 	c, err := p.transcript(path, id)
 	if err != nil {
-		return live
+		return live, nil
 	}
 	if !c.dialogsKnown {
 		c.dialogs = unansweredDialogs(c.t.entries)
@@ -30,21 +50,14 @@ func (p *Provider) dialogLive(ctx context.Context, id string, live *providers.Li
 	}
 	dialogs := c.dialogs
 	c.mu.Unlock()
-	if len(dialogs) == 0 {
-		return live
-	}
-	screen, err := providers.Screen(ctx, p.term, live.PaneID)
-	if err != nil {
-		return live
-	}
 	for _, b := range dialogs {
 		if dialogOnScreen(b, screen) {
 			resolved := *live
 			resolved.HerdrStatus = herdr.StatusBlocked
-			return &resolved
+			return &resolved, nil
 		}
 	}
-	return live
+	return live, nil
 }
 
 // Only the latest user turn can still own a dialog. Results are encountered

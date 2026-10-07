@@ -5,6 +5,7 @@ package claude
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -118,7 +119,7 @@ func root(t *Transcript, live *providers.Live) string {
 
 func (p *Provider) Summary(ctx context.Context, nativeID string, live *providers.Live) (*providers.Summary, error) {
 	reported := live
-	live = p.dialogLive(ctx, nativeID, live)
+	live, screenPlan := p.dialogState(ctx, nativeID, live)
 	path, err := p.transcriptPath(nativeID)
 	if err != nil {
 		return nil, err
@@ -132,6 +133,10 @@ func (p *Provider) Summary(ctx context.Context, nativeID string, live *providers
 		s.Cwd = live.Cwd
 	}
 	p.applyModeOverride(nativeID, path, &s)
+	if screenPlan != nil {
+		s.Pending = model.InteractionApproval
+		s.Status = model.StatusWaitingApproval
+	}
 	if live.Blocked() && !reported.Blocked() {
 		dialogStatus(&s)
 	}
@@ -189,7 +194,7 @@ func (p *Provider) RecentExcluding(ctx context.Context, since time.Time, exclude
 // Messages returns messages that may be shared with other callers; they must
 // not be modified.
 func (p *Provider) Messages(ctx context.Context, nativeID string, live *providers.Live) ([]model.Message, error) {
-	live = p.dialogLive(ctx, nativeID, live)
+	live, screenPlan := p.dialogState(ctx, nativeID, live)
 	path, err := p.transcriptPath(nativeID)
 	if err != nil {
 		return nil, err
@@ -199,9 +204,9 @@ func (p *Provider) Messages(ctx context.Context, nativeID string, live *provider
 		return nil, err
 	}
 	msgs := c.messages(ParseOptions{SessionID: gatewayID(nativeID), Root: root(c.t, live), Live: live, Sink: p.sink})
+	updated := c.info.ModTime()
 	c.mu.Unlock()
-	p.withScreenPlanRows(ctx, msgs, live)
-	return msgs, nil
+	return withScreenPlan(msgs, screenPlan, updated), nil
 }
 
 // SessionFileRoots returns the directories the session worked in, so file
@@ -405,9 +410,29 @@ func (p *Provider) Respond(ctx context.Context, nativeID string, live *providers
 	if ia == nil || ia.State != model.InteractionPending {
 		return providers.ErrInteractionGone
 	}
+	focusedRow := 0
+	if ia.Kind == model.KindPlan {
+		// Validate again immediately before answering. A stale lifecycle or
+		// card must never send approval keys into an ordinary composer.
+		screen, err := providers.Screen(ctx, p.term, live.PaneID)
+		if err != nil && !errors.Is(err, providers.ErrUnsupported) {
+			return err
+		}
+		if err == nil {
+			current := screenPlan(screen)
+			if current == nil || (strings.HasPrefix(ia.ID, screenPlanPrefix) && ia.ID != current.ID) {
+				return providers.ErrInteractionGone
+			}
+			ia.Questions[0].Options = current.Questions[0].Options
+			focusedRow = planFocusedRow(screen)
+		}
+	}
 	steps, err := dialogKeys(ia, r)
 	if err != nil {
 		return err
+	}
+	if focusedRow > 0 {
+		steps = append([]step{keys(repeat("up", focusedRow)...)}, steps...)
 	}
 	for i, st := range steps {
 		if i > 0 {
