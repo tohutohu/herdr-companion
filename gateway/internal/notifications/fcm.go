@@ -155,9 +155,12 @@ func (f *FCM) Send(ctx context.Context, deviceToken string, data map[string]stri
 		"token": deviceToken,
 		"data":  data,
 		"android": map[string]any{
-			"priority":    "HIGH",
-			"ttl":         "86400s",
-			"collapseKey": data["sessionId"],
+			"priority": "HIGH",
+			"ttl":      "86400s",
+			// FCM retains only four distinct collapse keys per device. With
+			// one key per session, notifications from other sessions can be
+			// discarded while the phone is disconnected. Deliver each event;
+			// Android already replaces displayed notifications per session.
 		},
 	}}
 	body, _ := json.Marshal(msg)

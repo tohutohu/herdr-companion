@@ -108,7 +108,10 @@ func (w *Watcher) stream(ctx context.Context, kick func()) error {
 	for ev := range events {
 		kick()
 		switch ev.Event {
-		case "pane.created", "pane.closed", "pane.agent_detected":
+		// Topology events use the general event envelope (underscores),
+		// unlike the pane status subscription envelope (dots).
+		case "pane_created", "pane_closed", "pane_agent_detected",
+			"pane.created", "pane.closed", "pane.agent_detected":
 			return nil // resubscribe with the new pane set
 		}
 	}
@@ -155,11 +158,27 @@ func (w *Watcher) Evaluate(ctx context.Context) {
 		}
 		w.last[s.ID] = next
 		w.mu.Unlock()
-		if !known || prev.status == s.Status {
+		if !known {
 			continue // first sighting after (re)start: no push
 		}
-		slog.Info("session status changed", "provider", s.Provider, "session_id", s.ID, "operation", "watch", "from", prev.status, "to", s.Status)
-		if kind, ok := notificationKind(prev.status, s.Status); ok {
+		var kind model.Status
+		var notify bool
+		if prev.status != s.Status {
+			slog.Info("session status changed", "provider", s.Provider, "session_id", s.ID, "operation", "watch", "from", prev.status, "to", s.Status)
+			kind, notify = notificationKind(prev.status, s.Status)
+		}
+		// A whole turn can happen between reads, or its transcript can flush
+		// after the terminal status was observed. Do not consume that new
+		// revision without notifying just because the status stayed the same.
+		if next.completionRevision != prev.completionRevision && prev.completionRevision != "" {
+			switch s.Status {
+			case model.StatusCompleted, model.StatusIdle:
+				kind, notify = model.StatusCompleted, true
+			case model.StatusFailed:
+				kind, notify = model.StatusFailed, true
+			}
+		}
+		if notify {
 			if (kind == model.StatusCompleted || kind == model.StatusFailed) && s.CompletionRevision != "" && s.CompletionRevision == prev.completionRevision {
 				slog.Info("push skipped: completion already observed", "provider", s.Provider, "session_id", s.ID, "operation", "push", "completion_revision", s.CompletionRevision)
 				continue

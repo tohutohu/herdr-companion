@@ -20,6 +20,7 @@ import (
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/config"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 )
 
@@ -201,6 +202,97 @@ func Test完了ターンが同じでも入力と承認の要求は通知する(t
 	}
 }
 
+func Test実行中の観測が抜けても新しい完了ターンは通知する(t *testing.T) {
+	for _, terminal := range []model.Status{model.StatusCompleted, model.StatusIdle, model.StatusFailed} {
+		t.Run(string(terminal), func(t *testing.T) {
+			fs := &fakeSessions{}
+			sender := &fakeSender{}
+			w, _ := newWatcher(t, fs, sender)
+			for _, revision := range []string{"old-turn", "new-turn", "new-turn", "another-turn"} {
+				s := sess(terminal)
+				s.CompletionRevision = revision
+				fs.list = []model.Session{s}
+				w.Evaluate(context.Background())
+			}
+			if len(sender.sent) != 2 {
+				t.Fatalf("missed running observations should still notify each new turn: %+v", sender.sent)
+			}
+			want := terminal
+			if terminal == model.StatusIdle {
+				want = model.StatusCompleted
+			}
+			for _, push := range sender.sent {
+				if push.data["status"] != string(want) {
+					t.Fatalf("status = %s, want %s", push.data["status"], want)
+				}
+			}
+		})
+	}
+}
+
+func Test完了状態の後に履歴が更新されても通知する(t *testing.T) {
+	fs := &fakeSessions{}
+	sender := &fakeSender{}
+	w, _ := newWatcher(t, fs, sender)
+	for _, step := range []struct {
+		status   model.Status
+		revision string
+	}{
+		{model.StatusCompleted, "old-turn"},
+		{model.StatusRunning, "old-turn"},
+		{model.StatusCompleted, "old-turn"},
+		{model.StatusCompleted, "new-turn"},
+		{model.StatusCompleted, "new-turn"},
+		{model.StatusIdle, "new-turn"},
+	} {
+		s := sess(step.status)
+		s.CompletionRevision = step.revision
+		fs.list = []model.Session{s}
+		w.Evaluate(context.Background())
+	}
+	if len(sender.sent) != 1 {
+		t.Fatalf("late transcript flush should notify once: %+v", sender.sent)
+	}
+}
+
+type fakeSubscriber struct {
+	events chan herdr.Event
+	subs   []map[string]any
+}
+
+func (f *fakeSubscriber) Snapshot(context.Context) (*herdr.Snapshot, error) {
+	return &herdr.Snapshot{Panes: []herdr.Pane{{PaneID: "w1:p1"}}}, nil
+}
+
+func (f *fakeSubscriber) Subscribe(_ context.Context, subs []map[string]any) (<-chan herdr.Event, error) {
+	f.subs = subs
+	return f.events, nil
+}
+
+func Testペイントポロジーの実際のイベント名で再購読する(t *testing.T) {
+	for _, event := range []string{"pane_created", "pane_closed", "pane_agent_detected", "pane.created", "pane.closed", "pane.agent_detected"} {
+		t.Run(event, func(t *testing.T) {
+			f := &fakeSubscriber{events: make(chan herdr.Event, 2)}
+			f.events <- herdr.Event{Event: "pane.agent_status_changed", Data: json.RawMessage(`{"pane_id":"w1:p1","agent_status":"working"}`)}
+			f.events <- herdr.Event{Event: event}
+			// An unrecognized topology event drains the channel and returns
+			// a subscription error instead of rebuilding the pane set.
+			close(f.events)
+			w := &Watcher{Herdr: f}
+			kicks := 0
+			if err := w.stream(context.Background(), func() { kicks++ }); err != nil {
+				t.Fatalf("topology did not trigger resubscription: %v", err)
+			}
+			if kicks != 3 {
+				t.Fatalf("snapshot, status and topology should trigger evaluation: %d", kicks)
+			}
+			if len(f.subs) != 4 || f.subs[3]["type"] != "pane.agent_status_changed" || f.subs[3]["pane_id"] != "w1:p1" {
+				t.Fatalf("subscriptions = %+v", f.subs)
+			}
+		})
+	}
+}
+
 func Test同一ターンでもバックグラウンド結果が更新されて再完了したら通知する(t *testing.T) {
 	for _, terminal := range []model.Status{model.StatusCompleted, model.StatusIdle, model.StatusFailed} {
 		t.Run(string(terminal), func(t *testing.T) {
@@ -329,8 +421,11 @@ func TestFCMのHTTPv1APIへデータメッセージを送る(t *testing.T) {
 	}
 	msg := got["message"].(map[string]any)
 	android := msg["android"].(map[string]any)
-	if msg["token"] != "device-token" || android["priority"] != "HIGH" || android["collapseKey"] != "codex:t1" || msg["data"].(map[string]any)["status"] != "completed" {
+	if msg["token"] != "device-token" || android["priority"] != "HIGH" || android["ttl"] != "86400s" || msg["data"].(map[string]any)["status"] != "completed" {
 		t.Errorf("message = %+v", got)
+	}
+	if _, ok := android["collapseKey"]; ok {
+		t.Error("session notifications must not compete for FCM's four collapse keys")
 	}
 	if _, ok := msg["notification"]; ok {
 		t.Error("must be a data-only message")
