@@ -117,6 +117,8 @@ func root(t *Transcript, live *providers.Live) string {
 }
 
 func (p *Provider) Summary(ctx context.Context, nativeID string, live *providers.Live) (*providers.Summary, error) {
+	reported := live
+	live = p.dialogLive(ctx, nativeID, live)
 	path, err := p.transcriptPath(nativeID)
 	if err != nil {
 		return nil, err
@@ -130,6 +132,9 @@ func (p *Provider) Summary(ctx context.Context, nativeID string, live *providers
 		s.Cwd = live.Cwd
 	}
 	p.applyModeOverride(nativeID, path, &s)
+	if live.Blocked() && !reported.Blocked() {
+		dialogStatus(&s)
+	}
 	return &s, nil
 }
 
@@ -184,6 +189,7 @@ func (p *Provider) RecentExcluding(ctx context.Context, since time.Time, exclude
 // Messages returns messages that may be shared with other callers; they must
 // not be modified.
 func (p *Provider) Messages(ctx context.Context, nativeID string, live *providers.Live) ([]model.Message, error) {
+	live = p.dialogLive(ctx, nativeID, live)
 	path, err := p.transcriptPath(nativeID)
 	if err != nil {
 		return nil, err
@@ -245,7 +251,7 @@ func (p *Provider) Send(ctx context.Context, nativeID string, live *providers.Li
 	if text == "" && len(in.Images) == 0 {
 		return fmt.Errorf("empty message")
 	}
-	if live.Blocked() {
+	if p.dialogLive(ctx, nativeID, live).Blocked() {
 		// Keep all input out of an agent dialog. agent.prompt performs this
 		// check too, but ordinary prompts are sent through the PTY directly.
 		return &herdr.Error{Code: "agent_blocked", Message: "agent is waiting at a dialog"}
