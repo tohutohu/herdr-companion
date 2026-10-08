@@ -1,31 +1,45 @@
 package com.tohutohu.herdrcompanion.ui.newsession
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import com.tohutohu.herdrcompanion.ui.UiMotion
+import com.tohutohu.herdrcompanion.ui.itemPlacementSpec
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 
 /**
  * A horizontal row whose [rowItems] can be reordered by long-pressing and
  * dragging. Content added by [beforeItems] and [afterItems] stays fixed and
  * is not part of the reorderable range.
+ *
+ * The row animates the items' placement with [placementSpec]; [itemContent]
+ * must not add its own `animateItem`, because the chip under the finger has to
+ * stay there instead of animating to its new slot.
  */
 @Composable
 fun <T> ReorderableChipRow(
@@ -35,30 +49,40 @@ fun <T> ReorderableChipRow(
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(),
     horizontalArrangement: Arrangement.Horizontal = Arrangement.Start,
+    placementSpec: FiniteAnimationSpec<IntOffset>? = itemPlacementSpec(paused = false),
     beforeItems: LazyListScope.() -> Unit = {},
     afterItems: LazyListScope.() -> Unit = {},
     itemContent: @Composable LazyItemScope.(T, Modifier) -> Unit,
 ) {
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
     var orderedItems by remember { mutableStateOf(rowItems) }
-    var draggedKey by remember { mutableStateOf<Any?>(null) }
+    // The chip being dragged, or settling into its slot after the drop.
+    var activeKey by remember { mutableStateOf<Any?>(null) }
+    var dragging by remember { mutableStateOf(false) }
     var dragOrigin by remember { mutableStateOf<List<T>?>(null) }
-    var dragStartCenter by remember { mutableStateOf(0f) }
-    var dragDistance by remember { mutableStateOf(0f) }
+    // Center of the lifted chip, in the row's viewport.
+    var dragCenter by remember { mutableFloatStateOf(0f) }
+    // 0 while lifted; 1 once the chip has settled into its slot.
+    val release = remember { Animatable(0f) }
+    var settleJob by remember { mutableStateOf<Job?>(null) }
     val haptic = LocalHapticFeedback.current
 
     LaunchedEffect(rowItems) {
-        if (draggedKey == null) orderedItems = rowItems
+        if (!dragging) orderedItems = rowItems
     }
 
     fun endDrag(commit: Boolean) {
         val origin = dragOrigin
         val result = orderedItems
         if (!commit && origin != null) orderedItems = origin
-        draggedKey = null
+        dragging = false
         dragOrigin = null
-        dragDistance = 0f
         if (commit && origin != null && origin != result) onMove(result)
+        settleJob = scope.launch {
+            release.animateTo(1f, UiMotion.resize())
+            activeKey = null
+        }
     }
 
     LazyRow(
@@ -70,23 +94,22 @@ fun <T> ReorderableChipRow(
         beforeItems()
         items(orderedItems, key = itemKey) { item ->
             val key = itemKey(item)
-            val dragging = draggedKey == key
-            val translation = if (dragging) {
-                val info = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == key }
-                info?.let { dragStartCenter + dragDistance - (it.offset + it.size / 2f) } ?: dragDistance
-            } else {
-                0f
-            }
+            val active = activeKey == key
             val reorderModifier = Modifier
+                // Lifted chips follow the finger, not a placement animation.
+                .animateItem(placementSpec = if (active) null else placementSpec)
                 .then(
-                    if (dragging) {
+                    if (active) {
                         Modifier
                             .zIndex(1f)
                             .graphicsLayer {
-                                translationX = translation
-                                scaleX = 1.03f
-                                scaleY = 1.03f
-                                shadowElevation = 8.dp.toPx()
+                                val lifted = 1f - release.value
+                                // Read here, after this frame's layout, so a move never lags a frame.
+                                val slotCenter = listState.itemCenter(key)
+                                translationX = slotCenter?.let { (dragCenter - it) * lifted } ?: 0f
+                                scaleX = 1f + 0.03f * lifted
+                                scaleY = 1f + 0.03f * lifted
+                                shadowElevation = 8.dp.toPx() * lifted
                             }
                     } else {
                         Modifier
@@ -95,26 +118,27 @@ fun <T> ReorderableChipRow(
                 .pointerInput(key) {
                     detectDragGesturesAfterLongPress(
                         onDragStart = {
-                            val info = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == key }
-                            if (info != null) {
-                                draggedKey = key
+                            val center = listState.itemCenter(key)
+                            if (center != null) {
+                                settleJob?.cancel()
+                                scope.launch { release.snapTo(0f) }
+                                activeKey = key
+                                dragging = true
                                 dragOrigin = orderedItems
-                                dragStartCenter = info.offset + info.size / 2f
-                                dragDistance = 0f
+                                dragCenter = center
                                 haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
                             }
                         },
-                        onDragEnd = { if (draggedKey == key) endDrag(commit = true) },
-                        onDragCancel = { if (draggedKey == key) endDrag(commit = false) },
+                        onDragEnd = { if (dragging && activeKey == key) endDrag(commit = true) },
+                        onDragCancel = { if (dragging && activeKey == key) endDrag(commit = false) },
                         onDrag = { change, dragAmount ->
-                            if (draggedKey != key) return@detectDragGesturesAfterLongPress
+                            if (!dragging || activeKey != key) return@detectDragGesturesAfterLongPress
                             change.consume()
-                            dragDistance += dragAmount.x
+                            dragCenter += dragAmount.x
 
                             val fromIndex = orderedItems.indexOfFirst { itemKey(it) == key }
                             if (fromIndex < 0) return@detectDragGesturesAfterLongPress
 
-                            val dragCenter = dragStartCenter + dragDistance
                             val reorderableKeys = orderedItems.mapTo(mutableSetOf()) { itemKey(it) }
                             val candidate = listState.layoutInfo.visibleItemsInfo
                                 .filter { it.key in reorderableKeys && it.key != key }
@@ -126,6 +150,12 @@ fun <T> ReorderableChipRow(
                             val toIndex = (if (insertionIndex > fromIndex) insertionIndex - 1 else insertionIndex)
                                 .coerceIn(0, orderedItems.lastIndex)
                             if (toIndex != fromIndex) {
+                                // A lazy list keeps its first visible item in place by key, so
+                                // moving that item would scroll the row along with it.
+                                listState.requestScrollToItem(
+                                    listState.firstVisibleItemIndex,
+                                    listState.firstVisibleItemScrollOffset,
+                                )
                                 orderedItems = orderedItems.toMutableList().apply {
                                     add(toIndex, removeAt(fromIndex))
                                 }
@@ -138,3 +168,6 @@ fun <T> ReorderableChipRow(
         afterItems()
     }
 }
+
+private fun LazyListState.itemCenter(key: Any): Float? =
+    layoutInfo.visibleItemsInfo.firstOrNull { it.key == key }?.let { it.offset + it.size / 2f }

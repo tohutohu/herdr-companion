@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.History
@@ -59,14 +58,14 @@ private fun ShortcutChips(
     val labels = shortLabels(favorites + recents)
 
     @Composable
-    fun LazyItemScope.Shortcut(path: String, icon: ImageVector, description: String, modifier: Modifier = Modifier) {
+    fun Shortcut(path: String, icon: ImageVector, description: String, modifier: Modifier) {
         FilterChip(
             selected = path == currentPath,
             enabled = enabled,
             onClick = { onOpen(path) },
             label = { Text(labels.getValue(path)) },
             leadingIcon = { Icon(icon, contentDescription = description, Modifier.size(FilterChipDefaults.IconSize)) },
-            modifier = modifier.animateItem(),
+            modifier = modifier,
         )
     }
 
@@ -83,7 +82,7 @@ private fun ShortcutChips(
         afterItems = {
             // Starring moves a chip between the groups; let it travel.
             items(recents, key = { "recent:$it" }) { path ->
-                Shortcut(path, Icons.Default.History, "Recent")
+                Shortcut(path, Icons.Default.History, "Recent", Modifier.animateItem())
             }
         },
     )

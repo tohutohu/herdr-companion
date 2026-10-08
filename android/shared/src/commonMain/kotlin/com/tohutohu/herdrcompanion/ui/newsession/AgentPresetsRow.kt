@@ -55,6 +55,7 @@ fun AgentPresetsRow(
             onMove = onReorder,
             modifier = Modifier.weight(1f),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
+            placementSpec = itemPlacementSpec(paused),
             // Room for the chips to scroll out from under the button.
             contentPadding = PaddingValues(end = 4.dp),
             beforeItems = {
@@ -79,7 +80,7 @@ fun AgentPresetsRow(
                     label = { Text(presetLabel(preset)) },
                     leadingIcon = if (selected) ({ Selected() }) else null,
                     // The check mark comes and goes; let the chip grow around it.
-                    modifier = reorderModifier.animateItem(placementSpec = itemPlacementSpec(paused)).animateContentSize(tween(CHIP_RESIZE_MS)),
+                    modifier = reorderModifier.animateContentSize(tween(CHIP_RESIZE_MS)),
                 )
             },
         )
