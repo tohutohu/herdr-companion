@@ -213,7 +213,7 @@ private fun LazyListState.itemCenter(key: Any): Float? =
     layoutInfo.visibleItemsInfo.firstOrNull { it.key == key }?.let { it.offset + it.size / 2f }
 
 private val AutoScrollEdge = 48.dp
-private val AutoScrollMaxSpeed = 600.dp // per second
+private val AutoScrollMaxSpeed = 1000.dp // per second
 
 /**
  * How deep the lifted chip at [dragCenter] is in the [edge] px at either end of the viewport,
