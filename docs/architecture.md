@@ -442,6 +442,12 @@ newer.
   removes it from the archive. Both keep the native id. A worktree outside
   `workspaceRoots` may be resumed when its repository is inside them; one
   that was removed answers 409.
+- A Codex thread can remain loaded on the shared app-server after its Herdr
+  pane closes. It can therefore be archived and still report `idle` with
+  `canSend: true`; archive membership is independent of agent status.
+  Successfully sending a message removes the session from the archive,
+  including sends through the daemon without a pane. Failed sends leave it
+  archived.
 
 Directories are restricted to `workspaceRoots` with the same checks as file
 access; new folder names must be a single, non-hidden path segment.

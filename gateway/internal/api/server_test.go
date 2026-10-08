@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"mime"
@@ -145,6 +146,9 @@ type fakeProvider struct {
 	sent         []model.Input
 	resp         []model.InteractionResponse
 	modeChanges  int
+	// daemonStatus models a thread still loaded without a Herdr pane.
+	daemonStatus model.Status
+	sendError    error
 	// sendHook, when set, runs inside Send before the input is recorded.
 	sendHook func(ctx context.Context)
 }
@@ -162,7 +166,7 @@ func (p *fakeProvider) Summary(_ context.Context, id string, live *providers.Liv
 	if id != "s1" && id != "old" {
 		return nil, providers.ErrNotFound
 	}
-	return &providers.Summary{NativeID: id, Cwd: p.root, UpdatedAt: time.Unix(100, 0), LastMessage: "done", Model: "fake-large"}, nil
+	return &providers.Summary{NativeID: id, Cwd: p.root, UpdatedAt: time.Unix(100, 0), LastMessage: "done", Model: "fake-large", Status: p.daemonStatus}, nil
 }
 func (p *fakeProvider) Recent(context.Context, time.Time) ([]providers.Summary, error) {
 	return []providers.Summary{
@@ -184,8 +188,11 @@ func (p *fakeProvider) Image(context.Context, string, string, int) (string, []by
 	return "image/png", []byte("PNG"), nil
 }
 func (p *fakeProvider) Send(ctx context.Context, id string, live *providers.Live, in model.Input) error {
-	if live == nil {
+	if live == nil && p.daemonStatus == "" {
 		return providers.ErrNotLive
+	}
+	if p.sendError != nil {
+		return p.sendError
 	}
 	if p.sendHook != nil {
 		p.sendHook(ctx)
@@ -436,6 +443,91 @@ func Test画像をアップロードしてメッセージに添付できる(t *t
 	resp, _ = do(t, ts, tok, "POST", "/v1/sessions/fake:old/messages", []byte(`{"text":"x"}`), "application/json")
 	if resp.StatusCode != http.StatusConflict {
 		t.Errorf("offline send status = %d", resp.StatusCode)
+	}
+}
+
+func Testアーカイブ済みセッションへの送信成功でアーカイブが解除される(t *testing.T) {
+	for _, daemon := range []bool{false, true} {
+		name := "端末から再開したセッション"
+		if daemon {
+			name = "ペインを閉じても共有サーバーに残るセッション"
+		}
+		t.Run(name, func(t *testing.T) {
+			ts, fp, fh, tok := newTestServer(t)
+			pane := fh.snap.Panes[0]
+			resp, body := do(t, ts, tok, "POST", "/v1/sessions/fake:s1/archive", nil, "")
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("archive status %d: %s", resp.StatusCode, body)
+			}
+			if daemon {
+				fp.daemonStatus = model.StatusIdle
+			} else {
+				fh.snap.Panes = append(fh.snap.Panes, pane)
+			}
+			_, body = do(t, ts, tok, "GET", "/v1/sessions/fake:s1", nil, "")
+			var before model.Session
+			if err := json.Unmarshal(body, &before); err != nil {
+				t.Fatal(err)
+			}
+			if !before.Archived || !before.CanSend || (daemon && before.PaneID != "") {
+				t.Fatalf("before send = %+v", before)
+			}
+			resp, body = do(t, ts, tok, "POST", "/v1/sessions/fake:s1/messages", []byte(`{"text":"続けて"}`), "application/json")
+			if resp.StatusCode != http.StatusAccepted || len(fp.sent) != 1 {
+				t.Fatalf("send status %d: %s, sent=%+v", resp.StatusCode, body, fp.sent)
+			}
+			_, body = do(t, ts, tok, "GET", "/v1/sessions/fake:s1", nil, "")
+			var after model.Session
+			if err := json.Unmarshal(body, &after); err != nil {
+				t.Fatal(err)
+			}
+			if after.Archived {
+				t.Errorf("still archived after send: %+v", after)
+			}
+			_, body = do(t, ts, tok, "GET", "/v1/sessions?archived=true", nil, "")
+			if ids := sessionIDs(t, body); len(ids) != 0 {
+				t.Errorf("archive after send = %v", ids)
+			}
+			_, body = do(t, ts, tok, "GET", "/v1/sessions", nil, "")
+			if ids := sessionIDs(t, body); !strings.Contains(strings.Join(ids, ","), "fake:s1") {
+				t.Errorf("sent session missing from main list = %v", ids)
+			}
+		})
+	}
+}
+
+func Test送信失敗や不正なメッセージではアーカイブを解除しない(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload string
+		daemon  bool
+		err     error
+		status  int
+	}{
+		{"送信先がオフライン", `{"text":"続けて"}`, false, nil, http.StatusConflict},
+		{"共有サーバーへの送信失敗", `{"text":"続けて"}`, true, errors.New("send failed"), http.StatusInternalServerError},
+		{"空のメッセージ", `{"text":""}`, true, nil, http.StatusBadRequest},
+		{"添付が存在しない", `{"text":"続けて","uploads":["missing"]}`, true, nil, http.StatusNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ts, fp, _, tok := newTestServer(t)
+			resp, body := do(t, ts, tok, "POST", "/v1/sessions/fake:s1/archive", nil, "")
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("archive status %d: %s", resp.StatusCode, body)
+			}
+			if tc.daemon {
+				fp.daemonStatus = model.StatusIdle
+			}
+			fp.sendError = tc.err
+			resp, body = do(t, ts, tok, "POST", "/v1/sessions/fake:s1/messages", []byte(tc.payload), "application/json")
+			if resp.StatusCode != tc.status || len(fp.sent) != 0 {
+				t.Fatalf("send status %d: %s, sent=%+v", resp.StatusCode, body, fp.sent)
+			}
+			_, body = do(t, ts, tok, "GET", "/v1/sessions?archived=true", nil, "")
+			if ids := sessionIDs(t, body); len(ids) != 1 || ids[0] != "fake:s1" {
+				t.Errorf("archive after failed send = %v", ids)
+			}
+		})
 	}
 }
 

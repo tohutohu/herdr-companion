@@ -393,6 +393,13 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, id, "send_message", err)
 		return
 	}
+	if s.Archive != nil {
+		if err := s.Archive.Remove(id); err != nil {
+			// The message has already been sent: returning an error here
+			// could make a client retry it and send the same prompt twice.
+			slog.Warn("unarchive after send failed", "session_id", id, "error", err)
+		}
+	}
 	writeJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
 }
 
