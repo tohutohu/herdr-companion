@@ -415,7 +415,7 @@ func toSession(r *Resolved, sum *providers.Summary) model.Session {
 			sess.Cwd = r.Live.Cwd
 		}
 	}
-	sess.CanSend = r.Live != nil || sum.Status != ""
+	sess.CanSend = r.Live != nil
 	sess.Project = r.Label
 	if sess.Project == "" {
 		sess.Project = providers.ProjectName(sess.Cwd)
@@ -425,11 +425,11 @@ func toSession(r *Resolved, sum *providers.Summary) model.Session {
 
 // Normalize maps Herdr lifecycle + provider hints to the public status set.
 func Normalize(live *providers.Live, sum *providers.Summary) model.Status {
-	if sum.Status != "" {
-		return sum.Status
-	}
 	if live == nil {
 		return model.StatusOffline
+	}
+	if sum.Status != "" {
+		return sum.Status
 	}
 	switch live.HerdrStatus {
 	case herdr.StatusWorking:

@@ -62,7 +62,9 @@ valid panes still claim one session, none is selected for pane operations.
 | (not in Herdr) | | `offline` |
 
 A Codex thread loaded on the shared daemon may report its own status
-(`waitingOnApproval`, `waitingOnUserInput`, `systemError`), which wins.
+(`waitingOnApproval`, `waitingOnUserInput`, `systemError`), which wins while
+the session has a Herdr pane. Without a pane, every session is `offline`
+with `canSend: false`, even if its thread remains loaded on the daemon.
 
 ## Provider adapters
 
@@ -443,11 +445,11 @@ newer.
   `workspaceRoots` may be resumed when its repository is inside them; one
   that was removed answers 409.
 - A Codex thread can remain loaded on the shared app-server after its Herdr
-  pane closes. It can therefore be archived and still report `idle` with
-  `canSend: true`; archive membership is independent of agent status.
-  Successfully sending a message removes the session from the archive,
-  including sends through the daemon without a pane. Failed sends leave it
-  archived.
+  pane closes, but is still `offline` with `canSend: false`. Pending daemon
+  interactions are hidden and sends and responses are rejected until it has
+  a Herdr pane again. Resume reopens the pane and removes it from the archive.
+  Successfully sending a message to an archived session reopened from a
+  terminal also removes it from the archive. Failed sends leave it archived.
 
 Directories are restricted to `workspaceRoots` with the same checks as file
 access; new folder names must be a single, non-hidden path segment.

@@ -88,22 +88,23 @@ func Test履歴不変でも承認の解消とモード変更を即座に反映�
 	p.daemon = d
 	d.Request(json.RawMessage(`1`), "item/commandExecution/requestApproval", json.RawMessage(`{"threadId":"`+th.ID+`","turnId":"t","itemId":"i","command":"go test"}`))
 	ctx := context.Background()
-	sum, msgs, err := p.Conversation(ctx, th.ID, nil)
+	live := &providers.Live{PaneID: "w1:p1"}
+	sum, msgs, err := p.Conversation(ctx, th.ID, live)
 	if err != nil || sum.Pending != model.InteractionApproval || msgs[len(msgs)-1].Blocks[0].Interaction == nil {
 		t.Fatalf("approval: %+v, %v", sum, err)
 	}
 	d.Notification("serverRequest/resolved", json.RawMessage(`{"threadId":"`+th.ID+`","requestId":1}`))
 	d.Notification("thread/settings/updated", json.RawMessage(`{"threadId":"`+th.ID+`","threadSettings":{"collaborationMode":{"mode":"plan"}}}`))
-	sum, msgs, err = p.Conversation(ctx, th.ID, nil)
+	sum, msgs, err = p.Conversation(ctx, th.ID, live)
 	if err != nil || sum.Pending != "" || sum.Mode != "Plan" || msgs[len(msgs)-1].Blocks[0].Interaction != nil || historyCalls(f) != 1 {
 		t.Fatalf("resolved: %+v, err=%v, calls=%v", sum, err, f.callList())
 	}
 	d.Notification("item/agentMessage/delta", json.RawMessage(`{"threadId":"`+th.ID+`","delta":"new"}`))
-	if _, _, err = p.Conversation(ctx, th.ID, nil); err != nil || historyCalls(f) != 2 {
+	if _, _, err = p.Conversation(ctx, th.ID, live); err != nil || historyCalls(f) != 2 {
 		t.Fatalf("event: %v %v", err, f.callList())
 	}
 	p.actionVersion.Add(1)
-	if _, _, err = p.Conversation(ctx, th.ID, nil); err != nil || historyCalls(f) != 3 {
+	if _, _, err = p.Conversation(ctx, th.ID, live); err != nil || historyCalls(f) != 3 {
 		t.Fatalf("action: %v %v", err, f.callList())
 	}
 }

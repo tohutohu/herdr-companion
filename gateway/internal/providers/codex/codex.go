@@ -460,6 +460,9 @@ func (p *Provider) messagesFromThread(ctx context.Context, th *Thread, live *pro
 		root = live.Cwd
 	}
 	msgs := p.convertedHistory(th, root)
+	if live == nil {
+		return msgs
+	}
 
 	var pending []model.Message
 	if d := p.currentDaemon(); d != nil {
@@ -509,11 +512,11 @@ func (p *Provider) Image(ctx context.Context, nativeID, messageID string, index 
 
 func (p *Provider) Send(ctx context.Context, nativeID string, live *providers.Live, in model.Input) error {
 	defer p.actionVersion.Add(1)
-	if d := p.currentDaemon(); d != nil && d.loaded(nativeID) {
-		return p.sendStructured(ctx, d, nativeID, in)
-	}
 	if live == nil {
 		return providers.ErrNotLive
+	}
+	if d := p.currentDaemon(); d != nil && d.loaded(nativeID) {
+		return p.sendStructured(ctx, d, nativeID, in)
 	}
 	// The Codex TUI attaches pasted image paths.
 	return p.term.Prompt(ctx, live.PaneID, providers.TextWithAttachments(in))
@@ -581,6 +584,9 @@ func (p *Provider) sendStructured(ctx context.Context, d *daemonConn, id string,
 
 func (p *Provider) Respond(ctx context.Context, nativeID string, live *providers.Live, r model.InteractionResponse) error {
 	defer p.actionVersion.Add(1)
+	if live == nil {
+		return providers.ErrNotLive
+	}
 	if strings.HasPrefix(r.InteractionID, asyncInputPrefix) {
 		return p.respondAsync(ctx, nativeID, live, r)
 	}

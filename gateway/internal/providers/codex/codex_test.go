@@ -602,8 +602,9 @@ func TestDaemon接続時は構造化APIで送信と承認を行う(t *testing.T)
 		time.Sleep(10 * time.Millisecond)
 	}
 
+	live := &providers.Live{PaneID: "w1:p1", HerdrStatus: herdr.StatusBlocked}
 	before := len(f.callList())
-	sum, msgs, err := p.Conversation(ctx, "thread-000001", nil)
+	sum, msgs, err := p.Conversation(ctx, "thread-000001", live)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -619,7 +620,33 @@ func TestDaemon接続時は構造化APIで送信と承認を行う(t *testing.T)
 		t.Fatalf("interaction = %+v", msgs[len(msgs)-1])
 	}
 
-	if err := p.Respond(ctx, "thread-000001", nil, model.InteractionResponse{InteractionID: ia.ID, Decision: "deny"}); err != nil {
+	// ペインが閉じてもスレッドは loaded のまま。履歴だけ読み、操作は拒否する。
+	_, offlineMsgs, err := p.Conversation(ctx, "thread-000001", nil)
+	if err != nil || len(offlineMsgs) == 0 {
+		t.Fatalf("offline history: %v, err=%v", offlineMsgs, err)
+	}
+	for _, msg := range offlineMsgs {
+		for _, block := range msg.Blocks {
+			if block.Interaction != nil {
+				t.Fatalf("offline interaction still visible: %+v", block.Interaction)
+			}
+		}
+	}
+	before = len(f.callList())
+	if err := p.Send(ctx, "thread-000001", nil, model.Input{Text: "続けて"}); !errors.Is(err, providers.ErrNotLive) {
+		t.Fatalf("offline send error = %v", err)
+	}
+	if err := p.Respond(ctx, "thread-000001", nil, model.InteractionResponse{InteractionID: ia.ID, Decision: "deny"}); !errors.Is(err, providers.ErrNotLive) {
+		t.Fatalf("offline respond error = %v", err)
+	}
+	if len(f.callList()) != before {
+		t.Fatal("offline operation reached the shared server")
+	}
+	if _, ok := d.lookup("thread-000001", ia.ID); !ok {
+		t.Fatal("offline response resolved the pending request")
+	}
+
+	if err := p.Respond(ctx, "thread-000001", live, model.InteractionResponse{InteractionID: ia.ID, Decision: "deny"}); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(50 * time.Millisecond)
@@ -629,12 +656,12 @@ func TestDaemon接続時は構造化APIで送信と承認を行う(t *testing.T)
 	if answered != `0 {"decision":"decline"}` {
 		t.Errorf("answered = %s", answered)
 	}
-	if err := p.Respond(ctx, "thread-000001", nil, model.InteractionResponse{InteractionID: ia.ID, Decision: "deny"}); err != providers.ErrInteractionGone {
+	if err := p.Respond(ctx, "thread-000001", live, model.InteractionResponse{InteractionID: ia.ID, Decision: "deny"}); err != providers.ErrInteractionGone {
 		t.Errorf("second respond err = %v", err)
 	}
 
 	// 進行中のターンがあるので steer で送る
-	if err := p.Send(ctx, "thread-000001", nil, model.Input{Text: "急いで", Images: []string{"/tmp/a.png"}}); err != nil {
+	if err := p.Send(ctx, "thread-000001", live, model.Input{Text: "急いで", Images: []string{"/tmp/a.png"}}); err != nil {
 		t.Fatal(err)
 	}
 	calls := f.callList()
@@ -647,7 +674,7 @@ func TestDaemon接続時は構造化APIで送信と承認を行う(t *testing.T)
 	}
 
 	// 画像以外の添付は構造化入力にできないので本文へパスを足す
-	if err := p.Send(ctx, "thread-000001", nil, model.Input{Text: "読んで", Files: []string{"/tmp/up/notes.txt"}}); err != nil {
+	if err := p.Send(ctx, "thread-000001", live, model.Input{Text: "読んで", Files: []string{"/tmp/up/notes.txt"}}); err != nil {
 		t.Fatal(err)
 	}
 	calls = f.callList()

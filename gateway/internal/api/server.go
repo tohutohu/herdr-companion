@@ -383,6 +383,10 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, id, "send_message", err)
 		return
 	}
+	if res.Live == nil {
+		s.fail(w, r, id, "send_message", providers.ErrNotLive)
+		return
+	}
 	// Once the message is here it goes to the agent even if the phone hangs up
 	// (leaves the screen, loses the network): typing half a prompt into the
 	// pane would be worse than finishing it.
@@ -413,6 +417,10 @@ func (s *Server) respond(w http.ResponseWriter, r *http.Request) {
 	res, err := s.Sessions.Resolve(r.Context(), id)
 	if err != nil {
 		s.fail(w, r, id, "respond", err)
+		return
+	}
+	if res.Live == nil {
+		s.fail(w, r, id, "respond", providers.ErrNotLive)
 		return
 	}
 	if err := res.Provider.Respond(r.Context(), res.NativeID, res.Live, req); err != nil {

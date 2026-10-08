@@ -20,6 +20,11 @@ func TestHerdrの状態を共通ステータスに正規化する(t *testing.T) 
 		want model.Status
 	}{
 		{"Herdrにいない", nil, providers.Summary{}, model.StatusOffline},
+		{"共有サーバーに待機中でもHerdrにいない", nil, providers.Summary{Status: model.StatusIdle}, model.StatusOffline},
+		{"共有サーバーで作業中でもHerdrにいない", nil, providers.Summary{Status: model.StatusRunning}, model.StatusOffline},
+		{"共有サーバーで承認待ちでもHerdrにいない", nil, providers.Summary{Status: model.StatusWaitingApproval}, model.StatusOffline},
+		{"共有サーバーで質問待ちでもHerdrにいない", nil, providers.Summary{Status: model.StatusWaitingInput}, model.StatusOffline},
+		{"共有サーバーで失敗してもHerdrにいない", nil, providers.Summary{Status: model.StatusFailed}, model.StatusOffline},
 		{"作業中", live(herdr.StatusWorking), providers.Summary{}, model.StatusRunning},
 		{"質問待ち", live(herdr.StatusBlocked), providers.Summary{Pending: model.InteractionQuestions}, model.StatusWaitingInput},
 		{"承認待ち", live(herdr.StatusBlocked), providers.Summary{Pending: model.InteractionApproval}, model.StatusWaitingApproval},

@@ -450,7 +450,7 @@ func Testアーカイブ済みセッションへの送信成功でアーカイ�
 	for _, daemon := range []bool{false, true} {
 		name := "端末から再開したセッション"
 		if daemon {
-			name = "ペインを閉じても共有サーバーに残るセッション"
+			name = "共有サーバーのセッションを端末から再開"
 		}
 		t.Run(name, func(t *testing.T) {
 			ts, fp, fh, tok := newTestServer(t)
@@ -461,15 +461,14 @@ func Testアーカイブ済みセッションへの送信成功でアーカイ�
 			}
 			if daemon {
 				fp.daemonStatus = model.StatusIdle
-			} else {
-				fh.snap.Panes = append(fh.snap.Panes, pane)
 			}
+			fh.snap.Panes = append(fh.snap.Panes, pane)
 			_, body = do(t, ts, tok, "GET", "/v1/sessions/fake:s1", nil, "")
 			var before model.Session
 			if err := json.Unmarshal(body, &before); err != nil {
 				t.Fatal(err)
 			}
-			if !before.Archived || !before.CanSend || (daemon && before.PaneID != "") {
+			if !before.Archived || !before.CanSend || before.PaneID != pane.PaneID {
 				t.Fatalf("before send = %+v", before)
 			}
 			resp, body = do(t, ts, tok, "POST", "/v1/sessions/fake:s1/messages", []byte(`{"text":"続けて"}`), "application/json")
@@ -496,6 +495,91 @@ func Testアーカイブ済みセッションへの送信成功でアーカイ�
 	}
 }
 
+func Test共有サーバーに残ってもアーカイブ後はペインが戻るまでオフライン(t *testing.T) {
+	for _, status := range []model.Status{model.StatusIdle, model.StatusRunning, model.StatusWaitingApproval, model.StatusWaitingInput, model.StatusFailed} {
+		for _, batch := range []bool{false, true} {
+			name := string(status) + "/単体"
+			if batch {
+				name = string(status) + "/一括"
+			}
+			t.Run(name, func(t *testing.T) {
+				ts, fp, _, tok := newTestServer(t)
+				fp.daemonStatus = status
+				path, payload := "/v1/sessions/fake:s1/archive", []byte(nil)
+				if batch {
+					path, payload = "/v1/sessions/archive", []byte(`{"ids":["fake:s1"]}`)
+				}
+				resp, body := do(t, ts, tok, "POST", path, payload, "application/json")
+				if resp.StatusCode != http.StatusOK {
+					t.Fatalf("archive status %d: %s", resp.StatusCode, body)
+				}
+				assertOffline := func(sess model.Session, archived bool) {
+					t.Helper()
+					if sess.ID != "fake:s1" || sess.Status != model.StatusOffline || sess.CanSend || sess.PaneID != "" || sess.Archived != archived {
+						t.Fatalf("offline session = %+v", sess)
+					}
+				}
+				for _, path := range []string{"/v1/sessions/fake:s1", "/v1/sessions/fake:s1/messages", "/v1/sessions?archived=true"} {
+					resp, body = do(t, ts, tok, "GET", path, nil, "")
+					if resp.StatusCode != http.StatusOK {
+						t.Fatalf("GET %s status %d: %s", path, resp.StatusCode, body)
+					}
+					var result struct {
+						model.Session
+						Detail   model.Session   `json:"session"`
+						Sessions []model.Session `json:"sessions"`
+					}
+					if err := json.Unmarshal(body, &result); err != nil {
+						t.Fatal(err)
+					}
+					switch path {
+					case "/v1/sessions/fake:s1/messages":
+						assertOffline(result.Detail, true)
+					case "/v1/sessions?archived=true":
+						if len(result.Sessions) != 1 {
+							t.Fatalf("archive list = %s", body)
+						}
+						assertOffline(result.Sessions[0], true)
+					default:
+						assertOffline(result.Session, true)
+					}
+				}
+				_, body = do(t, ts, tok, "GET", "/v1/sessions", nil, "")
+				if strings.Contains(strings.Join(sessionIDs(t, body), ","), "fake:s1") {
+					t.Fatalf("archived session still listed: %s", body)
+				}
+				for _, action := range []struct{ path, payload string }{
+					{"messages", `{"text":"続けて"}`},
+					{"respond", `{"interactionId":"q1","decision":"deny"}`},
+				} {
+					resp, body = do(t, ts, tok, "POST", "/v1/sessions/fake:s1/"+action.path, []byte(action.payload), "application/json")
+					if resp.StatusCode != http.StatusConflict || len(fp.sent) != 0 || len(fp.resp) != 0 {
+						t.Fatalf("offline %s status %d: %s", action.path, resp.StatusCode, body)
+					}
+				}
+				resp, body = do(t, ts, tok, "DELETE", "/v1/sessions/fake:s1/archive", nil, "")
+				var restored model.Session
+				if err := json.Unmarshal(body, &restored); err != nil || resp.StatusCode != http.StatusOK {
+					t.Fatalf("unarchive status %d: %s, err=%v", resp.StatusCode, body, err)
+				}
+				assertOffline(restored, false)
+				resp, body = do(t, ts, tok, "POST", "/v1/sessions/fake:s1/resume", []byte(`{"trust":true}`), "application/json")
+				if resp.StatusCode != http.StatusCreated {
+					t.Fatalf("resume status %d: %s", resp.StatusCode, body)
+				}
+				_, body = do(t, ts, tok, "GET", "/v1/sessions/fake:s1", nil, "")
+				var resumed model.Session
+				if err := json.Unmarshal(body, &resumed); err != nil {
+					t.Fatal(err)
+				}
+				if resumed.Status != status || !resumed.CanSend || resumed.PaneID == "" || resumed.Archived {
+					t.Fatalf("resumed session = %+v", resumed)
+				}
+			})
+		}
+	}
+}
+
 func Test送信失敗や不正なメッセージではアーカイブを解除しない(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -510,13 +594,17 @@ func Test送信失敗や不正なメッセージではアーカイブを解除�
 		{"添付が存在しない", `{"text":"続けて","uploads":["missing"]}`, true, nil, http.StatusNotFound},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ts, fp, _, tok := newTestServer(t)
+			ts, fp, fh, tok := newTestServer(t)
+			pane := fh.snap.Panes[0]
 			resp, body := do(t, ts, tok, "POST", "/v1/sessions/fake:s1/archive", nil, "")
 			if resp.StatusCode != http.StatusOK {
 				t.Fatalf("archive status %d: %s", resp.StatusCode, body)
 			}
 			if tc.daemon {
 				fp.daemonStatus = model.StatusIdle
+			}
+			if tc.err != nil {
+				fh.snap.Panes = append(fh.snap.Panes, pane)
 			}
 			fp.sendError = tc.err
 			resp, body = do(t, ts, tok, "POST", "/v1/sessions/fake:s1/messages", []byte(tc.payload), "application/json")

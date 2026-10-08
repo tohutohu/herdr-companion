@@ -88,7 +88,7 @@ type Summary struct {
 	CompletionRevision string
 	// Pending is the kind of interaction waiting for the user, if any.
 	Pending model.InteractionType
-	// Status, when set, is an authoritative provider status (e.g. Codex daemon).
+	// Status, when set, overrides Herdr's status while the session has a live pane.
 	Status model.Status
 	// Model is the model the session last used, as the provider names it.
 	Model string
