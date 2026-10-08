@@ -101,13 +101,14 @@ func queueBody(screen string) string {
 var queuedQuestionCount = regexp.MustCompile(`(?m)^\s*\? ([1-9][0-9]*) questions?(?: · [^\n]*)?\s*$`)
 var queuePosition = regexp.MustCompile(`^([1-9][0-9]*) of ([1-9][0-9]*)$`)
 
-// Codex 0.160 changed the queue shortcut from Alt+Up to Shift+Left.
+// Codex 0.160 changed the queue shortcut from Alt+Up to Shift+Left;
+// 0.161 renders the Shift modifier as ⇧ on macOS.
 func openQueueKey(screen string) string {
 	body := queueBody(screen)
 	if !queuedQuestionCount.MatchString(body) {
 		return ""
 	}
-	if strings.Contains(body, "shift+← to answer") {
+	if strings.Contains(body, "shift+← to answer") || strings.Contains(body, "⇧← to answer") {
 		return "shift+left"
 	}
 	if strings.Contains(body, "↑ to answer") {
@@ -120,7 +121,7 @@ func collapsedQuestion(screen string) bool { return openQueueKey(screen) != "" }
 
 func focusedQueue(screen string) (title string, position, count int) {
 	body := queueBody(screen)
-	if !strings.Contains(body, "enter submit") || (!strings.Contains(body, "↓ main prompt") && !strings.Contains(body, "shift+→ main prompt")) {
+	if !strings.Contains(body, "enter submit") || (!strings.Contains(body, "↓ main prompt") && !strings.Contains(body, "shift+→ main prompt") && !strings.Contains(body, "⇧→ main prompt")) {
 		return "", 0, 0
 	}
 	body = strings.TrimSpace(body)

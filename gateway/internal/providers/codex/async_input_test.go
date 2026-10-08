@@ -63,30 +63,40 @@ func asyncProviderWithThread(t *testing.T, term *asyncTerminal, th *Thread) *Pro
 }
 
 func Test単独TUIの非同期質問は完了ターンでも回答できる(t *testing.T) {
-	term := &asyncTerminal{screen: collapsedAsync, opened: "• Queued follow-up inputs\n\n  APIキーの保存先を教えてください。\n\n  Type your answer\n\n  enter submit   ctrl + ] skip   ⌥ + ↓ main prompt"}
-	p, th := asyncTestProvider(t, term)
-	live := &providers.Live{PaneID: "test", HerdrStatus: herdr.StatusBlocked}
-	msgs, err := p.Messages(context.Background(), th.ID, live)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ia := msgs[len(msgs)-1].Blocks[0].Interaction
-	if ia == nil || !ia.Supported || ia.Type != model.InteractionQuestions {
-		t.Fatalf("interaction: %+v", ia)
-	}
-	assertGolden(t, "async_question.golden.json", ia)
-	r := model.InteractionResponse{InteractionID: ia.ID, Answers: map[string]model.Answer{"0": {Text: "JEV_API_KEY"}}}
-	if err := p.Respond(context.Background(), th.ID, live, r); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Join(term.keys, ",") != "alt+up,enter" || term.text != "\x1b[200~JEV_API_KEY\x1b[201~" {
-		t.Fatalf("keys=%v text=%q", term.keys, term.text)
-	}
-	if err := p.Respond(context.Background(), th.ID, live, r); !errors.Is(err, providers.ErrInteractionGone) {
-		t.Fatalf("duplicate response: %v", err)
-	}
-	if ia := p.asyncInteraction(context.Background(), th, live); ia != nil {
-		t.Fatal("answered question is still pending")
+	for _, tc := range []struct {
+		name, collapsed, opened, key string
+	}{
+		{"Alt", collapsedAsync, "• Queued follow-up inputs\n\n  APIキーの保存先を教えてください。\n\n  Type your answer\n\n  enter submit   ctrl + ] skip   ⌥ + ↓ main prompt", "alt+up"},
+		{"Shift", "• Queued follow-up inputs\n  ? 1 question\n    shift+← to answer", "• Queued follow-up inputs\n\n  APIキーの保存先を教えてください。\n\n  Type your answer\n\n  enter submit   ctrl+] skip   shift+→ main prompt", "shift+left"},
+		{"Mac記号", "• Queued follow-up inputs\n  ? 1 question\n    ⇧← to answer", "• Queued follow-up inputs\n\n  APIキーの保存先を教えてください。\n\n  Type your answer\n\n  enter submit   ⌃] skip   ⇧→ main prompt", "shift+left"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			term := &asyncTerminal{screen: tc.collapsed, opened: tc.opened}
+			p, th := asyncTestProvider(t, term)
+			live := &providers.Live{PaneID: "test", HerdrStatus: herdr.StatusBlocked}
+			msgs, err := p.Messages(context.Background(), th.ID, live)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ia := msgs[len(msgs)-1].Blocks[0].Interaction
+			if ia == nil || !ia.Supported || ia.Type != model.InteractionQuestions {
+				t.Fatalf("interaction: %+v", ia)
+			}
+			assertGolden(t, "async_question.golden.json", ia)
+			r := model.InteractionResponse{InteractionID: ia.ID, Answers: map[string]model.Answer{"0": {Text: "JEV_API_KEY"}}}
+			if err := p.Respond(context.Background(), th.ID, live, r); err != nil {
+				t.Fatal(err)
+			}
+			if strings.Join(term.keys, ",") != tc.key+",enter" || term.text != "\x1b[200~JEV_API_KEY\x1b[201~" {
+				t.Fatalf("keys=%v text=%q", term.keys, term.text)
+			}
+			if err := p.Respond(context.Background(), th.ID, live, r); !errors.Is(err, providers.ErrInteractionGone) {
+				t.Fatalf("duplicate response: %v", err)
+			}
+			if ia := p.asyncInteraction(context.Background(), th, live); ia != nil {
+				t.Fatal("answered question is still pending")
+			}
+		})
 	}
 }
 
@@ -153,46 +163,56 @@ func multiThread(t *testing.T) *Thread {
 }
 
 func Test複数非同期質問をUIから順番に回答する(t *testing.T) {
-	th := multiThread(t)
-	term := &asyncTerminal{screen: multiCollapsed, opened: multiColor, afterSubmit: []string{multiName, multiShape}}
-	p := asyncProviderWithThread(t, term, th)
-	live := &providers.Live{PaneID: "test"}
-	var first model.InteractionResponse
-	for i, tc := range []struct {
-		title  string
-		answer model.Answer
-	}{
-		{"Color?", model.Answer{Selected: []string{"Red"}}},
-		{"Name?", model.Answer{Text: "UI test"}},
-		{"Shape?", model.Answer{Selected: []string{"Circle"}}},
-	} {
-		msgs, err := p.Messages(context.Background(), th.ID, live)
-		if err != nil {
-			t.Fatal(err)
-		}
-		ia := msgs[len(msgs)-1].Blocks[0].Interaction
-		if ia == nil || ia.Questions[0].Question != tc.title {
-			t.Fatalf("question %d: %+v", i, ia)
-		}
-		r := model.InteractionResponse{InteractionID: ia.ID, Answers: map[string]model.Answer{ia.Questions[0].ID: tc.answer}}
-		if i == 0 {
-			first = r
-		}
-		if err := p.Respond(context.Background(), th.ID, live, r); err != nil {
-			t.Fatal(err)
-		}
-		if err := p.Respond(context.Background(), th.ID, live, first); !errors.Is(err, providers.ErrInteractionGone) {
-			t.Fatalf("stale reply: %v", err)
-		}
-	}
-	if got := strings.Join(term.keys, ","); got != "shift+left,enter,enter,enter" {
-		t.Fatalf("keys: %s", got)
-	}
-	if term.text != "\x1b[200~UI test\x1b[201~" {
-		t.Fatalf("text: %q", term.text)
-	}
-	if p.asyncInteraction(context.Background(), th, live) != nil {
-		t.Fatal("queue still pending")
+	for _, macSymbols := range []bool{false, true} {
+		t.Run(map[bool]string{false: "Shift", true: "Mac記号"}[macSymbols], func(t *testing.T) {
+			render := func(screen string) string {
+				if macSymbols {
+					return strings.NewReplacer("shift+", "⇧", "ctrl+", "⌃").Replace(screen)
+				}
+				return screen
+			}
+			th := multiThread(t)
+			term := &asyncTerminal{screen: render(multiCollapsed), opened: render(multiColor), afterSubmit: []string{render(multiName), render(multiShape)}}
+			p := asyncProviderWithThread(t, term, th)
+			live := &providers.Live{PaneID: "test"}
+			var first model.InteractionResponse
+			for i, tc := range []struct {
+				title  string
+				answer model.Answer
+			}{
+				{"Color?", model.Answer{Selected: []string{"Red"}}},
+				{"Name?", model.Answer{Text: "UI test"}},
+				{"Shape?", model.Answer{Selected: []string{"Circle"}}},
+			} {
+				msgs, err := p.Messages(context.Background(), th.ID, live)
+				if err != nil {
+					t.Fatal(err)
+				}
+				ia := msgs[len(msgs)-1].Blocks[0].Interaction
+				if ia == nil || ia.Questions[0].Question != tc.title {
+					t.Fatalf("question %d: %+v", i, ia)
+				}
+				r := model.InteractionResponse{InteractionID: ia.ID, Answers: map[string]model.Answer{ia.Questions[0].ID: tc.answer}}
+				if i == 0 {
+					first = r
+				}
+				if err := p.Respond(context.Background(), th.ID, live, r); err != nil {
+					t.Fatal(err)
+				}
+				if err := p.Respond(context.Background(), th.ID, live, first); !errors.Is(err, providers.ErrInteractionGone) {
+					t.Fatalf("stale reply: %v", err)
+				}
+			}
+			if got := strings.Join(term.keys, ","); got != "shift+left,enter,enter,enter" {
+				t.Fatalf("keys: %s", got)
+			}
+			if term.text != "\x1b[200~UI test\x1b[201~" {
+				t.Fatalf("text: %q", term.text)
+			}
+			if p.asyncInteraction(context.Background(), th, live) != nil {
+				t.Fatal("queue still pending")
+			}
+		})
 	}
 }
 
