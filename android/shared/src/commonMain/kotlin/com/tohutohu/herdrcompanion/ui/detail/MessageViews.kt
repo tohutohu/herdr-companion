@@ -47,6 +47,7 @@ import com.tohutohu.herdrcompanion.data.Message
 import com.tohutohu.herdrcompanion.data.api.BlockDto
 import com.tohutohu.herdrcompanion.data.api.InteractionResponseDto
 import com.tohutohu.herdrcompanion.ui.ExpandChevron
+import com.tohutohu.herdrcompanion.ui.UiMotion
 import com.tohutohu.herdrcompanion.ui.markdown.MarkdownText
 
 @Composable
@@ -98,7 +99,7 @@ fun MessageItem(
 }
 
 /** How long a row takes to open or close. */
-internal const val RESIZE_MS = 200
+internal const val RESIZE_MS = UiMotion.ResizeMs
 
 /**
  * Called just before a row opens or closes, so the list can move the rows
@@ -152,8 +153,8 @@ fun ActivityGroupItem(
         // the newest one next to it.
         AnimatedVisibility(
             visible = expanded,
-            enter = expandVertically(tween(RESIZE_MS), expandFrom = Alignment.Bottom) + fadeIn(tween(RESIZE_MS)),
-            exit = shrinkVertically(tween(RESIZE_MS), shrinkTowards = Alignment.Bottom) + fadeOut(tween(RESIZE_MS / 2)),
+            enter = expandVertically(UiMotion.resize(), expandFrom = Alignment.Bottom) + fadeIn(UiMotion.resize()),
+            exit = shrinkVertically(UiMotion.resize(), shrinkTowards = Alignment.Bottom) + fadeOut(tween(UiMotion.FadeOutMs)),
         ) {
             SelectionContainer {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(vertical = 4.dp)) {
@@ -179,7 +180,7 @@ fun ActivityGroupItem(
         ) {
             val muted = MaterialTheme.colorScheme.onSurfaceVariant
             // While collapsed, each new call replaces the line.
-            Crossfade(if (expanded) null else row.latest, modifier = Modifier.weight(1f), animationSpec = tween(RESIZE_MS), label = "activity") { latest ->
+            Crossfade(if (expanded) null else row.latest, modifier = Modifier.weight(1f), animationSpec = UiMotion.resize(), label = "activity") { latest ->
                 Text(
                     latest?.let { "⋯ $it" } ?: "Hide",
                     fontFamily = FontFamily.Monospace,
@@ -304,11 +305,11 @@ private fun CollapsibleTool(text: String, output: Boolean) {
                 onResize()
                 expanded = !expanded
             }
-            .animateContentSize(tween(RESIZE_MS)),
+            .animateContentSize(UiMotion.resize()),
     ) {
         Row(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.Top) {
             // The surface animates its size; this only cross-fades the text.
-            Crossfade(expanded, modifier = Modifier.weight(1f), animationSpec = tween(RESIZE_MS), label = "tool") { open ->
+            Crossfade(expanded, modifier = Modifier.weight(1f), animationSpec = UiMotion.resize(), label = "tool") { open ->
                 if (open) {
                     Text(
                         text.trimEnd(),

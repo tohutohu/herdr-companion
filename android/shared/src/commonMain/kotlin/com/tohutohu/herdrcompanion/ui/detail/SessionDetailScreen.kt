@@ -586,7 +586,7 @@ private fun Composer(
                         }
                     },
                 )
-                SwapContent(busy) { spinning ->
+                SwapContent(busy, modifier = Modifier.size(48.dp), iconOnly = true) { spinning ->
                     if (spinning) {
                         CircularProgressIndicator(Modifier.padding(12.dp).size(24.dp))
                     } else {

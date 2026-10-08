@@ -16,10 +16,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
@@ -28,6 +30,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -38,14 +41,22 @@ import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -53,6 +64,8 @@ import com.tohutohu.herdrcompanion.data.api.AnswerDto
 import com.tohutohu.herdrcompanion.data.api.InteractionDto
 import com.tohutohu.herdrcompanion.data.api.InteractionResponseDto
 import com.tohutohu.herdrcompanion.data.api.QuestionDto
+import com.tohutohu.herdrcompanion.ui.SwapContent
+import com.tohutohu.herdrcompanion.ui.UiMotion
 
 /** Sentinel used as the "Other" option key. */
 private const val OTHER = "__herdr_other__"
@@ -83,14 +96,27 @@ fun InteractionCard(
     onOpenTerminal: () -> Unit,
 ) {
     val pending = interaction.isPending
+    // Remember which control was pressed, but use the caller's request state
+    // to drive progress. Re-enabling after a failure restores the same control.
+    var submitted by remember(interaction.id) { mutableStateOf<InteractionResponseDto?>(null) }
+    LaunchedEffect(enabled, pending) {
+        if (enabled || !pending) submitted = null
+    }
+    val respond: (InteractionResponseDto) -> Unit = {
+        submitted = it
+        onRespond(it)
+    }
+    val responding = pending && !enabled && submitted != null
     // Answering settles the card: its colours fade and the controls give way
     // to the summary instead of snapping.
     val container by animateColorAsState(
         if (pending) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+        animationSpec = UiMotion.feedback(),
         label = "cardContainer",
     )
     val content by animateColorAsState(
         if (pending) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+        animationSpec = UiMotion.feedback(),
         label = "cardContent",
     )
     Card(
@@ -109,8 +135,8 @@ fun InteractionCard(
                         when {
                             !open -> AnsweredSummary(interaction)
                             !interaction.supported -> Unsupported(interaction, onOpenTerminal)
-                            interaction.type == "approval" -> Approval(interaction, enabled, onRespond)
-                            interaction.type == "questions" -> Questions(interaction, enabled, onRespond)
+                            interaction.type == "approval" -> Approval(interaction, enabled, if (responding) submitted?.decision else null, respond)
+                            interaction.type == "questions" -> Questions(interaction, enabled, responding, respond)
                             else -> Unsupported(interaction, onOpenTerminal)
                         }
                     }
@@ -122,8 +148,8 @@ fun InteractionCard(
 
 /** Swaps content in the same time a row takes to open, without bouncing. */
 private fun AnimatedContentTransitionScope<*>.resizeFade(): ContentTransform =
-    fadeIn(tween(RESIZE_MS)) togetherWith fadeOut(tween(RESIZE_MS / 2)) using
-        SizeTransform(clip = false) { _, _ -> tween(RESIZE_MS) }
+    fadeIn(tween(UiMotion.FadeInMs)) togetherWith fadeOut(tween(UiMotion.FadeOutMs)) using
+        SizeTransform(clip = false) { _, _ -> UiMotion.resize() }
 
 @Composable
 private fun AnsweredSummary(interaction: InteractionDto) {
@@ -164,7 +190,12 @@ private fun outlinedButtonColors() = ButtonDefaults.outlinedButtonColors(
 )
 
 @Composable
-private fun Approval(interaction: InteractionDto, enabled: Boolean, onRespond: (InteractionResponseDto) -> Unit) {
+private fun Approval(
+    interaction: InteractionDto,
+    enabled: Boolean,
+    submittingDecision: String?,
+    onRespond: (InteractionResponseDto) -> Unit,
+) {
     interaction.detail?.let {
         Text(it, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
     }
@@ -178,16 +209,25 @@ private fun Approval(interaction: InteractionDto, enabled: Boolean, onRespond: (
             }
             val onClick = { onRespond(InteractionResponseDto(interactionId = interaction.id, decision = d)) }
             if (d == "deny") {
-                OutlinedButton(onClick = onClick, enabled = enabled, colors = outlinedButtonColors()) { Text(label) }
+                OutlinedButton(onClick = onClick, enabled = enabled, colors = outlinedButtonColors()) {
+                    ResponseButtonLabel(label, busy = submittingDecision == d)
+                }
             } else {
-                Button(onClick = onClick, enabled = enabled, colors = filledButtonColors()) { Text(label) }
+                Button(onClick = onClick, enabled = enabled, colors = filledButtonColors()) {
+                    ResponseButtonLabel(label, busy = submittingDecision == d)
+                }
             }
         }
     }
 }
 
 @Composable
-private fun Questions(interaction: InteractionDto, enabled: Boolean, onRespond: (InteractionResponseDto) -> Unit) {
+private fun Questions(
+    interaction: InteractionDto,
+    enabled: Boolean,
+    responding: Boolean,
+    onRespond: (InteractionResponseDto) -> Unit,
+) {
     // question id -> selected labels (OTHER marks the free-text choice)
     val selections = remember(interaction.id) { mutableStateMapOf<String, Set<String>>() }
     val otherTexts = remember(interaction.id) { mutableStateMapOf<String, String>() }
@@ -197,6 +237,7 @@ private fun Questions(interaction: InteractionDto, enabled: Boolean, onRespond: 
             q,
             selected = selections[q.id].orEmpty(),
             otherText = otherTexts[q.id].orEmpty(),
+            enabled = enabled,
             onSelect = { selections[q.id] = it },
             onOtherText = { otherTexts[q.id] = it },
         )
@@ -229,7 +270,34 @@ private fun Questions(interaction: InteractionDto, enabled: Boolean, onRespond: 
                 ),
             )
         },
-    ) { Text("Answer") }
+    ) { ResponseButtonLabel("Answer", busy = responding) }
+}
+
+/** Keep the button's label-sized footprint while the request is in flight. */
+@Composable
+private fun ResponseButtonLabel(label: String, busy: Boolean) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier.semantics {
+            if (busy) {
+                contentDescription = label
+                stateDescription = "Sending response"
+            }
+        },
+    ) {
+        Text(label, modifier = Modifier.alpha(0f).clearAndSetSemantics {})
+        SwapContent(busy) { sending ->
+            if (sending) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp,
+                    color = LocalContentColor.current,
+                )
+            } else {
+                Text(label)
+            }
+        }
+    }
 }
 
 /** An option's preview, kept unwrapped so ASCII mockups keep their shape. */
@@ -259,6 +327,7 @@ private fun QuestionView(
     q: QuestionDto,
     selected: Set<String>,
     otherText: String,
+    enabled: Boolean,
     onSelect: (Set<String>) -> Unit,
     onOtherText: (String) -> Unit,
 ) {
@@ -289,11 +358,12 @@ private fun QuestionView(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { toggle(key) },
+                    .clickable(enabled = enabled) { toggle(key) },
             ) {
                 if (multi) {
                     Checkbox(
                         checked = key in selected,
+                        enabled = enabled,
                         onCheckedChange = { toggle(key) },
                         colors = CheckboxDefaults.colors(
                             checkedColor = Accent,
@@ -304,6 +374,7 @@ private fun QuestionView(
                 } else {
                     RadioButton(
                         selected = key in selected,
+                        enabled = enabled,
                         onClick = { toggle(key) },
                         colors = RadioButtonDefaults.colors(
                             selectedColor = Accent,
@@ -332,11 +403,12 @@ private fun QuestionView(
         }
         AnimatedVisibility(
             visible = OTHER in selected || q.type == "text",
-            enter = expandVertically(tween(RESIZE_MS)) + fadeIn(tween(RESIZE_MS)),
-            exit = shrinkVertically(tween(RESIZE_MS)) + fadeOut(tween(RESIZE_MS / 2)),
+            enter = expandVertically(UiMotion.resize()) + fadeIn(tween(UiMotion.FadeInMs)),
+            exit = shrinkVertically(UiMotion.resize()) + fadeOut(tween(UiMotion.FadeOutMs)),
         ) {
             OutlinedTextField(
                 value = otherText,
+                enabled = enabled,
                 onValueChange = onOtherText,
                 placeholder = { Text(q.otherLabel ?: "Your answer") },
                 colors = OutlinedTextFieldDefaults.colors(

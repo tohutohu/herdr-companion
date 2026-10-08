@@ -2,6 +2,8 @@ package com.tohutohu.herdrcompanion.ui
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
@@ -37,27 +39,34 @@ fun <T : Any> ExpandingContent(value: T?, modifier: Modifier = Modifier, content
     AnimatedVisibility(
         visible = value != null,
         modifier = modifier,
-        enter = expandVertically() + fadeIn(),
-        exit = shrinkVertically() + fadeOut(),
+        enter = expandVertically(UiMotion.resize()) + fadeIn(tween(UiMotion.FadeInMs, easing = LinearEasing)),
+        exit = shrinkVertically(UiMotion.resize()) + fadeOut(tween(UiMotion.FadeOutMs, easing = LinearEasing)),
     ) {
         last?.let { content(it) }
     }
 }
 
 /**
- * Swaps between two states of the same control (a button and its spinner, an
- * icon and its counterpart): the old one scales and fades away as the new one
- * scales in, centred.
+ * Fades between states without scaling text. Icon-only controls can opt into
+ * a small scale change; any size change settles in the same time as a panel.
  */
 @Composable
-fun <T> SwapContent(target: T, modifier: Modifier = Modifier, content: @Composable (T) -> Unit) {
+fun <T> SwapContent(
+    target: T,
+    modifier: Modifier = Modifier,
+    iconOnly: Boolean = false,
+    content: @Composable (T) -> Unit,
+) {
     AnimatedContent(
         targetState = target,
         modifier = modifier,
         contentAlignment = Alignment.Center,
         transitionSpec = {
-            (fadeIn(tween(160)) + scaleIn(tween(160), initialScale = 0.8f))
-                .togetherWith(fadeOut(tween(100)) + scaleOut(tween(100), targetScale = 0.8f))
+            val enter = fadeIn(tween(UiMotion.FadeInMs, easing = LinearEasing))
+            val exit = fadeOut(tween(UiMotion.FadeOutMs, easing = LinearEasing))
+            (if (iconOnly) enter + scaleIn(UiMotion.feedback(), initialScale = 0.94f) else enter)
+                .togetherWith(if (iconOnly) exit + scaleOut(UiMotion.feedback(), targetScale = 0.94f) else exit)
+                .using(SizeTransform(clip = false) { _, _ -> UiMotion.resize() })
         },
         label = "swap",
     ) { content(it) }
@@ -71,7 +80,7 @@ fun ExpandChevron(
     modifier: Modifier = Modifier,
     tint: Color = LocalContentColor.current,
 ) {
-    val rotation by animateFloatAsState(if (expanded) 180f else 0f, label = "chevron")
+    val rotation by animateFloatAsState(if (expanded) 180f else 0f, UiMotion.resize(), label = "chevron")
     Icon(
         Icons.Default.ExpandMore,
         contentDescription = contentDescription,

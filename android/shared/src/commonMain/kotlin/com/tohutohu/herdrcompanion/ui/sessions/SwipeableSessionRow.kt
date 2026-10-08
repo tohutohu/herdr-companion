@@ -36,6 +36,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
+import com.tohutohu.herdrcompanion.ui.UiMotion
 import kotlinx.coroutines.flow.drop
 
 /**
@@ -119,11 +120,11 @@ private fun SwipeBackground(
         SwipeAction.STOP_AND_ARCHIVE -> scheme.errorContainer to scheme.onErrorContainer
         SwipeAction.UNARCHIVE -> scheme.primaryContainer to scheme.onPrimaryContainer
     }
-    val background by animateColorAsState(if (reached) container else scheme.surfaceContainerHighest, label = "swipeBackground")
-    val tint by animateColorAsState(if (reached) onContainer else scheme.onSurfaceVariant, label = "swipeTint")
+    val background by animateColorAsState(if (reached) container else scheme.surfaceContainerHighest, UiMotion.feedback(), label = "swipeBackground")
+    val tint by animateColorAsState(if (reached) onContainer else scheme.onSurfaceVariant, UiMotion.feedback(), label = "swipeTint")
     val scale by animateFloatAsState(
-        if (reached) 1f else 0.7f,
-        spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow),
+        if (reached) 1f else 0.9f,
+        spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMedium),
         label = "swipeIcon",
     )
     val icon = when (action) {

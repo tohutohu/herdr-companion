@@ -249,7 +249,7 @@ fun NewSessionScreen(
                                 onClick = { onAction(NewSessionAction.ToggleWorktree) },
                                 label = { Text(worktreeChipLabel(state.worktree)) },
                                 leadingIcon = {
-                                    SwapContent(state.worktree) { on ->
+                                    SwapContent(state.worktree, iconOnly = true) { on ->
                                         Icon(
                                             if (on) Icons.Default.Check else Icons.Default.AccountTree,
                                             contentDescription = null,
@@ -345,7 +345,7 @@ fun NewSessionScreen(
                     enabled = state.path.isNotEmpty(),
                     onClick = { onAction(NewSessionAction.ToggleFavoriteDirectory) },
                 ) {
-                    SwapContent(favoriteDir) { starred ->
+                    SwapContent(favoriteDir, iconOnly = true) { starred ->
                         Icon(
                             if (starred) Icons.Default.Star else Icons.Default.StarBorder,
                             contentDescription = if (starred) "Remove from favorites" else "Add to favorites",
