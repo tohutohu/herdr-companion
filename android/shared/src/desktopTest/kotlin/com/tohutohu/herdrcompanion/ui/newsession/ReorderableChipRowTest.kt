@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,7 +34,7 @@ class ReorderableChipRowTest {
     private var items by mutableStateOf(listOf("A", "B", "C", "D"))
     private val moves = mutableListOf<List<String>>()
 
-    private fun setRow() {
+    private fun setRow(after: List<String> = emptyList()) {
         rule.setContent {
             ReorderableChipRow(
                 rowItems = items,
@@ -42,9 +43,12 @@ class ReorderableChipRowTest {
                     moves += it
                     items = it
                 },
-                modifier = Modifier.width(400.dp),
+                modifier = Modifier.width(ROW),
                 contentPadding = PaddingValues(horizontal = PADDING),
                 horizontalArrangement = Arrangement.spacedBy(SPACING),
+                afterItems = {
+                    items(after, key = { it }) { Box(Modifier.testTag(it).size(CHIP, 32.dp)) { Text(it) } }
+                },
             ) { item, reorderModifier ->
                 Box(reorderModifier.testTag(item).size(CHIP, 32.dp)) { Text(item) }
             }
@@ -144,7 +148,44 @@ class ReorderableChipRowTest {
         assertNear(slot(1), left("A"), "A は 1 つ右へずれる")
     }
 
+    @Test
+    fun 右端で持ち続けると行がスクロールして末尾まで動かせる() {
+        items = listOf("A", "B", "C", "D", "E", "F", "G", "H")
+        setRow()
+
+        // Up to the row's right edge, then hold until the row stops scrolling.
+        drag("A", ROW - (PADDING + CHIP / 2))
+
+        assertEquals(listOf(listOf("B", "C", "D", "E", "F", "G", "H", "A")), moves)
+        assertNear(ROW - PADDING - CHIP, left("A"), "A は末尾の枠に収まる")
+    }
+
+    @Test
+    fun 左端で持ち続けると行がスクロールして先頭まで動かせる() {
+        items = listOf("A", "B", "C", "D", "E", "F", "G", "H")
+        setRow()
+        chip("D").performTouchInput { swipeLeft(startX = right - 2f, endX = right - 300f, durationMillis = 200) }
+        rule.waitForIdle()
+
+        drag("H", -(left("H") + CHIP / 2))
+
+        assertEquals(listOf(listOf("H", "A", "B", "C", "D", "E", "F", "G")), moves)
+        assertNear(slot(0), left("H"), "H は先頭の枠に収まる")
+    }
+
+    @Test
+    fun 並べ替えない後続のチップまではスクロールしない() {
+        items = listOf("A", "B", "C", "D", "E", "F")
+        setRow(after = listOf("r1", "r2", "r3", "r4", "r5"))
+
+        drag("A", ROW - (PADDING + CHIP / 2))
+
+        assertEquals(listOf(listOf("B", "C", "D", "E", "F", "A")), moves)
+        assertNear(ROW - PADDING - CHIP, left("A"), "並べ替えられる範囲の最後が右端に見える所で止まる")
+    }
+
     private companion object {
+        val ROW = 400.dp
         val CHIP = 60.dp
         val SPACING = 8.dp
         val PADDING = 16.dp
