@@ -97,15 +97,6 @@ private fun UsageCardContent(state: UsageCardUiState, onAction: (UsageCardAction
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 state.current.providers.forEach { ProviderUsage(it, state.nowMillis) }
-                if (state.current.providers.any { provider ->
-                        provider.windows.any { idealUsedPercent(it, state.nowMillis) != null }
-                    }) {
-                    Text(
-                        "Ideal = even usage until reset. The line marks the ideal usage now.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
                 state.current.error?.let {
                     Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
                 }
@@ -171,13 +162,6 @@ private fun WindowRow(window: UsageWindowDto, nowMillis: Long) {
                     drawLine(markerColor, Offset(x, 0f), Offset(x, size.height), strokeWidth = stroke)
                 }
             }
-        }
-        ideal?.let {
-            Text(
-                usagePaceText(window.usedPercent, it),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
     }
 }

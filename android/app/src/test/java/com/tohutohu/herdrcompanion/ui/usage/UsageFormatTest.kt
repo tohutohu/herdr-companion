@@ -63,7 +63,7 @@ class UsageFormatTest {
         val now = Instant.parse("2026-09-18T00:15:00Z").toEpochMilli()
 
         assertEquals(
-            "Claude 23% / ideal 55% (in 2h 15m) · Codex 53% / ideal 12% (9/24 04:00)",
+            "Claude 23% (in 2h 15m) · Codex 53% (9/24 04:00)",
             usageHeadlineWithReset(providers, now, ZoneOffset.UTC),
         )
     }
@@ -98,13 +98,6 @@ class UsageFormatTest {
         assertNull(idealUsedPercent(valid.copy(resetsAt = "2026-09-17T23:59:59Z"), now))
         assertEquals("Claude 23% (in 2h 30m)", usageHeadlineWithReset(
             listOf(claude.copy(windows = listOf(valid.copy(windowMinutes = 0)))), now, ZoneOffset.UTC))
-    }
-
-    @Test
-    fun `理想との差は割合ではなくパーセントポイントで表示する`() {
-        assertEquals("Ideal 50% · 30 points above", usagePaceText(80, 50))
-        assertEquals("Ideal 50% · 30 points below", usagePaceText(20, 50))
-        assertEquals("Ideal 50% · on pace", usagePaceText(50, 50))
     }
 
     @Test

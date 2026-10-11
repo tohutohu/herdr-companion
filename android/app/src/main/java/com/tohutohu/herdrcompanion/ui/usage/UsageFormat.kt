@@ -32,10 +32,7 @@ fun usageHeadlineWithReset(
     providers.mapNotNull { p ->
         val w = tightestWindow(p) ?: return@mapNotNull null
         val reset = resetText(w, nowMillis, zoneId)
-        val ideal = idealUsedPercent(w, nowMillis)
-        "${p.displayName} ${w.usedPercent}%" +
-            (ideal?.let { " / ideal $it%" } ?: "") +
-            (reset?.let { " ($it)" } ?: "")
+        "${p.displayName} ${w.usedPercent}%" + (reset?.let { " ($it)" } ?: "")
     }.joinToString(" · ")
 
 /** Even consumption over the whole window, reaching 100% at its reset. */
@@ -48,16 +45,6 @@ fun idealUsedPercent(window: UsageWindowDto, nowMillis: Long): Int? {
     val durationMillis = window.windowMinutes.toLong() * MILLIS_PER_MINUTE
     val elapsed = 1.0 - (resetMillis.toDouble() - nowMillis.toDouble()) / durationMillis
     return (elapsed.coerceIn(0.0, 1.0) * 100).roundToInt()
-}
-
-fun usagePaceText(usedPercent: Int, idealPercent: Int): String {
-    val difference = usedPercent - idealPercent
-    val comparison = when {
-        difference > 0 -> "$difference points above"
-        difference < 0 -> "${-difference} points below"
-        else -> "on pace"
-    }
-    return "Ideal $idealPercent% · $comparison"
 }
 
 /** "7d", or "7d · Fable only" for a window that covers one model. */
