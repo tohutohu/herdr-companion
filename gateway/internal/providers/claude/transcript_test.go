@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
@@ -293,22 +295,91 @@ func TestClaudeのインライン画像を取り出せる(t *testing.T) {
 type fakeTerminal struct {
 	calls    []string
 	paneText string
+	// composer is the input not sent yet; the pane shows it below paneText.
+	composer string
+	// A pasted image shows in the composer, as in Claude Code, after
+	// attachAfter more pane reads: the first asText pastes as their path, the
+	// later ones as a label. noAttach keeps it from showing at all, and echo
+	// shows the raw paste until then, like a terminal whose TUI has not started.
+	attachAfter int
+	asText      int
+	noAttach    bool
+	echo        bool
+	readErr     error
+	images      int
+	pending     []fakePaste
+	reads       int
+	// early holds what was sent while a paste had not shown yet.
+	early []string
+}
+
+type fakePaste struct {
+	path string
+	left int
 }
 
 func (f *fakeTerminal) SendKeys(_ context.Context, pane string, keys ...string) error {
-	f.calls = append(f.calls, "keys:"+strings.Join(keys, ","))
+	f.sent("keys:" + strings.Join(keys, ","))
 	return nil
 }
 func (f *fakeTerminal) SendText(_ context.Context, pane, text string) error {
-	f.calls = append(f.calls, "text:"+text)
+	f.sent("text:" + text)
+	if n := strings.Count(text, "\x7f"); n > 0 && n == len(text) {
+		r := []rune(f.composer)
+		f.composer = string(r[:len(r)-n])
+	}
+	if path, ok := strings.CutPrefix(text, "\x1b[200~"); ok && !f.noAttach {
+		path = strings.TrimSuffix(path, "\x1b[201~")
+		switch filepath.Ext(path) {
+		case ".png", ".jpg":
+			f.pending = append(f.pending, fakePaste{path, f.attachAfter})
+			if f.echo {
+				f.paneText += "^[[200~" + path + "^[[201~"
+			}
+		}
+	}
 	return nil
 }
 func (f *fakeTerminal) Prompt(_ context.Context, pane, text string) error {
-	f.calls = append(f.calls, "prompt:"+text)
+	f.sent("prompt:" + text)
 	return nil
 }
+func (f *fakeTerminal) sent(call string) {
+	f.calls = append(f.calls, call)
+	if len(f.pending) > 0 {
+		f.early = append(f.early, call)
+	}
+}
 func (f *fakeTerminal) ReadPane(context.Context, string, int) (*herdr.ReadResult, error) {
-	return &herdr.ReadResult{Text: f.paneText}, nil
+	if f.readErr != nil {
+		return nil, f.readErr
+	}
+	f.reads++
+	var waiting []fakePaste
+	for _, paste := range f.pending {
+		if paste.left > 0 {
+			waiting = append(waiting, fakePaste{paste.path, paste.left - 1})
+			continue
+		}
+		f.paneText = strings.ReplaceAll(f.paneText, "^[[200~"+paste.path+"^[[201~", "")
+		if f.asText > 0 {
+			f.asText--
+			f.composer += paste.path
+			continue
+		}
+		f.images++
+		f.composer += fmt.Sprintf("[Image #%d]", f.images)
+	}
+	f.pending = waiting
+	// The composer wraps long input and indents the lines that follow.
+	var shown strings.Builder
+	for i, r := range []rune(f.composer) {
+		if i > 0 && i%8 == 0 {
+			shown.WriteString("\n  ")
+		}
+		shown.WriteRune(r)
+	}
+	return &herdr.ReadResult{Text: f.paneText + "❯\u00a0" + shown.String()}, nil
 }
 
 func TestAskUserQuestionへの回答をキー操作に変換できる(t *testing.T) {
@@ -651,6 +722,125 @@ func Test画像はパスを個別にブラケットペーストしてから本�
 	want := "text:\x1b[200~/tmp/a.png\x1b[201~|text:\x1b[200~/tmp/b.jpg\x1b[201~|text:見て|text:\x1b[13u"
 	if got := strings.Join(term.calls, "|"); got != want {
 		t.Errorf("calls = %q, want %q", got, want)
+	}
+}
+
+func Test貼り付けた画像が入力欄に表示されるまで本文を入力しない(t *testing.T) {
+	// 送信済みの依頼に残るラベルは、貼り付けた画像の表示とは数えない。
+	term := &fakeTerminal{paneText: "❯ 前の依頼[Image #1]\n\n", images: 1, attachAfter: 3}
+	p := New(t.TempDir(), term, deadletter.Nop{})
+	p.keyDelay = 0
+	live := &providers.Live{PaneID: "w1:p1", HerdrStatus: herdr.StatusIdle}
+
+	if err := p.Send(context.Background(), "x", live, model.Input{Text: "見て", Images: []string{"/tmp/a.png", "/tmp/b.jpg"}}); err != nil {
+		t.Fatal(err)
+	}
+	want := "text:\x1b[200~/tmp/a.png\x1b[201~|text:\x1b[200~/tmp/b.jpg\x1b[201~|text:見て|text:\x1b[13u"
+	if got := strings.Join(term.calls, "|"); got != want {
+		t.Errorf("calls = %q, want %q", got, want)
+	}
+	if len(term.early) != 0 {
+		t.Errorf("sent before the image showed: %q", term.early)
+	}
+	if term.composer != "[Image #2][Image #3]" {
+		t.Errorf("composer = %q", term.composer)
+	}
+}
+
+func Test文字として入力欄に入った画像のパスは消して貼り直す(t *testing.T) {
+	term := &fakeTerminal{attachAfter: 2, asText: 1}
+	p := New(t.TempDir(), term, deadletter.Nop{})
+	p.keyDelay = 0
+
+	if err := p.SendLaunchPrompt(context.Background(), "w1:p1", model.Input{Text: "見て", Images: []string{"/tmp/up/画像.png"}}); err != nil {
+		t.Fatal(err)
+	}
+	paste := "text:\x1b[200~/tmp/up/画像.png\x1b[201~"
+	want := paste + "|text:" + strings.Repeat("\x7f", 14) + "|" + paste + "|text:見て|text:\x1b[13u"
+	if got := strings.Join(term.calls, "|"); got != want {
+		t.Errorf("calls = %q, want %q", got, want)
+	}
+	if term.composer != "[Image #1]" {
+		t.Errorf("composer = %q", term.composer)
+	}
+	if len(term.early) != 0 {
+		t.Errorf("sent before the paste showed: %q", term.early)
+	}
+}
+
+func Test貼り直しても文字のままの画像はパスを本文に残して送信する(t *testing.T) {
+	term := &fakeTerminal{asText: pasteAttempts}
+	p := New(t.TempDir(), term, deadletter.Nop{})
+	p.keyDelay = 0
+
+	if err := p.SendLaunchPrompt(context.Background(), "w1:p1", model.Input{Text: "見て", Images: []string{"/tmp/a.png"}}); err != nil {
+		t.Fatal(err)
+	}
+	paste, erase := "text:\x1b[200~/tmp/a.png\x1b[201~", "text:"+strings.Repeat("\x7f", 10)
+	want := strings.Join([]string{paste, erase, paste, erase, paste, "text: ", "text:見て", "text:\x1b[13u"}, "|")
+	if got := strings.Join(term.calls, "|"); got != want {
+		t.Errorf("calls = %q, want %q", got, want)
+	}
+}
+
+func TestTUIの起動前に端末がエコーした貼り付けは文字として入ったとみなさない(t *testing.T) {
+	term := &fakeTerminal{echo: true, attachAfter: 3}
+	p := New(t.TempDir(), term, deadletter.Nop{})
+	p.keyDelay = 0
+
+	if err := p.SendLaunchPrompt(context.Background(), "w1:p1", model.Input{Text: "見て", Images: []string{"/tmp/a.png"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(term.calls, "|"); got != "text:\x1b[200~/tmp/a.png\x1b[201~|text:見て|text:\x1b[13u" {
+		t.Errorf("calls = %q", got)
+	}
+	if len(term.early) != 0 {
+		t.Errorf("sent before the image showed: %q", term.early)
+	}
+}
+
+func Test画像が入力欄に表示されなくても待ち時間を過ぎれば本文を送信する(t *testing.T) {
+	term := &fakeTerminal{noAttach: true}
+	p := New(t.TempDir(), term, deadletter.Nop{})
+	p.keyDelay, p.attachWait = 0, 20*time.Millisecond
+
+	if err := p.SendLaunchPrompt(context.Background(), "w1:p1", model.Input{Text: "見て", Images: []string{"/tmp/a.png"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(term.calls, "|"); got != "text:\x1b[200~/tmp/a.png\x1b[201~|text:見て|text:\x1b[13u" {
+		t.Errorf("calls = %q", got)
+	}
+	if term.reads < 2 {
+		t.Errorf("pane reads = %d, want the pane polled while waiting", term.reads)
+	}
+}
+
+func Testペインを読めないときは画像の表示を待たずに本文を送信する(t *testing.T) {
+	term := &fakeTerminal{readErr: errors.New("pane gone")}
+	p := New(t.TempDir(), term, deadletter.Nop{})
+	p.keyDelay = 0
+
+	if err := p.SendLaunchPrompt(context.Background(), "w1:p1", model.Input{Text: "見て", Images: []string{"/tmp/a.png"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(term.calls, "|"); got != "text:\x1b[200~/tmp/a.png\x1b[201~|text:見て|text:\x1b[13u" {
+		t.Errorf("calls = %q", got)
+	}
+}
+
+func Test画像の表示を待つ間にキャンセルされたら本文を入力しない(t *testing.T) {
+	term := &fakeTerminal{noAttach: true}
+	p := New(t.TempDir(), term, deadletter.Nop{})
+	p.keyDelay, p.attachWait = 0, time.Minute
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	err := p.SendLaunchPrompt(ctx, "w1:p1", model.Input{Text: "見て", Images: []string{"/tmp/a.png"}})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("err = %v, want deadline exceeded", err)
+	}
+	if got := strings.Join(term.calls, "|"); got != "text:\x1b[200~/tmp/a.png\x1b[201~" {
+		t.Errorf("calls = %q", got)
 	}
 }
 

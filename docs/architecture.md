@@ -119,6 +119,14 @@ identity; the native database schema selects the history format.
   which Claude Code turns into `[Image #N]`; other attachments are appended to
   the prompt text as paths for Claude to read. Text containing terminal control
   characters falls back to `agent.prompt`.
+- Claude Code reads a pasted image asynchronously and takes input that
+  arrives meanwhile first, which leaves the prompt unsent in the composer, so
+  each paste is followed on the pane until its label shows. Right after a
+  start or on a busy machine that takes seconds. A path pasted just as the
+  `SessionStart` hook reports the session is inserted as text instead; it is
+  erased with as many DEL as it has characters and pasted again, and after
+  three pastes left as text for Claude to read (verified with Claude Code
+  2.1.296).
 
 ### Codex
 

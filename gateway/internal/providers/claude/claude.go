@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -16,6 +17,7 @@ import (
 	"sync"
 	"time"
 	"unicode/utf16"
+	"unicode/utf8"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
@@ -40,6 +42,8 @@ type Provider struct {
 	sink         deadletter.Sink
 	// keyDelay separates dialog steps so the TUI can re-render.
 	keyDelay time.Duration
+	// attachWait is how long a pasted image may take to show in the composer.
+	attachWait time.Duration
 }
 
 // DefaultConfigDir honours CLAUDE_CONFIG_DIR like Claude Code itself.
@@ -55,7 +59,7 @@ func New(configDir string, term providers.Terminal, sink deadletter.Sink) *Provi
 	if configDir == "" {
 		configDir = DefaultConfigDir()
 	}
-	return &Provider{configDir: configDir, term: term, sink: sink, keyDelay: 250 * time.Millisecond}
+	return &Provider{configDir: configDir, term: term, sink: sink, keyDelay: 250 * time.Millisecond, attachWait: 15 * time.Second}
 }
 
 func (p *Provider) Name() string        { return providerName }
@@ -279,11 +283,7 @@ func (p *Provider) ReportsSessionAtStartup() {}
 // enter pastes each image path, then types and submits the text.
 func (p *Provider) enter(ctx context.Context, paneID, text string, images []string) error {
 	for _, img := range images {
-		if err := p.term.SendText(ctx, paneID, "\x1b[200~"+img+"\x1b[201~"); err != nil {
-			return err
-		}
-		// Claude Code reads the file asynchronously after each paste.
-		if err := p.wait(ctx); err != nil {
+		if err := p.attachImage(ctx, paneID, img); err != nil {
 			return err
 		}
 	}
@@ -292,6 +292,123 @@ func (p *Provider) enter(ctx context.Context, paneID, text string, images []stri
 	}
 	return p.typePrompt(ctx, paneID, text)
 }
+
+const (
+	// imageLabel starts the label Claude Code shows for an attached image
+	// ("[Image #1]"), in the composer and in the prompts already sent, as
+	// paneText returns it.
+	imageLabel = "[Image#"
+	// pasteAttempts is how often an image path is pasted to get it attached.
+	pasteAttempts = 3
+	// pastePoll paces the pane reads that follow a paste.
+	pastePoll = 50 * time.Millisecond
+)
+
+// attachImage pastes an image path and waits for what Claude Code makes of
+// it before anything else is typed. Claude Code reads the file asynchronously
+// and takes input that arrives meanwhile first: the text then precedes the
+// image and the Enter after it is lost, so the prompt stays in the composer.
+// Right after a start, or on a busy machine, reading takes seconds.
+//
+// A path pasted just as the SessionStart hook reports the session can be
+// inserted as text instead of being attached. It is erased and pasted again;
+// a path that stays text is left for Claude Code to read, like the other
+// attachments. (All verified with Claude Code 2.1.296.)
+func (p *Provider) attachImage(ctx context.Context, paneID, path string) error {
+	paste := "\x1b[200~" + path + "\x1b[201~"
+	before, ok := p.paneText(ctx, paneID)
+	if !ok {
+		if err := p.term.SendText(ctx, paneID, paste); err != nil {
+			return err
+		}
+		return p.wait(ctx)
+	}
+	labels := strings.Count(before, imageLabel)
+	for attempt := 1; ; attempt++ {
+		if err := p.term.SendText(ctx, paneID, paste); err != nil {
+			return err
+		}
+		asText, err := p.pastedAsText(ctx, paneID, path, labels)
+		if err != nil || !asText {
+			return err
+		}
+		if attempt == pasteAttempts {
+			slog.Warn("pasted image stayed text in the composer", "provider", providerName, "pane", paneID)
+			return p.term.SendText(ctx, paneID, " ")
+		}
+		slog.Debug("pasted image was inserted as text; pasting it again", "provider", providerName, "pane", paneID, "attempt", attempt)
+		// The cursor is behind the path; DEL is Backspace.
+		if err := p.term.SendText(ctx, paneID, strings.Repeat("\x7f", utf8.RuneCountInString(path))); err != nil {
+			return err
+		}
+		if err := p.waitPane(ctx, paneID, func(text string) bool { return !strings.Contains(text, squash(path)) }); err != nil {
+			return err
+		}
+	}
+}
+
+// pastedAsText waits until a pasted image path has its label in the composer
+// (false) or stands there as text (true). An outcome that does not show
+// within attachWait is not waited for any longer.
+func (p *Provider) pastedAsText(ctx context.Context, paneID, path string, labels int) (bool, error) {
+	// Before its TUI starts the terminal echoes the paste, markers included.
+	plain, echoed := squash(path), "200~"+squash(path)
+	var asText bool
+	var since time.Time
+	err := p.waitPane(ctx, paneID, func(text string) bool {
+		if strings.Count(text, imageLabel) > labels {
+			return true
+		}
+		if !strings.Contains(text, plain) || strings.Contains(text, echoed) {
+			since = time.Time{}
+			return false
+		}
+		// The path has to stay for a moment to count as text.
+		if since.IsZero() {
+			since = time.Now()
+			return false
+		}
+		asText = time.Since(since) >= p.keyDelay
+		return asText
+	})
+	return asText, err
+}
+
+// waitPane polls the pane until done accepts its text (see paneText). It
+// gives up without an error after attachWait or when the pane cannot be read.
+func (p *Provider) waitPane(ctx context.Context, paneID string, done func(text string) bool) error {
+	deadline := time.Now().Add(p.attachWait)
+	for {
+		text, ok := p.paneText(ctx, paneID)
+		if !ok {
+			return p.wait(ctx)
+		}
+		if done(text) {
+			return nil
+		}
+		if !time.Now().Before(deadline) {
+			slog.Warn("paste did not show in the composer", "provider", providerName, "pane", paneID, "waited", p.attachWait)
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(pastePoll):
+		}
+	}
+}
+
+// paneText is the recent pane text without whitespace: the composer wraps
+// and indents long input. ok is false when the pane cannot be read.
+func (p *Provider) paneText(ctx context.Context, paneID string) (text string, ok bool) {
+	res, err := p.term.ReadPane(ctx, paneID, 40)
+	if err != nil || res == nil {
+		return "", false
+	}
+	return squash(res.Text), true
+}
+
+func squash(s string) string { return strings.Join(strings.Fields(s), "") }
 
 const (
 	// maxTypedLine is the longest line typed key by key. Claude Code handles
