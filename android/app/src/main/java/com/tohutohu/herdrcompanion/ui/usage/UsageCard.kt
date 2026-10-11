@@ -31,8 +31,8 @@ class UsageHolder : ViewModel() {
 }
 
 /**
- * How much of the Claude / Codex plan limits is used. Collapsed it is a single
- * line; tapping it shows every window with its reset time. The refresh button
+ * How much of the Claude / Codex plan limits is used. Collapsed it is a compact
+ * summary; tapping it shows every window with its reset time and ideal pace. The refresh button
  * makes the gateway read the limits again instead of serving its cache.
  */
 @Composable

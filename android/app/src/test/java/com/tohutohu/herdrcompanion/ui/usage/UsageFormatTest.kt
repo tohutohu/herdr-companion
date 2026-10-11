@@ -63,9 +63,48 @@ class UsageFormatTest {
         val now = Instant.parse("2026-09-18T00:15:00Z").toEpochMilli()
 
         assertEquals(
-            "Claude 23% (in 2h 15m) · Codex 53% (9/24 04:00)",
+            "Claude 23% / ideal 55% (in 2h 15m) · Codex 53% / ideal 12% (9/24 04:00)",
             usageHeadlineWithReset(providers, now, ZoneOffset.UTC),
         )
+    }
+
+    @Test
+    fun `短時間枠と週間枠の経過時間から理想消化率を計算する`() {
+        val now = Instant.parse("2026-09-18T00:00:00Z").toEpochMilli()
+        assertEquals(50, idealUsedPercent(window("5h", 23,
+            resetsAt = "2026-09-18T02:30:00Z", windowMinutes = 300), now))
+        assertEquals(25, idealUsedPercent(window("7d", 53,
+            resetsAt = "2026-09-23T06:00:00Z", windowMinutes = 10080), now))
+    }
+
+    @Test
+    fun `理想消化率は開始前をゼロにしてリセット直前には百になる`() {
+        val reset = Instant.parse("2026-09-18T05:00:00Z").toEpochMilli()
+        val window = window("5h", 23, resetsAt = "2026-09-18T05:00:00Z", windowMinutes = 300)
+        assertEquals(0, idealUsedPercent(window, reset - 6 * 60 * 60 * 1000L))
+        assertEquals(0, idealUsedPercent(window, reset - 5 * 60 * 60 * 1000L))
+        assertEquals(100, idealUsedPercent(window, reset - 1))
+    }
+
+    @Test
+    fun `期間やリセット時刻が不明かリセット済みなら理想を表示しない`() {
+        val now = Instant.parse("2026-09-18T00:00:00Z").toEpochMilli()
+        val valid = window("5h", 23, resetsAt = "2026-09-18T02:30:00Z", windowMinutes = 300)
+        assertNull(idealUsedPercent(valid.copy(windowMinutes = 0), now))
+        assertNull(idealUsedPercent(valid.copy(windowMinutes = -1), now))
+        assertNull(idealUsedPercent(valid.copy(resetsAt = null), now))
+        assertNull(idealUsedPercent(valid.copy(resetsAt = "invalid"), now))
+        assertNull(idealUsedPercent(valid.copy(resetsAt = "2026-09-18T00:00:00Z"), now))
+        assertNull(idealUsedPercent(valid.copy(resetsAt = "2026-09-17T23:59:59Z"), now))
+        assertEquals("Claude 23% (in 2h 30m)", usageHeadlineWithReset(
+            listOf(claude.copy(windows = listOf(valid.copy(windowMinutes = 0)))), now, ZoneOffset.UTC))
+    }
+
+    @Test
+    fun `理想との差は割合ではなくパーセントポイントで表示する`() {
+        assertEquals("Ideal 50% · 30 points above", usagePaceText(80, 50))
+        assertEquals("Ideal 50% · 30 points below", usagePaceText(20, 50))
+        assertEquals("Ideal 50% · on pace", usagePaceText(50, 50))
     }
 
     @Test

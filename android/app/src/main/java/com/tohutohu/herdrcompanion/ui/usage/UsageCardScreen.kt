@@ -8,14 +8,15 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
@@ -30,6 +31,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.tohutohu.herdrcompanion.data.api.UsageProviderDto
@@ -65,7 +67,7 @@ private fun UsageCardContent(state: UsageCardUiState, onAction: (UsageCardAction
                 "  " + usageHeadlineWithReset(state.current.providers, state.nowMillis).ifEmpty { "unavailable" },
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
@@ -95,6 +97,15 @@ private fun UsageCardContent(state: UsageCardUiState, onAction: (UsageCardAction
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 state.current.providers.forEach { ProviderUsage(it, state.nowMillis) }
+                if (state.current.providers.any { provider ->
+                        provider.windows.any { idealUsedPercent(it, state.nowMillis) != null }
+                    }) {
+                    Text(
+                        "Ideal = even usage until reset. The line marks the ideal usage now.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 state.current.error?.let {
                     Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
                 }
@@ -122,30 +133,52 @@ private fun ProviderUsage(provider: UsageProviderDto, nowMillis: Long) {
 
 @Composable
 private fun WindowRow(window: UsageWindowDto, nowMillis: Long) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            windowTitle(window),
-            style = MaterialTheme.typography.labelSmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.width(110.dp),
-        )
-        val progress by animateFloatAsState(window.usedPercent / 100f, label = "usage")
+    val ideal = idealUsedPercent(window, nowMillis)
+    Column(
+        Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                windowTitle(window),
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Text("${window.usedPercent}%", style = MaterialTheme.typography.labelSmall)
+            resetText(window, nowMillis)?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        val progress by animateFloatAsState((window.usedPercent / 100f).coerceIn(0f, 1f), label = "usage")
         val color by animateColorAsState(usedColor(window.usedPercent), label = "usageColor")
-        LinearProgressIndicator(
-            progress = { progress },
-            color = color,
-            modifier = Modifier.weight(1f).height(6.dp),
-        )
-        Text(" ${window.usedPercent}%", style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(44.dp))
-        Text(
-            resetText(window, nowMillis).orEmpty(),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.width(88.dp),
-        )
+        val markerColor = MaterialTheme.colorScheme.onSurface
+        Box(Modifier.fillMaxWidth().height(12.dp), contentAlignment = Alignment.Center) {
+            LinearProgressIndicator(
+                progress = { progress },
+                color = color,
+                modifier = Modifier.fillMaxWidth().height(6.dp),
+            )
+            if (ideal != null) {
+                Canvas(Modifier.fillMaxWidth().height(12.dp)) {
+                    val stroke = 2.dp.toPx()
+                    val x = (size.width * ideal / 100f).coerceIn(stroke / 2, size.width - stroke / 2)
+                    drawLine(markerColor, Offset(x, 0f), Offset(x, size.height), strokeWidth = stroke)
+                }
+            }
+        }
+        ideal?.let {
+            Text(
+                usagePaceText(window.usedPercent, it),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
