@@ -14,14 +14,14 @@
 ## 固定しているビルド条件
 
 - Kotlin `2.4.20`
-- Compose Multiplatform `1.12.0`
+- Compose Multiplatform `1.12.1`
 - Gradle wrapper `9.6.0`
 - JDK `17`
 - minimum macOS `13.0`
 - Apple Silicon `arm64` only
 - UI build version source: [`version.properties`](../version.properties)
 
-Compose Multiplatform 1.12.0のmacOSターゲットがarm64のみのため、Intel版やUniversal Binaryは生成しません。Composeの互換性情報は[Kotlin公式Compatibility and versioning](https://kotlinlang.org/docs/multiplatform/compose-compatibility-and-versioning.html)を参照してください。
+Compose Multiplatform 1.12.1のmacOSターゲットがarm64のみのため、Intel版やUniversal Binaryは生成しません。Composeの互換性情報は[Kotlin公式Compatibility and versioning](https://kotlinlang.org/docs/multiplatform/compose-compatibility-and-versioning.html)を参照してください。
 
 `version.properties`の`version`は`CFBundleShortVersionString`、`build`は`CFBundleVersion`、Composeの`packageVersion`、Androidの`versionName`/`versionCode`に共有されます。macOSのjpackageは先頭が0のバージョンを受け付けないため、production releaseは`1.0.0`以降を使います。
 
@@ -94,7 +94,7 @@ export MACOS_SIGNING_KEYCHAIN="$HOME/Library/Keychains/herdr-build.keychain-db"
 ./scripts/build-macos-release.sh
 ```
 
-Compose側は公式のmacOS signing DSLを使い、同梱JREとnested codeを含めてjpackage/codesignが処理します。Gateway側はGo helperを先に署名し、その後SwiftUI appを署名します。App Sandbox用のentitlementは追加していません。Compose 1.12.0がJVM runtime用に生成する標準entitlement（JIT、unsigned executable memory、library validation無効化）だけを利用します。
+Compose側は公式のmacOS signing DSLを使い、同梱JREとnested codeを含めてjpackage/codesignが処理します。Gateway側はGo helperを先に署名し、その後SwiftUI appを署名します。App Sandbox用のentitlementは追加していません。Compose 1.12.1がJVM runtime用に生成する標準entitlement（JIT、unsigned executable memory、library validation無効化）だけを利用します。
 
 Composeタスクを直接実行する場合は公式Gradle propertyも使用できます。
 
