@@ -32,12 +32,16 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -206,11 +210,16 @@ private fun FrameWindowScope.DesktopShell(
     var aboutOpen by remember { mutableStateOf(false) }
     var updateDialogOpen by remember { mutableStateOf(false) }
     val searchFocusRequester = remember { FocusRequester() }
-    val sessions = state.sessions.filterDesktopSessions(query)
+    val listed = if (state.showingArchived) state.archivedSessions else state.sessions
+    val sessions = listed.filterDesktopSessions(query)
     val highlightedId = if (searchFocused) sessions.getOrNull(highlightedIndex)?.session?.id else null
 
     LaunchedEffect(sessions.size, query) {
         highlightedIndex = highlightedIndex.coerceIn(0, (sessions.size - 1).coerceAtLeast(0))
+    }
+    // A search covers every archived session, so it loads the remaining pages.
+    LaunchedEffect(state.showingArchived, query, state.archivedSessions.size, state.archivedHasMore) {
+        if (state.showingArchived && query.isNotBlank()) state.loadMoreArchived()
     }
 
     fun focusSearch() {
@@ -284,7 +293,7 @@ private fun FrameWindowScope.DesktopShell(
                             else -> false
                         }
                     },
-                placeholder = { Text("Search sessions…") },
+                placeholder = { Text(if (state.showingArchived) "Search archived sessions…" else "Search sessions…") },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                 trailingIcon = {
                     if (query.isNotEmpty()) {
@@ -348,11 +357,14 @@ private fun FrameWindowScope.DesktopShell(
                         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("Sessions", style = MaterialTheme.typography.titleMedium)
-                        Spacer(Modifier.weight(1f))
+                        SessionListModeSwitch(
+                            showingArchived = state.showingArchived,
+                            onChange = state::showArchived,
+                            modifier = Modifier.weight(1f),
+                        )
                         if (query.isNotBlank()) {
                             Text(
-                                "${sessions.size}/${state.sessions.size}",
+                                "${sessions.size}/${listed.size}",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -366,54 +378,70 @@ private fun FrameWindowScope.DesktopShell(
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
                         )
                     }
-                    SessionListScreen(
-                        state = SessionListUiState(
-                            sessions = sessions.map { item ->
-                                item.copy(
-                                    selected = item.selected ||
-                                        item.session.id in state.openSessionIds ||
-                                        item.session.id == highlightedId,
+                    key(state.showingArchived) {
+                        SessionListScreen(
+                            state = if (state.showingArchived) {
+                                SessionListUiState(
+                                    sessions = sessions.map { item ->
+                                        item.copy(selected = item.selected || item.session.id == highlightedId)
+                                    },
+                                    isLoaded = state.archivedLoaded,
+                                    isRefreshing = state.archivedRefreshing,
+                                    error = state.archivedError,
+                                    emptyMessage = "No archived sessions. Right-click a session to archive it.",
+                                    busySessionIds = state.busySessionIds,
+                                    engagedSessionIds = state.busySessionIds,
+                                    hasMore = state.archivedHasMore,
+                                )
+                            } else SessionListUiState(
+                                sessions = sessions.map { item ->
+                                    item.copy(
+                                        selected = item.selected ||
+                                            item.session.id in state.openSessionIds ||
+                                            item.session.id == highlightedId,
+                                    )
+                                },
+                                isLoaded = state.listLoaded,
+                                isRefreshing = state.listRefreshing,
+                                error = state.listError,
+                                emptyMessage = if (query.isBlank()) {
+                                    "No sessions. Start Claude Code, Codex, OpenCode, or Devin inside Herdr on your Mac."
+                                } else {
+                                    "No sessions match \"$query\"."
+                                },
+                                busySessionIds = state.busySessionIds,
+                                engagedSessionIds = state.busySessionIds +
+                                    (state.archiveConfirmation?.id?.let { setOf(it) } ?: emptySet()),
+                            ),
+                            showTopBar = false,
+                            showNewSessionFab = false,
+                            sessionContextMenu = { item, content ->
+                                DesktopSessionContextMenu(
+                                    item = item,
+                                    onOpen = { state.openSession(item.session.id) },
+                                    onSplit = { state.openSessionInSplit(item.session.id) },
+                                    onArchive = {
+                                        if (item.session.archived) {
+                                            handleListAction(state, SessionListAction.Unarchive(listOf(item.session.toRef())))
+                                        } else {
+                                            handleListAction(state, SessionListAction.Archive(listOf(item.session.toRef())))
+                                        }
+                                    },
+                                    onRefresh = actions::refresh,
+                                    onCopyId = { actions.copySessionId(item.session.id) },
+                                    onOpenDirectory = {
+                                        val path = item.session.cwd ?: item.session.project
+                                        if (path.isBlank() || !DesktopPlatformActions.openPath(path)) {
+                                            state.reportError("Project directory is not available on this computer.")
+                                        }
+                                    },
+                                    content = content,
                                 )
                             },
-                            isLoaded = state.listLoaded,
-                            isRefreshing = state.listRefreshing,
-                            error = state.listError,
-                            emptyMessage = if (query.isBlank()) {
-                                "No sessions. Start Claude Code, Codex, OpenCode, or Devin inside Herdr on your Mac."
-                            } else {
-                                "No sessions match \"$query\"."
-                            },
-                            busySessionIds = state.busySessionIds,
-                            engagedSessionIds = state.busySessionIds +
-                                (state.archiveConfirmation?.id?.let { setOf(it) } ?: emptySet()),
-                        ),
-                        showTopBar = false,
-                        showNewSessionFab = false,
-                        sessionContextMenu = { item, content ->
-                            DesktopSessionContextMenu(
-                                item = item,
-                                onOpen = { state.openSession(item.session.id) },
-                                onSplit = { state.openSessionInSplit(item.session.id) },
-                                onArchive = {
-                                    if (item.session.archived) {
-                                        handleListAction(state, SessionListAction.Unarchive(listOf(item.session.toRef())))
-                                    } else {
-                                        handleListAction(state, SessionListAction.Archive(listOf(item.session.toRef())))
-                                    }
-                                },
-                                onRefresh = actions::refresh,
-                                onCopyId = { actions.copySessionId(item.session.id) },
-                                onOpenDirectory = {
-                                    val path = item.session.cwd ?: item.session.project
-                                    if (path.isBlank() || !DesktopPlatformActions.openPath(path)) {
-                                        state.reportError("Project directory is not available on this computer.")
-                                    }
-                                },
-                                content = content,
-                            )
-                        },
-                        onAction = { action -> handleListAction(state, action, openSettings = { settingsOpen = true }) },
-                    )
+                            onAction = { action -> handleListAction(state, action, openSettings = { settingsOpen = true }) },
+                            onLoadMore = state::loadMoreArchived,
+                        )
+                    }
                 }
                 VerticalDivider(
                     modifier = Modifier
@@ -660,6 +688,8 @@ private class DesktopActions(
     fun updates() = checkForUpdates()
     fun close() = closeWindow()
     fun openSession(id: String) = state.openSession(id)
+    val showingArchived: Boolean get() = state.showingArchived
+    fun toggleArchived() = state.showArchived(!state.showingArchived)
     fun archive() = state.detail?.session?.let { state.requestArchive(it.toRef()) }
     fun copySelectedSessionId() = copySessionId(state.selectedSessionId)
     fun copySessionId(id: String?) {
@@ -693,11 +723,33 @@ private fun FrameWindowScope.DesktopMenuBar(actions: DesktopActions) {
         Menu("View", mnemonic = 'V') {
             Item("Search Sessions", shortcut = KeyShortcut(Key.K, ctrl = true), onClick = actions::openSearch)
             Item("Refresh", shortcut = KeyShortcut(Key.R, ctrl = true), onClick = actions::refresh)
+            Separator()
+            CheckboxItem(
+                "Archived Sessions",
+                checked = actions.showingArchived,
+                onCheckedChange = { actions.toggleArchived() },
+            )
         }
         Menu("Session", mnemonic = 'S') {
             Item("Archive", enabled = actions.hasSelectedSession(), onClick = actions::archive)
             Item("Copy Session ID", enabled = actions.hasSelectedSession(), onClick = actions::copySelectedSessionId)
             Item("Open Project Directory", enabled = actions.hasProjectDirectory(), onClick = actions::openProjectDirectory)
+        }
+    }
+}
+
+/** Switches the sidebar between the current sessions and the archived ones. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SessionListModeSwitch(showingArchived: Boolean, onChange: (Boolean) -> Unit, modifier: Modifier = Modifier) {
+    SingleChoiceSegmentedButtonRow(modifier) {
+        listOf(false to "Sessions", true to "Archived").forEachIndexed { index, (archived, label) ->
+            SegmentedButton(
+                selected = showingArchived == archived,
+                onClick = { onChange(archived) },
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = 2),
+                icon = {},
+            ) { Text(label, maxLines = 1) }
         }
     }
 }
@@ -933,7 +985,7 @@ private fun handleListAction(state: DesktopAppState, action: SessionListAction, 
         is SessionListAction.Resume -> state.resume(action.session)
         SessionListAction.OpenNewSession -> state.openNewSession()
         SessionListAction.Refresh -> state.refreshSessions(userInitiated = true)
-        SessionListAction.OpenArchived -> state.reportError("Archived session browsing is not yet available on Desktop.")
+        SessionListAction.OpenArchived -> state.showArchived(true)
         SessionListAction.OpenSettings -> openSettings()
         is SessionListAction.OpenStarting -> state.reportError("Session startup is handled in the New Session window.")
     }

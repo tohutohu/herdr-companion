@@ -14,6 +14,7 @@ import com.tohutohu.herdrcompanion.model.toUiModel
 import com.tohutohu.herdrcompanion.ui.detail.AttachmentUiState
 import com.tohutohu.herdrcompanion.ui.detail.PendingMessageUiState
 import com.tohutohu.herdrcompanion.ui.detail.SessionDetailUiState
+import com.tohutohu.herdrcompanion.ui.sessions.ArchivedSessionsPager
 import com.tohutohu.herdrcompanion.ui.sessions.SessionListItemUiState
 import com.tohutohu.herdrcompanion.ui.sessions.SessionRef
 import kotlinx.coroutines.CoroutineScope
@@ -77,6 +78,7 @@ class DesktopAppState(
     private var openSessionIdsState by mutableStateOf<List<String>>(emptyList())
     private var detailsBySession by mutableStateOf<Map<String, SessionDetailUiState>>(emptyMap())
     private var previousStatuses = emptyMap<String, String>()
+    private val archivedPager = ArchivedSessionsPager { offset, limit -> repository.archivedSessions(offset, limit) }
 
     var connection by mutableStateOf(connectionSource.current)
         private set
@@ -98,6 +100,19 @@ class DesktopAppState(
         private set
     var archiveConfirmation by mutableStateOf<SessionUiModel?>(null)
         private set
+
+    /** The sidebar lists archived sessions instead of the current ones. */
+    var showingArchived by mutableStateOf(false)
+        private set
+    /** Archived sessions loaded so far, read from the gateway only while browsing them. */
+    var archivedSessions by mutableStateOf<List<SessionListItemUiState>>(emptyList())
+        private set
+    var archivedRefreshing by mutableStateOf(false)
+        private set
+    var archivedError by mutableStateOf<String?>(null)
+        private set
+    val archivedLoaded: Boolean get() = archivedPager.sessions != null
+    val archivedHasMore: Boolean get() = archivedPager.hasMore
     var newSessionOpen by mutableStateOf(false)
         private set
     /** Bumped when New Session is requested while its window is already open. */
@@ -157,6 +172,65 @@ class DesktopAppState(
     fun refreshSessions(userInitiated: Boolean = false) {
         if (closed) return
         scope.launch { refreshSessionsNow(userInitiated) }
+        if (userInitiated && showingArchived) reloadArchived(keepLoaded = false)
+    }
+
+    fun showArchived(show: Boolean) {
+        if (closed || show == showingArchived) return
+        showingArchived = show
+        if (show) reloadArchived(keepLoaded = false)
+    }
+
+    /** Reads the next page of archived sessions, if there is one. */
+    fun loadMoreArchived() {
+        if (closed || !archivedPager.hasMore) return
+        scope.launch {
+            try {
+                archivedPager.loadMore()
+                updateArchivedRows()
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (error: Exception) {
+                val mapped = error.toDesktopGatewayError()
+                reportError("Could not load more archived sessions: ${mapped.message}")
+                logger.warning("archived sessions page failed: ${mapped.kind}")
+            }
+        }
+    }
+
+    private fun reloadArchived(keepLoaded: Boolean) {
+        scope.launch {
+            archivedRefreshing = true
+            try {
+                archivedPager.load(keepLoaded)
+                archivedError = null
+                updateArchivedRows()
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (error: Exception) {
+                val mapped = error.toDesktopGatewayError()
+                archivedError = mapped.message
+                logger.warning("archived sessions failed: ${mapped.kind}")
+            } finally {
+                archivedRefreshing = false
+            }
+        }
+    }
+
+    /** Archiving, unarchiving and resuming move sessions in or out of the archived list. */
+    private fun reloadArchivedIfLoaded() {
+        if (archivedLoaded) reloadArchived(keepLoaded = true)
+    }
+
+    private fun updateArchivedRows() {
+        val open = openSessionIdsState
+        archivedSessions = archivedPager.sessions.orEmpty().map { row ->
+            SessionListItemUiState(
+                session = row.toUiModel(),
+                relativeUpdatedAt = relativeTime(row.updatedAt),
+                selected = row.id in open,
+            )
+        }
     }
 
     /** Saves a Gateway address and token typed in Settings; returns a message when they are unusable. */
@@ -238,7 +312,11 @@ class DesktopAppState(
                 listLoaded = true
                 listError = null
                 connectionState = DesktopConnectionState.CONNECTED
-                open.filterNot { id -> rows.any { it.id == id } }.forEach(::closeSession)
+                panesToClose(
+                    openSessionIds = open,
+                    listedIds = rows.mapTo(HashSet()) { it.id },
+                    archivedIds = archivedSessionIds(),
+                ).forEach(::closeSession)
                 updateSessionRowSelection()
                 logger.fine("session list refreshed: ${rows.size} sessions")
             } catch (cancel: CancellationException) {
@@ -417,7 +495,13 @@ class DesktopAppState(
     private fun updateSessionRowSelection() {
         val open = openSessionIdsState.toSet()
         sessions = sessions.map { it.copy(selected = it.session.id in open) }
+        archivedSessions = archivedSessions.map { it.copy(selected = it.session.id in open) }
     }
+
+    /** Archived sessions are not in the session list, but their panes stay open. */
+    private fun archivedSessionIds(): Set<String> =
+        archivedPager.sessions.orEmpty().mapTo(HashSet()) { it.id } +
+            detailsBySession.values.mapNotNull { detail -> detail.session?.takeIf { it.archived }?.id }
 
     private suspend fun detailLoop(id: String) {
         var first = true
@@ -679,6 +763,7 @@ class DesktopAppState(
                 api.archive(id).warning?.let { notice = it }
                 if (id in openSessionIdsState) closeSession(id)
                 refreshSessions()
+                reloadArchivedIfLoaded()
                 logger.info("session archived")
             } catch (error: Exception) {
                 val mapped = error.toDesktopGatewayError()
@@ -696,6 +781,7 @@ class DesktopAppState(
             try {
                 api.unarchive(ref.id)
                 refreshSessions()
+                reloadArchivedIfLoaded()
             } catch (error: Exception) {
                 val mapped = error.toDesktopGatewayError()
                 reportError(mapped.message)
@@ -712,6 +798,7 @@ class DesktopAppState(
             try {
                 api.resume(ref.id, trust = true)
                 refreshSessions()
+                reloadArchivedIfLoaded()
                 logger.info("session resume requested")
             } catch (error: Exception) {
                 val mapped = error.toDesktopGatewayError()
@@ -830,6 +917,16 @@ internal fun cleanupAttachments(attachments: Iterable<DesktopAttachment>) {
         runCatching { Files.deleteIfExists(attachment.path) }
     }
 }
+
+/**
+ * Panes whose session left the list, e.g. one deleted elsewhere. An archived
+ * session is not listed but stays readable, so its pane is kept.
+ */
+internal fun panesToClose(
+    openSessionIds: List<String>,
+    listedIds: Set<String>,
+    archivedIds: Set<String>,
+): List<String> = openSessionIds.filter { it !in listedIds && it !in archivedIds }
 
 internal fun openSessionInFocusedPane(
     openSessionIds: List<String>,

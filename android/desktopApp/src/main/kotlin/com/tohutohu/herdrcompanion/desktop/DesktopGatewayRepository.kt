@@ -11,6 +11,8 @@ class DesktopGatewayRepository(private val api: GatewayApi) {
 
     suspend fun session(id: String): SessionDto = api.session(id)
 
+    suspend fun archivedSessions(offset: Int, limit: Int) = api.archivedSessions(offset, limit)
+
     suspend fun messages(id: String, after: String? = null): List<MessageDto> =
         api.messages(id, after).messages
 

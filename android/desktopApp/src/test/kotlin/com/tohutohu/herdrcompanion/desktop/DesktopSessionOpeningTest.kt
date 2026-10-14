@@ -33,4 +33,16 @@ class DesktopSessionOpeningTest {
         val open = listOf("one", "two")
         assertEquals(open, openSessionInFocusedPane(open, "one", "two"))
     }
+
+    @Test
+    fun `一覧から消えたセッションのペインだけを閉じる`() {
+        assertEquals(
+            listOf("gone"),
+            panesToClose(
+                openSessionIds = listOf("listed", "gone", "archived"),
+                listedIds = setOf("listed"),
+                archivedIds = setOf("archived"),
+            ),
+        )
+    }
 }

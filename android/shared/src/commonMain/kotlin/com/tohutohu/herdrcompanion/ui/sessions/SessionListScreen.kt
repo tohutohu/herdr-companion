@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -51,6 +52,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -92,6 +94,8 @@ fun SessionListScreen(
     selection: SessionSelection = rememberSessionSelection(),
     showTopBar: Boolean = true,
     showNewSessionFab: Boolean = true,
+    /** Called as the list nears its end while [SessionListUiState.hasMore] is set. */
+    onLoadMore: () -> Unit = {},
 ) {
     var searchOpen by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
@@ -119,6 +123,15 @@ fun SessionListScreen(
     val firstId = sessions.firstOrNull()?.session?.id
     LaunchedEffect(firstId) {
         if (pinnedToTop && !selection.active) listState.scrollToItem(0)
+    }
+    val nearEnd by remember {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            (info.visibleItemsInfo.lastOrNull()?.index ?: 0) >= info.totalItemsCount - 6
+        }
+    }
+    LaunchedEffect(nearEnd, state.hasMore, state.sessions.size) {
+        if (nearEnd && state.hasMore) onLoadMore()
     }
 
     Scaffold(
@@ -211,7 +224,7 @@ fun SessionListScreen(
                             LinearProgressIndicator(Modifier.fillMaxWidth().animateItem())
                         }
                     }
-                    if (state.isLoaded && sessions.isEmpty() && pendingStarts.isEmpty() && state.error == null) {
+                    if (state.isLoaded && sessions.isEmpty() && pendingStarts.isEmpty() && state.error == null && !state.hasMore) {
                         item(key = "empty") {
                             Text(
                                 if (query.isBlank()) state.emptyMessage else "No matching sessions.",
@@ -252,6 +265,13 @@ fun SessionListScreen(
                             onUnarchive = { onAction(SessionListAction.Unarchive(listOf(it))) },
                             sessionContextMenu = sessionContextMenu,
                         )
+                    }
+                    if (state.hasMore) {
+                        item(key = "more") {
+                            Box(Modifier.animateItem().fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(Modifier.size(24.dp))
+                            }
+                        }
                     }
                 }
             }

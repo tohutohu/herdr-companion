@@ -20,6 +20,8 @@ data class SessionListUiState(
     val emptyMessage: String = "No sessions. Start Claude Code, Codex, OpenCode, or Devin inside Herdr on your Mac.",
     val busySessionIds: Set<String> = emptySet(),
     val engagedSessionIds: Set<String> = emptySet(),
+    /** More rows exist beyond the loaded ones; see SessionListScreen's onLoadMore. */
+    val hasMore: Boolean = false,
 )
 
 /** User events emitted by the session-list UI. */
