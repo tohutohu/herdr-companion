@@ -24,6 +24,10 @@ const (
 	ProviderError          Kind = "provider_error"
 	FileError              Kind = "file_error"
 	SendError              Kind = "send_error"
+	// MissedInteraction is a question or approval a manual reload showed was
+	// not captured: not on the app's screen, missing from a cached read, or
+	// the agent waits with nothing the app can answer.
+	MissedInteraction Kind = "missed_interaction"
 )
 
 type Entry struct {

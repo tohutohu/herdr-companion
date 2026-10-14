@@ -223,3 +223,11 @@ func messageBytes(msgs []model.Message) int {
 	}
 	return n
 }
+
+// Forget drops the thread's cached metadata, history and converted messages.
+func (p *Provider) Forget(nativeID string) {
+	p.displayMu.Lock()
+	delete(p.metadataEntries, nativeID)
+	delete(p.historyEntries, nativeID)
+	p.displayMu.Unlock()
+}

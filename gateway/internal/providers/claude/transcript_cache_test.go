@@ -200,3 +200,27 @@ func Test実行中セッションの要約は追記分だけ読み直しても�
 		}
 	}
 }
+
+func Test再読込のためにForgetするとトランスクリプトと要約のキャッシュを捨てる(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(testdata, "normal.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, path, write := cacheProvider(t)
+	write(raw)
+	ctx := context.Background()
+	if _, err := p.Messages(ctx, cacheSession, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.summaryPath(ctx, path, cacheSession, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.transcripts) != 1 || len(p.summaries) != 1 {
+		t.Fatalf("transcripts=%d summaries=%d", len(p.transcripts), len(p.summaries))
+	}
+	p.Forget(cacheSession)
+	if len(p.transcripts) != 0 || len(p.summaries) != 0 {
+		t.Errorf("Forget 後も残っている: transcripts=%d summaries=%d", len(p.transcripts), len(p.summaries))
+	}
+	assertCachedMessages(t, p, path, nil)
+}

@@ -151,6 +151,16 @@ type fakeProvider struct {
 	sendError    error
 	// sendHook, when set, runs inside Send before the input is recorded.
 	sendHook func(ctx context.Context)
+	// pending is appended to s1's messages; cached reads leave it out while
+	// staleCache is set, until Forget.
+	pending    *model.Interaction
+	staleCache bool
+	forgotten  []string
+}
+
+func (p *fakeProvider) Forget(nativeID string) {
+	p.forgotten = append(p.forgotten, nativeID)
+	p.staleCache = false
 }
 
 func (p *fakeProvider) FileRoots() []string { return p.fileRoots }
@@ -178,11 +188,15 @@ func (p *fakeProvider) Messages(_ context.Context, id string, _ *providers.Live)
 	if id != "s1" {
 		return nil, providers.ErrNotFound
 	}
-	return []model.Message{
+	msgs := []model.Message{
 		{ID: "m1", Role: model.RoleUser, Blocks: []model.Block{model.TextBlock("hi")}},
 		{ID: "m2", Role: model.RoleAssistant, Blocks: []model.Block{model.TextBlock("hello")}},
 		{ID: "m3", Role: model.RoleAssistant, Blocks: []model.Block{model.TextBlock("bye")}},
-	}, nil
+	}
+	if p.pending != nil && !p.staleCache {
+		msgs = append(msgs, model.Message{ID: "q1", Role: model.RoleAssistant, Blocks: []model.Block{{Type: model.BlockInteraction, Interaction: p.pending}}})
+	}
+	return msgs, nil
 }
 func (p *fakeProvider) Image(context.Context, string, string, int) (string, []byte, error) {
 	return "image/png", []byte("PNG"), nil
@@ -223,7 +237,7 @@ func (p *fakeProvider) CycleMode(_ context.Context, _ string, live *providers.Li
 
 func str(s string) *string { return &s }
 
-func newTestServer(t *testing.T) (*httptest.Server, *fakeProvider, *fakeHerdr, string) {
+func newTestServer(t *testing.T, opts ...func(*Server)) (*httptest.Server, *fakeProvider, *fakeHerdr, string) {
 	t.Helper()
 	root := t.TempDir()
 	os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n"), 0o644)
@@ -258,6 +272,9 @@ func newTestServer(t *testing.T) (*httptest.Server, *fakeProvider, *fakeHerdr, s
 		Uploads:   uploads.New(t.TempDir(), time.Hour),
 		Config:    store,
 		Sink:      deadletter.Nop{},
+	}
+	for _, opt := range opts {
+		opt(srv)
 	}
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)

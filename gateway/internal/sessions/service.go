@@ -208,6 +208,17 @@ func (s *Service) Conversation(ctx context.Context, id string) (model.Session, [
 	return sess, msgs, err
 }
 
+// Forget drops what the session's provider has cached for it.
+func (s *Service) Forget(id string) {
+	pname, native, ok := SplitID(id)
+	if !ok {
+		return
+	}
+	if f, ok := s.provider(pname).(providers.Forgetter); ok {
+		f.Forget(native)
+	}
+}
+
 // LiveSessions returns only sessions currently hosted by Herdr.
 func (s *Service) LiveSessions(ctx context.Context) ([]model.Session, error) {
 	snap, err := s.herdr.Snapshot(ctx)

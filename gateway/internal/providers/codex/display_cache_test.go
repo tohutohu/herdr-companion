@@ -207,3 +207,18 @@ func Test取得中に追記やイベントが来た履歴を最新として保�
 		})
 	}
 }
+
+func Test再読込のためにForgetすると履歴が不変でも再取得する(t *testing.T) {
+	th, _ := loadThread(t, "normal.json")
+	th.Path = filepath.Join(t.TempDir(), "rollout.jsonl")
+	os.WriteFile(th.Path, []byte("initial\n"), 0600)
+	p, f := cacheTestProvider(t, th)
+	ctx := context.Background()
+	if _, _, err := p.Conversation(ctx, th.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	p.Forget(th.ID)
+	if _, _, err := p.Conversation(ctx, th.ID, nil); err != nil || historyCalls(f) != 2 {
+		t.Fatalf("err=%v, calls=%v", err, f.callList())
+	}
+}

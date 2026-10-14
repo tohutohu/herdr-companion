@@ -96,6 +96,7 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("POST /v1/sessions/{id}/respond", s.respond)
 	api.HandleFunc("POST /v1/sessions/{id}/mode", s.cycleMode)
 	api.HandleFunc("POST /v1/sessions/{id}/seen", s.markSeen)
+	api.HandleFunc("POST /v1/sessions/{id}/reload", s.reloadSession)
 	api.HandleFunc("GET /v1/sessions/{id}/messages/{mid}/images/{n}", s.getImage)
 	api.HandleFunc("GET /v1/sessions/{id}/files", s.listFiles)
 	api.HandleFunc("GET /v1/sessions/{id}/files/content", s.fileContent)

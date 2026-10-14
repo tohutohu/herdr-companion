@@ -244,8 +244,16 @@ the raw payload. `GET /messages?after=<id>` returns messages from that id on
 `~/.local/state/herdr-mobile/errors/YYYY-MM-DD.jsonl`, one JSON object per
 line: `timestamp, provider, sessionId, kind, error, raw`. Kinds:
 `unknown_event, unknown_content, unsupported_interaction, parse_error,
-provider_error, file_error, send_error`. Identical entries are written once
-per process. `herdr-mobile-gateway debug replay FILE` re-runs the current
+provider_error, file_error, send_error, missed_interaction`. Identical
+entries are written once per process.
+
+`missed_interaction` comes from the app's Reload action
+(`POST /v1/sessions/{id}/reload`). The gateway reads the conversation once
+with its caches, drops them and reads again, then records a question or
+approval that the app was not showing (`not_shown`), that the cached read
+lacked (`stale_cache`), or a session waiting for an answer with nothing
+answerable pending (`uncaptured`, with the tail of the pane's screen). These
+are the cases where a question is on the agent's screen but not in the app. `herdr-mobile-gateway debug replay FILE` re-runs the current
 parsers on stored payloads.
 
 ## Notifications
@@ -517,6 +525,7 @@ Full request and response shapes, auth and connection details: [api.md](api.md).
 | POST | `/v1/sessions/{id}/respond` | `{interactionId, answers{qid:{selected[],text}}, decision}` |
 | POST | `/v1/sessions/{id}/mode` | advance the live provider TUI to its next available mode |
 | POST | `/v1/sessions/{id}/seen` | mark a `done` session seen in Herdr by focusing its pane; `{ok}` |
+| POST | `/v1/sessions/{id}/reload` | `{shown[]}` drop the provider's caches, read again → `{session, messages, findings[]}` (see Dead letters) |
 | GET | `/v1/sessions/{id}/messages/{mid}/images/{n}` | inline image bytes |
 | GET | `/v1/sessions/{id}/files?path=` | directory listing |
 | GET | `/v1/sessions/{id}/files/content?path=` | file bytes |

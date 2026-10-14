@@ -151,6 +151,7 @@ curl -s -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
 | POST | `/v1/sessions/{id}/respond` | 要 | 質問・承認への回答 |
 | POST | `/v1/sessions/{id}/mode` | 要 | TUI のモードを次へ切り替え |
 | POST | `/v1/sessions/{id}/seen` | 要 | 既読にする |
+| POST | `/v1/sessions/{id}/reload` | 要 | キャッシュを捨てて読み直し、質問の取りこぼしを診断 |
 | POST / DELETE | `/v1/sessions/{id}/archive` | 要 | アーカイブ／解除 |
 | POST | `/v1/sessions/archive` | 要 | 一括アーカイブ |
 | POST | `/v1/sessions/{id}/resume` | 要 | 停止中のセッションを再開 |
@@ -417,6 +418,21 @@ DELETE: アーカイブを解除し Session を返す。
 ### `POST /v1/sessions/{id}/seen`
 
 Herdr で `done` のセッションならペインをフォーカスして既読にする（それ以外は何もしない）。`200 {"ok": true}`。
+
+### `POST /v1/sessions/{id}/reload`
+
+```json
+{ "shown": ["<アプリが表示していた pending の interaction id>"] }
+```
+
+プロバイダーの表示用キャッシュを捨ててメッセージを全件読み直す。`200 {"session", "messages", "findings": [{"kind", "message"}]}`（`messages` は `after` なしの `GET …/messages` と同じ）。
+読み直しの前後で質問・承認の取りこぼしを調べ、見つかったものを `findings` に返し、dead letter（`missed_interaction`）に記録する。
+
+| `kind` | 意味 |
+|---|---|
+| `not_shown` | 読み直すと pending なのに `shown` に無かった（アプリのポーリングの取りこぼし）。`shown` を省くと調べない |
+| `stale_cache` | キャッシュを使った読み取りに無い pending が、読み直すと現れた |
+| `uncaptured` | `waiting_input` / `waiting_approval` なのに、アプリで答えられる（`supported`）pending が無い。ペインの画面末尾も記録する |
 
 ### `GET /v1/sessions/{id}/messages/{mid}/images/{n}`
 

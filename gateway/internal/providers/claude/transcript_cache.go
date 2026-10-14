@@ -235,3 +235,21 @@ func (c *cachedTranscript) messages(opt ParseOptions) []model.Message {
 	c.msgs[key] = msgs
 	return slices.Clone(msgs)
 }
+
+// Forget drops the session's decoded transcript and cached summaries.
+func (p *Provider) Forget(nativeID string) {
+	path, err := p.transcriptPath(nativeID)
+	if err != nil {
+		return
+	}
+	p.transcriptMu.Lock()
+	delete(p.transcripts, path)
+	p.transcriptMu.Unlock()
+	p.summaryMu.Lock()
+	for key := range p.summaries {
+		if key.path == path {
+			delete(p.summaries, key)
+		}
+	}
+	p.summaryMu.Unlock()
+}

@@ -141,6 +141,13 @@ type Provider interface {
 	Respond(ctx context.Context, nativeID string, live *Live, r model.InteractionResponse) error
 }
 
+// Forgetter is implemented by providers that cache display reads. Forget
+// drops what is cached for one session, so its next read starts from the
+// transcript or app-server again.
+type Forgetter interface {
+	Forget(nativeID string)
+}
+
 // ModeChanger is an optional capability for providers whose live TUI can move
 // to its next session mode. Keeping this outside Provider lets providers that
 // do not expose a safe mode switch remain unchanged.
