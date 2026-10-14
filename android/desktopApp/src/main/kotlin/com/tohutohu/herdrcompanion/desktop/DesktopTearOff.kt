@@ -10,12 +10,24 @@ import java.awt.Toolkit
 import java.awt.Window
 import java.awt.event.AWTEventListener
 import java.awt.event.MouseEvent
+import kotlin.math.floor
 
 /** The main window's pane header strip, where a dragged-out session can be dropped back in. */
 fun interface DesktopPaneDropZone {
-    /** The pane slot a session released at [point] (screen points) would take, or null outside the strip. */
-    fun indexAt(point: Point): Int?
+    /**
+     * How a session held at [point] (screen points) would dock, or null
+     * outside the strip. [grabFraction] is where across its width the pointer
+     * holds the session.
+     */
+    fun previewAt(point: Point, grabFraction: Float): DesktopDockPreview?
 }
+
+/**
+ * A dragged-out session shown back among the panes: the slot it takes if
+ * released now, and how far, in points, it sits from that slot while
+ * following the pointer.
+ */
+data class DesktopDockPreview(val index: Int, val offset: Float)
 
 /**
  * Carries a pane header drag on after the pane has left the main window, the
@@ -34,13 +46,14 @@ class DesktopTearOff(private val state: DesktopAppState) {
     var draggingSessionId by mutableStateOf<String?>(null)
         private set
 
-    /** The slot the dragged session takes if released now; null while it is outside the drop zone. */
-    var dropIndex by mutableStateOf<Int?>(null)
+    /** Where the dragged session would dock if released now; null while it is outside the drop zone. */
+    var dockPreview by mutableStateOf<DesktopDockPreview?>(null)
         private set
 
     var dropZone: DesktopPaneDropZone? = null
 
     private var grab = Point()
+    private var grabFraction = 0.5f
     private var window: Window? = null
 
     private val listener = AWTEventListener { event ->
@@ -70,8 +83,9 @@ class DesktopTearOff(private val state: DesktopAppState) {
     fun tearOff(sessionId: String, grabX: Int, grabY: Int, width: Int, height: Int) {
         val point = pointerOnScreen ?: return
         grab = Point(grabX, grabY)
+        grabFraction = if (width > 0) grabX.toFloat() / width else 0.5f
         draggingSessionId = sessionId
-        dropIndex = null
+        dockPreview = null
         state.openSessionInWindow(
             sessionId,
             x = point.x - grabX,
@@ -93,16 +107,16 @@ class DesktopTearOff(private val state: DesktopAppState) {
     }
 
     private fun follow(point: Point) {
-        dropIndex = dropZone?.indexAt(point)
+        dockPreview = dropZone?.previewAt(point, grabFraction)
         window?.setLocation(point.x - grab.x, point.y - grab.y)
     }
 
     private fun finish(point: Point) {
         follow(point)
         val sessionId = draggingSessionId ?: return
-        val index = dropIndex
+        val index = dockPreview?.index
         draggingSessionId = null
-        dropIndex = null
+        dockPreview = null
         window = null
         if (index != null) state.returnToMainWindow(sessionId, index)
     }
@@ -113,24 +127,27 @@ class DesktopTearOff(private val state: DesktopAppState) {
 }
 
 /**
- * Which pane slot a point over the split area's header strip falls into:
- * before the first pane whose centre lies right of it. With no panes open the
- * whole area accepts the drop.
+ * Where a session held at [point] would dock among [paneCount] open panes.
+ * Docking resets the panes to equal widths, so the preview lays them out that
+ * way too and picks the slot nearest to where the pointer holds the session.
+ * With no panes open the whole area accepts the drop; otherwise only the
+ * header strip at its top.
  */
-internal fun paneDropIndex(
+internal fun dockPreview(
     point: Point,
     area: Rectangle,
     stripHeight: Int,
-    paneWidths: List<Float>,
+    paneCount: Int,
     dividerWidth: Float,
-): Int? {
-    val zone = if (paneWidths.isEmpty()) area else Rectangle(area.x, area.y, area.width, stripHeight)
+    grabFraction: Float,
+): DesktopDockPreview? {
+    val zone = if (paneCount == 0) area else Rectangle(area.x, area.y, area.width, stripHeight)
     if (!zone.contains(point)) return null
-    val x = (point.x - area.x).toFloat()
-    var left = 0f
-    paneWidths.forEachIndexed { index, width ->
-        if (x < left + width / 2f) return index
-        left += width + dividerWidth
-    }
-    return paneWidths.size
+    val slotWidth = (area.width - dividerWidth * paneCount) / (paneCount + 1)
+    if (slotWidth <= 0f) return DesktopDockPreview(0, 0f)
+    val left = (point.x - area.x) - grabFraction.coerceIn(0f, 1f) * slotWidth
+    val index = floor((left + slotWidth / 2f) / (slotWidth + dividerWidth)).toInt().coerceIn(0, paneCount)
+    val slotLeft = index * (slotWidth + dividerWidth)
+    val clampedLeft = left.coerceIn(0f, (area.width - slotWidth).coerceAtLeast(0f))
+    return DesktopDockPreview(index, clampedLeft - slotLeft)
 }

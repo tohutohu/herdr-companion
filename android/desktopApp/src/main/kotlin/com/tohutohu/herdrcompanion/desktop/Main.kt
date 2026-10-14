@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -507,9 +506,14 @@ private fun FrameWindowScope.DesktopShell(
                         .widthIn(min = minDetailWidth)
                         .onGloballyPositioned { splitAreaInWindow = it.boundsInWindow() },
                 ) {
-                    val detailIds = state.openSessionIds
+                    // A dragged-out session held over the pane headers shows among the panes
+                    // where it would dock, laid out the way docking leaves them.
+                    val docking = tearOff.draggingSessionId?.let { id -> tearOff.dockPreview?.let { id to it } }
+                    val detailIds = docking?.let { (id, preview) ->
+                        state.openSessionIds.toMutableList().apply { add(preview.index.coerceIn(0, size), id) }
+                    } ?: state.openSessionIds
                     val paneCount = detailIds.size
-                    val weights = state.paneWeights.takeIf { it.size == paneCount }
+                    val weights = state.paneWeights.takeIf { docking == null && it.size == paneCount }
                         ?: equalPaneWeights(paneCount)
                     val dividerWidth = 8.dp
                     val paneWidth = (maxWidth - dividerWidth * (paneCount - 1).coerceAtLeast(0)).coerceAtLeast(0.dp)
@@ -520,12 +524,12 @@ private fun FrameWindowScope.DesktopShell(
                     val currentDensity by rememberUpdatedState(density.density)
                     val splitHeight = maxHeight
                     DisposableEffect(tearOff, window) {
-                        tearOff.dropZone = DesktopPaneDropZone { point ->
+                        tearOff.dropZone = DesktopPaneDropZone { point, grabFraction ->
                             val bounds = splitAreaInWindow ?: return@DesktopPaneDropZone null
                             val origin = runCatching { window.contentPane.locationOnScreen }.getOrNull()
                                 ?: return@DesktopPaneDropZone null
                             val scale = currentDensity
-                            paneDropIndex(
+                            dockPreview(
                                 point = point,
                                 area = Rectangle(
                                     origin.x + (bounds.left / scale).toInt(),
@@ -534,8 +538,9 @@ private fun FrameWindowScope.DesktopShell(
                                     (bounds.height / scale).toInt(),
                                 ),
                                 stripHeight = PANE_DROP_STRIP_HEIGHT,
-                                paneWidths = currentPaneWidths,
+                                paneCount = state.openSessionIds.size,
                                 dividerWidth = dividerWidth.value,
+                                grabFraction = grabFraction,
                             )
                         }
                         onDispose { tearOff.dropZone = null }
@@ -568,15 +573,21 @@ private fun FrameWindowScope.DesktopShell(
                                 }
                                 key(id) {
                                     val dragged = draggedPaneId == id
+                                    val dockOffset = docking?.takeIf { it.first == id }?.second?.offset
+                                    val lifted = dragged || dockOffset != null
                                     Box(
                                         Modifier
                                             .weight(weights[index])
                                             .fillMaxHeight()
-                                            .zIndex(if (dragged) 1f else 0f)
+                                            .zIndex(if (lifted) 1f else 0f)
                                             .graphicsLayer {
-                                                translationX = if (dragged) paneDragOffset else 0f
+                                                translationX = when {
+                                                    dragged -> paneDragOffset
+                                                    dockOffset != null -> dockOffset.dp.toPx()
+                                                    else -> 0f
+                                                }
                                                 translationY = if (dragged) paneDragOffsetY else 0f
-                                                shadowElevation = if (dragged) 8.dp.toPx() else 0f
+                                                shadowElevation = if (lifted) 8.dp.toPx() else 0f
                                             }
                                     ) {
                                         DesktopSessionPane(
@@ -641,22 +652,6 @@ private fun FrameWindowScope.DesktopShell(
                                     }
                                 }
                             }
-                        }
-                    }
-                    tearOff.dropIndex?.let { index ->
-                        val primary = MaterialTheme.colorScheme.primary
-                        if (paneCount == 0) {
-                            Box(Modifier.fillMaxSize().background(primary.copy(alpha = 0.12f)))
-                        } else {
-                            val x = paneWidthsPt.take(index).sum() + dividerWidth.value * index - dividerWidth.value / 2f
-                            Box(Modifier.fillMaxWidth().height(28.dp).background(primary.copy(alpha = 0.12f)))
-                            Box(
-                                Modifier
-                                    .offset(x = (x.dp - 2.dp).coerceIn(0.dp, (maxWidth - 4.dp).coerceAtLeast(0.dp)))
-                                    .width(4.dp)
-                                    .height(28.dp)
-                                    .background(primary),
-                            )
                         }
                     }
                 }

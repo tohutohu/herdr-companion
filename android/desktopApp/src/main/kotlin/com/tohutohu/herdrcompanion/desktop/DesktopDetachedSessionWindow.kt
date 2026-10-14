@@ -54,7 +54,7 @@ fun DesktopDetachedSessionWindow(
         state = windowState,
         icon = icon,
         // Hidden while a drag holds it over the main window's pane headers, where letting go docks it.
-        visible = !(tearOff.draggingSessionId == sessionId && tearOff.dropIndex != null),
+        visible = !(tearOff.draggingSessionId == sessionId && tearOff.dockPreview != null),
     ) {
         window.minimumSize = Dimension(MIN_DETACHED_WIDTH, MIN_DETACHED_HEIGHT)
         DisposableEffect(window) {
