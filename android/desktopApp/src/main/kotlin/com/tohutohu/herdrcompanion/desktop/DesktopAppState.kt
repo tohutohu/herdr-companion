@@ -37,6 +37,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
+import java.awt.Rectangle
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
@@ -85,6 +86,7 @@ class DesktopAppState(
     private var pendingMessageBaselines by mutableStateOf<Map<String, Set<String>>>(emptyMap())
     private var composerAttachmentsBySession by mutableStateOf<Map<String, List<DesktopAttachment>>>(emptyMap())
     private var openSessionIdsState by mutableStateOf<List<String>>(emptyList())
+    private var detachedWindowsState by mutableStateOf<List<DesktopDetachedWindow>>(emptyList())
     private var detailsBySession by mutableStateOf<Map<String, SessionDetailUiState>>(emptyMap())
     private var previousStatuses = emptyMap<String, String>()
     private val archivedPager = ArchivedSessionsPager { offset, limit -> repository.archivedSessions(offset, limit) }
@@ -139,6 +141,13 @@ class DesktopAppState(
 
     val selectedSessionId: String? get() = selection.selectedId
     val openSessionIds: List<String> get() = openSessionIdsState
+
+    /** Sessions shown in their own windows rather than in the main window's panes. */
+    val detachedWindows: List<DesktopDetachedWindow> get() = detachedWindowsState
+
+    /** Bumped to bring a detached session's window to the front. */
+    var windowRaiseRequest by mutableStateOf<Pair<String, Int>?>(null)
+        private set
     val detail: SessionDetailUiState?
         get() = selectedSessionId?.let(detailsBySession::get)
 
@@ -232,7 +241,7 @@ class DesktopAppState(
     }
 
     private fun updateArchivedRows() {
-        val open = openSessionIdsState
+        val open = shownSessionIds().toSet()
         archivedSessions = archivedPager.sessions.orEmpty().map { row ->
             SessionListItemUiState(
                 session = row.toUiModel(),
@@ -310,7 +319,7 @@ class DesktopAppState(
                     }
                 }
                 previousStatuses = rows.associate { it.id to it.status }
-                val open = openSessionIdsState
+                val open = shownSessionIds().toSet()
                 sessions = rows.map { row ->
                     SessionListItemUiState(
                         session = row.toUiModel(),
@@ -322,7 +331,7 @@ class DesktopAppState(
                 listError = null
                 connectionState = DesktopConnectionState.CONNECTED
                 panesToClose(
-                    openSessionIds = open,
+                    openSessionIds = shownSessionIds(),
                     listedIds = rows.mapTo(HashSet()) { it.id },
                     archivedIds = archivedSessionIds(),
                 ).forEach(::closeSession)
@@ -350,6 +359,10 @@ class DesktopAppState(
     /** Opens a session in the last-focused pane, replacing only that pane. */
     fun openSession(id: String) {
         if (closed) return
+        if (isDetached(id)) {
+            raiseWindow(id)
+            return
+        }
         val current = openSessionIdsState
         val next = openSessionInFocusedPane(current, selectedSessionId, id)
         current.firstOrNull { it !in next }?.let(::removeDetail)
@@ -364,6 +377,10 @@ class DesktopAppState(
     /** Adds a session to the Desktop split view, or focuses it if it is already open. */
     fun openSessionInSplit(id: String) {
         if (closed) return
+        if (isDetached(id)) {
+            raiseWindow(id)
+            return
+        }
         if (id in openSessionIdsState) {
             focusSession(id)
             return
@@ -411,7 +428,15 @@ class DesktopAppState(
         }
     }
 
+    /** Closes a session's pane or, for a detached session, its window. */
     fun closeSession(id: String) {
+        if (isDetached(id)) {
+            detachedWindowsState = detachedWindowsState.filterNot { it.sessionId == id }
+            removeDetail(id)
+            updateSessionRowSelection()
+            saveLayout()
+            return
+        }
         if (id !in openSessionIdsState) return
         val wasSelected = selection.selectedId == id
         removeDetail(id)
@@ -424,16 +449,69 @@ class DesktopAppState(
     }
 
     fun clearSelection() {
-        detailJobs.values.forEach(Job::cancel)
-        detailJobs.clear()
-        detailsBySession = emptyMap()
-        cleanupAttachments(composerAttachmentsBySession.values.flatten())
-        composerAttachmentsBySession = emptyMap()
+        openSessionIdsState.forEach(::removeDetail)
         setOpenSessionIds(emptyList())
         selection.clear()
         updateSessionRowSelection()
         saveLayout()
     }
+
+    /**
+     * Shows a session in its own window: a pane moves out of the main window
+     * with its conversation and draft attachments, and a session that is not
+     * open yet starts loading. [x] and [y] place the window, in screen points.
+     */
+    fun openSessionInWindow(id: String, x: Int? = null, y: Int? = null) {
+        if (closed) return
+        if (isDetached(id)) {
+            raiseWindow(id)
+            return
+        }
+        // Shown in the window before it leaves the panes, so its detail loop never sees it closed.
+        detachedWindowsState = detachedWindowsState + DesktopDetachedWindow(sessionId = id, x = x, y = y)
+        val index = openSessionIdsState.indexOf(id)
+        if (index >= 0) {
+            val wasSelected = selection.selectedId == id
+            setOpenSessionIds(openSessionIdsState - id)
+            if (wasSelected) openSessionIdsState.lastOrNull()?.let(selection::select) ?: selection.clear()
+        }
+        updateSessionRowSelection()
+        ensureDetail(id)
+        saveLayout()
+        if (index < 0) markSeen(id)
+    }
+
+    /** Moves a detached session back into the main window as a split pane, closing its window. */
+    fun returnToMainWindow(id: String) {
+        if (closed || !isDetached(id)) return
+        setOpenSessionIds(openSessionIdsState + id)
+        detachedWindowsState = detachedWindowsState.filterNot { it.sessionId == id }
+        selection.select(id)
+        updateSessionRowSelection()
+        ensureDetail(id)
+        saveLayout()
+    }
+
+    /** Records where a detached window now sits; saved with the layout. */
+    fun updateDetachedBounds(id: String, x: Int, y: Int, width: Int, height: Int) {
+        val current = detachedWindowsState.firstOrNull { it.sessionId == id } ?: return
+        val next = current.copy(x = x, y = y, width = width, height = height)
+        if (next == current) return
+        detachedWindowsState = detachedWindowsState.map { if (it.sessionId == id) next else it }
+        saveLayout()
+    }
+
+    private fun raiseWindow(id: String) {
+        windowRaiseRequest = id to ((windowRaiseRequest?.second ?: 0) + 1)
+        markSeen(id)
+    }
+
+    private fun isDetached(id: String): Boolean = detachedWindowsState.any { it.sessionId == id }
+
+    /** Whether the session is on screen anywhere, so its conversation keeps loading. */
+    private fun isShown(id: String): Boolean = id in openSessionIdsState || isDetached(id)
+
+    private fun shownSessionIds(): List<String> = openSessionIdsState + detachedWindowsState.map { it.sessionId }
 
     /**
      * Moves a pane to another slot, taking its width along. Call [saveLayout]
@@ -458,6 +536,7 @@ class DesktopAppState(
                 openSessionIds = openSessionIdsState,
                 focusedSessionId = selection.selectedId,
                 paneWeights = paneWeights,
+                detachedWindows = detachedWindowsState,
             ),
         )
     }
@@ -467,14 +546,15 @@ class DesktopAppState(
      * composition: state written while this object is created inside
      * `remember` is not yet visible to the detail loops, which then stop.
      */
-    fun restoreLayout(layout: DesktopLayoutSnapshot) {
-        if (closed || openSessionIdsState.isNotEmpty()) return
+    fun restoreLayout(layout: DesktopLayoutSnapshot, screens: List<Rectangle> = emptyList()) {
+        if (closed || shownSessionIds().isNotEmpty()) return
         val restored = layout.normalized()
-        if (restored.openSessionIds.isEmpty()) return
+        if (restored.openSessionIds.isEmpty() && restored.detachedWindows.isEmpty()) return
         openSessionIdsState = restored.openSessionIds
         paneWeights = restored.paneWeights
+        detachedWindowsState = restored.detachedWindows.map { it.onScreen(screens) }
         restored.focusedSessionId?.let(selection::select)
-        restored.openSessionIds.forEach(::ensureDetail)
+        shownSessionIds().forEach(::ensureDetail)
         updateSessionRowSelection()
     }
 
@@ -515,7 +595,7 @@ class DesktopAppState(
     }
 
     private fun updateSessionRowSelection() {
-        val open = openSessionIdsState.toSet()
+        val open = shownSessionIds().toSet()
         sessions = sessions.map { it.copy(selected = it.session.id in open) }
         archivedSessions = archivedSessions.map { it.copy(selected = it.session.id in open) }
     }
@@ -532,7 +612,7 @@ class DesktopAppState(
         // The loop owns the merged messages, so a reload runs in it too.
         val reloads = reloadSignals[id] ?: return
         var reload = false
-        while (currentCoroutineContext().isActive && !closed && id in openSessionIdsState) {
+        while (currentCoroutineContext().isActive && !closed && isShown(id)) {
             try {
                 // Keep the explicit GET /sessions/{id} call on the first load;
                 // it gives a useful Session-not-found error before messages.
@@ -581,7 +661,7 @@ class DesktopAppState(
                 throw cancel
             } catch (error: Exception) {
                 val mapped = error.toDesktopGatewayError(streaming = !first)
-                if (id in openSessionIdsState) {
+                if (isShown(id)) {
                     val current = detailsBySession[id] ?: loadingDetail(id)
                     updateDetail(id, (current).copy(
                         sessionId = id,
@@ -642,7 +722,7 @@ class DesktopAppState(
     }
 
     private fun addDesktopAttachments(sessionId: String, candidates: List<DesktopAttachment>) {
-        if (sessionId !in openSessionIdsState) {
+        if (!isShown(sessionId)) {
             cleanupAttachments(candidates)
             return
         }
@@ -679,7 +759,7 @@ class DesktopAppState(
     }
 
     fun send(id: String, text: String) {
-        if (id !in openSessionIdsState) return
+        if (!isShown(id)) return
         val attachments = composerAttachmentsBySession[id].orEmpty()
         if ((text.isBlank() && attachments.isEmpty()) || id in busySessionIds) return
         val pending = PendingMessageUiState(
@@ -769,7 +849,7 @@ class DesktopAppState(
                 transientError = mapped.message
                 logger.warning("interaction response failed: ${mapped.kind}")
             } finally {
-                if (id in openSessionIdsState) updateDetail(id) { it.copy(answering = false) }
+                if (isShown(id)) updateDetail(id) { it.copy(answering = false) }
             }
         }
     }
@@ -818,7 +898,7 @@ class DesktopAppState(
         scope.launch {
             try {
                 api.archive(id).warning?.let { notice = it }
-                if (id in openSessionIdsState) closeSession(id)
+                if (isShown(id)) closeSession(id)
                 refreshSessions()
                 reloadArchivedIfLoaded()
                 logger.info("session archived")
@@ -909,7 +989,7 @@ class DesktopAppState(
     }
 
     private fun updateDetail(id: String, value: SessionDetailUiState) {
-        if (id in openSessionIdsState) detailsBySession = detailsBySession + (id to value)
+        if (isShown(id)) detailsBySession = detailsBySession + (id to value)
     }
 
     private fun updateDetail(id: String, update: (SessionDetailUiState) -> SessionDetailUiState) {

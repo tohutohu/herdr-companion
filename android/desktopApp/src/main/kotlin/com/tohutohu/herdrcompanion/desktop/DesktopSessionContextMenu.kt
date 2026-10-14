@@ -25,6 +25,7 @@ fun DesktopSessionContextMenu(
     item: SessionListItemUiState,
     onOpen: () -> Unit,
     onSplit: () -> Unit,
+    onOpenInWindow: () -> Unit,
     onArchive: () -> Unit,
     onRefresh: () -> Unit,
     onCopyId: () -> Unit,
@@ -56,6 +57,10 @@ fun DesktopSessionContextMenu(
             DropdownMenuItem(
                 text = { Text("Split") },
                 onClick = { expanded = false; onSplit() },
+            )
+            DropdownMenuItem(
+                text = { Text("Open in New Window") },
+                onClick = { expanded = false; onOpenInWindow() },
             )
             DropdownMenuItem(
                 text = { Text("Refresh") },

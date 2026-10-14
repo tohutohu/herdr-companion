@@ -22,6 +22,10 @@ private const val MAX_WINDOW_WIDTH = 4_096
 private const val MAX_WINDOW_HEIGHT = 4_096
 private const val MIN_SIDEBAR_WIDTH = 240f
 private const val MAX_SIDEBAR_WIDTH = 1_600f
+const val DEFAULT_DETACHED_WIDTH = 760
+const val DEFAULT_DETACHED_HEIGHT = 820
+const val MIN_DETACHED_WIDTH = 420
+const val MIN_DETACHED_HEIGHT = 400
 
 /** The small, versionable part of the native window state we persist. */
 data class DesktopWindowSnapshot(
@@ -167,12 +171,28 @@ internal fun decodeAgentPresets(value: String?): AgentPresets =
 
 internal fun encodeAgentPresets(value: AgentPresets): String = json.encodeToString(value)
 
-/** Open panes, their order and widths, restored on the next launch. */
+/** A session shown in its own window, and that window's last bounds. */
+@Serializable
+data class DesktopDetachedWindow(
+    val sessionId: String,
+    val x: Int? = null,
+    val y: Int? = null,
+    val width: Int = DEFAULT_DETACHED_WIDTH,
+    val height: Int = DEFAULT_DETACHED_HEIGHT,
+) {
+    fun normalized(): DesktopDetachedWindow = copy(
+        width = width.coerceIn(MIN_DETACHED_WIDTH, MAX_WINDOW_WIDTH),
+        height = height.coerceIn(MIN_DETACHED_HEIGHT, MAX_WINDOW_HEIGHT),
+    )
+}
+
+/** Open panes, their order and widths, and detached session windows, restored on the next launch. */
 @Serializable
 data class DesktopLayoutSnapshot(
     val openSessionIds: List<String> = emptyList(),
     val focusedSessionId: String? = null,
     val paneWeights: List<Float> = emptyList(),
+    val detachedWindows: List<DesktopDetachedWindow> = emptyList(),
 ) {
     fun normalized(): DesktopLayoutSnapshot {
         val ids = openSessionIds.filter { it.isNotEmpty() }.distinct()
@@ -182,9 +202,26 @@ data class DesktopLayoutSnapshot(
             paneWeights = paneWeights
                 .takeIf { weights -> weights.size == ids.size && weights.all { it.isFinite() && it > 0f } }
                 ?: equalPaneWeights(ids.size),
+            // A session is shown in one place only; the main window wins.
+            detachedWindows = detachedWindows
+                .filter { it.sessionId.isNotEmpty() && it.sessionId !in ids }
+                .distinctBy { it.sessionId }
+                .map { it.normalized() },
         )
     }
 }
+
+/** Drops a saved position that no longer lands on any screen, so the window opens where the system puts it. */
+internal fun DesktopDetachedWindow.onScreen(screens: List<Rectangle>): DesktopDetachedWindow {
+    val x = x ?: return this
+    val y = y ?: return this
+    if (screens.isEmpty() || screens.any { it.intersects(Rectangle(x, y, width, height)) }) return this
+    return copy(x = null, y = null)
+}
+
+internal fun currentScreenBounds(): List<Rectangle> = runCatching {
+    GraphicsEnvironment.getLocalGraphicsEnvironment().screenDevices.map { it.defaultConfiguration.bounds }
+}.getOrDefault(emptyList())
 
 internal fun decodeLayout(value: String?): DesktopLayoutSnapshot =
     (value?.let { runCatching { json.decodeFromString<DesktopLayoutSnapshot>(it) }.getOrNull() } ?: DesktopLayoutSnapshot())

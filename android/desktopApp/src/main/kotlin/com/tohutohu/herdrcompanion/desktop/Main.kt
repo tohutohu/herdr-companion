@@ -6,7 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -65,6 +66,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.BitmapPainter
@@ -108,15 +110,20 @@ import com.tohutohu.herdrcompanion.ui.sessions.SessionRef
 import com.tohutohu.herdrcompanion.ui.theme.SharedTheme
 import java.awt.Cursor
 import java.awt.Frame
+import java.awt.MouseInfo
 import java.awt.event.ComponentAdapter
 import java.awt.event.ComponentEvent
 import java.awt.event.WindowEvent
 import java.awt.event.WindowStateListener
 import javax.imageio.ImageIO
+import kotlin.math.abs
 
 private val MIN_SIDEBAR_WIDTH = 240.dp
 private val MIN_DETAIL_WIDTH = 420.dp
 private val MIN_SPLIT_DETAIL_WIDTH = 300.dp
+
+/** How far a pane header is dragged up or down before letting go opens the pane in its own window. */
+private val PANE_TEAR_OFF_DISTANCE = 96.dp
 
 fun main() {
     val instanceLock = DesktopInstanceLock.tryAcquire()
@@ -133,39 +140,46 @@ fun main() {
                 width = restored.width.dp,
                 height = restored.height.dp,
             )
+            // Shared by the main window and the detached session windows.
+            val connectionSource = remember { DesktopConnectionSource() }
+            val http = remember { DesktopHttp.client() }
+            val api = remember { GatewayApi(http) { connectionSource.current.settings } }
+            val appState = remember {
+                DesktopAppState(
+                    connectionSource = connectionSource,
+                    api = api,
+                    http = http,
+                    onLayoutChanged = DesktopPreferences::saveLayout,
+                )
+            }
+            setSingletonImageLoaderFactory { context ->
+                desktopImageLoader(context, http) { connectionSource.current.settings }
+            }
+            LaunchedEffect(appState) {
+                appState.restoreLayout(DesktopPreferences.loadLayout(), currentScreenBounds())
+            }
+            DisposableEffect(appState) {
+                onDispose { appState.close() }
+            }
+            val windowIcon = remember { desktopWindowIcon() }
             Window(
                 onCloseRequest = ::exitApplication,
                 title = "Herdr Companion",
                 state = windowState,
-                icon = remember { desktopWindowIcon() },
+                icon = windowIcon,
             ) {
                 window.minimumSize = java.awt.Dimension(880, 560)
-                val connectionSource = remember { DesktopConnectionSource() }
-                val http = remember { DesktopHttp.client() }
-                val api = remember { GatewayApi(http) { connectionSource.current.settings } }
-                val appState = remember {
-                    DesktopAppState(
-                        connectionSource = connectionSource,
-                        api = api,
-                        http = http,
-                        onLayoutChanged = DesktopPreferences::saveLayout,
-                    )
-                }
-                setSingletonImageLoaderFactory { context ->
-                    desktopImageLoader(context, http) { connectionSource.current.settings }
-                }
                 val updateScope = rememberCoroutineScope()
                 val updater = remember { DesktopUpdater(updateScope, onQuit = ::exitApplication) }
                 DesktopWindowPersistence(window)
-                LaunchedEffect(appState) {
-                    appState.restoreLayout(DesktopPreferences.loadLayout())
-                }
                 LaunchedEffect(updater) { updater.startAutomaticChecks() }
-                DisposableEffect(appState) {
-                    onDispose { appState.close() }
-                }
                 SharedTheme {
                     DesktopShell(appState, api, updater, onCloseWindow = ::exitApplication)
+                }
+            }
+            for (detached in appState.detachedWindows) {
+                key(detached.sessionId) {
+                    DesktopDetachedSessionWindow(appState, api, detached, windowIcon)
                 }
             }
         }
@@ -427,6 +441,7 @@ private fun FrameWindowScope.DesktopShell(
                                     item = item,
                                     onOpen = { state.openSession(item.session.id) },
                                     onSplit = { state.openSessionInSplit(item.session.id) },
+                                    onOpenInWindow = { state.openSessionInWindow(item.session.id) },
                                     onArchive = {
                                         if (item.session.archived) {
                                             handleListAction(state, SessionListAction.Unarchive(listOf(item.session.toRef())))
@@ -483,6 +498,8 @@ private fun FrameWindowScope.DesktopShell(
                         val density = androidx.compose.ui.platform.LocalDensity.current
                         var draggedPaneId by remember { mutableStateOf<String?>(null) }
                         var paneDragOffset by remember { mutableStateOf(0f) }
+                        var paneDragOffsetY by remember { mutableStateOf(0f) }
+                        val tearOffDistancePx = with(density) { PANE_TEAR_OFF_DISTANCE.toPx() }
                         Row(Modifier.fillMaxSize()) {
                             detailIds.forEachIndexed { index, id ->
                                 if (index > 0) {
@@ -510,7 +527,10 @@ private fun FrameWindowScope.DesktopShell(
                                             .zIndex(if (dragged) 1f else 0f)
                                             .graphicsLayer {
                                                 translationX = if (dragged) paneDragOffset else 0f
+                                                translationY = if (dragged) paneDragOffsetY else 0f
                                                 shadowElevation = if (dragged) 8.dp.toPx() else 0f
+                                                // Faded once letting go would open the pane in its own window.
+                                                alpha = if (dragged && abs(paneDragOffsetY) > tearOffDistancePx) 0.6f else 1f
                                             }
                                     ) {
                                         DesktopSessionPane(
@@ -522,9 +542,11 @@ private fun FrameWindowScope.DesktopShell(
                                             onHeaderDragStart = {
                                                 draggedPaneId = id
                                                 paneDragOffset = 0f
+                                                paneDragOffsetY = 0f
                                                 state.focusSession(id)
                                             },
-                                            onHeaderDrag = { deltaPx ->
+                                            onHeaderDrag = { delta ->
+                                                paneDragOffsetY += delta.y
                                                 val ids = state.openSessionIds
                                                 val from = ids.indexOf(id)
                                                 if (from >= 0) {
@@ -536,16 +558,24 @@ private fun FrameWindowScope.DesktopShell(
                                                         widthsPx = current.map { paneWidthPx * it / total },
                                                         dividerWidthPx = with(density) { dividerWidth.toPx() },
                                                         fromIndex = from,
-                                                        offsetPx = paneDragOffset + deltaPx,
+                                                        offsetPx = paneDragOffset + delta.x,
                                                     )
                                                     state.movePane(from, target.index)
                                                     paneDragOffset = target.offsetPx
                                                 }
                                             },
-                                            onHeaderDragEnd = {
+                                            onHeaderDragEnd = { cancelled ->
+                                                val tornOff = !cancelled && abs(paneDragOffsetY) > tearOffDistancePx
                                                 draggedPaneId = null
                                                 paneDragOffset = 0f
-                                                state.saveLayout()
+                                                paneDragOffsetY = 0f
+                                                if (tornOff) {
+                                                    // The new window opens under the pointer, held by its title bar.
+                                                    val pointer = MouseInfo.getPointerInfo()?.location
+                                                    state.openSessionInWindow(id, pointer?.x?.minus(160), pointer?.y?.minus(12))
+                                                } else {
+                                                    state.saveLayout()
+                                                }
                                             },
                                         )
                                     }
@@ -561,7 +591,8 @@ private fun FrameWindowScope.DesktopShell(
 
     LaunchedEffect(state.notificationEvent?.id) {
         val event = state.notificationEvent ?: return@LaunchedEffect
-        if (!window.isActive && DesktopPreferences.notificationsEnabled) {
+        // A detached session window counts too: the user is looking at the app.
+        if (java.awt.Window.getWindows().none { it.isActive } && DesktopPreferences.notificationsEnabled) {
             DesktopNotificationService.show(event)
         }
         state.dismissNotification(event.id)
@@ -583,14 +614,9 @@ private fun FrameWindowScope.DesktopShell(
         )
     }
 
-    state.archiveConfirmation?.let {
-        AlertDialog(
-            onDismissRequest = state::cancelArchive,
-            title = { Text("Stop and archive this session?") },
-            text = { Text("The running agent pane will be closed. You can resume the session later.") },
-            confirmButton = { TextButton(onClick = state::confirmArchive) { Text("Stop and archive") } },
-            dismissButton = { TextButton(onClick = state::cancelArchive) { Text("Cancel") } },
-        )
+    // A detached session asks in its own window.
+    if (state.archiveConfirmation?.id?.let { id -> state.detachedWindows.none { it.sessionId == id } } == true) {
+        ArchiveConfirmationDialog(state)
     }
 
     if (settingsOpen) DesktopSettingsDialog(state, api, updatesSupported = updater.supported, onDismiss = { settingsOpen = false })
@@ -698,14 +724,10 @@ private fun DesktopSessionPane(
     sessionId: String,
     paneCount: Int,
     onHeaderDragStart: () -> Unit,
-    onHeaderDrag: (Float) -> Unit,
-    onHeaderDragEnd: () -> Unit,
+    onHeaderDrag: (Offset) -> Unit,
+    onHeaderDragEnd: (cancelled: Boolean) -> Unit,
 ) {
     val detail = state.detailFor(sessionId)
-    val dropTarget = rememberDesktopAttachmentDropTarget(
-        enabled = detail?.session?.canSend == true,
-        onFilesDropped = { paths -> state.addAttachments(sessionId, paths) },
-    )
     val currentDragStart by rememberUpdatedState(onHeaderDragStart)
     val currentDrag by rememberUpdatedState(onHeaderDrag)
     val currentDragEnd by rememberUpdatedState(onHeaderDragEnd)
@@ -723,13 +745,13 @@ private fun DesktopSessionPane(
                         },
                     )
                     .pointerInput(sessionId) {
-                        detectHorizontalDragGestures(
+                        detectDragGestures(
                             onDragStart = { currentDragStart() },
-                            onDragEnd = { currentDragEnd() },
-                            onDragCancel = { currentDragEnd() },
-                        ) { change, deltaPx ->
+                            onDragEnd = { currentDragEnd(false) },
+                            onDragCancel = { currentDragEnd(true) },
+                        ) { change, delta ->
                             change.consume()
-                            currentDrag(deltaPx)
+                            currentDrag(delta)
                         }
                     }
                     .clickable { state.focusSession(sessionId) },
@@ -743,6 +765,16 @@ private fun DesktopSessionPane(
                     modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
                 )
                 IconButton(
+                    onClick = { state.openSessionInWindow(sessionId) },
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.OpenInNew,
+                        contentDescription = "Open in new window",
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+                IconButton(
                     onClick = { state.closeSession(sessionId) },
                     modifier = Modifier.size(28.dp),
                 ) {
@@ -750,23 +782,51 @@ private fun DesktopSessionPane(
                 }
             }
         }
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            if (detail == null) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
-            } else {
-                SessionDetailScreen(
-                    state = detail,
-                    resolveUrl = api::absolute,
-                    formatFileSize = ::formatFileSize,
-                    resolveAttachmentPreview = { id -> state.resolveAttachmentPreview(id) },
-                    composerModifier = dropTarget.modifier,
-                    attachmentDropActive = dropTarget.active,
-                    onPasteImage = { state.addClipboardImage(sessionId) },
-                    onAction = { action -> handleDetailAction(state, api, window, sessionId, action) },
-                )
+        DesktopSessionContent(state, api, window, sessionId, Modifier.weight(1f).fillMaxWidth())
+    }
+}
+
+@Composable
+internal fun ArchiveConfirmationDialog(state: DesktopAppState) {
+    AlertDialog(
+        onDismissRequest = state::cancelArchive,
+        title = { Text("Stop and archive this session?") },
+        text = { Text("The running agent pane will be closed. You can resume the session later.") },
+        confirmButton = { TextButton(onClick = state::confirmArchive) { Text("Stop and archive") } },
+        dismissButton = { TextButton(onClick = state::cancelArchive) { Text("Cancel") } },
+    )
+}
+
+/** A session's conversation and composer, in a main window pane or a detached window. */
+@Composable
+internal fun DesktopSessionContent(
+    state: DesktopAppState,
+    api: GatewayApi,
+    window: java.awt.Window,
+    sessionId: String,
+    modifier: Modifier = Modifier,
+) {
+    val detail = state.detailFor(sessionId)
+    val dropTarget = rememberDesktopAttachmentDropTarget(
+        enabled = detail?.session?.canSend == true,
+        onFilesDropped = { paths -> state.addAttachments(sessionId, paths) },
+    )
+    Box(modifier) {
+        if (detail == null) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
             }
+        } else {
+            SessionDetailScreen(
+                state = detail,
+                resolveUrl = api::absolute,
+                formatFileSize = ::formatFileSize,
+                resolveAttachmentPreview = { id -> state.resolveAttachmentPreview(id) },
+                composerModifier = dropTarget.modifier,
+                attachmentDropActive = dropTarget.active,
+                onPasteImage = { state.addClipboardImage(sessionId) },
+                onAction = { action -> handleDetailAction(state, api, window, sessionId, action) },
+            )
         }
     }
 }
@@ -796,6 +856,7 @@ private class DesktopActions(
         if (id == null || !DesktopPlatformActions.copyText(id)) state.reportError("Nothing is selected to copy.")
     }
     fun hasSelectedSession() = state.selectedSessionId != null
+    fun openSelectedInWindow() = state.selectedSessionId?.let(state::openSessionInWindow)
     fun hasProjectDirectory() = state.detail?.session?.let { !it.cwd.isNullOrBlank() || it.project.isNotBlank() } == true
     fun openProjectDirectory() {
         val session = state.detail?.session ?: return
@@ -831,6 +892,8 @@ private fun FrameWindowScope.DesktopMenuBar(actions: DesktopActions) {
             )
         }
         Menu("Session", mnemonic = 'S') {
+            Item("Open in New Window", enabled = actions.hasSelectedSession(), onClick = actions::openSelectedInWindow)
+            Separator()
             Item("Archive", enabled = actions.hasSelectedSession(), onClick = actions::archive)
             Item("Copy Session ID", enabled = actions.hasSelectedSession(), onClick = actions::copySelectedSessionId)
             Item("Open Project Directory", enabled = actions.hasProjectDirectory(), onClick = actions::openProjectDirectory)

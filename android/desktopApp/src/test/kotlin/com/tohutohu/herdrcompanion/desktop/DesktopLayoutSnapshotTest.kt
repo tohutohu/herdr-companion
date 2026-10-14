@@ -49,4 +49,42 @@ class DesktopLayoutSnapshotTest {
             DesktopLayoutSnapshot(ids, paneWeights = listOf(1f, 0f)).normalized().paneWeights,
         )
     }
+
+    @Test
+    fun `別ウィンドウの位置と大きさを保存して復元できる`() {
+        val layout = DesktopLayoutSnapshot(
+            openSessionIds = listOf("one"),
+            focusedSessionId = "one",
+            paneWeights = listOf(1f),
+            detachedWindows = listOf(DesktopDetachedWindow("two", x = 40, y = 60, width = 700, height = 900)),
+        )
+
+        assertEquals(layout, decodeLayout(encodeLayout(layout)))
+    }
+
+    @Test
+    fun `別ウィンドウの無い以前の保存値も読める`() {
+        val restored = decodeLayout("""{"openSessionIds":["one"],"focusedSessionId":"one","paneWeights":[1.0]}""")
+
+        assertEquals(listOf("one"), restored.openSessionIds)
+        assertEquals(emptyList(), restored.detachedWindows)
+    }
+
+    @Test
+    fun `ペインと重複する別ウィンドウと小さすぎるウィンドウを正す`() {
+        val restored = DesktopLayoutSnapshot(
+            openSessionIds = listOf("one"),
+            detachedWindows = listOf(
+                DesktopDetachedWindow("one"),
+                DesktopDetachedWindow("two", width = 10, height = 10),
+                DesktopDetachedWindow("two"),
+                DesktopDetachedWindow(""),
+            ),
+        ).normalized()
+
+        assertEquals(
+            listOf(DesktopDetachedWindow("two", width = MIN_DETACHED_WIDTH, height = MIN_DETACHED_HEIGHT)),
+            restored.detachedWindows,
+        )
+    }
 }
