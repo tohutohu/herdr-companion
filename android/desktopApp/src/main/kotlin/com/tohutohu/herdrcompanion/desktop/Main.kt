@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -54,6 +55,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -64,6 +66,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.toComposeImageBitmap
@@ -75,8 +78,11 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.window.FrameWindowScope
 import androidx.compose.ui.window.MenuBar
 import androidx.compose.ui.window.Window
@@ -89,6 +95,7 @@ import com.tohutohu.herdrcompanion.data.AgentPreset
 import com.tohutohu.herdrcompanion.data.removePreset
 import com.tohutohu.herdrcompanion.data.upsertPreset
 import com.tohutohu.herdrcompanion.model.SessionUiModel
+import com.tohutohu.herdrcompanion.model.headline
 import com.tohutohu.herdrcompanion.ui.detail.SessionDetailAction
 import com.tohutohu.herdrcompanion.ui.detail.SessionDetailScreen
 import com.tohutohu.herdrcompanion.ui.newsession.AgentPresetEditorDialog
@@ -474,6 +481,8 @@ private fun FrameWindowScope.DesktopShell(
                         val dividerWidth = 8.dp
                         val paneWidth = (maxWidth - dividerWidth * (paneCount - 1)).coerceAtLeast(0.dp)
                         val density = androidx.compose.ui.platform.LocalDensity.current
+                        var draggedPaneId by remember { mutableStateOf<String?>(null) }
+                        var paneDragOffset by remember { mutableStateOf(0f) }
                         Row(Modifier.fillMaxSize()) {
                             detailIds.forEachIndexed { index, id ->
                                 if (index > 0) {
@@ -493,10 +502,16 @@ private fun FrameWindowScope.DesktopShell(
                                     )
                                 }
                                 key(id) {
+                                    val dragged = draggedPaneId == id
                                     Box(
                                         Modifier
                                             .weight(weights[index])
                                             .fillMaxHeight()
+                                            .zIndex(if (dragged) 1f else 0f)
+                                            .graphicsLayer {
+                                                translationX = if (dragged) paneDragOffset else 0f
+                                                shadowElevation = if (dragged) 8.dp.toPx() else 0f
+                                            }
                                     ) {
                                         DesktopSessionPane(
                                             state = state,
@@ -504,6 +519,34 @@ private fun FrameWindowScope.DesktopShell(
                                             window = window,
                                             sessionId = id,
                                             paneCount = detailIds.size,
+                                            onHeaderDragStart = {
+                                                draggedPaneId = id
+                                                paneDragOffset = 0f
+                                                state.focusSession(id)
+                                            },
+                                            onHeaderDrag = { deltaPx ->
+                                                val ids = state.openSessionIds
+                                                val from = ids.indexOf(id)
+                                                if (from >= 0) {
+                                                    val current = state.paneWeights.takeIf { it.size == ids.size }
+                                                        ?: equalPaneWeights(ids.size)
+                                                    val total = current.sum()
+                                                    val paneWidthPx = with(density) { paneWidth.toPx() }
+                                                    val target = paneDragTarget(
+                                                        widthsPx = current.map { paneWidthPx * it / total },
+                                                        dividerWidthPx = with(density) { dividerWidth.toPx() },
+                                                        fromIndex = from,
+                                                        offsetPx = paneDragOffset + deltaPx,
+                                                    )
+                                                    state.movePane(from, target.index)
+                                                    paneDragOffset = target.offsetPx
+                                                }
+                                            },
+                                            onHeaderDragEnd = {
+                                                draggedPaneId = null
+                                                paneDragOffset = 0f
+                                                state.saveLayout()
+                                            },
                                         )
                                     }
                                 }
@@ -613,6 +656,40 @@ internal fun adjustPaneDividerWeights(
     return updated
 }
 
+/** The slot a dragged pane belongs in, and its drag offset measured from that slot. */
+internal data class PaneDragTarget(val index: Int, val offsetPx: Float)
+
+/**
+ * Follows a pane header drag. The pane stays within the split area and takes
+ * a neighbour's slot once its leading edge passes the neighbour's centre, so
+ * a wide pane can still pass a narrow one at the end of the area.
+ */
+internal fun paneDragTarget(
+    widthsPx: List<Float>,
+    dividerWidthPx: Float,
+    fromIndex: Int,
+    offsetPx: Float,
+): PaneDragTarget {
+    if (fromIndex !in widthsPx.indices) return PaneDragTarget(fromIndex, offsetPx)
+    fun lefts(widths: List<Float>) = widths.runningFold(0f) { left, width -> left + width + dividerWidthPx }
+    val left = lefts(widthsPx)
+    val totalWidth = left.last() - dividerWidthPx
+    val width = widthsPx[fromIndex]
+    val offset = offsetPx.coerceIn(-left[fromIndex], (totalWidth - left[fromIndex] - width).coerceAtLeast(-left[fromIndex]))
+    fun center(i: Int) = left[i] + widthsPx[i] / 2f
+    var target = fromIndex
+    if (offset > 0f) {
+        val rightEdge = left[fromIndex] + width + offset
+        for (i in fromIndex + 1..widthsPx.lastIndex) if (rightEdge > center(i)) target = i
+    } else if (offset < 0f) {
+        val leftEdge = left[fromIndex] + offset
+        for (i in fromIndex - 1 downTo 0) if (leftEdge < center(i)) target = i
+    }
+    if (target == fromIndex) return PaneDragTarget(fromIndex, offset)
+    val newLeft = lefts(widthsPx.moved(fromIndex, target))[target]
+    return PaneDragTarget(target, offset - (newLeft - left[fromIndex]))
+}
+
 @Composable
 private fun DesktopSessionPane(
     state: DesktopAppState,
@@ -620,15 +697,21 @@ private fun DesktopSessionPane(
     window: java.awt.Window,
     sessionId: String,
     paneCount: Int,
+    onHeaderDragStart: () -> Unit,
+    onHeaderDrag: (Float) -> Unit,
+    onHeaderDragEnd: () -> Unit,
 ) {
     val detail = state.detailFor(sessionId)
     val dropTarget = rememberDesktopAttachmentDropTarget(
         enabled = detail?.session?.canSend == true,
         onFilesDropped = { paths -> state.addAttachments(sessionId, paths) },
     )
+    val currentDragStart by rememberUpdatedState(onHeaderDragStart)
+    val currentDrag by rememberUpdatedState(onHeaderDrag)
+    val currentDragEnd by rememberUpdatedState(onHeaderDragEnd)
     Column(Modifier.fillMaxSize()) {
         if (paneCount > 1) {
-            Box(
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(28.dp)
@@ -639,9 +722,26 @@ private fun DesktopSessionPane(
                             MaterialTheme.colorScheme.surfaceVariant
                         },
                     )
+                    .pointerInput(sessionId) {
+                        detectHorizontalDragGestures(
+                            onDragStart = { currentDragStart() },
+                            onDragEnd = { currentDragEnd() },
+                            onDragCancel = { currentDragEnd() },
+                        ) { change, deltaPx ->
+                            change.consume()
+                            currentDrag(deltaPx)
+                        }
+                    }
                     .clickable { state.focusSession(sessionId) },
-                contentAlignment = Alignment.CenterEnd,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
+                Text(
+                    text = detail?.session?.headline().orEmpty(),
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+                )
                 IconButton(
                     onClick = { state.closeSession(sessionId) },
                     modifier = Modifier.size(28.dp),

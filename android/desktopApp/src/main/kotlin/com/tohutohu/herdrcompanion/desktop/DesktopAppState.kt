@@ -435,6 +435,17 @@ class DesktopAppState(
         saveLayout()
     }
 
+    /**
+     * Moves a pane to another slot, taking its width along. Call [saveLayout]
+     * when the drag ends.
+     */
+    fun movePane(from: Int, to: Int) {
+        val ids = openSessionIdsState
+        if (from !in ids.indices || to !in ids.indices || from == to) return
+        openSessionIdsState = ids.moved(from, to)
+        if (paneWeights.size == ids.size) paneWeights = paneWeights.moved(from, to)
+    }
+
     /** Applies a divider drag; call [saveLayout] when the drag ends. */
     fun updatePaneWeights(weights: List<Float>) {
         if (weights.size == openSessionIdsState.size) paneWeights = weights
@@ -973,6 +984,9 @@ internal fun panesToClose(
     listedIds: Set<String>,
     archivedIds: Set<String>,
 ): List<String> = openSessionIds.filter { it !in listedIds && it !in archivedIds }
+
+internal fun <T> List<T>.moved(from: Int, to: Int): List<T> =
+    toMutableList().apply { add(to, removeAt(from)) }
 
 internal fun openSessionInFocusedPane(
     openSessionIds: List<String>,
