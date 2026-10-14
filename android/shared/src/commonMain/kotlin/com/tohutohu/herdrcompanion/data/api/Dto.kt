@@ -77,6 +77,21 @@ data class MessageDto(
 @Serializable
 data class MessagesResponse(val session: SessionDto, val messages: List<MessageDto>)
 
+/** The pending interactions the app shows, for the gateway to check on reload. */
+@Serializable
+data class ReloadRequest(val shown: List<String>)
+
+/** A question or approval a reload showed was missed; see docs/api.md. */
+@Serializable
+data class ReloadFindingDto(val kind: String, val message: String = "")
+
+@Serializable
+data class ReloadResponse(
+    val session: SessionDto,
+    val messages: List<MessageDto>,
+    val findings: List<ReloadFindingDto> = emptyList(),
+)
+
 @Serializable
 data class BlockDto(
     val type: String,

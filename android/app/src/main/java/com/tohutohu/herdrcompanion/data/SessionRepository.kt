@@ -4,6 +4,7 @@ import com.tohutohu.herdrcompanion.data.api.BlockDto
 import com.tohutohu.herdrcompanion.data.api.GatewayApi
 import com.tohutohu.herdrcompanion.data.api.InteractionResponseDto
 import com.tohutohu.herdrcompanion.data.api.MessageDto
+import com.tohutohu.herdrcompanion.data.api.ReloadFindingDto
 import com.tohutohu.herdrcompanion.data.api.SessionDto
 import com.tohutohu.herdrcompanion.data.api.SessionsResponse
 import com.tohutohu.herdrcompanion.data.db.AppDatabase
@@ -80,6 +81,19 @@ class SessionRepository(
         val start = if (incremental) anchorPos!! else 0
         val rows = resp.messages.mapIndexed { i, m -> m.toEntity(sessionId, start + i) }
         db.messages().replaceFrom(sessionId, start, rows)
+    }
+
+    /**
+     * Reads the whole conversation again past the gateway's caches and
+     * replaces the cached one. [shown] are the pending interactions on screen;
+     * returns what the gateway found missed.
+     */
+    suspend fun reloadMessages(sessionId: String, shown: List<String>): List<ReloadFindingDto> {
+        val resp = api.reload(sessionId, shown)
+        val s = resp.session
+        db.sessions().upsert(listOf(s.toEntity(System.currentTimeMillis(), listed = !s.archived || s.isLive)))
+        db.messages().replaceFrom(sessionId, 0, resp.messages.mapIndexed { i, m -> m.toEntity(sessionId, i) })
+        return resp.findings
     }
 
     suspend fun archivedSessions(offset: Int, limit: Int): SessionsResponse = api.archivedSessions(offset, limit)

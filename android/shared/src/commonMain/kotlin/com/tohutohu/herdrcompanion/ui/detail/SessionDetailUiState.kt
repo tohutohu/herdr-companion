@@ -37,6 +37,9 @@ data class SessionDetailUiState(
     val actionBusy: Boolean = false,
     val modeChanging: Boolean = false,
     val loading: Boolean = false,
+    /** A manual reload is reading the conversation again. */
+    val reloading: Boolean = false,
+    val reloadNotice: ReloadNotice? = null,
     val attachmentsEnabled: Boolean = true,
     val showBackButton: Boolean = true,
     val sendOnEnter: Boolean = false,
@@ -57,6 +60,8 @@ sealed interface SessionDetailAction {
     data class Discard(val localId: String) : SessionDetailAction
     data class Respond(val response: InteractionResponseDto) : SessionDetailAction
     data object CycleMode : SessionDetailAction
+    data object Reload : SessionDetailAction
+    data object DismissReloadNotice : SessionDetailAction
     data object Resume : SessionDetailAction
     data object Archive : SessionDetailAction
     data object Unarchive : SessionDetailAction

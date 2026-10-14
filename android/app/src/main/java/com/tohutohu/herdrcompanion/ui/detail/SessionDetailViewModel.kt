@@ -13,6 +13,7 @@ import com.tohutohu.herdrcompanion.data.api.InteractionResponseDto
 import com.tohutohu.herdrcompanion.data.db.SessionEntity
 import com.tohutohu.herdrcompanion.push.Notifications
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -27,6 +28,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 private const val POLL_MS = 3_000L
+private const val NOTICE_MS = 4_000L
 
 /**
  * Runs a message refresh and returns the error to show, or null on success.
@@ -119,6 +121,13 @@ class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidV
     private val _modeChanging = MutableStateFlow(false)
     val modeChanging = _modeChanging.asStateFlow()
 
+    private val _reloading = MutableStateFlow(false)
+    val reloading = _reloading.asStateFlow()
+
+    private val _reloadNotice = MutableStateFlow<ReloadNotice?>(null)
+    val reloadNotice = _reloadNotice.asStateFlow()
+    private var noticeTimeout: Job? = null
+
     private var fullSyncDone = false
 
     /**
@@ -154,6 +163,48 @@ class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidV
                 }
             } finally {
                 _loading.value = false
+            }
+        }
+    }
+
+    /**
+     * Reads the conversation again past every cache and asks the gateway
+     * whether a question was missed on the way, which it records. A clean
+     * result is shown briefly; a missed question stays until dismissed.
+     */
+    fun reload() {
+        if (_reloading.value) return
+        viewModelScope.launch {
+            _reloading.value = true
+            try {
+                refreshMutex.withLock {
+                    val findings = repo.reloadMessages(sessionId, pendingInteractionIds(messages.value))
+                    fullSyncDone = true
+                    _error.value = null
+                    showNotice(reloadNotice(findings))
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _error.value = "Reload failed: ${e.message}"
+            } finally {
+                _reloading.value = false
+            }
+        }
+    }
+
+    fun dismissReloadNotice() {
+        noticeTimeout?.cancel()
+        _reloadNotice.value = null
+    }
+
+    private fun showNotice(notice: ReloadNotice) {
+        noticeTimeout?.cancel()
+        _reloadNotice.value = notice
+        if (!notice.missed) {
+            noticeTimeout = viewModelScope.launch {
+                delay(NOTICE_MS)
+                _reloadNotice.value = null
             }
         }
     }

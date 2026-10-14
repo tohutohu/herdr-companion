@@ -8,12 +8,16 @@ import com.tohutohu.herdrcompanion.data.SendState
 import com.tohutohu.herdrcompanion.data.api.GatewayApi
 import com.tohutohu.herdrcompanion.data.api.InteractionResponseDto
 import com.tohutohu.herdrcompanion.data.api.MessageDto
+import com.tohutohu.herdrcompanion.data.api.MessagesResponse
 import com.tohutohu.herdrcompanion.data.api.Status
 import com.tohutohu.herdrcompanion.model.SessionUiModel
 import com.tohutohu.herdrcompanion.model.toUiModel
 import com.tohutohu.herdrcompanion.ui.detail.AttachmentUiState
 import com.tohutohu.herdrcompanion.ui.detail.PendingMessageUiState
+import com.tohutohu.herdrcompanion.ui.detail.ReloadNotice
 import com.tohutohu.herdrcompanion.ui.detail.SessionDetailUiState
+import com.tohutohu.herdrcompanion.ui.detail.pendingInteractionIds
+import com.tohutohu.herdrcompanion.ui.detail.reloadNotice
 import com.tohutohu.herdrcompanion.ui.sessions.ArchivedSessionsPager
 import com.tohutohu.herdrcompanion.ui.sessions.SessionListItemUiState
 import com.tohutohu.herdrcompanion.ui.sessions.SessionRef
@@ -23,6 +27,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -30,16 +35,19 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.logging.Logger
 
 private const val LIST_POLL_MS = 5_000L
 private const val DETAIL_POLL_MS = 3_000L
+private const val RELOAD_NOTICE_MS = 4_000L
 private const val MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
 /** Selection is intentionally separate from the Android navigation back stack. */
@@ -70,6 +78,7 @@ class DesktopAppState(
     private var listJob: Job? = null
     private var gatewayStartJob: Job? = null
     private val detailJobs = mutableMapOf<String, Job>()
+    private val reloadSignals = ConcurrentHashMap<String, Channel<Unit>>()
     private var closed = false
     private var pendingBySession by mutableStateOf<Map<String, List<PendingMessageUiState>>>(emptyMap())
     private var pendingAttachments by mutableStateOf<Map<String, List<DesktopAttachment>>>(emptyMap())
@@ -466,6 +475,7 @@ class DesktopAppState(
     private fun ensureDetail(id: String) {
         if (detailJobs[id]?.isActive == true) return
         detailsBySession = detailsBySession + (id to loadingDetail(id))
+        reloadSignals[id] = Channel(Channel.CONFLATED)
         detailJobs[id] = scope.launch { detailLoop(id) }
     }
 
@@ -487,6 +497,7 @@ class DesktopAppState(
 
     private fun removeDetail(id: String) {
         detailJobs.remove(id)?.cancel()
+        reloadSignals.remove(id)
         detailsBySession = detailsBySession - id
         cleanupAttachments(composerAttachmentsBySession[id].orEmpty())
         composerAttachmentsBySession = composerAttachmentsBySession - id
@@ -507,13 +518,21 @@ class DesktopAppState(
         var first = true
         var messages = emptyList<Message>()
         var anchor: String? = null
+        // The loop owns the merged messages, so a reload runs in it too.
+        val reloads = reloadSignals[id] ?: return
+        var reload = false
         while (currentCoroutineContext().isActive && !closed && id in openSessionIdsState) {
             try {
                 // Keep the explicit GET /sessions/{id} call on the first load;
                 // it gives a useful Session-not-found error before messages.
                 if (first) repository.session(id)
-                val since = anchor.takeUnless { first }
-                val response = if (since == null) {
+                val since = anchor.takeUnless { first || reload }
+                var notice: ReloadNotice? = detailsBySession[id]?.reloadNotice
+                val response = if (reload) {
+                    val r = repository.reload(id, pendingInteractionIds(messages))
+                    notice = reloadNotice(r.findings)
+                    MessagesResponse(r.session, r.messages)
+                } else if (since == null) {
                     repository.messageSnapshot(id)
                 } else {
                     repository.changedMessageSnapshot(id, since)
@@ -521,29 +540,32 @@ class DesktopAppState(
                 if (response == null) {
                     // Unchanged; only clear an error left by an earlier poll.
                     if (detailsBySession[id]?.error != null) updateDetail(id) { it.copy(error = null) }
-                    delay(DETAIL_POLL_MS)
-                    continue
+                } else {
+                    messages = mergeMessages(messages, response.messages.map(MessageDto::toMessage), since)
+                    anchor = messages.lastOrNull()?.id
+                    settlePending(id, messages)
+                    updateDetail(id, SessionDetailUiState(
+                        sessionId = id,
+                        session = response.session.toUiModel(),
+                        messages = messages,
+                        pending = pendingBySession[id].orEmpty(),
+                        error = null,
+                        answering = detailsBySession[id]?.answering == true,
+                        attachments = composerAttachmentStates(id),
+                        actionBusy = id in busySessionIds,
+                        loading = false,
+                        // A reload asked for during this poll is still to come.
+                        reloading = !reload && detailsBySession[id]?.reloading == true,
+                        reloadNotice = notice,
+                        attachmentsEnabled = true,
+                        showBackButton = false,
+                        sendOnEnter = true,
+                        sendWithModifier = false,
+                    ))
+                    if (reload && notice != null) clearReloadNoticeLater(id, notice)
+                    first = false
+                    logger.fine("session detail refreshed")
                 }
-                messages = mergeMessages(messages, response.messages.map(MessageDto::toMessage), since)
-                anchor = messages.lastOrNull()?.id
-                settlePending(id, messages)
-                updateDetail(id, SessionDetailUiState(
-                    sessionId = id,
-                    session = response.session.toUiModel(),
-                    messages = messages,
-                    pending = pendingBySession[id].orEmpty(),
-                    error = null,
-                    answering = detailsBySession[id]?.answering == true,
-                    attachments = composerAttachmentStates(id),
-                    actionBusy = id in busySessionIds,
-                    loading = false,
-                    attachmentsEnabled = true,
-                    showBackButton = false,
-                    sendOnEnter = true,
-                    sendWithModifier = false,
-                ))
-                first = false
-                logger.fine("session detail refreshed")
             } catch (cancel: CancellationException) {
                 throw cancel
             } catch (error: Exception) {
@@ -555,14 +577,38 @@ class DesktopAppState(
                         messages = messages,
                         pending = pendingBySession[id].orEmpty(),
                         attachments = composerAttachmentStates(id),
-                        error = mapped.message,
+                        error = if (reload) "Reload failed: ${mapped.message}" else mapped.message,
                         attachmentsEnabled = true,
                         loading = first,
+                        reloading = !reload && current.reloading,
                     ))
                 }
                 logger.warning("session detail failed: ${mapped.kind}")
             }
-            delay(DETAIL_POLL_MS)
+            reload = withTimeoutOrNull(DETAIL_POLL_MS) { reloads.receive() } != null
+        }
+    }
+
+    /**
+     * Reads the session again past every cache and asks the gateway whether
+     * a question was missed; the detail loop picks it up at once.
+     */
+    fun reload(id: String) {
+        if (detailsBySession[id]?.reloading != false) return
+        updateDetail(id) { it.copy(reloading = true) }
+        reloadSignals[id]?.trySend(Unit)
+    }
+
+    fun dismissReloadNotice(id: String) {
+        updateDetail(id) { it.copy(reloadNotice = null) }
+    }
+
+    /** A clean reload is reported briefly; a missed question stays until dismissed. */
+    private fun clearReloadNoticeLater(id: String, notice: ReloadNotice) {
+        if (notice.missed) return
+        scope.launch {
+            delay(RELOAD_NOTICE_MS)
+            updateDetail(id) { if (it.reloadNotice === notice) it.copy(reloadNotice = null) else it }
         }
     }
 

@@ -146,6 +146,19 @@ class GatewayApi(
         }
     }
 
+    /**
+     * Reads the whole conversation again past the gateway's caches. [shown]
+     * lists the pending interactions on screen, so the gateway can tell
+     * whether polling missed one.
+     */
+    suspend fun reload(id: String, shown: List<String>): ReloadResponse =
+        json.decodeFromString(
+            post(
+                url("v1", "sessions", id, "reload"),
+                json.encodeToString(ReloadRequest(shown)).toRequestBody(jsonType),
+            ),
+        )
+
     suspend fun sendMessage(id: String, text: String, uploads: List<String>) {
         post(
             url("v1", "sessions", id, "messages"),

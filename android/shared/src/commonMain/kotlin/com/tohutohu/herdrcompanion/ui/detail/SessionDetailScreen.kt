@@ -37,6 +37,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -52,6 +53,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -288,6 +290,15 @@ fun SessionDetailScreen(
                                         onAction(SessionDetailAction.OpenTerminal)
                                     },
                                 )
+                                DropdownMenuItem(
+                                    text = { Text("Reload") },
+                                    leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
+                                    enabled = !state.reloading,
+                                    onClick = {
+                                        menu = false
+                                        onAction(SessionDetailAction.Reload)
+                                    },
+                                )
                                 if (modeChangeSupported) {
                                     DropdownMenuItem(
                                         text = { Text("Change mode") },
@@ -373,9 +384,16 @@ fun SessionDetailScreen(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                 )
             }
+            ExpandingContent(value = state.reloadNotice) {
+                ReloadNoticeRow(
+                    it,
+                    onOpenTerminal = { onAction(SessionDetailAction.OpenTerminal) },
+                    onDismiss = { onAction(SessionDetailAction.DismissReloadNotice) },
+                )
+            }
             SyncIndicator(
-                visible = state.loading && session == null && messages.isEmpty(),
-                label = "Loading…",
+                visible = state.reloading || (state.loading && session == null && messages.isEmpty()),
+                label = if (state.reloading) "Reloading…" else "Loading…",
             )
             Box(Modifier.fillMaxSize()) {
                 CompositionLocalProvider(LocalRowResize provides onRowResize) {
@@ -626,6 +644,26 @@ private fun ResumeBar(busy: Boolean, onResume: () -> Unit) {
                     }
                 }
                 Text("  Resume")
+            }
+        }
+    }
+}
+
+/**
+ * The outcome of a manual reload. A missed question stays until dismissed:
+ * it is the case the reload exists to catch.
+ */
+@Composable
+private fun ReloadNoticeRow(notice: ReloadNotice, onOpenTerminal: () -> Unit, onDismiss: () -> Unit) {
+    val color = if (notice.missed) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant
+    Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 4.dp)) {
+        Text(notice.text, color = color, style = MaterialTheme.typography.bodySmall)
+        if (notice.missed) {
+            Row(Modifier.align(Alignment.End)) {
+                if (notice.openTerminal) {
+                    TextButton(onClick = onOpenTerminal) { Text("Terminal") }
+                }
+                TextButton(onClick = onDismiss) { Text("Dismiss") }
             }
         }
     }

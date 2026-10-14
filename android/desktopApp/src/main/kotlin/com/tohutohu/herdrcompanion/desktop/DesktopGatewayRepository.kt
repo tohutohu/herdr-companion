@@ -28,5 +28,8 @@ class DesktopGatewayRepository(private val api: GatewayApi) {
 
     suspend fun cycleMode(id: String) = api.cycleMode(id)
 
+    /** The whole conversation read past the gateway's caches, with what it found missed. */
+    suspend fun reload(id: String, shown: List<String>) = api.reload(id, shown)
+
     suspend fun markSeen(id: String) = api.markSeen(id)
 }
