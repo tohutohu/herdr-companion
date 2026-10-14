@@ -125,6 +125,8 @@ var ignoredTypes = map[string]bool{
 	"tag": true, "progress": true,
 	// Artifact bookkeeping: file-to-artifact links and comment watchers.
 	"frame-link": true, "artifact-comment-monitor": true, "artifact-autoreact-ledger": true,
+	// Copies of the requests sent to the API (Claude Code 2.1.300+).
+	"api-request": true, "api-request-blob": true,
 }
 
 var ignoredSystemSubtypes = map[string]bool{
@@ -414,6 +416,12 @@ func (t *Transcript) Messages(opt ParseOptions) []model.Message {
 		}
 		opt.refRoot = refRoot(e.Cwd, opt.Root, roots)
 		msgs := t.convert(e, t.raws[i], results, pending, opt)
+		// A line without a uuid still needs an ID the app can key and page by.
+		for j := range msgs {
+			if msgs[j].ID == "" {
+				msgs[j].ID = fmt.Sprintf("line-%d-%d", i, j)
+			}
+		}
 		out = append(out, msgs...)
 	}
 	// Only a running session can still pick up what is queued; in an ended

@@ -231,6 +231,40 @@ func TestClaudeの未知データはフォールバック表示しつつdeadlett
 	}
 }
 
+func TestAPIリクエストの記録行は会話に表示せずdeadletterにも残さない(t *testing.T) {
+	raw := `{"type":"user","message":{"role":"user","content":"test"},"uuid":"u1","timestamp":"2026-10-14T10:00:00.000Z","sessionId":"s"}
+{"type":"api-request","sessionId":"s","id":"r1","timestamp":"2026-10-14T10:00:01.000Z","version":"2.1.300","params":{},"tail":[]}
+{"type":"api-request-blob","sessionId":"s","hash":"h1","message":{"role":"user","content":"test"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"完了"}]},"uuid":"a1","timestamp":"2026-10-14T10:00:02.000Z","sessionId":"s"}
+`
+	rec := &deadletter.Recorder{}
+	tr, err := Decode(strings.NewReader(raw), "claude:test", rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgs := tr.Messages(ParseOptions{SessionID: "claude:test", Sink: rec})
+	if len(msgs) != 2 || msgs[0].ID != "u1" || msgs[1].ID != "a1" {
+		t.Errorf("messages = %+v", msgs)
+	}
+	if len(rec.Entries) != 0 {
+		t.Errorf("dead letters = %+v", rec.Entries)
+	}
+}
+
+func TestUUIDのない未知の行もメッセージごとに異なるIDを持つ(t *testing.T) {
+	raw := `{"type":"brand-new-event","sessionId":"s","message":{"role":"user","content":"a"}}
+{"type":"brand-new-event","sessionId":"s","message":{"role":"user","content":"b"}}
+`
+	tr, err := Decode(strings.NewReader(raw), "claude:test", &deadletter.Recorder{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgs := tr.Messages(ParseOptions{SessionID: "claude:test"})
+	if len(msgs) != 2 || msgs[0].ID == "" || msgs[1].ID == "" || msgs[0].ID == msgs[1].ID {
+		t.Errorf("messages = %+v", msgs)
+	}
+}
+
 func TestArtifactの操作は1行にまとめ公開したページへのリンクを出す(t *testing.T) {
 	tr, rec, ws := loadFixture(t, "artifact.jsonl")
 	msgs := tr.Messages(ParseOptions{SessionID: "claude:test", Root: ws, Sink: rec})

@@ -71,7 +71,27 @@ fun transcriptRows(messages: List<Message>, messageKeys: Map<String, String> = e
         }
     }
     flush()
-    return rows
+    return uniqueKeys(rows)
+}
+
+/**
+ * Lazy lists crash on a repeated key, so a row whose key is already taken
+ * (messages with the same or no ID) gets its position appended.
+ */
+private fun uniqueKeys(rows: List<TranscriptRow>): List<TranscriptRow> {
+    val seen = HashSet<String>()
+    return rows.mapIndexed { i, row ->
+        if (seen.add(row.key)) {
+            row
+        } else {
+            val key = "${row.key}@$i"
+            seen += key
+            when (row) {
+                is MessageRow -> row.copy(key = key)
+                is ActivityRow -> row.copy(key = key)
+            }
+        }
+    }
 }
 
 private data class Run(val start: Int, val activity: Boolean, val blocks: List<BlockDto>)

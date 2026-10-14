@@ -80,4 +80,17 @@ class TranscriptRowsTest {
         val rows = transcriptRows(listOf(msg("u1", "user", text("続けて"))), mapOf("u1" to "pending:local"))
         assertEquals("pending:local", rows.single().key)
     }
+
+    @Test
+    fun `IDが重複したり空だったりするメッセージにも別々のキーを付ける`() {
+        val rows = transcriptRows(
+            listOf(
+                msg("", "system", text("Unsupported event")),
+                msg("", "system", text("Unsupported event")),
+                msg("a1", "assistant", text("報告")),
+                msg("a1", "assistant", text("報告")),
+            ),
+        )
+        assertEquals(listOf("message:", "message:@1", "message:a1", "message:a1@3"), rows.map { it.key })
+    }
 }
