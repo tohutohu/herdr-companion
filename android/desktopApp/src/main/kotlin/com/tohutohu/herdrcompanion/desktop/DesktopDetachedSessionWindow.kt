@@ -5,6 +5,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Input
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -104,7 +109,31 @@ fun DesktopDetachedSessionWindow(
                             TextButton(onClick = state::dismissError) { Text("Dismiss") }
                         }
                     }
-                    DesktopSessionContent(state, api, window, sessionId, Modifier.weight(1f).fillMaxWidth())
+                    DesktopSessionContent(
+                        state = state,
+                        api = api,
+                        window = window,
+                        sessionId = sessionId,
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        extraMenuItems = { dismiss ->
+                            DropdownMenuItem(
+                                text = { Text("Move to Main Window") },
+                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.Input, contentDescription = null) },
+                                onClick = {
+                                    dismiss()
+                                    state.returnToMainWindow(sessionId)
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Close Window") },
+                                leadingIcon = { Icon(Icons.Default.Close, contentDescription = null) },
+                                onClick = {
+                                    dismiss()
+                                    state.closeSession(sessionId)
+                                },
+                            )
+                        },
+                    )
                 }
             }
             if (state.archiveConfirmation?.id == sessionId) ArchiveConfirmationDialog(state)

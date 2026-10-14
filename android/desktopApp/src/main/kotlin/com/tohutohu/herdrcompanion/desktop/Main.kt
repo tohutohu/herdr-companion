@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -34,6 +35,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -80,13 +82,14 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.window.FrameWindowScope
@@ -101,7 +104,6 @@ import com.tohutohu.herdrcompanion.data.AgentPreset
 import com.tohutohu.herdrcompanion.data.removePreset
 import com.tohutohu.herdrcompanion.data.upsertPreset
 import com.tohutohu.herdrcompanion.model.SessionUiModel
-import com.tohutohu.herdrcompanion.model.headline
 import com.tohutohu.herdrcompanion.ui.detail.SessionDetailAction
 import com.tohutohu.herdrcompanion.ui.detail.SessionDetailScreen
 import com.tohutohu.herdrcompanion.ui.newsession.AgentPresetEditorDialog
@@ -129,8 +131,8 @@ private val MIN_SPLIT_DETAIL_WIDTH = 300.dp
 /** How far a pane header is dragged up or down before the pane leaves for its own window. */
 private val PANE_TEAR_OFF_DISTANCE = 48.dp
 
-/** Height in points of the strip at the top of the split area that takes a dragged-out pane back. */
-private const val PANE_DROP_STRIP_HEIGHT = 40
+/** Height in points of the strip at the top of the split area, the panes' top bars, that takes a dragged-out pane back. */
+private const val PANE_DROP_STRIP_HEIGHT = 60
 
 /** Where the pointer holds a torn-off window below its top edge, in points: on the macOS title bar. */
 private const val TORN_OFF_GRAB_Y = 14
@@ -798,62 +800,67 @@ private fun DesktopSessionPane(
     onHeaderDrag: (Offset) -> Unit,
     onHeaderDragEnd: (cancelled: Boolean) -> Unit,
 ) {
-    val detail = state.detailFor(sessionId)
     val currentDragStart by rememberUpdatedState(onHeaderDragStart)
     val currentDrag by rememberUpdatedState(onHeaderDrag)
     val currentDragEnd by rememberUpdatedState(onHeaderDragEnd)
-    Column(Modifier.fillMaxSize()) {
-        if (paneCount > 1) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(28.dp)
-                    .background(
-                        if (state.selectedSessionId == sessionId) {
-                            MaterialTheme.colorScheme.secondaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.surfaceVariant
-                        },
-                    )
-                    .pointerInput(sessionId) {
-                        detectDragGestures(
-                            onDragStart = { start -> currentDragStart(start) },
-                            onDragEnd = { currentDragEnd(false) },
-                            onDragCancel = { currentDragEnd(true) },
-                        ) { change, delta ->
-                            change.consume()
-                            currentDrag(delta)
-                        }
+    Box(
+        Modifier
+            .fillMaxSize()
+            // Any press in a pane makes it the one the sidebar opens sessions into.
+            .pointerInput(sessionId) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        if (event.type == PointerEventType.Press) state.focusSession(sessionId)
                     }
-                    .clickable { state.focusSession(sessionId) },
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = detail?.session?.headline().orEmpty(),
-                    style = MaterialTheme.typography.labelMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+                }
+            },
+    ) {
+        DesktopSessionContent(
+            state = state,
+            api = api,
+            window = window,
+            sessionId = sessionId,
+            modifier = Modifier.fillMaxSize(),
+            // The session's top bar is the pane's drag handle: sideways to reorder, out to tear off.
+            headerModifier = Modifier.pointerInput(sessionId) {
+                detectDragGestures(
+                    onDragStart = { start -> currentDragStart(start) },
+                    onDragEnd = { currentDragEnd(false) },
+                    onDragCancel = { currentDragEnd(true) },
+                ) { change, delta ->
+                    change.consume()
+                    currentDrag(delta)
+                }
+            },
+            extraMenuItems = { dismiss ->
+                DropdownMenuItem(
+                    text = { Text("Open in New Window") },
+                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null) },
+                    onClick = {
+                        dismiss()
+                        state.openSessionInWindow(sessionId)
+                    },
                 )
-                IconButton(
-                    onClick = { state.openSessionInWindow(sessionId) },
-                    modifier = Modifier.size(28.dp),
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.OpenInNew,
-                        contentDescription = "Open in new window",
-                        modifier = Modifier.size(16.dp),
-                    )
-                }
-                IconButton(
-                    onClick = { state.closeSession(sessionId) },
-                    modifier = Modifier.size(28.dp),
-                ) {
-                    Icon(Icons.Default.Close, contentDescription = "Close session pane")
-                }
-            }
+                DropdownMenuItem(
+                    text = { Text("Close Pane") },
+                    leadingIcon = { Icon(Icons.Default.Close, contentDescription = null) },
+                    onClick = {
+                        dismiss()
+                        state.closeSession(sessionId)
+                    },
+                )
+            },
+        )
+        if (paneCount > 1 && state.selectedSessionId == sessionId) {
+            Box(
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .height(2.dp)
+                    .background(MaterialTheme.colorScheme.primary),
+            )
         }
-        DesktopSessionContent(state, api, window, sessionId, Modifier.weight(1f).fillMaxWidth())
     }
 }
 
@@ -876,6 +883,8 @@ internal fun DesktopSessionContent(
     window: java.awt.Window,
     sessionId: String,
     modifier: Modifier = Modifier,
+    headerModifier: Modifier = Modifier,
+    extraMenuItems: @Composable ColumnScope.(dismiss: () -> Unit) -> Unit,
 ) {
     val detail = state.detailFor(sessionId)
     val dropTarget = rememberDesktopAttachmentDropTarget(
@@ -896,6 +905,8 @@ internal fun DesktopSessionContent(
                 composerModifier = dropTarget.modifier,
                 attachmentDropActive = dropTarget.active,
                 onPasteImage = { state.addClipboardImage(sessionId) },
+                headerModifier = headerModifier,
+                extraMenuItems = extraMenuItems,
                 onAction = { action -> handleDetailAction(state, api, window, sessionId, action) },
             )
         }

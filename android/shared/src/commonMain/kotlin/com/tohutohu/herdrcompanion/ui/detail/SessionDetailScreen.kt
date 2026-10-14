@@ -17,6 +17,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -116,6 +117,13 @@ fun SessionDetailScreen(
     composerModifier: Modifier = Modifier,
     attachmentDropActive: Boolean = false,
     onPasteImage: (() -> Boolean)? = null,
+    /** Applied to the top bar, e.g. to make it a drag handle on the desktop. */
+    headerModifier: Modifier = Modifier,
+    /**
+     * Platform items at the end of the session menu; [dismiss] closes it.
+     * With them the menu is shown even before the session has loaded.
+     */
+    extraMenuItems: (@Composable ColumnScope.(dismiss: () -> Unit) -> Unit)? = null,
     onAction: (SessionDetailAction) -> Unit,
 ) {
     val session = state.session
@@ -234,6 +242,7 @@ fun SessionDetailScreen(
     Scaffold(
         topBar = {
             TopAppBar(
+                modifier = headerModifier,
                 expandedHeight = 52.dp,
                 navigationIcon = {
                     if (state.showBackButton) {
@@ -274,48 +283,54 @@ fun SessionDetailScreen(
                 },
                 actions = {
                     ContextGauge(session?.contextUsedPercent, onClick = { detailsOpen = !detailsOpen })
-                    session?.let { s ->
-                        val modeChangeSupported = s.provider == "claude" || s.provider == "codex"
+                    if (session != null || extraMenuItems != null) {
                         Box {
                             IconButton(onClick = { menu = true }) {
                                 Icon(Icons.Default.MoreVert, contentDescription = "Session actions")
                             }
                             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                                DropdownMenuItem(
-                                    text = { Text("Terminal") },
-                                    leadingIcon = { Icon(Icons.Default.Terminal, contentDescription = null) },
-                                    enabled = s.paneId != null,
-                                    onClick = {
-                                        menu = false
-                                        onAction(SessionDetailAction.OpenTerminal)
-                                    },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Reload") },
-                                    leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
-                                    enabled = !state.reloading,
-                                    onClick = {
-                                        menu = false
-                                        onAction(SessionDetailAction.Reload)
-                                    },
-                                )
-                                if (modeChangeSupported) {
+                                session?.let { s ->
+                                    val modeChangeSupported = s.provider == "claude" || s.provider == "codex"
                                     DropdownMenuItem(
-                                        text = { Text("Change mode") },
-                                        enabled = s.live && s.paneId != null && !state.actionBusy && !state.modeChanging,
+                                        text = { Text("Terminal") },
+                                        leadingIcon = { Icon(Icons.Default.Terminal, contentDescription = null) },
+                                        enabled = s.paneId != null,
                                         onClick = {
                                             menu = false
-                                            onAction(SessionDetailAction.CycleMode)
+                                            onAction(SessionDetailAction.OpenTerminal)
                                         },
                                     )
+                                    DropdownMenuItem(
+                                        text = { Text("Reload") },
+                                        leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
+                                        enabled = !state.reloading,
+                                        onClick = {
+                                            menu = false
+                                            onAction(SessionDetailAction.Reload)
+                                        },
+                                    )
+                                    if (modeChangeSupported) {
+                                        DropdownMenuItem(
+                                            text = { Text("Change mode") },
+                                            enabled = s.live && s.paneId != null && !state.actionBusy && !state.modeChanging,
+                                            onClick = {
+                                                menu = false
+                                                onAction(SessionDetailAction.CycleMode)
+                                            },
+                                        )
+                                    }
+                                    SessionActionMenuItems(
+                                        s = s.toSessionRef(),
+                                        onResume = { onAction(SessionDetailAction.Resume) },
+                                        onUnarchive = { onAction(SessionDetailAction.Unarchive) },
+                                        onArchive = { onAction(SessionDetailAction.Archive) },
+                                        onDismiss = { menu = false },
+                                    )
                                 }
-                                SessionActionMenuItems(
-                                    s = s.toSessionRef(),
-                                    onResume = { onAction(SessionDetailAction.Resume) },
-                                    onUnarchive = { onAction(SessionDetailAction.Unarchive) },
-                                    onArchive = { onAction(SessionDetailAction.Archive) },
-                                    onDismiss = { menu = false },
-                                )
+                                extraMenuItems?.let { items ->
+                                    if (session != null) HorizontalDivider()
+                                    items { menu = false }
+                                }
                             }
                         }
                     }
