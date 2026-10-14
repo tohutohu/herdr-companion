@@ -459,16 +459,23 @@ class DesktopAppState(
     /**
      * Shows a session in its own window: a pane moves out of the main window
      * with its conversation and draft attachments, and a session that is not
-     * open yet starts loading. [x] and [y] place the window, in screen points.
+     * open yet starts loading. The bounds are in screen points.
      */
-    fun openSessionInWindow(id: String, x: Int? = null, y: Int? = null) {
+    fun openSessionInWindow(
+        id: String,
+        x: Int? = null,
+        y: Int? = null,
+        width: Int = DEFAULT_DETACHED_WIDTH,
+        height: Int = DEFAULT_DETACHED_HEIGHT,
+    ) {
         if (closed) return
         if (isDetached(id)) {
             raiseWindow(id)
             return
         }
         // Shown in the window before it leaves the panes, so its detail loop never sees it closed.
-        detachedWindowsState = detachedWindowsState + DesktopDetachedWindow(sessionId = id, x = x, y = y)
+        detachedWindowsState = detachedWindowsState +
+            DesktopDetachedWindow(sessionId = id, x = x, y = y, width = width, height = height).normalized()
         val index = openSessionIdsState.indexOf(id)
         if (index >= 0) {
             val wasSelected = selection.selectedId == id
@@ -481,10 +488,10 @@ class DesktopAppState(
         if (index < 0) markSeen(id)
     }
 
-    /** Moves a detached session back into the main window as a split pane, closing its window. */
-    fun returnToMainWindow(id: String) {
+    /** Moves a detached session back into the main window as a split pane at [index], closing its window. */
+    fun returnToMainWindow(id: String, index: Int = openSessionIdsState.size) {
         if (closed || !isDetached(id)) return
-        setOpenSessionIds(openSessionIdsState + id)
+        setOpenSessionIds(openSessionIdsState.toMutableList().apply { add(index.coerceIn(0, size), id) })
         detachedWindowsState = detachedWindowsState.filterNot { it.sessionId == id }
         selection.select(id)
         updateSessionRowSelection()

@@ -114,4 +114,26 @@ class DesktopDetachedWindowTest {
             state.detachedWindows,
         )
     }
+
+    @Test
+    fun `ドラッグで戻したセッションは落とした位置のペインに入る`() {
+        state.openSession("one")
+        state.openSessionInSplit("two")
+        state.openSessionInWindow("three")
+
+        state.returnToMainWindow("three", index = 1)
+
+        assertEquals(listOf("one", "three", "two"), state.openSessionIds)
+        assertEquals(listOf(1f, 1f, 1f), state.paneWeights)
+    }
+
+    @Test
+    fun `引き剥がしたペインの大きさで別ウィンドウを開く`() {
+        state.openSessionInWindow("one", x = 0, y = 0, width = 500, height = 100)
+
+        assertEquals(
+            listOf(DesktopDetachedWindow("one", x = 0, y = 0, width = 500, height = MIN_DETACHED_HEIGHT)),
+            state.detachedWindows,
+        )
+    }
 }

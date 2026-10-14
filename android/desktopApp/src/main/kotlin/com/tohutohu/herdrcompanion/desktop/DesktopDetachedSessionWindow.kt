@@ -33,6 +33,7 @@ import java.awt.event.ComponentEvent
 @Composable
 fun DesktopDetachedSessionWindow(
     state: DesktopAppState,
+    tearOff: DesktopTearOff,
     api: GatewayApi,
     detached: DesktopDetachedWindow,
     icon: Painter?,
@@ -52,6 +53,8 @@ fun DesktopDetachedSessionWindow(
         title = state.detailFor(sessionId)?.session?.headline() ?: "Herdr Companion",
         state = windowState,
         icon = icon,
+        // Hidden while a drag holds it over the main window's pane headers, where letting go docks it.
+        visible = !(tearOff.draggingSessionId == sessionId && tearOff.dropIndex != null),
     ) {
         window.minimumSize = Dimension(MIN_DETACHED_WIDTH, MIN_DETACHED_HEIGHT)
         DisposableEffect(window) {
@@ -62,7 +65,11 @@ fun DesktopDetachedSessionWindow(
                     state.updateDetachedBounds(sessionId, window.x, window.y, window.width, window.height)
             }
             window.addComponentListener(listener)
-            onDispose { window.removeComponentListener(listener) }
+            tearOff.attachWindow(sessionId, window)
+            onDispose {
+                tearOff.detachWindow(window)
+                window.removeComponentListener(listener)
+            }
         }
         LaunchedEffect(state.windowRaiseRequest) {
             if (state.windowRaiseRequest?.first == sessionId) {

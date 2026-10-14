@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -67,6 +68,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.BitmapPainter
@@ -81,6 +83,9 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -110,7 +115,7 @@ import com.tohutohu.herdrcompanion.ui.sessions.SessionRef
 import com.tohutohu.herdrcompanion.ui.theme.SharedTheme
 import java.awt.Cursor
 import java.awt.Frame
-import java.awt.MouseInfo
+import java.awt.Rectangle
 import java.awt.event.ComponentAdapter
 import java.awt.event.ComponentEvent
 import java.awt.event.WindowEvent
@@ -122,8 +127,14 @@ private val MIN_SIDEBAR_WIDTH = 240.dp
 private val MIN_DETAIL_WIDTH = 420.dp
 private val MIN_SPLIT_DETAIL_WIDTH = 300.dp
 
-/** How far a pane header is dragged up or down before letting go opens the pane in its own window. */
-private val PANE_TEAR_OFF_DISTANCE = 96.dp
+/** How far a pane header is dragged up or down before the pane leaves for its own window. */
+private val PANE_TEAR_OFF_DISTANCE = 48.dp
+
+/** Height in points of the strip at the top of the split area that takes a dragged-out pane back. */
+private const val PANE_DROP_STRIP_HEIGHT = 40
+
+/** Where the pointer holds a torn-off window below its top edge, in points: on the macOS title bar. */
+private const val TORN_OFF_GRAB_Y = 14
 
 fun main() {
     val instanceLock = DesktopInstanceLock.tryAcquire()
@@ -158,8 +169,12 @@ fun main() {
             LaunchedEffect(appState) {
                 appState.restoreLayout(DesktopPreferences.loadLayout(), currentScreenBounds())
             }
+            val tearOff = remember { DesktopTearOff(appState) }
             DisposableEffect(appState) {
-                onDispose { appState.close() }
+                onDispose {
+                    tearOff.close()
+                    appState.close()
+                }
             }
             val windowIcon = remember { desktopWindowIcon() }
             Window(
@@ -174,12 +189,12 @@ fun main() {
                 DesktopWindowPersistence(window)
                 LaunchedEffect(updater) { updater.startAutomaticChecks() }
                 SharedTheme {
-                    DesktopShell(appState, api, updater, onCloseWindow = ::exitApplication)
+                    DesktopShell(appState, tearOff, api, updater, onCloseWindow = ::exitApplication)
                 }
             }
             for (detached in appState.detachedWindows) {
                 key(detached.sessionId) {
-                    DesktopDetachedSessionWindow(appState, api, detached, windowIcon)
+                    DesktopDetachedSessionWindow(appState, tearOff, api, detached, windowIcon)
                 }
             }
         }
@@ -220,6 +235,7 @@ private fun DesktopWindowPersistence(window: java.awt.Window) {
 @Composable
 private fun FrameWindowScope.DesktopShell(
     state: DesktopAppState,
+    tearOff: DesktopTearOff,
     api: GatewayApi,
     updater: DesktopUpdater,
     onCloseWindow: () -> Unit,
@@ -230,6 +246,7 @@ private fun FrameWindowScope.DesktopShell(
     var settingsOpen by remember { mutableStateOf(false) }
     var aboutOpen by remember { mutableStateOf(false) }
     var updateDialogOpen by remember { mutableStateOf(false) }
+    var splitAreaInWindow by remember { mutableStateOf<Rect?>(null) }
     val searchFocusRequester = remember { FocusRequester() }
     val listed = if (state.showingArchived) state.archivedSessions else state.sessions
     val sessions = listed.filterDesktopSessions(query)
@@ -484,21 +501,52 @@ private fun FrameWindowScope.DesktopShell(
                         .pointerHoverIcon(PointerIcon(Cursor.getPredefinedCursor(Cursor.E_RESIZE_CURSOR))),
                 )
                 BoxWithConstraints(
-                    Modifier.weight(1f).fillMaxHeight().widthIn(min = minDetailWidth),
+                    Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .widthIn(min = minDetailWidth)
+                        .onGloballyPositioned { splitAreaInWindow = it.boundsInWindow() },
                 ) {
                     val detailIds = state.openSessionIds
+                    val paneCount = detailIds.size
+                    val weights = state.paneWeights.takeIf { it.size == paneCount }
+                        ?: equalPaneWeights(paneCount)
+                    val dividerWidth = 8.dp
+                    val paneWidth = (maxWidth - dividerWidth * (paneCount - 1).coerceAtLeast(0)).coerceAtLeast(0.dp)
+                    val density = LocalDensity.current
+                    // Dp are AWT screen points, which the tear-off works in.
+                    val paneWidthsPt = weights.map { paneWidth.value * it / weights.sum() }
+                    val currentPaneWidths by rememberUpdatedState(paneWidthsPt)
+                    val currentDensity by rememberUpdatedState(density.density)
+                    val splitHeight = maxHeight
+                    DisposableEffect(tearOff, window) {
+                        tearOff.dropZone = DesktopPaneDropZone { point ->
+                            val bounds = splitAreaInWindow ?: return@DesktopPaneDropZone null
+                            val origin = runCatching { window.contentPane.locationOnScreen }.getOrNull()
+                                ?: return@DesktopPaneDropZone null
+                            val scale = currentDensity
+                            paneDropIndex(
+                                point = point,
+                                area = Rectangle(
+                                    origin.x + (bounds.left / scale).toInt(),
+                                    origin.y + (bounds.top / scale).toInt(),
+                                    (bounds.width / scale).toInt(),
+                                    (bounds.height / scale).toInt(),
+                                ),
+                                stripHeight = PANE_DROP_STRIP_HEIGHT,
+                                paneWidths = currentPaneWidths,
+                                dividerWidth = dividerWidth.value,
+                            )
+                        }
+                        onDispose { tearOff.dropZone = null }
+                    }
                     if (detailIds.isEmpty()) {
                         EmptyDetail(state, openSettings = { settingsOpen = true })
                     } else {
-                        val paneCount = detailIds.size
-                        val weights = state.paneWeights.takeIf { it.size == paneCount }
-                            ?: equalPaneWeights(paneCount)
-                        val dividerWidth = 8.dp
-                        val paneWidth = (maxWidth - dividerWidth * (paneCount - 1)).coerceAtLeast(0.dp)
-                        val density = androidx.compose.ui.platform.LocalDensity.current
                         var draggedPaneId by remember { mutableStateOf<String?>(null) }
                         var paneDragOffset by remember { mutableStateOf(0f) }
                         var paneDragOffsetY by remember { mutableStateOf(0f) }
+                        var grabX by remember { mutableStateOf(0f) }
                         val tearOffDistancePx = with(density) { PANE_TEAR_OFF_DISTANCE.toPx() }
                         Row(Modifier.fillMaxSize()) {
                             detailIds.forEachIndexed { index, id ->
@@ -529,8 +577,6 @@ private fun FrameWindowScope.DesktopShell(
                                                 translationX = if (dragged) paneDragOffset else 0f
                                                 translationY = if (dragged) paneDragOffsetY else 0f
                                                 shadowElevation = if (dragged) 8.dp.toPx() else 0f
-                                                // Faded once letting go would open the pane in its own window.
-                                                alpha = if (dragged && abs(paneDragOffsetY) > tearOffDistancePx) 0.6f else 1f
                                             }
                                     ) {
                                         DesktopSessionPane(
@@ -539,41 +585,55 @@ private fun FrameWindowScope.DesktopShell(
                                             window = window,
                                             sessionId = id,
                                             paneCount = detailIds.size,
-                                            onHeaderDragStart = {
+                                            onHeaderDragStart = { start ->
                                                 draggedPaneId = id
                                                 paneDragOffset = 0f
                                                 paneDragOffsetY = 0f
+                                                grabX = start.x / density.density
                                                 state.focusSession(id)
                                             },
-                                            onHeaderDrag = { delta ->
+                                            onHeaderDrag = drag@{ delta ->
                                                 paneDragOffsetY += delta.y
                                                 val ids = state.openSessionIds
                                                 val from = ids.indexOf(id)
-                                                if (from >= 0) {
-                                                    val current = state.paneWeights.takeIf { it.size == ids.size }
-                                                        ?: equalPaneWeights(ids.size)
-                                                    val total = current.sum()
-                                                    val paneWidthPx = with(density) { paneWidth.toPx() }
-                                                    val target = paneDragTarget(
-                                                        widthsPx = current.map { paneWidthPx * it / total },
-                                                        dividerWidthPx = with(density) { dividerWidth.toPx() },
-                                                        fromIndex = from,
-                                                        offsetPx = paneDragOffset + delta.x,
+                                                if (from < 0) return@drag
+                                                // Out of the header strip or the window: the pane becomes a window
+                                                // that follows the pointer, like a browser tab.
+                                                val pointer = tearOff.pointerOnScreen
+                                                val outside = pointer != null && !window.bounds.contains(pointer)
+                                                if (outside || abs(paneDragOffsetY) > tearOffDistancePx) {
+                                                    val width = currentPaneWidths.getOrElse(from) { DEFAULT_DETACHED_WIDTH.toFloat() }
+                                                    draggedPaneId = null
+                                                    paneDragOffset = 0f
+                                                    paneDragOffsetY = 0f
+                                                    tearOff.tearOff(
+                                                        sessionId = id,
+                                                        grabX = grabX.coerceIn(40f, (width - 40f).coerceAtLeast(40f)).toInt(),
+                                                        grabY = TORN_OFF_GRAB_Y,
+                                                        width = width.toInt(),
+                                                        height = splitHeight.value.toInt() + TORN_OFF_GRAB_Y * 2,
                                                     )
-                                                    state.movePane(from, target.index)
-                                                    paneDragOffset = target.offsetPx
+                                                    return@drag
                                                 }
+                                                val current = state.paneWeights.takeIf { it.size == ids.size }
+                                                    ?: equalPaneWeights(ids.size)
+                                                val total = current.sum()
+                                                val paneWidthPx = with(density) { paneWidth.toPx() }
+                                                val target = paneDragTarget(
+                                                    widthsPx = current.map { paneWidthPx * it / total },
+                                                    dividerWidthPx = with(density) { dividerWidth.toPx() },
+                                                    fromIndex = from,
+                                                    offsetPx = paneDragOffset + delta.x,
+                                                )
+                                                state.movePane(from, target.index)
+                                                paneDragOffset = target.offsetPx
                                             },
-                                            onHeaderDragEnd = { cancelled ->
-                                                val tornOff = !cancelled && abs(paneDragOffsetY) > tearOffDistancePx
-                                                draggedPaneId = null
-                                                paneDragOffset = 0f
-                                                paneDragOffsetY = 0f
-                                                if (tornOff) {
-                                                    // The new window opens under the pointer, held by its title bar.
-                                                    val pointer = MouseInfo.getPointerInfo()?.location
-                                                    state.openSessionInWindow(id, pointer?.x?.minus(160), pointer?.y?.minus(12))
-                                                } else {
+                                            onHeaderDragEnd = {
+                                                // A torn-off pane already left; its cancelled gesture changes nothing.
+                                                if (draggedPaneId == id) {
+                                                    draggedPaneId = null
+                                                    paneDragOffset = 0f
+                                                    paneDragOffsetY = 0f
                                                     state.saveLayout()
                                                 }
                                             },
@@ -581,6 +641,22 @@ private fun FrameWindowScope.DesktopShell(
                                     }
                                 }
                             }
+                        }
+                    }
+                    tearOff.dropIndex?.let { index ->
+                        val primary = MaterialTheme.colorScheme.primary
+                        if (paneCount == 0) {
+                            Box(Modifier.fillMaxSize().background(primary.copy(alpha = 0.12f)))
+                        } else {
+                            val x = paneWidthsPt.take(index).sum() + dividerWidth.value * index - dividerWidth.value / 2f
+                            Box(Modifier.fillMaxWidth().height(28.dp).background(primary.copy(alpha = 0.12f)))
+                            Box(
+                                Modifier
+                                    .offset(x = (x.dp - 2.dp).coerceIn(0.dp, (maxWidth - 4.dp).coerceAtLeast(0.dp)))
+                                    .width(4.dp)
+                                    .height(28.dp)
+                                    .background(primary),
+                            )
                         }
                     }
                 }
@@ -723,7 +799,7 @@ private fun DesktopSessionPane(
     window: java.awt.Window,
     sessionId: String,
     paneCount: Int,
-    onHeaderDragStart: () -> Unit,
+    onHeaderDragStart: (Offset) -> Unit,
     onHeaderDrag: (Offset) -> Unit,
     onHeaderDragEnd: (cancelled: Boolean) -> Unit,
 ) {
@@ -746,7 +822,7 @@ private fun DesktopSessionPane(
                     )
                     .pointerInput(sessionId) {
                         detectDragGestures(
-                            onDragStart = { currentDragStart() },
+                            onDragStart = { start -> currentDragStart(start) },
                             onDragEnd = { currentDragEnd(false) },
                             onDragCancel = { currentDragEnd(true) },
                         ) { change, delta ->
