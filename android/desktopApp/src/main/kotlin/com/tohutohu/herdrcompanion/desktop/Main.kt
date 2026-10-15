@@ -449,8 +449,7 @@ private fun FrameWindowScope.DesktopShell(
                                     "No sessions match \"$query\"."
                                 },
                                 busySessionIds = state.busySessionIds,
-                                engagedSessionIds = state.busySessionIds +
-                                    (state.archiveConfirmation?.id?.let { setOf(it) } ?: emptySet()),
+                                engagedSessionIds = state.busySessionIds + state.archiveConfirmation.map { it.id },
                             ),
                             showTopBar = false,
                             showNewSessionFab = false,
@@ -687,8 +686,9 @@ private fun FrameWindowScope.DesktopShell(
         )
     }
 
-    // A detached session asks in its own window.
-    if (state.archiveConfirmation?.id?.let { id -> state.detachedWindows.none { it.sessionId == id } } == true) {
+    // A single detached session asks in its own window.
+    val confirming = state.archiveConfirmation
+    if (confirming.isNotEmpty() && (confirming.size > 1 || state.detachedWindows.none { it.sessionId == confirming.single().id })) {
         ArchiveConfirmationDialog(state)
     }
 
@@ -866,10 +866,20 @@ private fun DesktopSessionPane(
 
 @Composable
 internal fun ArchiveConfirmationDialog(state: DesktopAppState) {
+    val targets = state.archiveConfirmation
+    val live = targets.count { it.live }
     AlertDialog(
         onDismissRequest = state::cancelArchive,
-        title = { Text("Stop and archive this session?") },
-        text = { Text("The running agent pane will be closed. You can resume the session later.") },
+        title = { Text(if (targets.size == 1) "Stop and archive this session?" else "Stop and archive ${targets.size} sessions?") },
+        text = {
+            Text(
+                if (targets.size == 1) {
+                    "The running agent pane will be closed. You can resume the session later."
+                } else {
+                    "$live of them are running. Their agent panes will be closed. You can resume the sessions later."
+                },
+            )
+        },
         confirmButton = { TextButton(onClick = state::confirmArchive) { Text("Stop and archive") } },
         dismissButton = { TextButton(onClick = state::cancelArchive) { Text("Cancel") } },
     )
@@ -1225,8 +1235,8 @@ private fun EmptyDetail(state: DesktopAppState, openSettings: () -> Unit) {
 private fun handleListAction(state: DesktopAppState, action: SessionListAction, openSettings: () -> Unit = {}) {
     when (action) {
         is SessionListAction.OpenSession -> state.openSession(action.sessionId)
-        is SessionListAction.Archive -> action.sessions.firstOrNull()?.let(state::requestArchive)
-        is SessionListAction.Unarchive -> action.sessions.firstOrNull()?.let(state::unarchive)
+        is SessionListAction.Archive -> state.requestArchive(action.sessions)
+        is SessionListAction.Unarchive -> state.unarchive(action.sessions)
         is SessionListAction.Resume -> state.resume(action.session)
         SessionListAction.OpenNewSession -> state.openNewSession()
         SessionListAction.Refresh -> state.refreshSessions(userInitiated = true)

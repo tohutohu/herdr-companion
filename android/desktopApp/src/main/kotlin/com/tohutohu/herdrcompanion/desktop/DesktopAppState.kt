@@ -114,7 +114,8 @@ class DesktopAppState(
         private set
     var busySessionIds by mutableStateOf<Set<String>>(emptySet())
         private set
-    var archiveConfirmation by mutableStateOf<SessionUiModel?>(null)
+    /** Sessions waiting for the stop-and-archive confirmation; empty when none is asked. */
+    var archiveConfirmation by mutableStateOf<List<SessionUiModel>>(emptyList())
         private set
 
     /** The sidebar lists archived sessions instead of the current ones. */
@@ -908,61 +909,85 @@ class DesktopAppState(
         }
     }
 
-    fun requestArchive(ref: SessionRef) {
-        val model = sessions.firstOrNull { it.session.id == ref.id }?.session
-            ?: detail?.session?.takeIf { it.id == ref.id }
-        if (model == null) {
-            reportError("Session not found.")
-        } else if (model.live) {
-            archiveConfirmation = model
-        } else {
-            archiveNow(model.id)
+    fun requestArchive(ref: SessionRef) = requestArchive(listOf(ref))
+
+    /**
+     * Archives [refs] in one gateway request. Archiving a running session
+     * kills its agent, so a selection with one asks first.
+     */
+    fun requestArchive(refs: List<SessionRef>) {
+        val models = refs.distinctBy { it.id }.filter { it.id !in busySessionIds }.mapNotNull { ref ->
+            sessions.firstOrNull { it.session.id == ref.id }?.session
+                ?: detail?.session?.takeIf { it.id == ref.id }
+                ?: detailFor(ref.id)?.session
+        }
+        when {
+            models.isEmpty() -> if (refs.any { it.id !in busySessionIds }) reportError("Session not found.")
+            models.any { it.live } -> archiveConfirmation = models
+            else -> archiveNow(models.map { it.id })
         }
     }
 
     fun confirmArchive() {
-        val id = archiveConfirmation?.id ?: return
-        archiveConfirmation = null
-        archiveNow(id)
+        val ids = archiveConfirmation.map { it.id }
+        archiveConfirmation = emptyList()
+        if (ids.isNotEmpty()) archiveNow(ids)
     }
 
     fun cancelArchive() {
-        archiveConfirmation = null
+        archiveConfirmation = emptyList()
     }
 
-    private fun archiveNow(id: String) {
-        setBusy(id, true)
+    private fun archiveNow(ids: List<String>) {
+        ids.forEach { setBusy(it, true) }
         scope.launch {
             try {
-                api.archive(id).warning?.let { notice = it }
-                if (isShown(id)) closeSession(id)
+                val archived = api.archive(ids)
+                archived.mapNotNull { it.warning }.takeIf { it.isNotEmpty() }?.let { notice = it.joinToString("\n") }
+                ids.filter(::isShown).forEach(::closeSession)
                 refreshSessions()
                 reloadArchivedIfLoaded()
-                logger.info("session archived")
+                logger.info("sessions archived: ${ids.size}")
             } catch (error: Exception) {
                 val mapped = error.toDesktopGatewayError()
                 reportError(mapped.message)
                 logger.warning("session archive failed: ${mapped.kind}")
+                // The gateway may have archived some before failing.
+                refreshSessions()
+                reloadArchivedIfLoaded()
             } finally {
-                setBusy(id, false)
+                ids.forEach { setBusy(it, false) }
             }
         }
     }
 
-    fun unarchive(ref: SessionRef) {
-        setBusy(ref.id, true)
+    fun unarchive(ref: SessionRef) = unarchive(listOf(ref))
+
+    /** Restores [refs] one at a time; the gateway has no batch endpoint for it. */
+    fun unarchive(refs: List<SessionRef>) {
+        val ids = refs.map { it.id }.distinct().filter { it !in busySessionIds }
+        if (ids.isEmpty()) return
+        ids.forEach { setBusy(it, true) }
         scope.launch {
-            try {
-                api.unarchive(ref.id)
-                refreshSessions()
-                reloadArchivedIfLoaded()
-            } catch (error: Exception) {
-                val mapped = error.toDesktopGatewayError()
-                reportError(mapped.message)
-                logger.warning("session unarchive failed: ${mapped.kind}")
-            } finally {
-                setBusy(ref.id, false)
+            var failures = 0
+            var lastError: DesktopGatewayError? = null
+            for (id in ids) {
+                try {
+                    api.unarchive(id)
+                } catch (error: Exception) {
+                    val mapped = error.toDesktopGatewayError()
+                    failures++
+                    lastError = mapped
+                    logger.warning("session unarchive failed: ${mapped.kind}")
+                } finally {
+                    setBusy(id, false)
+                }
             }
+            lastError?.let {
+                reportError(if (ids.size == 1) it.message else "Could not restore $failures of ${ids.size} sessions: ${it.message}")
+            }
+            refreshSessions()
+            reloadArchivedIfLoaded()
         }
     }
 

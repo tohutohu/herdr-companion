@@ -136,7 +136,7 @@ fun DesktopDetachedSessionWindow(
                     )
                 }
             }
-            if (state.archiveConfirmation?.id == sessionId) ArchiveConfirmationDialog(state)
+            if (state.archiveConfirmation.singleOrNull()?.id == sessionId) ArchiveConfirmationDialog(state)
         }
     }
 }
