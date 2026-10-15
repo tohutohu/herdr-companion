@@ -18,9 +18,14 @@ func Test現在のClaudeの承認画面と折り返された画面を検出で�
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A 40-column pane wraps the heading, the feedback hint and the file path.
+	narrow, err := os.ReadFile(filepath.Join(testdata, "plan_screen_2_1_300_40cols.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	wrapped := strings.ReplaceAll(planScreen, "Would you like to proceed?", "Would you like to\n proceed?")
 	wrapped = strings.ReplaceAll(wrapped, "Yes, clear context (41% used) and auto-accept edits", "Yes, clear context (41% used) and\n       auto-accept edits")
-	for name, screen := range map[string]string{"2.1.292": string(real), "折り返し": wrapped} {
+	for name, screen := range map[string]string{"2.1.292": string(real), "折り返し": wrapped, "2.1.300の40桁": string(narrow)} {
 		t.Run(name, func(t *testing.T) {
 			ia := screenPlan(screen)
 			if ia == nil || ia.Kind != model.KindPlan || ia.State != model.InteractionPending || len(ia.Questions[0].Options) < 3 {
@@ -34,6 +39,13 @@ func Test現在のClaudeの承認画面と折り返された画面を検出で�
 	if got := screenPlan(wrapped).Questions[0].Options[0].Label; got != "Yes, clear context (41% used) and auto-accept edits" {
 		t.Fatalf("wrapped choice = %s", got)
 	}
+	var narrowLabels []string
+	for _, o := range screenPlan(string(narrow)).Questions[0].Options {
+		narrowLabels = append(narrowLabels, o.Label)
+	}
+	if got := strings.Join(narrowLabels[:2], "|"); got != "Yes, and use auto mode|Yes, manually approve edits" {
+		t.Fatalf("40-column choices = %s", got)
+	}
 	if screenPlan(wrapped).ID != screenPlan(planScreen).ID {
 		t.Fatal("wrapping changed the screen plan ID")
 	}
@@ -44,6 +56,7 @@ func Test現在のClaudeの承認画面と折り返された画面を検出で�
 		"引用後の入力欄": planScreen + "\n❯ Ask anything",
 		"フォーカスなし": strings.ReplaceAll(planScreen, "❯", " "),
 		"操作ヒントなし": strings.ReplaceAll(planScreen, "shift+tab to approve with this feedback", ""),
+		"途中で切れた操作ヒント": strings.ReplaceAll(planScreen, "shift+tab to approve with this feedback", "shift+tab to approve with"),
 		"不完全な選択肢": strings.ReplaceAll(planScreen, "2. Yes, auto-accept edits", "7. Yes, auto-accept edits"),
 	} {
 		if screenPlan(screen) != nil {

@@ -133,10 +133,14 @@ func planRows(screen string) (rows []model.Option, ok bool) {
 	}
 	var labels []string
 	focused, feedbackHint := false, false
+	// Narrow panes wrap the hint under the last row as well; collect it until
+	// the whole sentence is there instead of reading it as part of a label.
+	hint := ""
 	for _, line := range lines[end+1:] {
 		text := strings.TrimSpace(line)
 		if strings.HasPrefix(text, "shift+tab") {
-			feedbackHint = strings.Contains(text, "approve with this feedback")
+			hint = text
+			feedbackHint = isFeedbackHint(hint)
 			continue
 		}
 		if strings.HasPrefix(text, "ctrl+g") {
@@ -147,6 +151,11 @@ func planRows(screen string) (rows []model.Option, ok bool) {
 			// A normal composer after a quoted dialog is not an active plan.
 			if strings.HasPrefix(text, "❯") {
 				return nil, false
+			}
+			if hint != "" && !feedbackHint && text != "" {
+				hint += " " + text
+				feedbackHint = isFeedbackHint(hint)
+				continue
 			}
 			if len(labels) > 0 && text != "" && !feedbackHint {
 				labels[len(labels)-1] += " " + text
@@ -169,6 +178,10 @@ func planRows(screen string) (rows []model.Option, ok bool) {
 		rows = append(rows, model.Option{Label: l})
 	}
 	return rows, true
+}
+
+func isFeedbackHint(hint string) bool {
+	return strings.Contains(strings.Join(strings.Fields(hint), ""), "approvewiththisfeedback")
 }
 
 const screenPlanPrefix = "claude-plan-screen:"
