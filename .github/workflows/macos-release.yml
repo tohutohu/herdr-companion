@@ -81,6 +81,7 @@ jobs:
         run: swift test
 
       - name: Restore persistent Android signing key
+        id: android-key
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -96,13 +97,16 @@ jobs:
           KEYSTORE_PATH="$RUNNER_TEMP/herdr-android-release.keystore"
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -D > "$KEYSTORE_PATH"
           chmod 600 "$KEYSTORE_PATH"
-          echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH" >> "$GITHUB_ENV"
+          # Only the APK step gets the key: every Gradle build configures :app,
+          # and a path without its passwords would fail the desktop builds.
+          echo "path=$KEYSTORE_PATH" >> "$GITHUB_OUTPUT"
 
       - name: Build Android release APK
         working-directory: android
         env:
           VERSION: ${{ needs.metadata.outputs.version }}
           BUILD: ${{ needs.metadata.outputs.build }}
+          ANDROID_KEYSTORE_PATH: ${{ steps.android-key.outputs.path }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
