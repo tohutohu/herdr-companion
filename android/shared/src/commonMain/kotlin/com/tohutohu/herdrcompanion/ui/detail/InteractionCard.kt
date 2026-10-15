@@ -47,6 +47,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.mapSaver
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
@@ -69,6 +72,25 @@ import com.tohutohu.herdrcompanion.ui.UiMotion
 
 /** Sentinel used as the "Other" option key. */
 private const val OTHER = "__herdr_other__"
+
+// Save only Bundle-compatible values, so pending answers survive screen
+// recreation and a lazy transcript row leaving composition.
+private val QuestionSelectionsSaver = mapSaver<SnapshotStateMap<String, Set<String>>>(
+    save = { answers -> answers.mapValues { it.value.toList() } },
+    restore = { saved ->
+        mutableStateMapOf<String, Set<String>>().apply {
+            saved.forEach { (id, labels) -> put(id, (labels as List<*>).map { it as String }.toSet()) }
+        }
+    },
+)
+private val QuestionTextsSaver = mapSaver<SnapshotStateMap<String, String>>(
+    save = { it.toMap() },
+    restore = { saved ->
+        mutableStateMapOf<String, String>().apply {
+            saved.forEach { (id, text) -> put(id, text as String) }
+        }
+    },
+)
 
 /**
  * Colors inside the card come only from the card's container/content pair. With
@@ -229,8 +251,8 @@ private fun Questions(
     onRespond: (InteractionResponseDto) -> Unit,
 ) {
     // question id -> selected labels (OTHER marks the free-text choice)
-    val selections = remember(interaction.id) { mutableStateMapOf<String, Set<String>>() }
-    val otherTexts = remember(interaction.id) { mutableStateMapOf<String, String>() }
+    val selections = rememberSaveable(interaction.id, saver = QuestionSelectionsSaver) { mutableStateMapOf<String, Set<String>>() }
+    val otherTexts = rememberSaveable(interaction.id, saver = QuestionTextsSaver) { mutableStateMapOf<String, String>() }
 
     interaction.questions.forEach { q ->
         QuestionView(
