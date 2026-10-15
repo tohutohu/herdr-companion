@@ -15,6 +15,7 @@ import com.tohutohu.herdrcompanion.data.Settings
 import com.tohutohu.herdrcompanion.push.FirebaseRuntime
 import com.google.firebase.FirebaseApp
 import com.google.firebase.messaging.FirebaseMessaging
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -126,6 +127,10 @@ class HerdrMobileApp : Application(), SingletonImageLoader.Factory {
         container = AppContainer(this)
         Notifications.createChannels(this)
         container.pushRegistration.registerIfPossible()
+        container.scope.launch(Dispatchers.IO) {
+            runCatching { com.tohutohu.herdrcompanion.push.ReplyWorker.resumePending(this@HerdrMobileApp) }
+                .onFailure { android.util.Log.w("ReplyWorker", "could not restore queued replies", it) }
+        }
     }
 
     override fun newImageLoader(context: PlatformContext): ImageLoader =

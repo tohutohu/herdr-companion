@@ -149,6 +149,10 @@ func serve(args []string) error {
 		return err
 	}
 	svc.Archive = archived
+	delivery, err := api.OpenMessageDeliveryStore(filepath.Join(config.StateDir(), "message-delivery"))
+	if err != nil {
+		return err
+	}
 
 	roots := cfg.WorkspaceRoots
 	if len(roots) == 0 {
@@ -179,7 +183,7 @@ func serve(args []string) error {
 
 	srv := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           (&api.Server{AgentUpdates: agentupdate.New(ctx, cfg.CodexBinary, cfg.OpenCode.Binary, devinBinary), Sessions: svc, Terminal: hc, Focus: hc, Uploads: up, Config: store, Sink: sink, Launcher: launch, Worktrees: hc, Archive: archived, Usage: limits, DirectoryCheck: dirCheck}).Handler(),
+		Handler:           (&api.Server{MessageDelivery: delivery, AgentUpdates: agentupdate.New(ctx, cfg.CodexBinary, cfg.OpenCode.Binary, devinBinary), Sessions: svc, Terminal: hc, Focus: hc, Uploads: up, Config: store, Sink: sink, Launcher: launch, Worktrees: hc, Archive: archived, Usage: limits, DirectoryCheck: dirCheck}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {

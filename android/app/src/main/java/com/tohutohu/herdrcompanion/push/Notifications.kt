@@ -122,7 +122,7 @@ object Notifications {
     /**
      * Re-posts the session's notification with the reply typed into it. While
      * [sending] it stays put and takes no second reply; an [error] replaces the
-     * body and alerts, because the message never reached the agent.
+     * body and alerts. An uncertain outcome asks the user to check the conversation.
      */
     fun showReply(
         context: Context,
@@ -133,13 +133,14 @@ object Notifications {
         reply: String,
         sending: Boolean = false,
         error: String? = null,
+        uncertain: Boolean = false,
     ) {
-        val b = builder(context, sessionId, status, title, error?.let { "Not sent: $it" } ?: body)
-            .setRemoteInputHistory(arrayOf(reply))
+        val b = builder(context, sessionId, status, title, error?.let { if (uncertain) "Delivery unconfirmed: $it" else "Not sent: $it" } ?: body)
+            .setRemoteInputHistory(arrayOf(replyHistoryPreview(reply)))
             .setSilent(error == null)
         if (sending) {
             b.setProgress(0, 0, true).setOngoing(true).setAutoCancel(false)
-        } else {
+        } else if (!uncertain) {
             b.addAction(replyAction(context, sessionId, status, title, body))
         }
         post(context, sessionId, b.build())
@@ -156,4 +157,11 @@ object Notifications {
     fun cancel(context: Context, sessionId: String) {
         NotificationManagerCompat.from(context).cancel(sessionId.hashCode())
     }
+}
+
+/** Keep notification Binder payloads small; the complete reply remains in private storage. */
+internal fun replyHistoryPreview(reply: String): String {
+    if (reply.length <= 2_000) return reply
+    val end = if (reply[1_999].isHighSurrogate()) 1_999 else 2_000
+    return reply.substring(0, end) + "…"
 }

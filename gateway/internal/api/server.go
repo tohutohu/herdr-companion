@@ -49,16 +49,17 @@ type Focuser interface {
 }
 
 type Server struct {
-	pairing        pairingState
-	AgentUpdates   *agentupdate.Service
-	DirectoryCheck *directorycheck.Checker
-	Sessions       *sessions.Service
-	Terminal       Terminal
-	Focus          Focuser
-	Uploads        *uploads.Store
-	Config         *config.Store
-	Sink           deadletter.Sink
-	Launcher       *launcher.Launcher
+	pairing         pairingState
+	MessageDelivery *MessageDeliveryStore
+	AgentUpdates    *agentupdate.Service
+	DirectoryCheck  *directorycheck.Checker
+	Sessions        *sessions.Service
+	Terminal        Terminal
+	Focus           Focuser
+	Uploads         *uploads.Store
+	Config          *config.Store
+	Sink            deadletter.Sink
+	Launcher        *launcher.Launcher
 	// Worktrees removes the worktrees of archived sessions.
 	Worktrees worktree.Herdr
 	Archive   *archive.Store
@@ -93,6 +94,9 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("POST /v1/sessions/{id}/resume", s.resumeSession)
 	api.HandleFunc("GET /v1/sessions/{id}/messages", s.getMessages)
 	api.HandleFunc("POST /v1/sessions/{id}/messages", s.postMessage)
+	api.HandleFunc("GET /v1/message-delivery", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]bool{"idempotency": s.MessageDelivery != nil})
+	})
 	api.HandleFunc("POST /v1/sessions/{id}/respond", s.respond)
 	api.HandleFunc("POST /v1/sessions/{id}/mode", s.cycleMode)
 	api.HandleFunc("POST /v1/sessions/{id}/seen", s.markSeen)
@@ -337,8 +341,9 @@ func messagesFrom(msgs []model.Message, after string) []model.Message {
 }
 
 type sendRequest struct {
-	Text    string   `json:"text"`
-	Uploads []string `json:"uploads"`
+	Text      string   `json:"text"`
+	Uploads   []string `json:"uploads"`
+	RequestID string   `json:"requestId,omitempty"`
 }
 
 // sendTimeout bounds a send that no longer has a client waiting on it. Claude
@@ -369,6 +374,38 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, id, "send_message", badRequest("invalid json"))
 		return
 	}
+	var deliveryDigest, deliveryScope string
+	if req.RequestID != "" {
+		if !deliveryID.MatchString(req.RequestID) {
+			writeError(w, http.StatusBadRequest, "invalid request ID")
+			return
+		}
+		if s.MessageDelivery == nil {
+			writeError(w, http.StatusServiceUnavailable, "message delivery receipts unavailable")
+			return
+		}
+		// Include session and the complete payload; never store message contents.
+		payload, _ := json.Marshal(struct {
+			Session string
+			Request sendRequest
+		}{id, req})
+		digest := sha256.Sum256(payload)
+		deliveryDigest = hex.EncodeToString(digest[:])
+		deliveryScope = config.GatewayID(s.Config.Get().AuthToken)
+		existing, err := s.MessageDelivery.previous(deliveryScope, req.RequestID, deliveryDigest)
+		if err != nil {
+			if errors.Is(err, errDeliveryUnknown) || errors.Is(err, errDeliveryConflict) {
+				writeError(w, http.StatusConflict, err.Error())
+			} else {
+				writeError(w, http.StatusServiceUnavailable, "could not persist message delivery receipt")
+			}
+			return
+		}
+		if existing {
+			writeJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
+			return
+		}
+	}
 	in := model.Input{Text: req.Text}
 	var err error
 	if in.Images, in.Files, err = s.uploadPaths(req.Uploads); err != nil {
@@ -388,6 +425,21 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, id, "send_message", providers.ErrNotLive)
 		return
 	}
+	if req.RequestID != "" {
+		fresh, err := s.MessageDelivery.claim(deliveryScope, req.RequestID, deliveryDigest)
+		if err != nil {
+			if errors.Is(err, errDeliveryUnknown) || errors.Is(err, errDeliveryConflict) {
+				writeError(w, http.StatusConflict, err.Error())
+			} else {
+				writeError(w, http.StatusServiceUnavailable, "could not persist message delivery receipt")
+			}
+			return
+		}
+		if !fresh {
+			writeJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
+			return
+		}
+	}
 	// Once the message is here it goes to the agent even if the phone hangs up
 	// (leaves the screen, loses the network): typing half a prompt into the
 	// pane would be worse than finishing it.
@@ -395,8 +447,18 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	if err := res.Provider.Send(ctx, res.NativeID, res.Live, in); err != nil {
 		s.recordSendError(id, "send message: "+err.Error(), req, err)
+		if req.RequestID != "" {
+			writeError(w, http.StatusConflict, errDeliveryUnknown.Error())
+			return
+		}
 		s.fail(w, r, id, "send_message", err)
 		return
+	}
+	if req.RequestID != "" {
+		if err := s.MessageDelivery.accept(deliveryScope, req.RequestID, deliveryDigest); err != nil {
+			writeError(w, http.StatusConflict, errDeliveryUnknown.Error())
+			return
+		}
 	}
 	if s.Archive != nil {
 		if err := s.Archive.Remove(id); err != nil {
