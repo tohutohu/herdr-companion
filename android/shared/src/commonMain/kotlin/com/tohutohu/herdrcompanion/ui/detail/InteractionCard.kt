@@ -13,13 +13,16 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -60,6 +63,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -354,7 +358,10 @@ private fun QuestionView(
     onOtherText: (String) -> Unit,
 ) {
     val multi = q.type == "multiselect"
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    Column(
+        modifier = if (multi) Modifier else Modifier.selectableGroup(),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
         q.header?.takeIf { it.isNotBlank() }?.let {
             Text(it, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = Muted)
         }
@@ -380,13 +387,27 @@ private fun QuestionView(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable(enabled = enabled) { toggle(key) },
+                    .heightIn(min = 48.dp)
+                    .then(
+                        if (multi) Modifier.toggleable(
+                            value = key in selected,
+                            enabled = enabled,
+                            role = Role.Checkbox,
+                            onValueChange = { toggle(key) },
+                        ) else Modifier.selectable(
+                            selected = key in selected,
+                            enabled = enabled,
+                            role = Role.RadioButton,
+                            onClick = { toggle(key) },
+                        ),
+                    ),
             ) {
                 if (multi) {
                     Checkbox(
+                        modifier = Modifier.size(48.dp),
                         checked = key in selected,
                         enabled = enabled,
-                        onCheckedChange = { toggle(key) },
+                        onCheckedChange = null,
                         colors = CheckboxDefaults.colors(
                             checkedColor = Accent,
                             checkmarkColor = OnAccent,
@@ -395,9 +416,10 @@ private fun QuestionView(
                     )
                 } else {
                     RadioButton(
+                        modifier = Modifier.size(48.dp),
                         selected = key in selected,
                         enabled = enabled,
-                        onClick = { toggle(key) },
+                        onClick = null,
                         colors = RadioButtonDefaults.colors(
                             selectedColor = Accent,
                             unselectedColor = LocalContentColor.current.copy(alpha = 0.6f),

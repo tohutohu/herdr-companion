@@ -10,6 +10,7 @@ data class AttachmentUiState(
     val id: String,
     val name: String,
     val mimeType: String,
+    val size: Long? = null,
 ) {
     val isImage get() = mimeType.startsWith("image/")
 }

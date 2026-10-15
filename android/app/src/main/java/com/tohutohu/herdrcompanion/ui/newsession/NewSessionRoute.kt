@@ -8,7 +8,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -26,6 +25,8 @@ import com.tohutohu.herdrcompanion.data.api.DirListingDto
 import com.tohutohu.herdrcompanion.data.api.ModelsResponse
 import com.tohutohu.herdrcompanion.data.api.StartSessionRequest
 import com.tohutohu.herdrcompanion.ui.detail.AttachmentUiState
+import com.tohutohu.herdrcompanion.ui.detail.rememberPickedAttachments
+import com.tohutohu.herdrcompanion.ui.detail.readPickedAttachmentMetadata
 import com.tohutohu.herdrcompanion.ui.usage.UsageCardRoute
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -69,13 +70,20 @@ fun NewSessionRoute(
     var restored by rememberSaveable { mutableStateOf(false) }
     // Listing is not saveable; after rotation the restored path is loaded again.
     var directoryRestored by remember { mutableStateOf(false) }
-    val attachments = remember { mutableStateListOf<Attachment>() }
+    val attachments = rememberPickedAttachments("new-session")
     val resolver = context.contentResolver
     val addAttachments: (List<Uri>) -> Unit = { uris ->
-        val fresh = uris.filterNot { uri -> attachments.any { it.uri == uri } }
+        val fresh = uris.map(Uri::toString).filterNot { id -> attachments.any { it.id == id } }
         if (fresh.isNotEmpty()) {
             scope.launch {
-                attachments.addAll(withContext(Dispatchers.IO) { fresh.map { readAttachment(resolver, it) } })
+                val result = withContext(Dispatchers.IO) {
+                    readPickedAttachmentMetadata(fresh) {
+                        val attachment = readAttachment(resolver, Uri.parse(it))
+                        AttachmentUiState(it, attachment.name, attachment.mime, attachment.size)
+                    }
+                }
+                attachments.addAll(result.attachments.filterNot { item -> attachments.any { it.id == item.id } })
+                error = result.error
             }
         }
     }
@@ -93,7 +101,7 @@ fun NewSessionRoute(
     fun start(request: StartSessionRequest, preset: AgentPreset) {
         if (starting) return
         starting = true
-        val picked = attachments.toList()
+        val picked = attachments.map { Attachment(Uri.parse(it.id), it.name, it.mimeType, it.size) }
         val id = starts.enqueue(request) { picked.map { uploadAttachment(resolver, api, it) } }
         container.scope.launch {
             runCatching { shortcutStore.recordUsed(request.cwd) }
@@ -183,7 +191,7 @@ fun NewSessionRoute(
         currentPreset = current,
         favorite = favorite,
         worktree = worktree,
-        attachments = attachments.map { AttachmentUiState(it.uri.toString(), it.name, it.mime) },
+        attachments = attachments.toList(),
         attachmentsEnabled = true,
     )
 
@@ -211,7 +219,7 @@ fun NewSessionRoute(
                     PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
                 )
                 NewSessionAction.PickFile -> filePicker.launch(arrayOf("*/*"))
-                is NewSessionAction.RemoveAttachment -> attachments.removeAll { it.uri.toString() == action.id }
+                is NewSessionAction.RemoveAttachment -> attachments.removeAll { it.id == action.id }
                 is NewSessionAction.SelectPreset -> {
                     provider = action.preset.provider
                     model = action.preset.model
@@ -279,6 +287,6 @@ fun NewSessionRoute(
             }
         },
         topContent = { UsageCardRoute() },
-        resolveAttachmentPreview = { id -> attachments.firstOrNull { it.uri.toString() == id }?.uri },
+        resolveAttachmentPreview = { id -> Uri.parse(id) },
     )
 }

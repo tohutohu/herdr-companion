@@ -10,8 +10,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
@@ -62,14 +63,19 @@ fun SessionDetailRoute(
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { vm.pollWhileVisible() }
     }
 
-    val attachments = remember { mutableStateListOf<Attachment>() }
+    val attachments = rememberPickedAttachments(sessionId)
+    var attachmentError by rememberSaveable(sessionId) { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val resolver = context.contentResolver
     val add: (List<Uri>) -> Unit = { uris ->
-        val fresh = uris.filterNot { uri -> attachments.any { it.uri == uri } }
+        val fresh = uris.map(Uri::toString).filterNot { id -> attachments.any { it.id == id } }
         if (fresh.isNotEmpty()) {
             scope.launch {
-                attachments.addAll(withContext(Dispatchers.IO) { fresh.map { readAttachment(resolver, it) } })
+                val result = withContext(Dispatchers.IO) {
+                    readPickedAttachmentMetadata(fresh) { readAttachment(resolver, Uri.parse(it)).toUiState() }
+                }
+                attachments.addAll(result.attachments.filterNot { item -> attachments.any { it.id == item.id } })
+                attachmentError = result.error
             }
         }
     }
@@ -82,12 +88,12 @@ fun SessionDetailRoute(
         messages = messagePresentation.messages,
         pending = messagePresentation.pending.map(PendingMessage::toUiState),
         messageKeys = messagePresentation.messageKeys,
-        error = error,
+        error = attachmentError ?: error,
         answering = answering,
         loading = loading,
         reloading = reloading,
         reloadNotice = reloadNotice,
-        attachments = attachments.map(Attachment::toUiState),
+        attachments = attachments.toList(),
         actionBusy = session?.let { actions.busy(it.id) } == true,
         modeChanging = modeChanging,
     )
@@ -97,7 +103,7 @@ fun SessionDetailRoute(
         focusLatest = focusLatest,
         resolveUrl = api::absolute,
         formatFileSize = { Formatter.formatShortFileSize(context, it) },
-        resolveAttachmentPreview = { id -> attachments.firstOrNull { it.uri.toString() == id }?.uri },
+        resolveAttachmentPreview = { id -> Uri.parse(id) },
         onAction = { action ->
             when (action) {
                 SessionDetailAction.Back -> onBack()
@@ -108,10 +114,11 @@ fun SessionDetailRoute(
                     PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
                 )
                 SessionDetailAction.PickFile -> filePicker.launch(arrayOf("*/*"))
-                is SessionDetailAction.RemoveAttachment -> attachments.removeAll { it.uri.toString() == action.id }
+                is SessionDetailAction.RemoveAttachment -> attachments.removeAll { it.id == action.id }
                 is SessionDetailAction.Send -> {
-                    vm.send(action.text, attachments.toList())
+                    vm.send(action.text, attachments.map { Attachment(Uri.parse(it.id), it.name, it.mimeType, it.size) })
                     attachments.clear()
+                    attachmentError = null
                 }
                 is SessionDetailAction.Retry -> vm.retry(action.localId)
                 is SessionDetailAction.Discard -> vm.discard(action.localId)
@@ -131,6 +138,7 @@ private fun Attachment.toUiState() = AttachmentUiState(
     id = uri.toString(),
     name = name,
     mimeType = mime,
+    size = size,
 )
 
 private fun PendingMessage.toUiState() = PendingMessageUiState(

@@ -151,7 +151,7 @@ fun SessionDetailScreen(
     }
     // Whether changes scroll the newest message into view. Only the reader's
     // own scrolls decide it: where a drag (and its fling) comes to rest.
-    var followNewest by remember { mutableStateOf(true) }
+    var followNewest by rememberSaveable(state.sessionId) { mutableStateOf(true) }
     LaunchedEffect(listState) {
         var dragged = false
         launch {

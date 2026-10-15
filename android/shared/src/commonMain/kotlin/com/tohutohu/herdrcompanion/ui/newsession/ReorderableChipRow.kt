@@ -26,9 +26,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.tohutohu.herdrcompanion.ui.UiMotion
@@ -39,7 +50,8 @@ import kotlinx.coroutines.launch
 
 /**
  * A horizontal row whose [rowItems] can be reordered by long-pressing and
- * dragging. Content added by [beforeItems] and [afterItems] stays fixed and
+ * dragging, accessibility actions, or Alt + Left/Right on a focused chip.
+ * Content added by [beforeItems] and [afterItems] stays fixed and
  * is not part of the reorderable range.
  *
  * The row animates the items' placement with [placementSpec]; [itemContent]
@@ -52,6 +64,7 @@ fun <T> ReorderableChipRow(
     itemKey: (T) -> Any,
     onMove: (List<T>) -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     contentPadding: PaddingValues = PaddingValues(),
     horizontalArrangement: Arrangement.Horizontal = Arrangement.Start,
     placementSpec: FiniteAnimationSpec<IntOffset>? = itemPlacementSpec(paused = false),
@@ -74,6 +87,19 @@ fun <T> ReorderableChipRow(
     var settleJob by remember { mutableStateOf<Job?>(null) }
     val haptic = LocalHapticFeedback.current
     val density = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
+
+    fun moveOne(key: Any, delta: Int): Boolean {
+        if (!enabled || dragging || activeKey != null) return false
+        val from = orderedItems.indexOfFirst { itemKey(it) == key }
+        val to = from + delta
+        if (from < 0 || to !in orderedItems.indices) return false
+        listState.requestScrollToItem(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+        val result = orderedItems.toMutableList().apply { add(to, removeAt(from)) }
+        orderedItems = result
+        onMove(result)
+        return true
+    }
 
     LaunchedEffect(rowItems) {
         if (!dragging) orderedItems = rowItems
@@ -177,7 +203,25 @@ fun <T> ReorderableChipRow(
                         Modifier
                     },
                 )
-                .pointerInput(key) {
+                // Keep accessibility bounds inside the visual transform so
+                // focus and hit targets follow a lifted or settling chip.
+                .semantics {
+                    customActions = if (!enabled || dragging || activeKey != null) emptyList() else buildList {
+                        val index = orderedItems.indexOfFirst { itemKey(it) == key }
+                        if (index > 0) add(CustomAccessibilityAction("Move earlier") { moveOne(key, -1) })
+                        if (index in 0 until orderedItems.lastIndex) add(CustomAccessibilityAction("Move later") { moveOne(key, 1) })
+                    }
+                }
+                .onPreviewKeyEvent { event ->
+                    if (event.type != KeyEventType.KeyDown || !event.isAltPressed) false
+                    else when (event.key) {
+                        Key.DirectionLeft -> moveOne(key, if (layoutDirection == LayoutDirection.Ltr) -1 else 1)
+                        Key.DirectionRight -> moveOne(key, if (layoutDirection == LayoutDirection.Ltr) 1 else -1)
+                        else -> false
+                    }
+                }
+                .pointerInput(key, enabled) {
+                    if (!enabled) return@pointerInput
                     detectDragGesturesAfterLongPress(
                         onDragStart = {
                             val center = listState.itemCenter(key)

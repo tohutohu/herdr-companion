@@ -1,6 +1,7 @@
 package com.tohutohu.herdrcompanion.ui.newsession
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.size
@@ -13,11 +14,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -34,7 +40,7 @@ class ReorderableChipRowTest {
     private var items by mutableStateOf(listOf("A", "B", "C", "D"))
     private val moves = mutableListOf<List<String>>()
 
-    private fun setRow(after: List<String> = emptyList()) {
+    private fun setRow(after: List<String> = emptyList(), enabled: Boolean = true) {
         rule.setContent {
             ReorderableChipRow(
                 rowItems = items,
@@ -44,13 +50,14 @@ class ReorderableChipRowTest {
                     items = it
                 },
                 modifier = Modifier.width(ROW),
+                enabled = enabled,
                 contentPadding = PaddingValues(horizontal = PADDING),
                 horizontalArrangement = Arrangement.spacedBy(SPACING),
                 afterItems = {
                     items(after, key = { it }) { Box(Modifier.testTag(it).size(CHIP, 32.dp)) { Text(it) } }
                 },
             ) { item, reorderModifier ->
-                Box(reorderModifier.testTag(item).size(CHIP, 32.dp)) { Text(item) }
+                Box(reorderModifier.testTag(item).focusable().size(CHIP, 32.dp)) { Text(item) }
             }
         }
     }
@@ -182,6 +189,50 @@ class ReorderableChipRowTest {
 
         assertEquals(listOf(listOf("B", "C", "D", "E", "F", "A")), moves)
         assertNear(ROW - PADDING - CHIP, left("A"), "並べ替えられる範囲の最後が右端に見える所で止まる")
+    }
+
+    @Test
+    fun 支援機能の移動操作で順序が変わり境界の操作は表示されない() {
+        setRow(after = listOf("recent"))
+        fun actions(tag: String) = chip(tag).fetchSemanticsNode().config[SemanticsActions.CustomActions]
+        assertEquals(listOf("Move later"), actions("A").map { it.label })
+        assertEquals(listOf("Move earlier"), actions("D").map { it.label })
+        val move = actions("A").single()
+        rule.runOnIdle { assertTrue(move.action()) }
+        assertEquals(listOf(listOf("B", "A", "C", "D")), moves)
+        assertEquals(listOf("Move earlier", "Move later"), actions("A").map { it.label })
+    }
+
+    @Test
+    fun フォーカスしたチップをAlt矢印で並べ替えられる() {
+        setRow()
+        chip("B").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+        chip("B").performKeyInput {
+            keyDown(Key.AltLeft)
+            pressKey(Key.DirectionRight)
+            keyUp(Key.AltLeft)
+        }
+        assertEquals(listOf(listOf("A", "C", "B", "D")), moves)
+        // The same focused chip remains operable after its lazy-list slot moves.
+        chip("B").performKeyInput {
+            keyDown(Key.AltLeft)
+            pressKey(Key.DirectionLeft)
+            keyUp(Key.AltLeft)
+        }
+        assertEquals(listOf("A", "B", "C", "D"), moves.last())
+    }
+
+    @Test
+    fun 無効な行では支援機能もキーボードも順序を変更しない() {
+        setRow(enabled = false)
+        assertTrue(chip("B").fetchSemanticsNode().config[SemanticsActions.CustomActions].isEmpty())
+        chip("B").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+        chip("B").performKeyInput {
+            keyDown(Key.AltLeft)
+            pressKey(Key.DirectionRight)
+            keyUp(Key.AltLeft)
+        }
+        assertTrue(moves.isEmpty())
     }
 
     private companion object {

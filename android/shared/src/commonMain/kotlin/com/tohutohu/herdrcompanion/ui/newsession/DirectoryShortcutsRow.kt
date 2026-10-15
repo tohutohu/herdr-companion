@@ -73,6 +73,7 @@ private fun ShortcutChips(
         rowItems = favorites,
         itemKey = { "fav:$it" },
         onMove = onReorderFavorites,
+        enabled = enabled,
         modifier = Modifier.fillMaxWidth(),
         contentPadding = PaddingValues(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),

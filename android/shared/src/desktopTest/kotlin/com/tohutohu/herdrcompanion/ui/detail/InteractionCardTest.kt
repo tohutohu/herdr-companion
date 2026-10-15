@@ -17,6 +17,14 @@ import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsToggleable
+import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -43,6 +51,7 @@ class InteractionCardTest {
 
     private var visible by mutableStateOf(true)
     private var interactionId by mutableStateOf("question-1")
+    private var questionType by mutableStateOf("multiselect")
     private var registry by mutableStateOf(SaveableStateRegistry(null) { true })
     private var response: InteractionResponseDto? = null
     private lateinit var focusManager: FocusManager
@@ -58,7 +67,7 @@ class InteractionCardTest {
                                 interaction = InteractionDto(
                                     id = interactionId, type = "questions", state = "pending", supported = true,
                                     questions = listOf(
-                                        QuestionDto("choices", "multiselect", question = "Choose features",
+                                        QuestionDto("choices", questionType, question = "Choose features",
                                             options = listOf(OptionDto("Logs"), OptionDto("Images"))),
                                         QuestionDto("notes", "text", question = "Add instructions"),
                                     ),
@@ -127,5 +136,29 @@ class InteractionCardTest {
         rule.runOnIdle { interactionId = "question-2" }
         rule.onNodeWithText("Answer").assertIsNotEnabled().performClick()
         rule.runOnIdle { assertNull(response) }
+    }
+
+    @Test
+    fun 複数選択の行が一つのチェック可能な操作として状態を伝える() {
+        content()
+        rule.onNodeWithText("Logs").assertIsToggleable().assertIsOff().performClick().assertIsOn()
+        rule.onAllNodes(
+            SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Checkbox), useUnmergedTree = true,
+        ).assertCountEquals(2)
+        rule.onNodeWithText("Logs").performClick().assertIsOff()
+    }
+
+    @Test
+    fun 単一選択の行が選択状態を伝えて別の選択を解除する() {
+        questionType = "single"
+        content()
+        rule.onNodeWithText("Logs").performClick().assertIsSelected()
+        rule.onNodeWithText("Images").performClick().assertIsSelected()
+        rule.onAllNodes(
+            SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton), useUnmergedTree = true,
+        ).assertCountEquals(2)
+        rule.onNode(hasSetTextAction()).performTextInput("instructions")
+        rule.onNodeWithText("Answer").performClick()
+        rule.runOnIdle { assertEquals(listOf("Images"), response?.answers?.get("choices")?.selected) }
     }
 }
