@@ -2,8 +2,10 @@ package com.tohutohu.herdrcompanion.data
 
 import android.content.ContentResolver
 import com.tohutohu.herdrcompanion.data.api.GatewayApi
+import com.tohutohu.herdrcompanion.data.api.MessageDeliveryAttempt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -35,6 +37,7 @@ data class PendingMessage(
     val acceptedAt: Long? = null,
     /** Kept after a successful upload so a retry does not upload again. */
     val uploadIds: List<String>? = null,
+    val canRetry: Boolean = true,
 )
 
 /**
@@ -47,11 +50,14 @@ class Outbox(
     private val api: GatewayApi,
     private val repository: SessionRepository,
     private val scope: CoroutineScope,
+    private val upload: suspend (GatewayApi, Attachment) -> String = { target, attachment -> uploadAttachment(resolver, target, attachment) },
+    private val refresh: suspend (String) -> Unit = { repository.refreshMessages(it) },
 ) {
     private val pending = MutableStateFlow<List<PendingMessage>>(emptyList())
 
     /** Sends to one session go out one at a time, in the order they were written. */
     private val locks = ConcurrentHashMap<String, Mutex>()
+    private val attempts = ConcurrentHashMap<String, MessageDeliveryAttempt>()
 
     fun observe(sessionId: String): Flow<List<PendingMessage>> =
         pending.map { all -> all.filter { it.sessionId == sessionId } }.distinctUntilChanged()
@@ -65,16 +71,29 @@ class Outbox(
             state = SendState.SENDING,
             known = known,
         )
+        attempts[p.localId] = MessageDeliveryAttempt(p.localId, api)
         pending.update { it + p }
         deliver(p.localId)
     }
 
     fun retry(localId: String) {
-        if (edit(localId) { it.copy(state = SendState.SENDING, error = null) } != null) deliver(localId)
+        // A successful CAS owns the retry before launching, including two taps
+        // in the same frame or calls arriving on different threads.
+        while (true) {
+            val rows = pending.value
+            val original = rows.firstOrNull { it.localId == localId } ?: return
+            if (original.state != SendState.FAILED || !original.canRetry) return
+            val next = rows.map { if (it.localId == localId) it.copy(state = SendState.SENDING, error = null) else it }
+            if (pending.compareAndSet(rows, next)) {
+                deliver(localId)
+                return
+            }
+        }
     }
 
     fun discard(localId: String) {
         pending.update { all -> all.filterNot { it.localId == localId } }
+        attempts.remove(localId)
     }
 
     /**
@@ -82,34 +101,41 @@ class Outbox(
      * the gateway took long ago without them ever showing up.
      */
     fun settle(sessionId: String, messages: List<Message>) {
-        pending.update { all -> stillPending(all, sessionId, messages, System.currentTimeMillis()) }
+        while (true) {
+            val before = pending.value
+            val next = stillPending(before, sessionId, messages, System.currentTimeMillis())
+            if (pending.compareAndSet(before, next)) {
+                val remaining = next.mapTo(HashSet()) { it.localId }
+                before.filter { it.localId !in remaining }.forEach { attempts.remove(it.localId) }
+                return
+            }
+        }
     }
 
     private fun deliver(localId: String) {
-        scope.launch {
+        // Enter the mutex queue at enqueue time; Default dispatcher scheduling
+        // must not let a later message acquire the session lock first.
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
             val sessionId = pending.value.firstOrNull { it.localId == localId }?.sessionId ?: return@launch
             locks.getOrPut(sessionId) { Mutex() }.withLock {
                 val p = pending.value.firstOrNull { it.localId == localId } ?: return@withLock
+                val attempt = attempts[localId] ?: return@withLock
                 try {
-                    val ids = p.uploadIds ?: p.attachments.map { upload(it) }
-                    edit(localId) { it.copy(uploadIds = ids) }
-                    api.sendMessage(sessionId, p.text, ids)
-                    edit(localId) { it.copy(state = SendState.ACCEPTED, acceptedAt = System.currentTimeMillis()) }
+                    attempt.send(api, sessionId, p.text) { target -> p.attachments.map { upload(target, it) } }
+                    edit(localId) { it.copy(state = SendState.ACCEPTED, acceptedAt = System.currentTimeMillis(), uploadIds = attempt.uploadIds, canRetry = attempt.canRetry) }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    edit(localId) { it.copy(state = SendState.FAILED, error = e.message ?: e.toString()) }
+                    edit(localId) { it.copy(state = SendState.FAILED, error = e.message ?: e.toString(), uploadIds = attempt.uploadIds, canRetry = attempt.canRetry) }
                     return@withLock
                 }
             }
             // The agent writes it down right away, or queues it; pick that up
             // sooner than the next poll would.
             delay(500)
-            runCatching { repository.refreshMessages(sessionId) }
+            runCatching { refresh(sessionId) }
         }
     }
-
-    private suspend fun upload(attachment: Attachment): String = uploadAttachment(resolver, api, attachment)
 
     private fun edit(localId: String, change: (PendingMessage) -> PendingMessage): PendingMessage? {
         var out: PendingMessage? = null

@@ -22,6 +22,8 @@ data class PendingMessageUiState(
     val attachments: List<AttachmentUiState>,
     val state: SendState,
     val error: String?,
+    /** False when delivery is ambiguous and replay could duplicate the message. */
+    val canRetry: Boolean = true,
 )
 
 /** The state required to render a session detail screen. */

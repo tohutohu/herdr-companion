@@ -147,6 +147,7 @@ private fun PendingMessage.toUiState() = PendingMessageUiState(
     attachments = attachments.map(Attachment::toUiState),
     state = state,
     error = error,
+    canRetry = canRetry,
 )
 
 private fun SessionEntity.toSessionRef() = SessionRef(id, live = status != Status.OFFLINE, archived = archived)

@@ -54,6 +54,10 @@ class GatewayApi(
     private val http: OkHttpClient,
     private val settings: () -> Settings,
 ) {
+    /** Pin sends and their uploads to the connection selected when they were queued. */
+    internal fun connectionSettings() = settings()
+    internal fun forConnection(connection: Settings) = GatewayApi(http) { connection }
+
     private val jsonType = "application/json".toMediaType()
 
     private fun base(): HttpUrl {
@@ -182,10 +186,16 @@ class GatewayApi(
     }
 
     suspend fun sendMessage(id: String, text: String, uploads: List<String>, requestId: String? = null) {
-        post(
-            url("v1", "sessions", id, "messages"),
-            json.encodeToString(SendMessageRequest(text, uploads, requestId)).toRequestBody(jsonType),
-        )
+        val body = json.encodeToString(SendMessageRequest(text, uploads, requestId)).toRequestBody(jsonType)
+        val once = object : RequestBody() {
+            override fun contentType() = body.contentType()
+            override fun contentLength() = body.contentLength()
+            override fun isOneShot() = true
+            override fun writeTo(sink: okio.BufferedSink) = body.writeTo(sink)
+        }
+        // Only the delivery owner may decide to retry a non-idempotent POST.
+        // Old gateways ignore request IDs, so even transport-level replay is unsafe.
+        execute(request(url("v1", "sessions", id, "messages")).post(once).build())
     }
 
     suspend fun respond(id: String, response: InteractionResponseDto) {

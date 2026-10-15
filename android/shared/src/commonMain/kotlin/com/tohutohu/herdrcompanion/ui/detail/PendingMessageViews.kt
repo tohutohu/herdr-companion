@@ -112,13 +112,14 @@ fun PendingMessageItem(
                 SendState.ACCEPTED -> DeliveryLine(label = "Delivered · waiting for the agent", icon = Icons.Default.Check)
                 SendState.FAILED -> Column(horizontalAlignment = Alignment.End) {
                     DeliveryLine(
-                        label = "Not sent: ${message.error ?: "unknown error"}",
+                        label = if (message.canRetry) "Not sent: ${message.error ?: "unknown error"}"
+                        else message.error ?: "Delivery could not be confirmed. Check the conversation before sending again.",
                         icon = Icons.Default.ErrorOutline,
                         color = MaterialTheme.colorScheme.error,
                     )
                     Row {
                         TextButton(onClick = onDiscard) { Text("Discard") }
-                        TextButton(onClick = onRetry) { Text("Retry") }
+                        TextButton(onClick = onRetry, enabled = message.canRetry) { Text("Retry") }
                     }
                 }
             }

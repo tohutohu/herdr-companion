@@ -9,6 +9,8 @@ import com.tohutohu.herdrcompanion.data.api.GatewayApi
 import com.tohutohu.herdrcompanion.data.api.InteractionResponseDto
 import com.tohutohu.herdrcompanion.data.api.MessageDto
 import com.tohutohu.herdrcompanion.data.api.MessageSnapshot
+import com.tohutohu.herdrcompanion.data.api.MessageDeliveryAttempt
+import com.tohutohu.herdrcompanion.data.api.UnconfirmedMessageDeliveryException
 import com.tohutohu.herdrcompanion.data.api.MessagesResponse
 import com.tohutohu.herdrcompanion.data.api.Status
 import com.tohutohu.herdrcompanion.model.SessionUiModel
@@ -23,6 +25,7 @@ import com.tohutohu.herdrcompanion.ui.sessions.ArchivedSessionsPager
 import com.tohutohu.herdrcompanion.ui.sessions.SessionListItemUiState
 import com.tohutohu.herdrcompanion.ui.sessions.SessionRef
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -83,6 +86,8 @@ class DesktopAppState(
     private var closed = false
     private var pendingBySession by mutableStateOf<Map<String, List<PendingMessageUiState>>>(emptyMap())
     private var pendingAttachments by mutableStateOf<Map<String, List<DesktopAttachment>>>(emptyMap())
+    private val pendingDeliveries = ConcurrentHashMap<String, DesktopPendingDelivery>()
+    private val deliverySessionLocks = ConcurrentHashMap<String, Mutex>()
     private var pendingMessageBaselines by mutableStateOf<Map<String, Set<String>>>(emptyMap())
     private var composerAttachmentsBySession by mutableStateOf<Map<String, List<DesktopAttachment>>>(emptyMap())
     private var openSessionIdsState by mutableStateOf<List<String>>(emptyList())
@@ -768,7 +773,7 @@ class DesktopAppState(
     }
 
     fun send(id: String, text: String) {
-        if (!isShown(id)) return
+        if (closed || !isShown(id)) return
         val attachments = composerAttachmentsBySession[id].orEmpty()
         if ((text.isBlank() && attachments.isEmpty()) || id in busySessionIds) return
         val pending = PendingMessageUiState(
@@ -779,28 +784,15 @@ class DesktopAppState(
             error = null,
         )
         pendingAttachments = pendingAttachments + (pending.localId to attachments)
+        val delivery = DesktopPendingDelivery(MessageDeliveryAttempt(pending.localId, api), text, attachments.toList())
+        pendingDeliveries[pending.localId] = delivery
         pendingMessageBaselines = pendingMessageBaselines + (
             pending.localId to detailsBySession[id]?.messages.orEmpty().map(Message::id).toSet()
         )
         updatePending(id) { it + pending }
         composerAttachmentsBySession = composerAttachmentsBySession - id
         updateDetail(id) { it.copy(attachments = emptyList()) }
-        scope.launch {
-            try {
-                val uploads = uploadAttachments(attachments)
-                repository.send(id, text, uploads)
-                updatePending(id) { rows ->
-                    rows.map { row -> if (row.localId == pending.localId) row.copy(state = SendState.ACCEPTED) else row }
-                }
-                logger.fine("message accepted by Gateway")
-            } catch (error: Exception) {
-                val mapped = error.toDesktopGatewayError()
-                updatePending(id) { rows ->
-                    rows.map { row -> if (row.localId == pending.localId) row.copy(state = SendState.FAILED, error = mapped.message) else row }
-                }
-                logger.warning("message send failed: ${mapped.kind}")
-            }
-        }
+        deliverPending(id, pending.localId, delivery)
     }
 
     fun retry(localId: String) {
@@ -808,24 +800,59 @@ class DesktopAppState(
     }
 
     fun retry(id: String, localId: String) {
+        if (closed) return
         val original = pendingBySession[id].orEmpty().firstOrNull { it.localId == localId } ?: return
-        if (original.state != SendState.FAILED) return
-        updatePending(id) { rows -> rows.map { if (it.localId == localId) it.copy(state = SendState.SENDING, error = null) else it } }
-        pendingMessageBaselines = pendingMessageBaselines + (
-            localId to detailsBySession[id]?.messages.orEmpty().map(Message::id).toSet()
-        )
-        sendRetry(id, original, pendingAttachments[localId].orEmpty())
+        val delivery = pendingDeliveries[localId] ?: return
+        if (original.state != SendState.FAILED || !original.canRetry || !delivery.attempt.canRetry) return
+        deliverPending(id, localId, delivery)
     }
 
-    private fun sendRetry(id: String, original: PendingMessageUiState, attachments: List<DesktopAttachment>) {
-        scope.launch {
+    private fun deliverPending(id: String, localId: String, delivery: DesktopPendingDelivery) {
+        // Acquire before launching so even simultaneous retry callbacks cannot
+        // queue a second replay while the first is waiting on the network.
+        if (!delivery.lock.tryLock()) return
+        updatePending(id) { rows -> rows.map { if (it.localId == localId) it.copy(state = SendState.SENDING, error = null) else it } }
+        val sessionLock = deliverySessionLocks.getOrPut(id) { Mutex() }
+        // Enter the session queue on the caller's thread, preserving enqueue
+        // order before the Default dispatcher can schedule another message.
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            var released = false
             try {
-                val uploads = uploadAttachments(attachments)
-                repository.send(id, original.text, uploads)
-                updatePending(id) { rows -> rows.map { if (it.localId == original.localId) it.copy(state = SendState.ACCEPTED) else it } }
-            } catch (error: Exception) {
-                val mapped = error.toDesktopGatewayError()
-                updatePending(id) { rows -> rows.map { if (it.localId == original.localId) it.copy(state = SendState.FAILED, error = mapped.message) else it } }
+                sessionLock.withLock {
+                    var failure: Exception? = null
+                    try {
+                        delivery.attempt.send(api, id, delivery.text) { pinnedApi ->
+                            uploadDesktopAttachments(pinnedApi, delivery.attachments)
+                        }
+                    } catch (cancel: CancellationException) {
+                        throw cancel
+                    } catch (error: Exception) {
+                        failure = error
+                    }
+                    // FAILED is an invitation to retry. Make the attempt
+                    // available before publishing it, including when logging
+                    // or another message's completion takes time.
+                    released = true
+                    delivery.lock.unlock()
+                    val error = failure
+                    if (error == null) {
+                        updatePending(id) { rows -> rows.map { if (it.localId == localId) it.copy(state = SendState.ACCEPTED) else it } }
+                        logger.fine("message accepted by Gateway")
+                    } else {
+                        val mapped = error.toDesktopGatewayError()
+                        val description = if (!delivery.attempt.canRetry || error is UnconfirmedMessageDeliveryException) error.message else mapped.message
+                        updatePending(id) { rows -> rows.map {
+                            if (it.localId == localId) it.copy(
+                                state = SendState.FAILED,
+                                error = description,
+                                canRetry = delivery.attempt.canRetry,
+                            ) else it
+                        } }
+                        logger.warning("message send failed: ${mapped.kind}")
+                    }
+                }
+            } finally {
+                if (!released) delivery.lock.unlock()
             }
         }
     }
@@ -837,6 +864,7 @@ class DesktopAppState(
     fun discard(id: String, localId: String) {
         cleanupAttachments(pendingAttachments[localId].orEmpty())
         pendingAttachments = pendingAttachments - localId
+        pendingDeliveries.remove(localId)
         pendingMessageBaselines = pendingMessageBaselines - localId
         updatePending(id) { rows -> rows.filterNot { it.localId == localId } }
     }
@@ -1005,9 +1033,6 @@ class DesktopAppState(
         detailsBySession[id]?.let { updateDetail(id, update(it)) }
     }
 
-    private suspend fun uploadAttachments(attachments: List<DesktopAttachment>): List<String> =
-        uploadDesktopAttachments(api, attachments)
-
     private fun settlePending(id: String, messages: List<Message>) {
         val existing = pendingBySession[id].orEmpty()
         val remaining = existing.filterNot { pending ->
@@ -1025,6 +1050,7 @@ class DesktopAppState(
             val settledIds = existing.filterNot { it in remaining }.map { it.localId }.toSet()
             cleanupAttachments(settledIds.flatMap { pendingAttachments[it].orEmpty() })
             pendingAttachments = pendingAttachments - settledIds
+            settledIds.forEach(pendingDeliveries::remove)
             pendingMessageBaselines = pendingMessageBaselines - settledIds
             pendingBySession = if (remaining.isEmpty()) pendingBySession - id else pendingBySession + (id to remaining)
         }
@@ -1037,12 +1063,21 @@ class DesktopAppState(
         detailJobs.clear()
         cleanupAttachments(composerAttachmentsBySession.values.flatten())
         cleanupAttachments(pendingAttachments.values.flatten())
+        pendingDeliveries.clear()
         listJob?.cancel()
         gatewayStartJob?.cancel()
         scope.cancel()
         http.connectionPool.evictAll()
         http.dispatcher.executorService.shutdown()
     }
+}
+
+private class DesktopPendingDelivery(
+    val attempt: MessageDeliveryAttempt,
+    val text: String,
+    val attachments: List<DesktopAttachment>,
+) {
+    val lock = Mutex()
 }
 
 /** Uploads the files to the gateway and returns their upload ids. */
