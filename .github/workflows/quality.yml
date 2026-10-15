@@ -34,6 +34,9 @@ jobs:
           xvfb-run -a ./gradlew --console=plain
           :app:testDebugUnitTest :shared:allTests :gatewayClient:test :desktopApp:test
           :app:lintDebug :app:lintRelease :app:assembleRelease
+      - name: Compile isolated Android device tests
+        working-directory: android
+        run: ./gradlew --console=plain -PdeviceTests=true :app:assembleDeviceTestAndroidTest
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

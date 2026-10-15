@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <receiver android:name=".test.DeviceTestConfigReceiver" android:exported="true"
+            android:permission="android.permission.DUMP" />
+        <!-- Available only in the isolated .devicetest APK. -->
+        <activity android:name=".test.DeviceTestActivity" android:exported="false" />
+        <receiver android:name=".DebugConfigReceiver" android:exported="true"
+            android:permission="android.permission.DUMP" />
+    </application>
+</manifest>

@@ -51,6 +51,11 @@ android {
     }
 
     buildTypes {
+        create("deviceTest") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".devicetest"
+            matchingFallbacks += "debug"
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
@@ -60,6 +65,8 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
+    // Keep the existing debug JVM/CI tasks; opt in only for isolated device runs.
+    if (providers.gradleProperty("deviceTests").orNull == "true") testBuildType = "deviceTest"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -75,6 +82,11 @@ android {
         unitTests.isIncludeAndroidResources = true
     }
     sourceSets.getByName("test").resources.srcDir("schemas")
+    sourceSets.getByName("deviceTest").java.srcDir("src/debug/java")
+    // These tests reference the isolated variant's test host, never the normal APK.
+    if (providers.gradleProperty("deviceTests").orNull != "true") {
+        sourceSets.getByName("androidTest").java.setSrcDirs(emptyList<String>())
+    }
 }
 
 kotlin {
@@ -130,4 +142,14 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
     testImplementation(libs.okhttp.mockwebserver)
+
+    androidTestImplementation(libs.androidx.test.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.rules)
+    // Compose's transitive 3.5.0 uses an InputManager API removed on API 37.
+    androidTestImplementation(libs.androidx.test.espresso)
+    androidTestImplementation(platform(libs.compose.bom))
+    androidTestImplementation(libs.compose.ui.test.junit4)
+    androidTestImplementation(libs.okhttp.mockwebserver)
+    add("deviceTestImplementation", libs.compose.ui.test.manifest)
 }
