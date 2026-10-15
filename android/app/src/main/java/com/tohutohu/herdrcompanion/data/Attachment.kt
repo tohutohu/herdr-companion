@@ -5,6 +5,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import com.tohutohu.herdrcompanion.data.api.GatewayApi
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
 private const val MAX_UPLOAD_BYTES = 20 * 1024 * 1024
@@ -28,12 +29,14 @@ fun readAttachment(resolver: ContentResolver, uri: Uri): Attachment {
 /** Uploads a picked file to the gateway and returns its upload id. */
 suspend fun uploadAttachment(resolver: ContentResolver, api: GatewayApi, attachment: Attachment): String {
     val bytes = withContext(Dispatchers.IO) {
-        resolver.openInputStream(attachment.uri)?.use { it.readBytes() }
+        resolver.openInputStream(attachment.uri)?.use {
+            try {
+                it.readUploadBytes(MAX_UPLOAD_BYTES) { ensureActive() }
+            } catch (e: UploadTooLargeException) {
+                error("${attachment.name} is larger than ${MAX_UPLOAD_BYTES / (1024 * 1024)} MB")
+            }
+        }
             ?: error("cannot read ${attachment.name}")
-    }
-    // The gateway rejects anything larger, with a much vaguer message.
-    if (bytes.size > MAX_UPLOAD_BYTES) {
-        error("${attachment.name} is larger than ${MAX_UPLOAD_BYTES / (1024 * 1024)} MB")
     }
     return api.upload(bytes, attachment.mime, attachment.name)
 }
