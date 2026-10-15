@@ -1,6 +1,6 @@
 # Androidプロジェクト品質監査
 
-監査日: 2026-10-15。現在の追加対応と検証は末尾の「8. 追補」を優先する。基準コミット: `1104f86`（1.6.1）。Androidに加え、その共通UI・HTTPクライアント・Desktop利用側と、Gateway/Managerの信頼境界を調査した。
+監査日: 2026-10-15。現在の追加対応と検証は末尾の「9. 追補」を優先する。基準コミット: `1104f86`（1.6.1）。Androidに加え、その共通UI・HTTPクライアント・Desktop利用側と、Gateway/Managerの信頼境界を調査した。
 コード追跡、静的解析、独立した3担当の調査、既存テスト、障害条件の回帰テストを統合した記録である。全ファイルの行単位レビュー、侵入試験、全端末の動作保証ではない。
 
 ## 1. 構成と重要なデータフロー
@@ -275,3 +275,80 @@ GitHub公開APKを取得して`apksigner verify --print-certs`で比較したと
 
 まずこの節の確定結果と最新commitを確認する。500 MiB利用にはAndroid/DesktopのclientとGateway双方が必要。ローカルGateway app/DMGとAPKを生成しているが、稼働中の`/Applications`は置換していない。変更を実サービスへ入れる段階と、本番の送信/通知操作は分けて扱う。
 残る主な作業はAndroid OS実動作/URI権限寿命、通知失敗本文のアプリ内復旧UI、画面内Outboxへの同じ送信IDの活用、性能の実測、大画面/補助技術の実機評価、AGP移行である。
+
+
+## 9. 追補: 通常送信の再送とAndroid OS検証（2026-10-15）
+
+依頼「2,4あたり」に対応。前回の優先順位2（通常Outboxの重複送信）と4（Androidプラットフォーム上の検証）を進めた。500 MiBの添付上限とstreamingは維持している。
+
+### 9.1 通常送信の正確性（P1、修正済み）
+
+根本原因はAndroid OutboxとDesktopが初回/手動retryを別のPOSTとして送り、通知返信で導入したreceipt/requestIdを使っていなかったこと。受付後に応答だけ失われると、再送が同じ指示をもう一度providerへ渡す。AndroidのRetryは状態確認なしでjobを増やし、Desktopは成功済み添付も再uploadしていた。コード経路と実HTTPの応答切断で確認した。
+
+- `gatewayClient/.../api/MessageDeliveryAttempt.kt`: enqueue時のlocalId/接続先、本文、session、成功uploadIdsを1回の論理送信に固定する。receipt対応を確認したGatewayへ同requestIdを渡し、再試行時も同じJSONを送る。接続先変更、対応の後退、409では曖昧な再送を停止する。
+- `gatewayClient/.../api/GatewayApi.kt`: message POSTだけone-shot bodyにし、OkHttp内部の自動replayも止める。旧GatewayはrequestIdを無視し得るため、送信後の不確定な結果をクライアントから重ねない。通信前/upload段階の失敗は再試行できる。
+- `app/.../data/Outbox.kt`: FAILED→SENDINGのCASで二重Retryを防ぐ。UNDISPATCHEDでsession Mutexの待機列へ入り、dispatcherの実行順で指示が逆転するのを防ぐ。
+- `desktopApp/.../DesktopAppState.kt`: 同helper/添付ID保持とsession FIFOを使う。排他制御を追加した最初の実装ではFAILED表示直後のRetryがprivate lockに拒否される競合を回帰試験で検出し、lock解放後にFAILEDを公開するよう修正した。
+- `shared/.../detail/PendingMessageViews.kt`: 結果不明を「Not sent」と断定せず、会話確認を案内しRetryを無効化する。履歴に届いたメッセージとの既存照合は維持する。
+
+既存RepositoryとHTTP clientを使い、新しい永続schema/本番依存は導入していない。修正リスクは送信経路に限定される。旧Gatewayでは再送を保守的に止めるが、重複指示を防ぐための意図した挙動。provider実行そのもののexactly-onceや、通常Outboxのprocess kill後の再開を保証する変更ではない。commit: `50bf43c`。
+
+追加回帰は16件: Android4、gatewayClient7、Desktop3、共通UI2。受付後の応答切断でもprovider相当の副作用1回、同ID/本文/添付、upload1回、二重tap、FIFO、legacy停止、307自動replay停止、接続切替、409、対応後退を検証する。
+
+主な修正位置（repo相対、今回の最終source）:
+
+| ファイル | 行/責務 |
+|---|---|
+| `android/gatewayClient/src/main/kotlin/com/tohutohu/herdrcompanion/data/api/MessageDeliveryAttempt.kt` | 12: 論理送信のidentity/接続固定とretry可否 |
+| `android/gatewayClient/src/main/kotlin/com/tohutohu/herdrcompanion/data/api/GatewayApi.kt` | 188: one-shot message POST |
+| `android/app/src/main/java/com/tohutohu/herdrcompanion/data/Outbox.kt` | 79: retryのCAS、114以降: session直列配送 |
+| `android/desktopApp/src/main/kotlin/com/tohutohu/herdrcompanion/desktop/DesktopAppState.kt` | 810: 初回/retry共通配送と排他 |
+| `android/shared/src/commonMain/kotlin/com/tohutohu/herdrcompanion/ui/detail/PendingMessageViews.kt` | 115/122: 結果不明表示とRetry無効化 |
+
+### 9.2 Androidテストの隔離と再現性
+
+Google公式 `testing-setup` / `android-cli` skillを使用し、[instrumented testing](https://developer.android.com/training/testing/instrumented-tests)、[ActivityScenario](https://developer.android.com/reference/androidx/test/core/app/ActivityScenario)を参照した。手動DIと既存JUnitを維持し、テストのためのDI frameworkは追加していない。
+
+`deviceTest` variantはapplicationId suffix `.devicetest` を持ち、instrumentedコードはそのsuffixを権限操作・Settings/DB変更より先に検証する。通常debugのJVM/CI taskは維持し、`-PdeviceTests=true`の時だけこのテストを有効にする。deviceTest専用host Activityは非exported、adb設定ReceiverはDUMP保護。通常APKには含めない。
+
+実行は `scripts/run-android-device-tests.sh` に集約し、serial必須・ゼロ件成功防止・失敗ログ保存・スクリーンショット回収を行う。CIは専用テストAPKのコンパイルも行う。[詳しい再現手順](android-device-testing.md)を追加した。端末内MockWebServerと実WorkManager/Room/Android Activity/PendingIntentを使い、実利用のHerdr/providerに接続しない。
+
+初回Android37のテストは、Compose経由のEspresso3.5.0が削除済みInputManager.getInstanceを呼び7件ともテスト基盤内で失敗した。実アプリの障害とは区別し、[公式修正情報](https://developer.android.com/jetpack/androidx/releases/test#espresso-3.7.0)とローカルAARを確認して、instrumented依存に修正済み3.7.0を明示した。SDK37の初期起動ではSystem UI等にもANRが起こり、最初の実行は中断した。テスト件数や成功と混同しない。
+
+### 9.3 検証の確定結果
+
+変更前の既知基準は追補8のJVM331件green。今回の最終統合では、追加16件を含む347件が全成功した。新規test harnessの失敗は下に分離している。
+
+| 対象 | 確定結果 |
+|---|---|
+| JVM | app **173**、gatewayClient **20**、Desktop **87**、shared **67**。計 **347件**、failure/error/skipped 0 |
+| Android instrumented | 専用Google Play ARM64/Android37 AVDで **7件全成功**、49.464s。別途、WorkManager履歴を消さずchain試験を再実行して **1件成功**（3.855s、件数に重複加算しない） |
+| Activity/Compose | 日本語・絵文字・複数選択の回答、添付metadata、履歴位置を実Android Bundle経由で再生成後に復元。履歴閲覧中の追加入力でも最新へ飛ばない |
+| Android通知/Worker | 合成SDK push→実Service→PrefetchWorker→Room→実通知PendingIntent→詳細→Activity再生成。長文RemoteInput→実ReplyWorker→HTTP→再取得Roomの本文一致。503の実backoffと同ID再試行、先行400時の後続chain成功 |
+| 本物のFCM/background | private fixtureに専用端末1台だけ登録し、現ソースをbuildしたCLIから送信。background通知Record（completed_v2/importance4）とHTTP先読みを確認 |
+| 本物のFCM/process | backgroundの `am kill` 後、pid消失を確認。次のFCMで新processが起動して先読み成功。force-stopの代用ではない。OSの自然なLMKや送信中killの保証とは区別 |
+| 本物のFCM/Doze | `mScreenOn=false` / `mCharging=false` / `mState=IDLE` を確認し、高優先度FCMから先読み成功。強制IDLEであり、自然な長時間Doze/OEM省電力の検証ではない |
+| 本物のFCM/回線断 | wifi/data両方を無効にし `Active default network: none` を確認。FCM送信後5秒間HTTP取得数は不変、回線復帰後に取得成功 |
+| 実DB保存 | FCM試験後の専用アプリのRoom DB/WALをprivate directoryへ取得し、session `test:notification` と本文 `Isolated push transcript` の保存をSQLiteで確認。FCM試験のHTTP取得計5、message POST 0 |
+| Lint | Debug **Error0 / Warning38**、Release **Error0 / Warning39**。前回確定値と同数。test依存はversion catalogへ登録し、新たなUseTomlInstead警告を残していない |
+| Release | `:app:assembleRelease`成功。R8 minify/resource shrinkingとも有効。最終統合GradleはBUILD SUCCESSFUL（4m34s、cache込み、アプリ性能比較ではない） |
+| 署名/隔離 | APKの証明書SHA256は固定Mac鍵 `4f77a2d3dd622cbd9b598825506f8bf978ef0aafd428fc4ed189969f5ca628a9`。aapt2でrelease ManifestにDeviceTest/DebugConfigReceiver/.devicetestが無いことを確認 |
+| 画像 | 実端末から質問・履歴の2PNGを回収して目視確認。日本語/選択/過去履歴が見え、composerとも重ならない。今回の変更前とのpixel比較は未実施。Retryの有効/無効と文言は共通UI回帰試験で確認 |
+| CI/差分 | 既存CIのJVM/Lint/releaseに専用テストAPK compileを追加。ローカルで専用compile/実行スクリプト成功、`git diff --check`成功。remote CI実行は未実施 |
+| Go/Swift | 今回production変更なし。隔離Gateway CLIの `go build` 成功。Go/Swift testは前追補の結果を維持し今回は再実行していない |
+
+途中で検出・修正した失敗: 新variantの無条件testBuildTypeで既存testDebugUnitTestが消える構成をopt-inへ変更、Robolectricの非generic getApplication呼出しを訂正、前述のDesktop Retry競合を修正。端末harnessはEspresso3.5.0/API37不整合、通知によるMAIN→VIEW変更をActivityScenarioが追跡できない不整合、固定接続IDによるWorkManager履歴件数の混入を順に修正した。最終7件と履歴保持後の再試験は成功しており、appの既存障害として報告しない。初回のSystem UI等のANR、Android36の新規AVD起動未完了は環境上の中断で、API36の実行結果はない。最終の実測プラットフォームはAndroid37のみ。
+
+APK: `android/app/build/outputs/apk/release/app-release.apk`、**6,361,172 bytes**、SHA256 `8cef5f4f8ab2413e5e46e18eb5dfeb0a4c9940fa4d3c74e608a692cb7fee55d8`。
+
+再生成可能な成果物は `android/app/build/reports/device-tests/`（instrumentation.log、fcm-results.json、2PNG）、Gradleの各test-results/Lint report。実行ログは `/private/tmp/herdr-final-checks.log`、`/private/tmp/herdr-instrumented-passed.log`、`/private/tmp/herdr-chain-repeat.log`。実FCMは `scripts/android-device-fixture.py` / `scripts/configure-android-device-test.py` と前述の[手順](android-device-testing.md)で再開できる。fixtureはpush/prefetch専用でmessage送信は501、idempotencyはfalseを返す。通常アプリ/実Gatewayのconfig/実Herdr sessionは操作せず、private一時config・専用AVDだけを使用した。終了時に強制Doze/battery設定を戻し、専用エミュレータとfixtureを停止、専用AVD・一時token/config・DB snapshotを削除した（実行中の他5台のエミュレータには操作しない）。本番アプリ差替、公開release、git pushは実行していない。
+
+未検証: 実機/OEM、Android29〜36での実動作、自然な長時間Doze、送信途中のOS kill、大容量uploadの実機メモリ、文書providerごとのURI grant/revoke・寿命、TalkBack/大画面/200%font、release APKの端末上の操作。端末上の今回のテストはdebug相当の隔離variantであり、releaseはR8 build/Lint/署名までを検証した。
+
+### 9.4 更新後の残課題
+
+1. P1: 大容量の通常送信はアプリscopeのため、OSによるprocess kill後のupload/送信継続は未対応。永続OutboxとURIの扱い、foreground transferの要否を設計する。
+2. P1/P2: 通知返信の失敗本文はprivate保存されるが、アプリ内の一覧・コピー・明示再試行UIは未追加。後続通知による上書きもこのUIで回復できるようにする。
+3. P2: Androidプラットフォーム検証は下の確定範囲に限る。OEM省電力、実機radio/自然な長時間Doze、提供元別URI権限寿命、TalkBack/フォント拡大/大画面を継続する。
+4. P2: 起動/フレーム/500 MiB時peak heap・batteryのPerfetto等による計測。今回のbuild/test所要時間をアプリ性能の改善指標として扱わない。
+5. P2: AGP10に向けたDSL/built-in Kotlin移行と公開配布の運用検証。依存の一括更新や既存ユーザーデータの破壊的移行は行っていない。

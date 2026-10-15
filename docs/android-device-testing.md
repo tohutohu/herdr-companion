@@ -13,7 +13,7 @@ HERDR_DEVICE_TEST_SERIAL=emulator-XXXX bash scripts/run-android-device-tests.sh
 
 ## 実FCM・background・Doze・process kill
 
-専用エミュレータと専用APKだけを対象にする。以下のfixtureはloopbackにだけbindし、Herdrやproviderを呼ばない。既存設定から読むのはFirebaseクライアント設定だけ。サービスアカウントは既存Gatewayの `notify-test` にだけパスで渡す。tokenを含む一時ファイルはprivate directory/mode 600で保存し、終了時に削除する。
+専用エミュレータと専用APKだけを対象にする。実FCMにはGoogle Playイメージと有効なPlay services/Play Storeを使う。以下のfixtureはloopbackにだけbindし、Herdrやproviderを呼ばない。既存設定から読むのはFirebaseクライアント設定だけ。サービスアカウントは既存Gatewayの `notify-test` にだけパスで渡す。tokenを含む一時ファイルはprivate directory/mode 600で保存し、終了時に削除する。
 
 ```bash
 task_device_state=$(mktemp -d /private/tmp/herdr-device-fixture.XXXXXX)
@@ -25,13 +25,13 @@ python3 scripts/configure-android-device-test.py --serial emulator-XXXX \
   --settings "$task_device_state/settings.json"
 adb -s emulator-XXXX shell pm grant com.tohutohu.herdrcompanion.devicetest android.permission.POST_NOTIFICATIONS
 adb -s emulator-XXXX shell am start -n com.tohutohu.herdrcompanion.devicetest/com.tohutohu.herdrcompanion.MainActivity
-adb -s emulator-XXXX shell input keyevent KEYCODE_HOME
 ```
 
-`counts.json` のdevicesが1になってから、**一時configだけ**を指定して送る。通常利用中configを `notify-test` に指定しない（全登録端末へ送られる）。最新ソースのCLIを一時directoryへビルドして使う。
+初回のtoken取得が完了し、`counts.json` のdevicesが1になるまでアプリをforegroundに保つ。その後HOMEへ移動して、**一時configだけ**を指定して送る。通常利用中configを `notify-test` に指定しない（全登録端末へ送られる）。最新ソースのCLIを一時directoryへビルドして使う。
 
 ```bash
 (cd gateway && env -u GOROOT go build -o "$task_device_state/gateway" ./cmd/herdr-mobile-gateway)
+adb -s emulator-XXXX shell input keyevent KEYCODE_HOME
 HERDR_MOBILE_CONFIG="$task_device_state/gateway-config.json" "$task_device_state/gateway" notify-test
 ```
 
