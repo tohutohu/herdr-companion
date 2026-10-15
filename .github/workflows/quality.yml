@@ -1,0 +1,54 @@
+name: Quality checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: "platforms;android-37.0"
+      - name: Install desktop test runtime
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libegl1 libgl1 xvfb xauth
+      - name: Test, lint and build optimized APK
+        working-directory: android
+        run: >-
+          xvfb-run -a ./gradlew --console=plain
+          :app:testDebugUnitTest :shared:allTests :gatewayClient:test :desktopApp:test
+          :app:lintDebug :app:lintRelease :app:assembleRelease
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: android-quality-reports
+          path: android/**/build/reports/
+  gateway:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.x"
+          cache-dependency-path: gateway/go.sum
+      - name: Test and vet
+        working-directory: gateway
+        run: |
+          env -u GOROOT go test ./...
+          env -u GOROOT go vet ./...

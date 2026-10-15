@@ -80,11 +80,32 @@ jobs:
         working-directory: macos
         run: swift test
 
+      - name: Restore persistent Android signing key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Missing persistent Android signing secret: $name. Refusing an APK signed by an ephemeral key." >&2
+              exit 1
+            fi
+          done
+          KEYSTORE_PATH="$RUNNER_TEMP/herdr-android-release.keystore"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -D > "$KEYSTORE_PATH"
+          chmod 600 "$KEYSTORE_PATH"
+          echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH" >> "$GITHUB_ENV"
+
       - name: Build Android release APK
         working-directory: android
         env:
           VERSION: ${{ needs.metadata.outputs.version }}
           BUILD: ${{ needs.metadata.outputs.build }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           ./gradlew --console=plain :app:assembleRelease \
             "-Pherdr.version=$VERSION" \
@@ -156,6 +177,7 @@ jobs:
             security delete-keychain "$HERDR_CI_KEYCHAIN" >/dev/null 2>&1 || true
           fi
           rm -f "$RUNNER_TEMP/herdr-developer-id.p12"
+          rm -f "$RUNNER_TEMP/herdr-android-release.keystore"
 
   linux:
     needs: metadata

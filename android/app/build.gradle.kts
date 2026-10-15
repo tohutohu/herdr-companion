@@ -40,13 +40,23 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    val releaseKeystore = providers.environmentVariable("ANDROID_KEYSTORE_PATH").orNull
+    if (releaseKeystore != null) {
+        signingConfigs.create("stableRelease") {
+            storeFile = file(releaseKeystore)
+            storePassword = providers.environmentVariable("ANDROID_KEYSTORE_PASSWORD").get()
+            keyAlias = providers.environmentVariable("ANDROID_KEY_ALIAS").get()
+            keyPassword = providers.environmentVariable("ANDROID_KEY_PASSWORD").get()
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            // No release keystore yet; the debug key makes the APK installable
-            // (and lets it update an installed debug build).
-            signingConfig = signingConfigs.getByName("debug")
+            // Local builds retain the existing installable debug-key behavior.
+            // Release CI supplies a persistent key, never a fresh runner's key.
+            signingConfig = signingConfigs.getByName(if (releaseKeystore != null) "stableRelease" else "debug")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }

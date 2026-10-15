@@ -181,7 +181,7 @@ hc-darwin-arm64  hc-darwin-amd64  hc-linux-amd64  hc-linux-arm64  hc-windows-amd
 
 `hc`はcgoなしの純Goなので、1台のUbuntu runnerで全プラットフォーム向けにクロスコンパイルし、`-X main.version`でreleaseのversionを埋め込みます（`hc version`で確認できる）。`releases/latest/download/hc-<os>-<arch>`で常に最新版を取れるよう、asset名にversionを入れません。
 
-Android APKは`assembleRelease`で生成し、R8とリソース圧縮を有効にした状態で配布します。現在のプロジェクト設定ではreleaseもdebug署名キーを使うため、Play Store提出用ではなく、直接インストールできる共有APKです。Firebase設定は内蔵せず、Macとのペアリング時に取り込みます。
+Android APKは`assembleRelease`で生成し、R8とリソース圧縮を有効にした状態で配布します。ローカルでは既存debug署名キーを使い、配布CIでは同じMac鍵をGitHub Secretsから復元して固定署名します。Play Store提出用ではなく、直接インストールできる共有APKです。Firebase設定は内蔵せず、Macとのペアリング時に取り込みます。
 
 CIへ設定するsecret名:
 
@@ -239,3 +239,12 @@ tag名と`version.properties`が一致しないreleaseはwrapperが停止しま�
 5. login itemは`SMAppService.mainApp`で管理し、承認待ち状態からSystem Settingsを開ける
 
 次フェーズでは、stable/beta等のrelease channel、独立したupdate signing、旧bundle保持によるrollbackを検討します。
+
+### Android署名鍵の固定
+
+CIは`ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`の4つのRepository Secretsを必要とします。未設定なら公開APK生成前に失敗し、fresh runnerの一時的なdebug鍵で署名したAPKを公開しません。秘密鍵はrunnerの一時ディレクトリへmode 600で復元し、job終了時に削除します。Gradleは`ANDROID_KEYSTORE_PATH`と残り3環境変数で固定鍵を使います。認証情報やkeystoreをリポジトリへ置かないでください。
+
+2026-10-15に所有者の承認を得て、このMacの既存Android鍵を登録しました。証明書SHA-256は`4f77a2d3dd622cbd9b598825506f8bf978ef0aafd428fc4ed189969f5ca628a9`です。ローカル既存APKと今後のCIの署名を揃えます。
+公開済みv1.6.0（`e5e4f6db1feb64dfadcf8d1d27283922b29551f9d8a96f97a12621987cd6d9c8`）とv1.6.1（`9aba26c05af36b3e2bae51f9adc46cb0bceabac6caa649ade24bd4aa368fe713`）は異なる署名でした。その秘密鍵は今回のローカル鍵ではないため、それらのAPKへ署名互換の上書き更新を可能にはしません。対象端末を無断でアンインストールせず、移行方法は設定・データの扱いとともに判断してください。
+
+PRとmain pushでは`quality.yml`がAndroid/JVM/shared tests、debug/release lint、R8付きrelease assemble、Go test/vetを実行します。この品質確認用APKは公開しません。署名を要する正式公開は従来のrelease workflowで行います。
