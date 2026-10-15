@@ -66,11 +66,12 @@ class SessionRepository(
      */
     suspend fun refreshMessages(sessionId: String, full: Boolean = false) {
         val anchor = if (full) null else db.messages().lastId(sessionId)
-        val resp = if (anchor == null) {
-            api.messages(sessionId)
+        val snapshot = if (anchor == null) {
+            null
         } else {
             api.messagesIfChanged(sessionId, after = anchor) ?: return
         }
+        val resp = snapshot?.response ?: api.messages(sessionId)
         val now = System.currentTimeMillis()
         // An archived session is only listed while it runs.
         val s = resp.session
@@ -81,6 +82,7 @@ class SessionRepository(
         val start = if (incremental) anchorPos!! else 0
         val rows = resp.messages.mapIndexed { i, m -> m.toEntity(sessionId, start + i) }
         db.messages().replaceFrom(sessionId, start, rows)
+        snapshot?.acknowledge()
     }
 
     /**

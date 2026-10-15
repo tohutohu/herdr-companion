@@ -8,6 +8,7 @@ import com.tohutohu.herdrcompanion.data.SendState
 import com.tohutohu.herdrcompanion.data.api.GatewayApi
 import com.tohutohu.herdrcompanion.data.api.InteractionResponseDto
 import com.tohutohu.herdrcompanion.data.api.MessageDto
+import com.tohutohu.herdrcompanion.data.api.MessageSnapshot
 import com.tohutohu.herdrcompanion.data.api.MessagesResponse
 import com.tohutohu.herdrcompanion.data.api.Status
 import com.tohutohu.herdrcompanion.model.SessionUiModel
@@ -626,6 +627,7 @@ class DesktopAppState(
                 if (first) repository.session(id)
                 val since = anchor.takeUnless { first || reload }
                 var notice: ReloadNotice? = detailsBySession[id]?.reloadNotice
+                var snapshot: MessageSnapshot? = null
                 val response = if (reload) {
                     val r = repository.reload(id, pendingInteractionIds(messages))
                     notice = reloadNotice(r.findings)
@@ -633,7 +635,7 @@ class DesktopAppState(
                 } else if (since == null) {
                     repository.messageSnapshot(id)
                 } else {
-                    repository.changedMessageSnapshot(id, since)
+                    repository.changedMessageSnapshot(id, since).also { snapshot = it }?.response
                 }
                 if (response == null) {
                     // Unchanged; only clear an error left by an earlier poll.
@@ -660,6 +662,7 @@ class DesktopAppState(
                         sendOnEnter = true,
                         sendWithModifier = false,
                     ))
+                    snapshot?.acknowledge()
                     if (reload && notice != null) clearReloadNoticeLater(id, notice)
                     first = false
                     logger.fine("session detail refreshed")

@@ -38,6 +38,15 @@ data class DownloadMetadata(
     val contentLength: Long,
 )
 
+/** A conditional response whose ETag becomes usable only after its consumer applies it. */
+class MessageSnapshot internal constructor(
+    val response: MessagesResponse,
+    private val rememberTag: () -> Unit,
+) {
+    /** Call after updating the local messages; cancellation or a failed write must leave it unacknowledged. */
+    fun acknowledge() = rememberTag()
+}
+
 /** Thin OkHttp client for the gateway HTTP API, shared by Android and Desktop JVM. */
 class GatewayApi(
     private val http: OkHttpClient,
@@ -124,14 +133,17 @@ class GatewayApi(
     suspend fun messages(id: String, after: String? = null): MessagesResponse =
         get(url("v1", "sessions", id, "messages", query = mapOf("after" to after)))
 
-    /** The ETag of each session's last messages response, and the URL it answered. */
+    /** The ETag of each session's last applied messages response, and the URL it answered. */
     private val messageTags = ConcurrentHashMap<String, Pair<HttpUrl, String>>()
 
     /**
      * Like [messages], but returns null when the gateway reports the response
-     * unchanged since this client last received it for the same request.
+     * unchanged since this client last applied it for the same request.
+     * A received response must be [acknowledged][MessageSnapshot.acknowledge]
+     * after it has been applied, so cancellation cannot advance the ETag
+     * past the consumer's cached messages.
      */
-    suspend fun messagesIfChanged(id: String, after: String? = null): MessagesResponse? {
+    suspend fun messagesIfChanged(id: String, after: String? = null): MessageSnapshot? {
         val url = url("v1", "sessions", id, "messages", query = mapOf("after" to after))
         val known = messageTags[id]?.takeIf { it.first == url }?.second
         val req = request(url).get().apply { if (known != null) header("If-None-Match", known) }.build()
@@ -140,8 +152,9 @@ class GatewayApi(
                 if (known != null && resp.code == 304) return@use null
                 val body = json.decodeFromString<MessagesResponse>(bodyOrThrow(resp))
                 val etag = resp.header("ETag")
-                if (etag != null) messageTags[id] = url to etag else messageTags.remove(id)
-                body
+                MessageSnapshot(body) {
+                    if (etag != null) messageTags[id] = url to etag else messageTags.remove(id)
+                }
             }
         }
     }

@@ -2,9 +2,14 @@ package com.tohutohu.herdrcompanion.data.api
 
 import com.tohutohu.herdrcompanion.data.Settings
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.withContext
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import okhttp3.OkHttpClient
+import okhttp3.Call
+import okhttp3.EventListener
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -255,14 +260,56 @@ class GatewayApiTest {
         server.enqueue(MockResponse.Builder().code(304).addHeader("ETag", "\"v1\"").build())
         server.enqueue(MockResponse.Builder().addHeader("ETag", "\"v2\"").body(body).build())
 
-        assertEquals("running", api.messagesIfChanged("claude:s1", after = "m1")!!.session.status)
+        val snapshot = api.messagesIfChanged("claude:s1", after = "m1")!!
+        assertEquals("running", snapshot.response.session.status)
+        snapshot.acknowledge()
         assertNull(server.takeRequest().headers["If-None-Match"])
 
         assertNull(api.messagesIfChanged("claude:s1", after = "m1"))
         assertEquals("\"v1\"", server.takeRequest().headers["If-None-Match"])
 
         // 別の anchor への要求には前回の ETag を送らない。
-        assertEquals("running", api.messagesIfChanged("claude:s1", after = "m2")!!.session.status)
+        assertEquals("running", api.messagesIfChanged("claude:s1", after = "m2")!!.response.session.status)
+        assertNull(server.takeRequest().headers["If-None-Match"])
+    }
+
+    @Test
+    fun `ローカル反映に失敗した応答のETagは次の取得を省略しない`() = runBlocking {
+        val body = """{"session":{"id":"claude:s1","provider":"claude","status":"running","updatedAt":"2026-09-17T10:00:00Z"},"messages":[]}"""
+        repeat(3) { index ->
+            server.enqueue(MockResponse.Builder().addHeader("ETag", "\"v${index + 1}\"").body(body).build())
+        }
+        api.messagesIfChanged("claude:s1", after = "m1")!!.acknowledge()
+        assertNull(server.takeRequest().headers["If-None-Match"])
+
+        // A failed Room write or desktop mapping leaves the newer response unacknowledged.
+        api.messagesIfChanged("claude:s1", after = "m1")!!
+        assertEquals("\"v1\"", server.takeRequest().headers["If-None-Match"])
+
+        api.messagesIfChanged("claude:s1", after = "m1")!!
+        assertEquals("\"v1\"", server.takeRequest().headers["If-None-Match"])
+    }
+
+    @Test
+    fun `応答受信中にキャンセルされても未反映のETagを記憶しない`() = runBlocking {
+        val body = """{"session":{"id":"claude:s1","provider":"claude","status":"running","updatedAt":"2026-09-17T10:00:00Z"},"messages":[]}"""
+        repeat(2) { server.enqueue(MockResponse.Builder().addHeader("ETag", "\"v1\"").body(body).build()) }
+        val receiving = Job()
+        val http = OkHttpClient.Builder().eventListener(object : EventListener() {
+            override fun responseBodyEnd(call: Call, byteCount: Long) {
+                // The blocking read finishes, but withContext cannot deliver its result.
+                receiving.cancel()
+            }
+        }).build()
+        val cancellingApi = GatewayApi(http) { Settings(server.url("/").toString(), "secret") }
+
+        val failure = runCatching {
+            withContext(receiving) { cancellingApi.messagesIfChanged("claude:s1", after = "m1") }
+        }.exceptionOrNull()
+        assertTrue(failure is CancellationException)
+        assertNull(server.takeRequest().headers["If-None-Match"])
+
+        cancellingApi.messagesIfChanged("claude:s1", after = "m1")!!
         assertNull(server.takeRequest().headers["If-None-Match"])
     }
 
