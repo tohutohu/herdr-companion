@@ -1,5 +1,6 @@
 package com.tohutohu.herdrcompanion.data
 
+import androidx.room.withTransaction
 import com.tohutohu.herdrcompanion.data.api.BlockDto
 import com.tohutohu.herdrcompanion.data.api.GatewayApi
 import com.tohutohu.herdrcompanion.data.api.InteractionResponseDto
@@ -12,8 +13,11 @@ import com.tohutohu.herdrcompanion.data.db.MessageEntity
 import com.tohutohu.herdrcompanion.data.db.SessionEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.builtins.ListSerializer
 import java.time.Instant
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Room is the UI's read source; this class pulls from the gateway and
@@ -24,6 +28,8 @@ class SessionRepository(
     private val api: GatewayApi,
 ) {
     private val blocksSerializer = ListSerializer(BlockDto.serializer())
+    private val listingLock = Mutex()
+    private val messageLocks = ConcurrentHashMap<String, Mutex>()
 
     fun observeSessions(): Flow<List<SessionEntity>> = db.sessions().observeListed()
 
@@ -50,7 +56,7 @@ class SessionRepository(
             }
         }
 
-    suspend fun refreshSessions() {
+    suspend fun refreshSessions() = listingLock.withLock {
         val now = System.currentTimeMillis()
         val sessions = api.sessions()
         db.sessions().replaceListing(sessions.map { it.toEntity(now, listed = true) })
@@ -64,24 +70,25 @@ class SessionRepository(
      * in-progress changes to it are picked up. An incremental fetch the
      * gateway reports unchanged leaves the cache as it is.
      */
-    suspend fun refreshMessages(sessionId: String, full: Boolean = false) {
+    suspend fun refreshMessages(sessionId: String, full: Boolean = false): Unit = messageLock(sessionId).withLock {
         val anchor = if (full) null else db.messages().lastId(sessionId)
         val snapshot = if (anchor == null) {
             null
         } else {
-            api.messagesIfChanged(sessionId, after = anchor) ?: return
+            api.messagesIfChanged(sessionId, after = anchor) ?: return@withLock
         }
         val resp = snapshot?.response ?: api.messages(sessionId)
         val now = System.currentTimeMillis()
         // An archived session is only listed while it runs.
         val s = resp.session
-        db.sessions().upsert(listOf(s.toEntity(now, listed = !s.archived || s.isLive)))
-
-        val anchorPos = anchor?.let { db.messages().positionOf(sessionId, it) }
-        val incremental = anchor != null && anchorPos != null && resp.messages.firstOrNull()?.id == anchor
-        val start = if (incremental) anchorPos!! else 0
-        val rows = resp.messages.mapIndexed { i, m -> m.toEntity(sessionId, start + i) }
-        db.messages().replaceFrom(sessionId, start, rows)
+        db.withTransaction {
+            db.sessions().upsert(listOf(s.toEntity(now, listed = !s.archived || s.isLive)))
+            val anchorPos = anchor?.let { db.messages().positionOf(sessionId, it) }
+            val incremental = anchor != null && anchorPos != null && resp.messages.firstOrNull()?.id == anchor
+            val start = if (incremental) requireNotNull(anchorPos) else 0
+            val rows = resp.messages.mapIndexed { i, m -> m.toEntity(sessionId, start + i) }
+            db.messages().replaceFrom(sessionId, start, rows)
+        }
         snapshot?.acknowledge()
     }
 
@@ -90,13 +97,17 @@ class SessionRepository(
      * replaces the cached one. [shown] are the pending interactions on screen;
      * returns what the gateway found missed.
      */
-    suspend fun reloadMessages(sessionId: String, shown: List<String>): List<ReloadFindingDto> {
+    suspend fun reloadMessages(sessionId: String, shown: List<String>): List<ReloadFindingDto> = messageLock(sessionId).withLock {
         val resp = api.reload(sessionId, shown)
         val s = resp.session
-        db.sessions().upsert(listOf(s.toEntity(System.currentTimeMillis(), listed = !s.archived || s.isLive)))
-        db.messages().replaceFrom(sessionId, 0, resp.messages.mapIndexed { i, m -> m.toEntity(sessionId, i) })
-        return resp.findings
+        db.withTransaction {
+            db.sessions().upsert(listOf(s.toEntity(System.currentTimeMillis(), listed = !s.archived || s.isLive)))
+            db.messages().replaceFrom(sessionId, 0, resp.messages.mapIndexed { i, m -> m.toEntity(sessionId, i) })
+        }
+        resp.findings
     }
+
+    private fun messageLock(sessionId: String): Mutex = messageLocks.getOrPut(sessionId) { Mutex() }
 
     suspend fun archivedSessions(offset: Int, limit: Int): SessionsResponse = api.archivedSessions(offset, limit)
 

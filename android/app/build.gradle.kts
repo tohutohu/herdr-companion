@@ -60,6 +60,11 @@ android {
         compose = true
         buildConfig = true
     }
+
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
+    sourceSets.getByName("test").resources.srcDir("schemas")
 }
 
 kotlin {
@@ -113,5 +118,6 @@ dependencies {
     implementation(libs.androidx.fragment)
 
     testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
     testImplementation(libs.okhttp.mockwebserver)
 }
