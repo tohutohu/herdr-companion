@@ -1,6 +1,6 @@
 # Androidプロジェクト品質監査
 
-監査日: 2026-10-15。基準コミット: `1104f86`（1.6.1）。Androidに加え、その共通UI・HTTPクライアント・Desktop利用側と、Gateway/Managerの信頼境界を調査した。
+監査日: 2026-10-15。現在の追加対応と検証は末尾の「8. 追補」を優先する。基準コミット: `1104f86`（1.6.1）。Androidに加え、その共通UI・HTTPクライアント・Desktop利用側と、Gateway/Managerの信頼境界を調査した。
 コード追跡、静的解析、独立した3担当の調査、既存テスト、障害条件の回帰テストを統合した記録である。全ファイルの行単位レビュー、侵入試験、全端末の動作保証ではない。
 
 ## 1. 構成と重要なデータフロー
@@ -137,7 +137,7 @@ git diff --check
 - 添付7 tests成功: 空/上限同値/1byte超過/サイズ不明巨大入力/short read/zero read/cancel。実際の読み出しバイト数が最大20MiB+1に収まることをassert。
 - ETag API tests 16件成功（2件追加）。旧eager-tag保存を一時的に戻すと追加2件が失敗し、修正へ戻すと成功。
 - 質問Compose tests 2件成功。旧rememberでは保存・再生成後のAnswer有効性のテストが失敗、修正後は選択/日本語入力をそのまま送信できる。別interaction IDに旧回答を送信しないことも確認。
-- 質問再生成前後の画像をpixel一致比較して成功し、生成画像を目視確認。`android/shared/build/reports/audit-ui/question-before-recreation.png`と`question-after-recreation.png`（500×299、Desktop描画）。Androidの実画面スクリーンショットとは区別する。
+- 質問再生成前後の画像をpixel一致比較して成功し、生成画像を目視確認。`android/shared/build/reports/audit-ui/question-before-recreation.png`と`question-after-recreation.png`（500×298、Desktop描画）。Androidの実画面スクリーンショットとは区別する。
 - `:app:analyzeReleaseR8Config`成功。HTML/PBは`android/app/build/reports/r8/`。独自の広域keepはなく、この監査でkeep削除はしていない。
 - 最終全体検証の結果は下の確定欄を参照。
 
@@ -167,7 +167,7 @@ adbには既存エミュレータが接続済みだったが、Android instrumen
 | R8 config analyzer | 成功、21s。skill独自変換は前述の欠落で未実施 |
 | Go test / vet | 成功（ソース変更なし、変更前実行） |
 | Swift Manager | **6 tests** / failures 0（ソース変更なし） |
-| UI画像比較 | 再生成前後500×299画像のpixel一致。PNG SHA-256も両方`cb97122f8db022184f656b0e5e8b92863406abb2a6a614eebf623dcef8c858d9` |
+| UI画像比較 | 再生成前後500×298画像のpixel一致。PNG SHA-256も両方`cb97122f8db022184f656b0e5e8b92863406abb2a6a614eebf623dcef8c858d9` |
 | Release APK | `android/app/build/outputs/apk/release/app-release.apk`、6,312,020 bytes。SHA-256 `0018d4505dcac07abda554a57b75e0402502fbcba73c90ab366387e1667a0522`。debug鍵署名という既存配布方式を維持 |
 | 差分レビュー | 修正3件を独立commit。別担当のread-onlyレビューでも重大な回帰なし。`git diff --check`成功。依存/Room schema/本番設定の変更なし |
 
@@ -193,3 +193,85 @@ JVM/Composeの合計は295 tests（追加11件を含む）。Swiftの6件とは�
 - [WorkManagerのwork管理](https://developer.android.com/develop/background-work/background-tasks/persistent/how-to/manage-work): unique workと失敗・依存関係。
 - [Androidのアプリ署名](https://developer.android.com/studio/publish/app-signing): A06の署名継続性とdebug keystore。
 - [Compose performance](https://developer.android.com/develop/ui/compose/performance/bestpractices)、[semantics](https://developer.android.com/develop/ui/compose/accessibility/semantics): A12/A13の今後の測定・操作検証。
+
+## 8. 追補: 残課題と500 MiB添付への対応（2026-10-15）
+
+この節が現在の状態を示す。1〜7節の件数・commit・20 MiB仕様は初回監査時の履歴である。利用者の追加依頼に基づき、初回の最大3件という実装枠の後に、以下を追加実装した。
+
+### 大きな添付をメモリに積まず送る
+
+AndroidとDesktopの全量ByteArray読み込みを廃止し、共通`StreamingUploadBody`が64 KiB単位でInputStreamから送信する。上限を既存20 MiBから**500 MiB（524,288,000 bytes）**へ変更し、Gatewayの受信上限も揃えた。未知サイズもchunkedで扱い、上限+1 byteまでに停止する。既知サイズの超過は送信前に拒否する。読取り中のサイズ変化、short/zero read、provider例外、キャンセルでもstreamを閉じる。
+
+転送全体の時間枠は30分、書込みが停滞した場合は60秒。one-shot request bodyとして、HTTP redirect/retryで文書URIを勝手に再読込しない。送信を再操作した場合にはsourceを開き直せる。旧`UploadBytes.kt`と旧20 MiB helperテストは利用0を確認して削除し、streamingの境界/HTTPテストに置き換えた。
+
+- Go HTTPテストで500 MiBを実送信し、保存サイズ一致を確認した。上限+1の413と不完全ファイル削除、中断時cleanupも確認。
+- JVMでは500 MiBの生成streamを消費し、最大read要求が64 KiBであることを検証。500 MiBをMockWebServerに蓄積して試験する方式は使わない。
+- Androidのpicker metadataと保存状態にsizeを引き継ぎ、復元後も既知サイズを活かす。旧triplet形式の保存状態はサイズ不明として復元する。
+- Gatewayまでの転送容量であり、個々のエージェントが処理できる形式・画像等の上限を拡張するものではない。
+
+### バックログの現在地
+
+| ID | 追加対応 | 現在の限界 |
+|---|---|---|
+| A02 | **更新済**: Android/Desktop/Gatewayの500 MiB streaming、実転送/境界テスト | 本番の旧Gatewayも更新が必要。モバイル回線500 MiB実転送や実機peak heapは未測定。通常OutboxはアプリscopeでありOSによるプロセス終了後の転送継続を保証しない |
+| A04 | **修正済**: 通知返信本文をprivate fileへatomic保存し、WorkManager DataはUUIDのみ。40,000回の日本語/emojiを含む長文でDataが512bytes未満と本文保持をRobolectric検証 | Notification表示用のpreviewだけ2000文字に制限するが、送信本文は切り捨てない。Gatewayの通常テキストJSON上限1 MiBは別仕様 |
+| A05 | **通知返信で修正済**: optional requestId+永続receipt、POST前の対応確認、同じ成功要求は202を返し再実行しない。不確定な実行は409で会話確認へ | exactly-once配送は保証しない。実行前に停止すれば未送信になり得るが、曖昧な送信を重ねない。旧Gatewayには一度送信後の曖昧な自動retryをしない。画面内Outboxの手動retryは従来方式 |
+| A06 | **修正・登録済**: 環境変数で固定鍵、CIは未設定時fail-fast。所有者承認後、Mac既存鍵を4つのGitHub Secretsへ登録 | 公開済みの別鍵APKへの上書き互換は復元できない。リモートCIでの実releaseは未実行 |
+| A07 | **修正済**: repoのsession別Mutexをpoll/prefetch/outbox/reloadで共有。anchor読取から通信・DB反映まで直列化し、session+message保存をtransactionへ。list refreshも直列化 | セッション一覧と詳細という異なるAPI snapshot間の鮮度をグローバルrevisionで整合する設計ではない |
+| A08 | **修正済/範囲限定**: URI/name/MIME/sizeを保存、session/フォームownerを分離、metadata取得失敗を添付単位で表示。キャンセルは再送出 | 永続URI grantは追加しない。同taskの有効grant下での復元を改善。端末再起動等でgrantが失効した場合は再選択が必要 |
+| A09 | **修正済**: `Call.awaitBody`のcancelを`Call.cancel`へ接続。APIの受信/送信/長時間POSTのtimeoutを維持して、待機やbody読取中のsocketも閉じる | 呼出しをキャンセルしてもGatewayで始まった副作用は取り消せない。ContentProvider内でopen/read自体がブロック中なら、その呼出しが戻るまでsource closeは遅れ得る。PairingやCoil独自の通信管理まで一律置換はしていない |
+| A10 | **改善済**: PR/main品質CIとRobolectricテストを追加。旧Room1〜7→8のデータ保持、tail置換、取得/再読込競合、WorkManager DataをAndroid API35のSQLiteで検証 | 実端末instrumented/実FCM/OS kill試験とCIのリモート実行は残る。テスト用Applicationは実Gatewayへ接続しない |
+| A11 | **修正済・再現済**: followNewestをsession別rememberSaveableへ。履歴touch→追加出力→保存/復元→追加出力を実Composeで検証 | 旧実装は最後の「新出力でも履歴維持」assertだけ失敗し、修正で成功。初期fixtureのtouch領域不備とは区別 |
+| A13 | **改善済**: 質問行のselectable/toggleable semanticsを集約。チップへcustomActionsとAlt+左右キーを追加し、disabled時は操作させない | TalkBack音声・Switch Access・Androidハードウェアキーボードは未実機確認。gesture既存テストを維持し、semantics boundsも視覚transformと合わせた |
+| A14 | **修正済**: UI上の恒久エラーでもWorkの終端はsuccessとして後続chainを阻害しない。payload順序・中断再開・取消・旧Data移行・接続切替を扱う | session毎1枚の通知は、後続成功で先行失敗表示を上書きし得る。失敗本文は30日private保存するが、アプリ内復旧画面は未追加 |
+| A12 / A15 | **継続調査**: composition中の大量処理/初期化の実測、AGP10移行は今回の機能修正に混ぜない | 速度向上を推測で断定しない。互換DSL・旧swipe APIの一括移行は別変更で確認する |
+
+Gatewayのreceiptは`state/message-delivery`へbodyのhashとaccepted状態だけ保存し、provider実行前にfile/directoryをfsyncする。成功receiptはatomic置換する。本文は保存しない。遅延retryによる再実行を防ぐためreceiptをTTL削除しない。API契約は[api.md](api.md)、正本/永続状態と旧Gateway互換は[architecture.md](architecture.md)を参照。
+
+通知返信のprivate payloadは成功時削除、旧接続分削除、終端失敗30日保持、offline pendingは期限削除しない。保存→enqueueの隙間でプロセスが終了しても次回起動で再開し、既存Workをtagで照合して二重enqueueを避ける。旧APKの本文入りDataは成否不確定として移行し、勝手に再送しない。
+
+### 署名の実調査と承認された外部操作
+
+GitHub公開APKを取得して`apksigner verify --print-certs`で比較したところ、v1.6.0とv1.6.1は異なる証明書だった。前節の「危険」はこの2成果物では確認済みとなった。
+所有者がチャットで「既存Mac鍵をGitHubへ登録する」を承認した後、ローカル鍵からexportした公開証明書が既存ローカルAPKのSHA-256 `4f77a2d3dd622cbd9b598825506f8bf978ef0aafd428fc4ed189969f5ca628a9`と一致することを検証し、4つのRepository Secretsへ登録した。鍵・password・base64をsourceやログに出力していない。登録名は一覧APIで確認した。
+既存公開鍵の秘密鍵を復元したわけではなく、過去公開APKの更新互換は別問題である。端末のアンインストール、本番Gateway交換、Herdr再起動、Git push/Release公開はしていない。
+
+### 追加検証・失敗の切り分け
+
+- `:app:testDebugUnitTest :gatewayClient:test :desktopApp:test`成功。追加のRoom/通知/Data/API試験を含む。
+- `:shared:allTests`成功。旧gesture/アニメーションテストに加え、添付復元/例外、scroll復元、選択semantics、並替customActions/keyboard/disabledを検証。
+- Go全package test/vetと、新規delivery receipt試験のrace検出を実行。
+- 独立レビューで「一時的な本文読取り失敗をWork成功と扱い、その後の起動で未送信ファイルを削除する」回復経路を発見。読取り失敗のbounded retry・ファイル保持、残存payloadの再queueとattempted/receipt再判定へ修正し、成功状態と配信成功を混同しない回帰試験を追加した。
+- 質問画面のsemantics変更前/後は500×298 pixelsで差分0。PNG SHA-256も同一。PNGの実寸はImageIOで500×298と確認した。
+- 最初の複数Gradle実行でshared jar生成が衝突し`zip END header not found`。以降は親の単一実行へ集約した。ソース不具合と区別する。
+- 追加テストのcompile/API呼出し誤り、JUnitの非Unit戻り値を修正。初期scroll fixtureはoverlay領域へtouchしていたため、transcriptを操作するfixtureへ修正してから旧実装の障害を確認した。
+- 新semanticsの位置がgraphicsLayerより外にあってboundsがドラッグ位置を追わない回帰を既存2テストが検出。コードのmodifier順を修正し、既存matcherや閾値を緩めず成功した。
+- Python環境にPillowがないため画像比較はJDK ImageIOで実行。画像内容を生成/改変せずpixelを比較した。
+- 固定署名経路を指定して最終releaseを生成し、ローカルAPKとの証明書一致も確認する。最終値は下記確定欄へ記録する。
+
+| 最終チェック | 確定結果 |
+|---|---|
+| 固定署名経路を指定した統合Gradle | **BUILD SUCCESSFUL**、1m 9s。debug/release assemble、app/shared/client/Desktop tests、両variant Lint、R8+resource shrinkingを含む |
+| app JVM/Robolectric | **169 tests** / failures 0 / errors 0 / skipped 0 |
+| shared common/Desktop Compose | **65 tests** / failures 0 / errors 0 / skipped 0 |
+| gatewayClient JVM | **13 tests** / failures 0 / errors 0 / skipped 0 |
+| desktopApp JVM | **84 tests** / failures 0 / errors 0 / skipped 0 |
+| 合計 | **331 tests**。初回295件から旧helper7件を削除し、新しい回帰43件を追加 |
+| Debug / Release Lint | Error **0 / 0**、Warning **38 / 39**、Hint **1 / 1**。警告増分6件はUseKtxの提案で、今回一括整理はしていない |
+| Go | 全package test/vet成功、receiptの新規8試験を含むAPI race検査成功 |
+| Mac Gateway artifact | ad-hoc署名のapp/DMGを生成しcodesign --verify --deep --strict成功。Developer ID署名・notarizationではない |
+| APK | `android/app/build/outputs/apk/release/app-release.apk`、6,344,788 bytes、SHA-256 `06313dbbfab0435b85220f2273292d3a0de65f41b143a10737b640fcf6b4831b` |
+| APK証明書 | `apksigner verify --print-certs`成功。SHA-256 `4f77a2d3dd622cbd9b598825506f8bf978ef0aafd428fc4ed189969f5ca628a9`、承認されたMac既存鍵と一致 |
+| Gateway DMG | `macos/build/Herdr-Companion-Gateway-arm64.dmg`、12,652,256 bytes、SHA-256 `6c4884857459cf8a98635608eca6298e625c464c503f7b43ec21831b0a003d73` |
+| Workflow / diff | 両workflowをRuby YAMLでparse成功。リモートworkflowは未実行。`git diff --check`成功、独立レビューでも新規P0/P1の指摘なし |
+
+最初の最終実行では、追加修正中の`Reply.kt`を対象にrelease LintのSuspiciousIndentationが1件発生した。ソースを固定しcompile/Lintを再実行してエラー0を確認した。Lint抑制やbaseline追加はしていない。
+追加検証ログは`/private/tmp/herdr-followup-{core,ui-2,final,final-2,go,go-vet,gateway-build}.log`等。最終成功は`final-2.log`。画像は`android/shared/build/reports/audit-ui/`、HTML/XMLは各moduleのbuild reports/test-resultsに再生成可能。
+
+実装は`7d24478`（500 MiB/HTTP）、`e846e7e`（Room/refresh）、`60f18b7`（返信/receipt）、`e8c169c`（UI状態/操作）、`590de52`（品質CI/署名）に分割してcommitした。既存未追跡skillsは変更・commitしていない。
+
+
+### 再開点
+
+まずこの節の確定結果と最新commitを確認する。500 MiB利用にはAndroid/DesktopのclientとGateway双方が必要。ローカルGateway app/DMGとAPKを生成しているが、稼働中の`/Applications`は置換していない。変更を実サービスへ入れる段階と、本番の送信/通知操作は分けて扱う。
+残る主な作業はAndroid OS実動作/URI権限寿命、通知失敗本文のアプリ内復旧UI、画面内Outboxへの同じ送信IDの活用、性能の実測、大画面/補助技術の実機評価、AGP移行である。

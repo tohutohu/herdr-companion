@@ -14,6 +14,7 @@ The main benefit is that you can follow a session without keeping the app open o
 - Send ordinary messages directly from the inline reply action in a notification
 - Answer AskUserQuestion, Codex's requestUserInput, and approvals in native UI
 - Send images and files, view images inline, and open file references from messages
+- Upload attachments up to 500 MiB with streaming on Android, Desktop, and the updated Gateway
 - Start new sessions from the app and choose the working directory and model
 
 The notification-to-screen flow looks like this:

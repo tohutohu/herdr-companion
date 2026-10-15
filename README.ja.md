@@ -14,6 +14,7 @@ Mac 上の [Herdr](https://herdr.dev) で動いている Claude Code / Codex / O
 - 通知のインライン返信から、通常のメッセージをそのまま送れる
 - AskUserQuestion、Codex の `requestUserInput`、承認操作はネイティブ UI で回答できる
 - 画像・ファイルの送信、会話中の画像表示、メッセージ内のファイル参照にも対応
+- 添付は500 MiBまでストリーミング送信（Android・Desktop・更新済みGateway）
 - アプリから新しいセッションを起動し、作業フォルダやモデルも選べる
 
 通知から画面を開くまでの流れは次のとおりです。

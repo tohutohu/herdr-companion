@@ -25,8 +25,11 @@ Herdr Companion Gateway (Go, on the Mac)
   source is unchanged. Restarting the gateway loses nothing.
 - **Persistent gateway state** is limited to `~/.config/herdr-mobile/config.json`
   (listen address, auth token, FCM device tokens, optional paths), the set of
-  archived session ids (`~/.local/state/herdr-mobile/archive.json`) and
-  dead-letter / log files under `~/.local/state/herdr-mobile/`.
+  archived session ids (`~/.local/state/herdr-mobile/archive.json`), small
+  message-delivery receipts (`message-delivery/`), and dead-letter / log files
+  under `~/.local/state/herdr-mobile/`. The menu-bar manager uses the separate
+  `desktop/` config/state directories; `HERDR_MOBILE_STATE_DIR` selects the
+  gateway state root. Delivery receipts contain hashes and status, never text.
 - **In-memory only:** last seen status and completion revision per session
   (push de-duplication), bounded Codex display and rollout projections,
   the FCM access token, and — for Codex — pending server requests received on
@@ -234,6 +237,30 @@ collapsed; a message of attachments alone takes the next new one). Failed
 sends offer *Retry* / *Discard*; one delivered but never seen is dropped after
 30 min.
 
+Notification replies use a separate persistent path: a UUID identifies a
+private Android payload file, while WorkManager Data contains only that UUID.
+Replies are chained per connection/session. A permanent delivery error ends
+that work with scheduler success after reporting the error, so replies already
+appended to the chain still run. Atomic payload replacement records a send
+attempt before the POST. Startup reconciles payload IDs with work tags to
+recover the save/enqueue gap; cancelled work is not resurrected. Accepted
+payloads and old-connection payloads are removed, terminal failures are retained
+for 30 days, and pending offline payloads do not expire. The terminal files do
+not yet have an in-app draft-recovery view.
+
+`GET /v1/message-delivery` advertises durable request-ID handling. Notification
+replies use the same `requestId` on retries only when this capability is present;
+an older gateway may ignore the field, so an ambiguous old-gateway send is
+never replayed automatically. Before calling the provider, the gateway durably
+claims the ID after validating the payload and resolving the live session.
+Accepted duplicates return 202 without another provider call. A provider error,
+unfinished receipt after restart, or inability to persist acceptance returns
+409 with an unconfirmed outcome. This provides at-most-once provider invocation,
+not proof that an interrupted send reached the agent. Receipt files are synced
+before execution and never automatically expired, since deleting an unknown
+outcome would permit replay. The guarantee requires retaining the same state
+directory. Normal in-app Outbox sends remain compatible and do not opt in yet.
+
 Unknown provider data never fails a request: it becomes a
 `Unsupported event: …` text block and is written to the dead-letter log with
 the raw payload. `GET /messages?after=<id>` returns messages from that id on
@@ -285,6 +312,11 @@ On Android, `PushService` shows the notification (channels *Completed*,
 fetches the session into Room, so tapping the notification opens a populated
 conversation.
 
+RemoteInput replies persist their full text privately before enqueueing, with
+only a short notification-history preview. Delivery failures distinguish a
+known rejection from an unconfirmed outcome; the latter removes the immediate
+reply action and asks the user to check the conversation first.
+
 Read state is Herdr's, not the app's. Herdr reports a finished agent as `done`
 until its pane is focused, then as `idle`; a pane that is focused when its
 agent finishes goes straight to `idle`. The gateway sends that as `unread` on
@@ -300,8 +332,9 @@ A notification carries an inline *Reply* field when `canSend` is set and the
 session is not waiting on a question or an approval — those expect that exact
 answer, which only the in-app interaction UI can give. `ReplyReceiver` re-posts
 the notification with the typed text and hands it to `ReplyWorker`, which POSTs
-the message and retries an unreachable gateway; the notification reports the
-send as pending, done, or failed.
+the message. Failures before sending and same-ID requests to a receipt-capable
+gateway can retry; an ambiguous send to an old gateway asks for conversation
+confirmation. The notification reports pending, done, failed, or unconfirmed.
 
 ## Starting sessions
 
@@ -521,7 +554,8 @@ Full request and response shapes, auth and connection details: [api.md](api.md).
 | POST | `/v1/sessions/archive` | archive `{ids[]}` in one request (stops running sessions) → `{sessions[]}` (each with `warning?`) |
 | POST | `/v1/sessions/{id}/resume` | `{trust}` reopen in a new Herdr workspace → `{sessionId?, paneId, warning?}` |
 | GET | `/v1/sessions/{id}/messages?after=` | `{session, messages}` |
-| POST | `/v1/sessions/{id}/messages` | `{text, uploads[]}` |
+| POST | `/v1/sessions/{id}/messages` | `{text, uploads[], requestId?}`; optional durable at-most-once delivery |
+| GET | `/v1/message-delivery` | `{idempotency}`; required capability check before automatic message retries |
 | POST | `/v1/sessions/{id}/respond` | `{interactionId, answers{qid:{selected[],text}}, decision}` |
 | POST | `/v1/sessions/{id}/mode` | advance the live provider TUI to its next available mode |
 | POST | `/v1/sessions/{id}/seen` | mark a `done` session seen in Herdr by focusing its pane; `{ok}` |
@@ -531,7 +565,7 @@ Full request and response shapes, auth and connection details: [api.md](api.md).
 | GET | `/v1/sessions/{id}/files/content?path=` | file bytes |
 | GET | `/v1/sessions/{id}/terminal?lines=` | recent pane text |
 | POST | `/v1/sessions/{id}/terminal` | `{text, keys[]}` (allow-listed keys) |
-| POST | `/v1/uploads` | raw file body, optional `Content-Disposition` file name → `{id, name}` (deleted after 24 h) |
+| POST | `/v1/uploads` | streamed raw body up to 500 MiB, optional `Content-Disposition` file name → `{id, name}` (deleted after 24 h) |
 | GET | `/v1/usage` | cached subscription limits `{providers[{provider, displayName, plan?, account?, windows[{key, label, scope?, usedPercent, windowMinutes?, resetsAt?}], updatedAt?, error?}], fetchedAt?, error?}` |
 | POST | `/v1/usage/refresh` | re-read the limits now (takes ~10 s) → same shape |
 | POST / DELETE | `/v1/devices` | FCM token registration |

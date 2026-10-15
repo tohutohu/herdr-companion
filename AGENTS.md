@@ -24,7 +24,8 @@ env -u GOROOT go build -o ~/.local/bin/hc ./cmd/hc  # agent-facing client CLI (d
 cd android
 export JAVA_HOME=$HOME/Library/Java/JavaVirtualMachines/jbr-17.0.14/Contents/Home
 ./gradlew --console=plain assembleRelease          # default for APK build requests (R8 + resource shrinking)
-./gradlew --console=plain assembleDebug testDebugUnitTest  # development checks
+./gradlew --console=plain assembleDebug testDebugUnitTest  # includes Robolectric API 35 Room/worker tests
+./gradlew --console=plain :shared:allTests :gatewayClient:test :desktopApp:test :app:lintDebug :app:lintRelease
 ANDROID_SERIAL=<serial> ./gradlew installDebug
 
 # Compose Mac UI (JDK 17; separate from the menu-bar Gateway Manager)
@@ -48,7 +49,7 @@ Both Mac apps update themselves from the latest GitHub Release (`docs/macos-rele
 
 - 「APKをビルドして」 means `assembleRelease`: R8 (`isMinifyEnabled = true`) and resource shrinking (`isShrinkResources = true`) must both be enabled. Do not deliver a debug APK unless the user explicitly requests one.
 - Before reporting completion, confirm the release build succeeded and link `android/app/build/outputs/apk/release/app-release.apk`.
-- Release currently uses the debug signing key so it is installable; this does not disable R8 or resource shrinking.
+- Local release builds use the existing debug signing key. Release CI restores the persistent Mac key from ANDROID_KEYSTORE_* / ANDROID_KEY_* secrets; never publish with a fresh runner's generated key. This does not disable R8 or resource shrinking.
 - 実機が adb に接続されていない場合は、USB 接続を依頼したり接続待ちしたりせず、ビルド済み release APK のパスを提示する。
 
 `compileSdk` is 37 because Coil 3.6 requires it (targetSdk stays 36).
@@ -149,3 +150,11 @@ open "/Applications/Herdr Companion Gateway.app"
   `skills-lock.json` records the installed source.
 - Keep the API key in the existing private Gateway config (`jevApiKey`) or
   `TYPESAFE_API_KEY`; never put it in source, test fixtures, or command output.
+
+### Quality audit follow-up
+
+- Current findings and validation: `docs/engineering-audit.md`.
+- Uploads are streamed in 64 KiB buffers, up to 500 MiB on Android/Desktop/Gateway; do not restore whole-file `readBytes()` for uploads.
+- Run only one Gradle process per checkout: concurrent builds can corrupt shared module jar outputs.
+- App JVM tests use Robolectric API 35 with a plain Application for isolated Room migration/refresh and WorkManager Data checks; they never connect to the user's Gateway.
+- Notification replies persist their body under private `files/notification-replies`; WorkManager Data carries only the UUID. Gateway message-delivery receipts are durable state: do not delete them as disposable cache, since delayed retries must not execute a send twice.

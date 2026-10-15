@@ -113,11 +113,11 @@ curl -s -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
 | 401 | トークン不一致（`/pair` では招待コードが無効・期限切れ） |
 | 403 | 許可されたルート外のファイルへのアクセス |
 | 404 | セッション・ファイル・アップロード・保留中の起動が見つからない |
-| 409 | セッションが Herdr で動いていない／既に動いている、質問が既に閉じた、作業ディレクトリが無い、同名フォルダが既にある、エージェントがブロック中 |
+| 409 | セッションが Herdr で動いていない／既に動いている、質問が既に閉じた、作業ディレクトリが無い、同名フォルダが既にある、エージェントがブロック中、送信結果不明・送信 ID の内容不一致 |
 | 413 | ファイル・アップロードが大きすぎる |
 | 422 | そのプロバイダーが対応していない操作 |
 | 502 | Herdr ソケット API のエラー |
-| 503 | エージェント更新・セッション起動機能が無効 |
+| 503 | エージェント更新・セッション起動機能が無効、送信 receipt の永続保存が利用不能 |
 
 ### セッション ID
 
@@ -148,6 +148,7 @@ curl -s -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
 | GET | `/v1/sessions/{id}` | 要 | セッション 1 件 |
 | GET | `/v1/sessions/{id}/messages` | 要 | セッションとメッセージ |
 | POST | `/v1/sessions/{id}/messages` | 要 | メッセージ送信 |
+| GET | `/v1/message-delivery` | 要 | 永続 receipt による重複送信防止の対応状況 |
 | POST | `/v1/sessions/{id}/respond` | 要 | 質問・承認への回答 |
 | POST | `/v1/sessions/{id}/mode` | 要 | TUI のモードを次へ切り替え |
 | POST | `/v1/sessions/{id}/seen` | 要 | 既読にする |
@@ -393,11 +394,36 @@ DELETE: アーカイブを解除し Session を返す。
 ### `POST /v1/sessions/{id}/messages`
 
 ```json
-{ "text": "続けて", "uploads": ["<upload id>"] }
+{ "text": "続けて", "uploads": ["<upload id>"], "requestId": "<optional client UUID>" }
 ```
 
 テキストも添付も空なら `400`。`202 {"ok": true}`。リクエストを受けた後はクライアントが切断しても送信を完了させる（最大 2 分）。
 アーカイブ済みのセッションは送信成功後に自動でアーカイブ解除する。送信失敗時はアーカイブを維持する。共有 app-server に残っている Codex セッションは、Herdr のペインがなくても送信できる。
+
+`requestId` は任意で、英数字・`_`・`-` の1〜128文字。省略時は従来の送信動作を維持する。
+対応する Gateway では、同じ認証トークンに対する同一 ID・同一セッション・同一本文・同一添付の
+受付済み要求に `202` を再応答し、provider を再実行しない。ID を別内容に使うと `409`。
+入力と送信先を検証した後、provider を呼ぶ前に receipt を永続化するため、送信途中の Gateway 再起動も
+自動的な二重実行を起こさない。ただし provider のエラーや送信途中の中断では、送信済みかを断定できず
+`409`（`Delivery unconfirmed...`）となる。会話を確認するまで新しい ID で送り直さない。
+receipt を保存できない場合は送信を開始せず `503`。成功状態の保存に失敗した場合は `409` とする。
+
+### `GET /v1/message-delivery`
+
+```json
+{ "idempotency": true }
+```
+
+送信前に対応状況を確認する。receipt store を持たない構成は `false`、旧 Gateway は `404` を返す。
+旧 Gateway は未知の `requestId` を無視するため、この確認なしに POST を自動再試行してはいけない。
+Android の通知返信は対応 Gateway に同じ ID を渡して再試行し、旧 Gateway では一度送信を始めた後の
+通信断・プロセス再開を「結果不明」として止める。通常の画面内 Outbox は従来の送信動作を維持する。
+
+receipt は `HERDR_MOBILE_STATE_DIR/message-delivery/`（Mac メニューバーアプリでは通常
+`~/.local/state/herdr-mobile/desktop/message-delivery/`）に保存する。ファイル名はトークン由来の
+識別値と送信 ID の hash、内容は要求の hash と受付済みフラグのみで、本文・添付内容・トークンは保存しない。
+未確定 receipt を消すと遅延した再試行が実行され得るため、自動期限削除は行わない。
+再起動時も同じ state 領域を使用することが重複防止の前提となる。
 
 ### `POST /v1/sessions/{id}/respond`
 
@@ -538,7 +564,9 @@ Herdr で `done` のセッションならペインをフォーカスして既読
 
 ボディはファイルの生バイト列。`Content-Type` にファイルの型、任意で
 `Content-Disposition: attachment; filename="a.png"` で名前を付ける（無ければ型から拡張子を決める）。
-上限 20 MiB（超えると `413`）。24 時間後に削除される。
+上限 500 MiB（超えると `413`）。`Content-Length` が不明な chunked body でもストリームしながら
+上限を検査する。24 時間後に削除される。Android はファイルを一度に ByteArray にせず
+URI のストリームから送る。サイズ不明の文書も chunked で送信できる。
 
 ```json
 { "id": "<upload id>", "name": "a.png" }
@@ -577,6 +605,18 @@ Herdr で `done` のセッションならペインをフォーカスして既読
 今すぐ読み直す（約 10 秒）。同時の呼び出しは 1 回の読み取りを共有する。形式は上と同じ。
 
 ## 通知（FCM）
+
+Android の RemoteInput 返信は、本文をアプリ専用ファイルへ atomic に保存し、WorkManager Data には
+UUID のみを渡す。長文を Data の10KB制限で失わず、同じセッションの返信を入力順で処理する。
+先行返信の恒久エラーは通知で報告して scheduler 上は終端成功とし、既に待機している後続返信を止めない。
+送信結果が不明な場合はその旨を表示し、即時の返信 action を外して会話の確認へ誘導する。
+通知履歴は短いプレビューで、送信本文は切り詰めない。
+
+アプリ起動時に保存・enqueue 間の中断を回復し、実行中・待機中 work の tag がある場合は重複登録しない。
+本文が残っている場合は scheduler の成功だけで配信済みと判断せず、再登録して attempted/receipt を再確認する。
+成功した本文ファイルと古い接続の本文ファイルは削除する。失敗・結果不明の終端本文は30日保持し、
+オフラインで未処理の本文を経過時間だけで消さない。WorkManager で明示的にキャンセル済みの返信は再登録しない。
+終端ファイルはローカル復旧用であり、現時点ではアプリ内の草稿復元画面はない。
 
 ### `POST /v1/devices`
 

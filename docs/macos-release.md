@@ -191,7 +191,7 @@ CIへ設定するsecret名:
 - `APPLE_APP_SPECIFIC_PASSWORD`
 - `APPLE_TEAM_ID`
 
-証明書がない場合もCIはunsigned artifact生成まで進みます。notarization用3 secretの一部だけを設定する構成は拒否します。
+MacのDeveloper ID証明書がない場合もCIはunsigned DMG生成まで進みます。Androidの固定署名用Secretsは必須です。notarization用3 secretの一部だけを設定する構成は拒否します。
 
 ## Version tagの手順
 
