@@ -125,9 +125,12 @@ var ignoredTypes = map[string]bool{
 	"tag": true, "progress": true,
 	// Artifact bookkeeping: file-to-artifact links and comment watchers.
 	"frame-link": true, "artifact-comment-monitor": true, "artifact-autoreact-ledger": true,
-	// Copies of the requests sent to the API (Claude Code 2.1.300+).
-	"api-request": true, "api-request-blob": true,
 }
+
+// apiRequestTypePrefix covers the copies of the requests Claude Code sends to
+// the API (2.1.300+): api-request, api-request-blob, api-request-shape. The
+// blob lines carry a message, so they would otherwise show as unknown events.
+const apiRequestTypePrefix = "api-request"
 
 var ignoredSystemSubtypes = map[string]bool{
 	"stop_hook_summary": true, "turn_duration": true, "away_summary": true,
@@ -447,7 +450,7 @@ func (t *Transcript) convert(e *entry, raw []byte, results map[string]toolResult
 		return convertSystem(e, raw, opt)
 	case e.Type == "attachment":
 		return absorbedPrompt(e, opt)
-	case ignoredTypes[e.Type]:
+	case ignoredTypes[e.Type] || strings.HasPrefix(e.Type, apiRequestTypePrefix):
 		return nil
 	default:
 		// Unknown metadata lines are recorded but not shown: they are not
