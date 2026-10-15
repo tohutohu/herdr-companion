@@ -2,6 +2,7 @@ package com.tohutohu.herdrcompanion.data.api
 
 import com.tohutohu.herdrcompanion.data.Settings
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -14,6 +15,7 @@ import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
+import java.io.InputStream
 import java.io.OutputStream
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
@@ -77,7 +79,7 @@ class GatewayApi(
         Request.Builder().url(url).header("Authorization", "Bearer ${settings().token.trim()}")
 
     private suspend fun execute(req: Request): String = withContext(Dispatchers.IO) {
-        http.newCall(req).execute().use { resp -> bodyOrThrow(resp) }
+        http.newCall(req).awaitBody { resp -> bodyOrThrow(resp) }
     }
 
     private fun bodyOrThrow(resp: Response): String {
@@ -148,8 +150,8 @@ class GatewayApi(
         val known = messageTags[id]?.takeIf { it.first == url }?.second
         val req = request(url).get().apply { if (known != null) header("If-None-Match", known) }.build()
         return withContext(Dispatchers.IO) {
-            http.newCall(req).execute().use { resp ->
-                if (known != null && resp.code == 304) return@use null
+            http.newCall(req).awaitBody { resp ->
+                if (known != null && resp.code == 304) return@awaitBody null
                 val body = json.decodeFromString<MessagesResponse>(bodyOrThrow(resp))
                 val etag = resp.header("ETag")
                 MessageSnapshot(body) {
@@ -172,10 +174,17 @@ class GatewayApi(
             ),
         )
 
-    suspend fun sendMessage(id: String, text: String, uploads: List<String>) {
+    /** Older gateways can send once, but cannot safely replay an ambiguous POST. */
+    suspend fun supportsMessageIdempotency(): Boolean = try {
+        get<MessageDeliveryCapabilities>(url("v1", "message-delivery")).idempotency
+    } catch (error: GatewayException) {
+        if (error.code == 404) false else throw error
+    }
+
+    suspend fun sendMessage(id: String, text: String, uploads: List<String>, requestId: String? = null) {
         post(
             url("v1", "sessions", id, "messages"),
-            json.encodeToString(SendMessageRequest(text, uploads)).toRequestBody(jsonType),
+            json.encodeToString(SendMessageRequest(text, uploads, requestId)).toRequestBody(jsonType),
         )
     }
 
@@ -193,13 +202,21 @@ class GatewayApi(
     }
 
     /** Uploads one attachment and returns its upload id. */
-    suspend fun upload(bytes: ByteArray, contentType: String, filename: String): String {
+    suspend fun upload(contentType: String, filename: String, size: Long? = null, openStream: () -> InputStream): String {
+        val context = currentCoroutineContext()
+        val body = StreamingUploadBody(contentType.toMediaType(), filename, size, openStream) { context.ensureActive() }
         val req = request(url("v1", "uploads"))
-            .post(bytes.toRequestBody(contentType.toMediaType()))
+            .post(body)
             // RFC 5987, because OkHttp only accepts ASCII header values.
             .header("Content-Disposition", "attachment; filename*=UTF-8''" + encodeFilename(filename))
             .build()
-        return json.decodeFromString<UploadResponse>(execute(req)).id
+        // Large files may take minutes over a tailnet; stalled writes still
+        // fail within a minute instead of waiting for the full transfer budget.
+        val uploads = http.newBuilder()
+            .writeTimeout(60, TimeUnit.SECONDS)
+            .callTimeout(30, TimeUnit.MINUTES)
+            .build()
+        return uploads.newCall(req).awaitBody { resp -> json.decodeFromString<UploadResponse>(bodyOrThrow(resp)).id }
     }
 
     suspend fun terminal(id: String, lines: Int = 300): TerminalResponse =
@@ -230,7 +247,7 @@ class GatewayApi(
     /** Returns content type and bytes. */
     suspend fun fileContent(id: String, path: String): Pair<String, ByteArray> = withContext(Dispatchers.IO) {
         val req = request(url("v1", "sessions", id, "files", "content", query = mapOf("path" to path))).get().build()
-        http.newCall(req).execute().use { resp ->
+        http.newCall(req).awaitBody { resp ->
             if (!resp.isSuccessful) {
                 val body = resp.body.string()
                 val msg = runCatching { json.decodeFromString<ErrorResponse>(body).error }.getOrNull()
@@ -251,7 +268,7 @@ class GatewayApi(
     /** Streams a file of any size into [out], reporting bytes written so far. */
     suspend fun downloadFile(id: String, path: String, out: OutputStream, onProgress: (Long) -> Unit) = withContext(Dispatchers.IO) {
         val req = request(url("v1", "sessions", id, "files", "content", query = mapOf("path" to path, "download" to "1"))).get().build()
-        http.newCall(req).execute().use { resp ->
+        http.newCall(req).awaitBody { resp ->
             if (!resp.isSuccessful) bodyOrThrow(resp)
             resp.body.byteStream().use { input ->
                 val buf = ByteArray(64 * 1024)
@@ -282,7 +299,7 @@ class GatewayApi(
             throw GatewayException(0, "Download URL is not from the configured gateway")
         }
         val req = request(target).get().build()
-        http.newCall(req).execute().use { resp ->
+        http.newCall(req).awaitBody { resp ->
             if (!resp.isSuccessful) {
                 val body = resp.body.string()
                 val msg = runCatching { json.decodeFromString<ErrorResponse>(body).error }.getOrNull()
@@ -327,7 +344,7 @@ class GatewayApi(
         val body = json.encodeToString(DirectoryCheckRequest(cwd, prompt)).toRequestBody(jsonType)
         val req = request(url("v1", "directories", "check")).post(body).build()
         val bounded = http.newBuilder().callTimeout(12, TimeUnit.SECONDS).build()
-        bounded.newCall(req).execute().use { resp -> json.decodeFromString(bodyOrThrow(resp)) }
+        bounded.newCall(req).awaitBody { resp -> json.decodeFromString(bodyOrThrow(resp)) }
     }
 
     suspend fun startSession(body: StartSessionRequest): StartSessionResponse =
@@ -341,7 +358,7 @@ class GatewayApi(
     private suspend inline fun <reified T> slowPost(url: HttpUrl, body: String): T = withContext(Dispatchers.IO) {
         val req = request(url).post(body.toRequestBody(jsonType)).build()
         val slow = http.newBuilder().readTimeout(150, TimeUnit.SECONDS).callTimeout(160, TimeUnit.SECONDS).build()
-        slow.newCall(req).execute().use { resp -> json.decodeFromString(bodyOrThrow(resp)) }
+        slow.newCall(req).awaitBody { resp -> json.decodeFromString(bodyOrThrow(resp)) }
     }
 
     /** Subscription limits as the gateway last read them. */

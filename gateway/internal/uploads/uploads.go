@@ -20,7 +20,7 @@ import (
 	"unicode"
 )
 
-const MaxUploadSize = 20 << 20
+const MaxUploadSize = 500 << 20
 
 var (
 	ErrTooLarge = errors.New("upload too large")
@@ -89,7 +89,9 @@ func (s *Store) Save(r io.Reader, contentType, name string) (File, error) {
 		return File{}, err
 	}
 	n, err := io.Copy(f, io.LimitReader(r, MaxUploadSize+1))
-	f.Close()
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
 	if err == nil && n > MaxUploadSize {
 		err = ErrTooLarge
 	}

@@ -706,6 +706,10 @@ func (s *Server) writeTerminal(w http.ResponseWriter, r *http.Request) {
 // the file with a Content-Disposition header; without one the name is derived
 // from the content type.
 func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
+	if r.ContentLength > uploads.MaxUploadSize {
+		s.fail(w, r, "", "upload", uploads.ErrTooLarge)
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, uploads.MaxUploadSize+1)
 	f, err := s.Uploads.Save(r.Body, r.Header.Get("Content-Type"), uploadName(r))
 	if err != nil {

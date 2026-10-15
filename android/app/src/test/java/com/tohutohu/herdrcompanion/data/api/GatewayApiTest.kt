@@ -165,7 +165,7 @@ class GatewayApiTest {
     @Test
     fun `アップロードは本文の種別と元のファイル名を送る`() = runBlocking {
         server.enqueue(MockResponse.Builder().code(201).body("""{"id":"abc","name":"売上_レポート.csv"}""").build())
-        assertEquals("abc", api.upload("col1\n".toByteArray(), "text/csv", "売上 レポート.csv"))
+        assertEquals("abc", api.upload("text/csv", "売上 レポート.csv") { "col1\n".byteInputStream() })
         val req = server.takeRequest()
         assertEquals("/v1/uploads", req.target)
         assertEquals("text/csv", req.headers["Content-Type"])

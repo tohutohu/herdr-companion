@@ -151,7 +151,10 @@ data class InteractionResponseDto(
 )
 
 @Serializable
-data class SendMessageRequest(val text: String, val uploads: List<String> = emptyList())
+data class SendMessageRequest(val text: String, val uploads: List<String> = emptyList(), val requestId: String? = null)
+
+@Serializable
+data class MessageDeliveryCapabilities(val idempotency: Boolean = false)
 
 @Serializable
 data class UploadResponse(val id: String)

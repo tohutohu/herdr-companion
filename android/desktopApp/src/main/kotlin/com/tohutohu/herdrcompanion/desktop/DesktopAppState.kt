@@ -50,7 +50,6 @@ import java.util.logging.Logger
 private const val LIST_POLL_MS = 5_000L
 private const val DETAIL_POLL_MS = 3_000L
 private const val RELOAD_NOTICE_MS = 4_000L
-private const val MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
 /** Selection is intentionally separate from the Android navigation back stack. */
 class DesktopSelectionState {
@@ -1049,14 +1048,10 @@ class DesktopAppState(
 /** Uploads the files to the gateway and returns their upload ids. */
 internal suspend fun uploadDesktopAttachments(api: GatewayApi, attachments: List<DesktopAttachment>): List<String> =
     attachments.map { attachment ->
-        val bytes = withContext(kotlinx.coroutines.Dispatchers.IO) {
-            val size = Files.size(attachment.path)
-            if (size > MAX_UPLOAD_BYTES) {
-                error("${attachment.name} is larger than ${MAX_UPLOAD_BYTES / (1024 * 1024)} MB")
-            }
-            Files.readAllBytes(attachment.path)
+        val size = withContext(kotlinx.coroutines.Dispatchers.IO) { Files.size(attachment.path) }
+        api.upload(attachment.mimeType, attachment.name, size) {
+            Files.newInputStream(attachment.path)
         }
-        api.upload(bytes, attachment.mimeType, attachment.name)
     }
 
 internal fun cleanupAttachments(attachments: Iterable<DesktopAttachment>) {

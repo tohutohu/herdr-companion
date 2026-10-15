@@ -1,6 +1,9 @@
 package uploads
 
 import (
+	"errors"
+	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -48,7 +51,7 @@ func Test保存したファイルは名前と種別ごと取り出せる(t *test
 
 func Test大きすぎるアップロードは保存しない(t *testing.T) {
 	s := New(t.TempDir(), time.Hour)
-	body := strings.NewReader(strings.Repeat("x", MaxUploadSize+1))
+	body := io.LimitReader(zeroReader{}, MaxUploadSize+1)
 	if _, err := s.Save(body, "text/plain", "big.txt"); err != ErrTooLarge {
 		t.Errorf("err = %v, want ErrTooLarge", err)
 	}
@@ -57,6 +60,52 @@ func Test大きすぎるアップロードは保存しない(t *testing.T) {
 	}
 	if _, err := s.Get("../../etc"); err != ErrNotFound {
 		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+	entries, err := os.ReadDir(s.Dir())
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("rejected upload left files: %v, %v", entries, err)
+	}
+}
+
+type zeroReader struct{}
+
+func (zeroReader) Read(p []byte) (int, error) {
+	clear(p)
+	return len(p), nil
+}
+
+func Test上限ちょうどの500MiBをストリーム保存できる(t *testing.T) {
+	s := New(t.TempDir(), time.Hour)
+	f, err := s.Save(io.LimitReader(zeroReader{}, MaxUploadSize), "application/octet-stream", "large.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(f.Path)
+	if err != nil || info.Size() != MaxUploadSize {
+		t.Fatalf("stored size = %v, error = %v", info, err)
+	}
+}
+
+type interruptedReader struct {
+	sent bool
+}
+
+func (r *interruptedReader) Read(p []byte) (int, error) {
+	if r.sent {
+		return 0, io.ErrUnexpectedEOF
+	}
+	r.sent = true
+	return copy(p, "partial"), nil
+}
+
+func Test転送中断時は不完全なファイルを残さない(t *testing.T) {
+	s := New(t.TempDir(), time.Hour)
+	if _, err := s.Save(&interruptedReader{}, "text/plain", "partial.txt"); !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("error = %v", err)
+	}
+	entries, err := os.ReadDir(s.Dir())
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("interrupted upload left files: %v, %v", entries, err)
 	}
 }
 
