@@ -973,7 +973,9 @@ func (s *Server) archiveSession(w http.ResponseWriter, r *http.Request) {
 }
 
 // archiveSessions archives several sessions in one request. Running sessions
-// are stopped before the archive ids are persisted.
+// are stopped before the archive ids are persisted. When one fails, the ones
+// already stopped are still archived so they do not linger, paneless, in the
+// session list.
 func (s *Server) archiveSessions(w http.ResponseWriter, r *http.Request) {
 	var req archiveSessionsRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
@@ -1004,6 +1006,15 @@ func (s *Server) archiveSessions(w http.ResponseWriter, r *http.Request) {
 	for _, id := range ids {
 		sess, wasStopped, err := s.archiveOne(r.Context(), id)
 		if err != nil {
+			if len(archived) > 0 {
+				done := make([]string, len(archived))
+				for i, a := range archived {
+					done[i] = a.ID
+				}
+				if aerr := s.Archive.AddMany(done); aerr != nil {
+					slog.Warn("archiving the sessions before a failed one failed", "operation", "archive_sessions", "error", aerr)
+				}
+			}
 			s.fail(w, r, id, "archive_sessions", err)
 			return
 		}

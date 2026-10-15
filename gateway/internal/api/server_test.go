@@ -958,6 +958,25 @@ func Test複数のセッションを一度のリクエストでアーカイブ�
 	}
 }
 
+func Test一括アーカイブの途中で失敗してもそれまでのセッションはアーカイブされる(t *testing.T) {
+	ts, _, fh, tok := newTestServer(t)
+	resp, body := do(
+		t, ts, tok, "POST", "/v1/sessions/archive",
+		[]byte(`{"ids":["fake:s1","fake:missing","fake:old"]}`), "application/json",
+	)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status %d: %s", resp.StatusCode, body)
+	}
+	if got := strings.Join(fh.calls, ","); got != "close-workspace:w1" {
+		t.Errorf("herdr calls = %v", fh.calls)
+	}
+	// fake:s1 は停止済みなのでアーカイブに残し、未処理の fake:old は触らない
+	_, body = do(t, ts, tok, "GET", "/v1/sessions?archived=true", nil, "")
+	if ids := strings.Join(sessionIDs(t, body), ","); ids != "fake:s1" {
+		t.Errorf("archived list = %v", ids)
+	}
+}
+
 func Testアーカイブ一覧をページごとに取得できる(t *testing.T) {
 	ts, _, _, tok := newTestServer(t)
 	do(t, ts, tok, "POST", "/v1/sessions/archive", []byte(`{"ids":["fake:s1","fake:old"]}`), "application/json")
