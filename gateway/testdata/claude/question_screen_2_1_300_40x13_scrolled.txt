@@ -1,0 +1,13 @@
+│ for pending interactions, so any false
+│ negative hides the panel entirely.
+│ Which approach do you prefer?
+
+❯ 1. Screen
+     Make screen matching robust
+↓ 2. Upstream
+     Report to Herdr
+────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc
+to cancel

@@ -109,13 +109,39 @@ func dialogOnScreen(b contentBlock, screen string) bool {
 	if err != nil {
 		return false
 	}
-	body := strings.Join(strings.Fields(screen[:footer]), "")
+	body := dialogText(screen[:footer])
 	for _, q := range ia.Questions {
-		if question := strings.Join(strings.Fields(q.Question), ""); question != "" && strings.Contains(body, question) {
+		if questionVisible(body, dialogText(q.Question)) {
 			return true
 		}
 	}
 	return false
+}
+
+// minQuestionTail keeps a few common trailing words from matching on their own.
+const minQuestionTail = 16
+
+// questionVisible also accepts a question taller than the pane: its first rows
+// scroll off the top, so the screen starts with the rest of the question.
+func questionVisible(body, question string) bool {
+	if question == "" {
+		return false
+	}
+	if strings.Contains(body, question) {
+		return true
+	}
+	for i := range question {
+		if tail := question[i:]; len(tail) >= minQuestionTail && strings.HasPrefix(body, tail) {
+			return true
+		}
+	}
+	return false
+}
+
+// dialogText drops what terminal layout adds to a question: soft wraps, and
+// the "│" gutter Claude Code draws beside a question that spans several rows.
+func dialogText(s string) string {
+	return strings.Join(strings.Fields(strings.ReplaceAll(s, "│", " ")), "")
 }
 
 func dialogStatus(s *providers.Summary) {

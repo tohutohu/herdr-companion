@@ -3,6 +3,8 @@ package claude
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -118,6 +120,46 @@ func Test質問本文とダイアログのフッターが両方ある時だけ�
 	}
 	if !dialogOnScreen(blocks[0], strings.ReplaceAll(questionScreen, "Which color?", "Which\n color?")) {
 		t.Error("wrapped question not detected")
+	}
+}
+
+func Test複数行に折り返された長い質問を狭いパネルで検出する(t *testing.T) {
+	// Claude Code 2.1.300 in a 40x19 pane, where Herdr reports idle.
+	screen, err := os.ReadFile(filepath.Join(testdata, "question_screen_2_1_300_40cols.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := `{"type":"assistant","uuid":"a1","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_long","name":"AskUserQuestion","input":{"questions":[{"header":"方針","question":"このリポジトリのGatewayで、Herdrの状態通知が欠けたときにClaudeの質問ダイアログを画面から復元する処理を、今回の調査結果を踏まえてどの方針で直すのが一番よいと思いますか？既存のテストとの互換性も考慮してください。","multiSelect":false,"options":[{"label":"画面の判定を強化","description":"折り返しや省略に強い照合にする"},{"label":"Herdrに報告","description":"上流のルールを直してもらう"}]}]}}]}}`
+	blocks, _ := decodeBlocks(decodeLines(t, []string{call}).entries[0].Message.Content)
+	if !dialogOnScreen(blocks[0], string(screen)) {
+		t.Error("question with a gutter not detected")
+	}
+}
+
+func Test上が画面外に出た長い質問を狭く低いパネルで検出する(t *testing.T) {
+	// Claude Code 2.1.300 in a 40x13 pane: only the last rows of the question remain.
+	screen, err := os.ReadFile(filepath.Join(testdata, "question_screen_2_1_300_40x13_scrolled.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	question := "We need to decide how the gateway should recover question dialogs when the terminal multiplexer misses the blocked lifecycle notification. Consider wrapping, gutters, truncation, small panes, previews, multiple questions, and compatibility with the existing fixtures and golden files. Also keep in mind that the phone app only shows the answer panel for pending interactions, so any false negative hides the panel entirely. Which approach do you prefer?"
+	call := func(q string) contentBlock {
+		line := `{"type":"assistant","uuid":"a1","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_long","name":"AskUserQuestion","input":{"questions":[{"header":"Approach","question":"` + q + `","options":[{"label":"Screen"},{"label":"Upstream"}]}]}}]}}`
+		blocks, _ := decodeBlocks(decodeLines(t, []string{line}).entries[0].Message.Content)
+		return blocks[0]
+	}
+	if !dialogOnScreen(call(question), string(screen)) {
+		t.Error("question scrolled off the top not detected")
+	}
+	// Only the start of the screen may continue a cut question, and a common
+	// short ending is not enough evidence on its own.
+	for name, q := range map[string]string{
+		"別の長い質問": "Something else entirely. Which approach do you prefer?",
+		"短い末尾":   "Do you prefer?",
+	} {
+		if dialogOnScreen(call(q), string(screen)) {
+			t.Errorf("%s matched", name)
+		}
 	}
 }
 
