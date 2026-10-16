@@ -53,11 +53,11 @@ func Test現在のClaudeの承認画面と折り返された画面を検出で�
 		t.Fatal("different plan files have the same screen plan ID")
 	}
 	for name, screen := range map[string]string{
-		"引用後の入力欄": planScreen + "\n❯ Ask anything",
-		"フォーカスなし": strings.ReplaceAll(planScreen, "❯", " "),
-		"操作ヒントなし": strings.ReplaceAll(planScreen, "shift+tab to approve with this feedback", ""),
+		"引用後の入力欄":     planScreen + "\n❯ Ask anything",
+		"フォーカスなし":     strings.ReplaceAll(planScreen, "❯", " "),
+		"操作ヒントなし":     strings.ReplaceAll(planScreen, "shift+tab to approve with this feedback", ""),
 		"途中で切れた操作ヒント": strings.ReplaceAll(planScreen, "shift+tab to approve with this feedback", "shift+tab to approve with"),
-		"不完全な選択肢": strings.ReplaceAll(planScreen, "2. Yes, auto-accept edits", "7. Yes, auto-accept edits"),
+		"不完全な選択肢":     strings.ReplaceAll(planScreen, "2. Yes, auto-accept edits", "7. Yes, auto-accept edits"),
 	} {
 		if screenPlan(screen) != nil {
 			t.Errorf("%s was detected as an actionable plan", name)
