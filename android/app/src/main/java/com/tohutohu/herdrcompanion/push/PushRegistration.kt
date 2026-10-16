@@ -3,6 +3,7 @@ package com.tohutohu.herdrcompanion.push
 import android.content.Context
 import android.os.Build
 import android.util.Log
+import androidx.core.content.edit
 import com.google.firebase.FirebaseApp
 import com.google.firebase.messaging.FirebaseMessaging
 import com.tohutohu.herdrcompanion.data.api.GatewayApi
@@ -60,7 +61,7 @@ class PushRegistration(
 
     private fun deviceName(): String {
         val prefs = context.getSharedPreferences("push_device", Context.MODE_PRIVATE)
-        val id = prefs.getString("id", null) ?: UUID.randomUUID().toString().also { prefs.edit().putString("id", it).apply() }
+        val id = prefs.getString("id", null) ?: UUID.randomUUID().toString().also { prefs.edit { putString("id", it) } }
         return "${Build.MANUFACTURER} ${Build.MODEL} ($id)"
     }
 

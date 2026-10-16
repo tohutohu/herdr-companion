@@ -15,6 +15,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
@@ -72,7 +73,7 @@ fun SessionDetailRoute(
         if (fresh.isNotEmpty()) {
             scope.launch {
                 val result = withContext(Dispatchers.IO) {
-                    readPickedAttachmentMetadata(fresh) { readAttachment(resolver, Uri.parse(it)).toUiState() }
+                    readPickedAttachmentMetadata(fresh) { readAttachment(resolver, it.toUri()).toUiState() }
                 }
                 attachments.addAll(result.attachments.filterNot { item -> attachments.any { it.id == item.id } })
                 attachmentError = result.error
@@ -103,7 +104,7 @@ fun SessionDetailRoute(
         focusLatest = focusLatest,
         resolveUrl = api::absolute,
         formatFileSize = { Formatter.formatShortFileSize(context, it) },
-        resolveAttachmentPreview = { id -> Uri.parse(id) },
+        resolveAttachmentPreview = { id -> id.toUri() },
         onAction = { action ->
             when (action) {
                 SessionDetailAction.Back -> onBack()
@@ -116,7 +117,7 @@ fun SessionDetailRoute(
                 SessionDetailAction.PickFile -> filePicker.launch(arrayOf("*/*"))
                 is SessionDetailAction.RemoveAttachment -> attachments.removeAll { it.id == action.id }
                 is SessionDetailAction.Send -> {
-                    vm.send(action.text, attachments.map { Attachment(Uri.parse(it.id), it.name, it.mimeType, it.size) })
+                    vm.send(action.text, attachments.map { Attachment(it.id.toUri(), it.name, it.mimeType, it.size) })
                     attachments.clear()
                     attachmentError = null
                 }

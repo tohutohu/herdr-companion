@@ -4,6 +4,7 @@ import android.text.format.DateUtils
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -44,7 +45,7 @@ fun UsageCardRoute(modifier: Modifier = Modifier) {
     var usage by holder::usage
     var refreshing by remember { mutableStateOf(false) }
     var expanded by rememberSaveable { mutableStateOf(false) }
-    var nowMillis by remember { mutableStateOf(System.currentTimeMillis()) }
+    var nowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
     val scope = rememberCoroutineScope()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
 

@@ -14,6 +14,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.net.toUri
 import com.tohutohu.herdrcompanion.container
 import com.tohutohu.herdrcompanion.data.AgentPreset
 import com.tohutohu.herdrcompanion.data.Attachment
@@ -78,7 +79,7 @@ fun NewSessionRoute(
             scope.launch {
                 val result = withContext(Dispatchers.IO) {
                     readPickedAttachmentMetadata(fresh) {
-                        val attachment = readAttachment(resolver, Uri.parse(it))
+                        val attachment = readAttachment(resolver, it.toUri())
                         AttachmentUiState(it, attachment.name, attachment.mime, attachment.size)
                     }
                 }
@@ -101,7 +102,7 @@ fun NewSessionRoute(
     fun start(request: StartSessionRequest, preset: AgentPreset) {
         if (starting) return
         starting = true
-        val picked = attachments.map { Attachment(Uri.parse(it.id), it.name, it.mimeType, it.size) }
+        val picked = attachments.map { Attachment(it.id.toUri(), it.name, it.mimeType, it.size) }
         val id = starts.enqueue(request) { picked.map { uploadAttachment(resolver, api, it) } }
         container.scope.launch {
             runCatching { shortcutStore.recordUsed(request.cwd) }
@@ -287,6 +288,6 @@ fun NewSessionRoute(
             }
         },
         topContent = { UsageCardRoute() },
-        resolveAttachmentPreview = { id -> Uri.parse(id) },
+        resolveAttachmentPreview = { id -> id.toUri() },
     )
 }

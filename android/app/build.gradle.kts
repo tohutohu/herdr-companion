@@ -136,7 +136,7 @@ dependencies {
 
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.messaging)
-    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
+    implementation(libs.play.services.code.scanner)
     implementation(libs.androidx.fragment)
 
     testImplementation(libs.junit)
