@@ -323,7 +323,7 @@ Android 13 and newer ask for notification permission.
 cd gateway
 go run ./cmd/herdr-mobile-gateway --debug --log-file ""   # development server (:8765)
 go test ./...
-go test ./internal/providers/... -update                 # update fixture goldens
+go test ./internal/providers/claude ./internal/providers/codex -update  # update fixture goldens
 go vet ./...
 
 # Use a separate Herdr session
@@ -344,7 +344,7 @@ cd android
 
 ### Test data
 
-gateway/testdata/{claude,codex}/ contains anonymized real-data fixtures and golden JSON results. When a Claude or Codex format change creates a dead letter, add the raw payload as a fixture and update the adapter.
+gateway/testdata/{claude,codex,opencode}/ contains anonymized real-data fixtures and golden JSON results. When a Claude or Codex format change creates a dead letter, add the raw payload as a fixture and update the adapter.
 
 ## Limitations and known behavior
 

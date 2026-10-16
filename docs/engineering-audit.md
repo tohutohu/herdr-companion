@@ -76,7 +76,7 @@ P0と断定できる問題は今回確認していない。中心的なリスク
 | ID / 優先度 / 状態 | 根拠・原因と影響 | 対応・代替・リスク/効果・検証 |
 |---|---|---|
 | A01 / P1 / **修正済・再現済** | `gatewayClient/.../GatewayApi.kt:146`、`app/.../data/SessionRepository.kt:67`。受信直後のETag保存→キャンセル/DB保存失敗→次回304で未表示更新をスキップ。質問・承認の表示信頼性に影響 | 消費側の反映後ack。小・低リスク・Android/Desktop両方に効果。受信途中cancel/未ack/ack後304/anchor変更をテスト。本文cacheで毎回再適用する代替はメモリ/DB負荷が増えるため不採用 |
-| A02 / P1 / **修正済・境界検証済** | `app/.../data/Attachment.kt:30`、新`UploadBytes.kt:10`。旧版は全量read後に20MiBを判定。巨大文書でプロセスOOMの可能性 | 上限+1 byteで停止。小・低リスク。実OOMを故意発生させず消費バイト数を検証。サイズqueryだけでは未知サイズ/不正申告を防げず、streaming multipart化は今回不要 |
+| A02 / P1 / **修正済・境界検証済** | `app/.../data/Attachment.kt:30`、新`UploadBytes.kt:10`。旧版は全量read後に20MiBを判定。巨大文書でプロセスOOMの可能性 | 上限+1 byteで停止。小・低リスク。実OOMを故意発生させず消費バイト数を検証。サイズqueryだけでは未知サイズ/不正申告を防げず、streaming multipart化は今回不要。**後続**: 旧`UploadBytes.kt`は削除し、`StreamingUploadBody.kt`による500 MiBまでのstreamingへ置換（下の追補参照） |
 | A03 / P1 / **修正済・再現済** | `shared/.../ui/detail/InteractionCard.kt:254`。質問選択と自由入力がrememberのみで再生成/行破棄により消失 | 最小の選択label/文字列をSaverで保存。小・低リスク・回答のやり直しを防ぐ。復元後の送信内容・別IDへの切替・画像差分をComposeテスト。永続DB草稿は今回の寿命に対し過大 |
 | A04 / P1 / 未修正・コード確認 | `app/.../push/Reply.kt:100`。返信全文+FCM title/bodyをWorkManager Dataへ格納。10KB制限超過でbuild例外がReceiverへ伝播し返信不可 | payload永続化+IDのみDataへ。小さい代替は例外を捕捉しアプリでの返信へ誘導。本文切捨ては不可。中・schema/cleanup設計あり・長文時の効果大。日本語/絵文字/メタデータ込みの境界とReceiverをテスト |
 | A05 / P1 / 未修正・コード確認、障害再現未実施 | `app/.../push/Reply.kt:57,70`、`shared/.../data/api/Dto.kt:154`、`gateway/internal/api/server.go:396`。POST実行後の応答紛失で最大4回同じ非冪等送信 | request IDとGateway重複排除を設計。中・プロトコル/再起動境界の回帰リスクあり。単純なretry停止は未送信時の回復を損なう。応答を破棄するHTTP試験でprovider実行回数を検証 |
@@ -215,7 +215,7 @@ AndroidとDesktopの全量ByteArray読み込みを廃止し、共通`StreamingUp
 |---|---|---|
 | A02 | **更新済**: Android/Desktop/Gatewayの500 MiB streaming、実転送/境界テスト | 本番の旧Gatewayも更新が必要。モバイル回線500 MiB実転送や実機peak heapは未測定。通常OutboxはアプリscopeでありOSによるプロセス終了後の転送継続を保証しない |
 | A04 | **修正済**: 通知返信本文をprivate fileへatomic保存し、WorkManager DataはUUIDのみ。40,000回の日本語/emojiを含む長文でDataが512bytes未満と本文保持をRobolectric検証 | Notification表示用のpreviewだけ2000文字に制限するが、送信本文は切り捨てない。Gatewayの通常テキストJSON上限1 MiBは別仕様 |
-| A05 | **通知返信で修正済**: optional requestId+永続receipt、POST前の対応確認、同じ成功要求は202を返し再実行しない。不確定な実行は409で会話確認へ | exactly-once配送は保証しない。実行前に停止すれば未送信になり得るが、曖昧な送信を重ねない。旧Gatewayには一度送信後の曖昧な自動retryをしない。画面内Outboxの手動retryは従来方式 |
+| A05 | **通知返信で修正済**: optional requestId+永続receipt、POST前の対応確認、同じ成功要求は202を返し再実行しない。不確定な実行は409で会話確認へ | exactly-once配送は保証しない。実行前に停止すれば未送信になり得るが、曖昧な送信を重ねない。旧Gatewayには一度送信後の曖昧な自動retryをしない。画面内Outboxの手動retryは従来方式（§9.1で同じrequestId方式に統一済み） |
 | A06 | **修正・登録済**: 環境変数で固定鍵、CIは未設定時fail-fast。所有者承認後、Mac既存鍵を4つのGitHub Secretsへ登録 | 公開済みの別鍵APKへの上書き互換は復元できない。リモートCIでの実releaseは未実行 |
 | A07 | **修正済**: repoのsession別Mutexをpoll/prefetch/outbox/reloadで共有。anchor読取から通信・DB反映まで直列化し、session+message保存をtransactionへ。list refreshも直列化 | セッション一覧と詳細という異なるAPI snapshot間の鮮度をグローバルrevisionで整合する設計ではない |
 | A08 | **修正済/範囲限定**: URI/name/MIME/sizeを保存、session/フォームownerを分離、metadata取得失敗を添付単位で表示。キャンセルは再送出 | 永続URI grantは追加しない。同taskの有効grant下での復元を改善。端末再起動等でgrantが失効した場合は再選択が必要 |

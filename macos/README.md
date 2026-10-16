@@ -9,7 +9,7 @@ macOS 13以降のメニューバーアプリです。Herdr Companion Gatewayを�
 1. Tailscale（推奨）をMacとAndroidに用意して同じtailnetへ接続するか、同じ信頼できるローカルネットワークを使います。外部からはCloudflare TunnelなどのHTTPSトンネルも利用できます。
 2. MacのHerdrと使うエージェント（Claude Code／Codex／OpenCode／Devin CLI）をセットアップします。Herdrのintegration設定は[ルートREADME](../README.md#1-herdr-のセットアップ)を参照してください。
 3. Gateway DMGを開き、`Herdr Companion Gateway.app`をApplicationsへドラッグして起動します。Compose UIを使う場合はUI DMGの`Herdr Companion.app`も別途Applicationsへ入れます。
-4. メニューバーのターミナルアイコンを開き、Tailscale IPv4またはローカルネットワークのIPv4とポートを確認して「Gatewayを起動」。UI側がオフラインの場合は、UIの接続画面またはSettingsからGateway managerを起動できます。
+4. メニューバーのターミナルアイコンを開き、Tailscale IPv4またはローカルネットワークのIPv4とポートを確認して「Gatewayを起動」。UI側がオフラインの場合は、UIの接続エラー画面からGateway managerを起動できます。
 5. 「ペアリングQRを表示」→ Androidの設定で「Scan Mac QR」→ 接続先を確認して「Pair」。
 
 HTTPSトンネルを使う場合は、AndroidのSettingsでGateway URLにCloudflare Tunnelなどの`https://...` URLを入力し、同じGatewayの認証トークンを保存します。
@@ -44,7 +44,7 @@ Firebase APIキーをAndroidアプリに制限する場合、配布APKのパッ�
 - アプリ自身が起動したGatewayだけを管理します。既存LaunchAgentは変更しません。
 - アプリを終了すると同梱Gatewayも終了します。ログイン時起動は設定で有効にできます。
 - managerとCompose UIは同一ユーザー内で複数起動しません。2つ目の起動は既存プロセスを前面化します。
-- Gatewayがクラッシュした場合は状態が停止に変わります。managerの「Gatewayを起動」またはCompose UIの「Start Gateway manager」で再起動してください。
+- Gatewayがクラッシュした場合は状態が停止に変わります。managerの「Gatewayを起動」またはCompose UIの「Start Herdr Companion Gateway」で再起動してください。
 - ログイン時起動を有効にするとmanagerの起動後にGatewayも自動起動します。承認待ちの場合はアプリ内のボタンからシステム設定を開けます。
 
 ## アップデート

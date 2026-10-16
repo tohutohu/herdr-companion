@@ -1,4 +1,4 @@
-# Herdr Desktop macOS release
+# Herdr Companion macOS release
 
 このリポジトリのmacOS配布は、UIとGatewayを別アプリ・別DMGとして扱います。
 
@@ -154,7 +154,7 @@ open 'dist/Herdr Companion.app'
 open 'dist/Herdr Companion Gateway.app'
 ```
 
-UIだけを先に入れた場合、Gateway設定が存在しないとUIは設定案内を表示します。設定画面または接続画面の`Start Gateway manager`から、別アプリの`Herdr Companion Gateway.app`へ起動要求を送れます。managerが設定を作成・Gatewayを起動すると、UIは設定を再読込して接続します。GatewayはUIへ隠れて同梱しません。設定は`~/.config/herdr-mobile/desktop/config.json`、ログと状態は`~/.local/state/herdr-mobile/desktop/`です。
+UIだけを先に入れた場合、Gateway設定が存在しないとUIは設定案内を表示します。接続エラー画面の`Start Herdr Companion Gateway`から、別アプリの`Herdr Companion Gateway.app`へ起動要求を送れます。managerが設定を作成・Gatewayを起動すると、UIは設定を再読込して接続します。GatewayはUIへ隠れて同梱しません。設定は`~/.config/herdr-mobile/desktop/config.json`、ログと状態は`~/.local/state/herdr-mobile/desktop/`です。
 
 ## インストール手順
 

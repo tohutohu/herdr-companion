@@ -2,7 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
   LaunchAgent for herdr-mobile-gateway.
-  Replace __HOME__ with your home directory (see README), then:
+  Replace __HOME__ with your home directory and __LISTEN__ with the listen
+  address (see README), then:
     cp com.herdr-mobile.gateway.plist ~/Library/LaunchAgents/
     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.herdr-mobile.gateway.plist
 -->

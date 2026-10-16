@@ -13,7 +13,7 @@ Design: `docs/architecture.md`. Setup for humans: `README.md`.
 # Gateway
 cd gateway
 go test ./...                                  # must pass
-go test ./internal/providers/... -update       # regenerate golden JSON after intended parser changes
+go test ./internal/providers/claude ./internal/providers/codex -update  # regenerate golden JSON after intended parser changes
 go vet ./...
 env -u GOROOT go test ./...                    # avoid inherited GOROOT/toolchain mismatch
 # Production updates: rebuild the Mac Gateway app, replace /Applications/Herdr Companion Gateway.app, reopen it.
@@ -62,6 +62,7 @@ Screens are shown with Navigation 3 (`ui/AppNavigation.kt`): the back stack is a
 |---|---|---|
 | Herdr server | LaunchAgent `com.herdr-mobile.herdr-server` | from `gateway/deploy/*.plist` (placeholders replaced with `sed`, see README) |
 | Gateway | `/Applications/Herdr Companion Gateway.app` (menu-bar app, login item) | bundled child process; `100.99.15.34:8765` |
+| Cloudflare tunnel | LaunchAgent `com.herdr-mobile.cloudflare-tunnel` | HTTPS route to the Gateway from outside the tailnet (`docs/api.md`) |
 
 ```bash
 launchctl list | grep herdr-mobile
@@ -80,7 +81,7 @@ open "/Applications/Herdr Companion Gateway.app"
 ## Persistent state and secrets (never commit)
 
 - Active config: `~/.config/herdr-mobile/desktop/config.json`: auth token, FCM device tokens, optional `workspaceRoots` etc. Mode 600. For CLI diagnostics set `HERDR_MOBILE_CONFIG` to this path and use the app-bundled executable. The old root config is a migration backup, not active state.
-- `~/.config/herdr-mobile/desktop/firebase-service-account.json`: FCM key (Firebase project `herdr-client-android`, SA `firebase-adminsdk-fbsvc`).
+- FCM key (Firebase project `herdr-client-android`, SA `firebase-adminsdk-fbsvc`): the file named by `fcmCredentialsFile` in the active config (`~/.config/herdr-mobile/desktop/firebase-credentials-*.json`, written by `import-firebase`). The bundled Gateway is started without `GOOGLE_APPLICATION_CREDENTIALS`, so `desktop/firebase-service-account.json` is not what it reads.
 - `android/app/google-services.json`: gitignored. Shared APKs use Firebase settings received at QR pairing; only `-PbundleFirebase=true` embeds this file in a personal build.
 - Mac menu-bar app uses separate `~/.config/herdr-mobile/desktop/config.json` and `~/.local/state/herdr-mobile/desktop/`, port 8766 by default (this Mac retains 8765 after migration). It manages only its own bundled Gateway; never stops Herdr. Firebase and Jev keys are optional. See `macos/README.md`.
 - Recreate them with `firebase` / `gcloud`. gcloud's default account is a work account, so always pass `--account tohu.soy@gmail.com --project herdr-client-android`. Don't change the gcloud config.
@@ -111,7 +112,7 @@ open "/Applications/Herdr Companion Gateway.app"
 
 ## Android device / emulator
 
-- Emulator: `emulator -avd Pixel_9_Pro -no-window -no-audio -no-snapshot-save`. It reaches host loopback services at `10.0.2.2` (a throwaway gateway on `127.0.0.1:18765` is `http://10.0.2.2:18765`), but the real gateway listens on the Tailscale IP only, so use `http://100.99.15.34:8765` for it. Stop the emulator with `adb emu kill`.
+- Emulator: follow the shared contract in `~/workspace/AGENTS.md`: create an isolated AVD with `~/.local/bin/android-emulator-standard HERDR_<PURPOSE>_API37`, start it on its own port with `-no-window -no-audio -no-snapshot-save`, pass `ANDROID_SERIAL` explicitly and stop it with `adb -s <serial> emu kill`. It reaches host loopback services at `10.0.2.2` (a throwaway gateway on `127.0.0.1:18765` is `http://10.0.2.2:18765`), but the real gateway listens on the Tailscale IP only, so use `http://100.99.15.34:8765` for it.
 - `adb shell screenrecord` dies with the shell that started it; start it, drive the UI and `adb pull` within one command.
 - Real phone: Pixel 7a over USB. It reaches the gateway via Tailscale IP `100.99.15.34`; the MagicDNS name doesn't resolve on the phone.
 - `adb shell input text` goes through the phone's Japanese IME and gets converted. Configure debug builds with the DUMP-guarded receiver (only adb can send it), then launch the app:
@@ -125,7 +126,7 @@ open "/Applications/Herdr Companion Gateway.app"
 ## Conventions
 
 - Herdr API changes: run `herdr api schema --output /private/tmp/herdr-api-schema.json` and check request/response types and `protocol` before editing the client. `herdr api snapshot` reports live runtime state; do not rely only on CLI help or an older client struct.
-- Test names are in Japanese. Parser tests use fixtures in `gateway/testdata/{claude,codex}` (anonymized real data) with golden JSON.
+- Test names are in Japanese. Parser tests use fixtures in `gateway/testdata/{claude,codex,opencode}` (anonymized real data) with golden JSON.
 - New agent output formats: add the raw payload from dead letters as a fixture, then update the adapter.
 - Session costs are priced by `gateway/internal/pricing` from list rates as of
   2026-09; add a row when an agent starts using a new model (an unknown model

@@ -101,6 +101,16 @@ daemon を使わない通常の `codex` でも履歴の閲覧とメッセージ�
 
 `Herdr Companion.app`（Compose Desktop UI）も利用する場合は、UI 用 DMG を別途インストールします。Gateway Manager と UI は別アプリです。Firebase の取り込み、ログイン時起動、Gateway の start/stop もメニューバー版で管理できます。詳しくは [macos/README.md](macos/README.md) を参照してください。
 
+同じデスクトップ UI は Linux でも動きます。各 GitHub Release に `Herdr-Companion-Linux-x.y.z-amd64.deb` と `-arm64.deb` があり、`sudo apt install ./Herdr-Companion-Linux-*.deb` でインストールできます。自分でビルドする場合、jpackage は実行中の OS 向けにしかパッケージを作れないため、`.deb` は Linux 上でビルドします（JDK 17 と、Gradle ビルドに Android アプリが含まれるため Android SDK も必要）。jpackage はビルド時にインストールされているライブラリからパッケージの依存関係を決めるので、ビルド前に `libegl1` を入れてください。
+
+```bash
+cd android
+./gradlew :desktopApp:packageReleaseDeb   # desktopApp/build/compose/binaries/main-release/deb/herdr-companion_*.deb
+sudo apt install ./desktopApp/build/compose/binaries/main-release/deb/herdr-companion_*.deb
+```
+
+メニューバーアプリのないマシンでは **Settings** を開き、Gateway の接続先（例: `http://100.x.y.z:8766`）と、Mac で `herdr-mobile-gateway token` が表示したトークンを入力します。通知は `notify-send` を使い、Herdr ペインは `$TERMINAL` または最初に見つかったターミナルエミュレータで開きます。Linux 版は自動アップデートしません。
+
 ### CLI / launchd 版
 
 配布アプリを使わず、Gateway をソースから起動する場合は次の手順です。
@@ -325,7 +335,7 @@ Android 13 以降は通知の許可を求められます。
 cd gateway
 go run ./cmd/herdr-mobile-gateway --debug --log-file ""   # 開発起動（:8765）
 go test ./...
-go test ./internal/providers/... -update                 # fixture の golden を更新
+go test ./internal/providers/claude ./internal/providers/codex -update  # fixture の golden を更新
 go vet ./...
 
 # 別の Herdr セッションに向ける
@@ -346,7 +356,7 @@ cd android
 
 ### テストデータ
 
-`gateway/testdata/{claude,codex}/` に実データ由来の fixture（パスは匿名化済み）と、変換結果の golden JSON があります。
+`gateway/testdata/{claude,codex,opencode}/` に実データ由来の fixture（パスは匿名化済み）と、変換結果の golden JSON があります。
 Claude / Codex の仕様変更で dead-letter に記録されたデータは、raw を fixture に追加して adapter を更新してください。
 
 ## 制約・既知の事項

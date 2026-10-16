@@ -16,7 +16,7 @@ if [[ "${GITHUB_REF_NAME:-}" == v* && "${GITHUB_REF_NAME#v}" != "$VERSION" ]]; t
   exit 1
 fi
 if [[ "$(uname -m)" != "arm64" ]]; then
-  echo "Herdr Desktop release packaging currently supports Apple Silicon (arm64) only." >&2
+  echo "Herdr Companion release packaging currently supports Apple Silicon (arm64) only." >&2
   exit 1
 fi
 

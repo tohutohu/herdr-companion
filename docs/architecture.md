@@ -259,7 +259,8 @@ unfinished receipt after restart, or inability to persist acceptance returns
 not proof that an interrupted send reached the agent. Receipt files are synced
 before execution and never automatically expired, since deleting an unknown
 outcome would permit replay. The guarantee requires retaining the same state
-directory. Normal in-app Outbox sends remain compatible and do not opt in yet.
+directory. Android Outbox and Desktop sends use the same request ID and receipt for
+retries of one logical send (`MessageDeliveryAttempt`).
 
 Unknown provider data never fails a request: it becomes a
 `Unsupported event: …` text block and is written to the dead-letter log with
