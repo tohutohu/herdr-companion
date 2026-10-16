@@ -11,11 +11,10 @@ import kotlin.test.assertTrue
 
 class DesktopConnectionTest {
     @Test
-    fun `macOS manager config supplies token and local default port`() {
-        val connection = DesktopConnectionConfig.parseConfig(
-            """{"authToken":"secret"}""",
-            "http://127.0.0.1:8766",
-        )
+    fun `マネージャーの設定からトークンを読みローカルの既定ポートへ接続する`() = withHome { home ->
+        writeManagerConfig(home, """{"authToken":"secret"}""")
+
+        val connection = DesktopConnectionConfig.load(home, environment = emptyMap(), properties = emptyMap())
 
         assertEquals("http://127.0.0.1:8766", connection.baseUrl)
         assertEquals("secret", connection.token)
@@ -23,21 +22,19 @@ class DesktopConnectionTest {
     }
 
     @Test
-    fun `explicit gateway URL in config wins over default`() {
-        val connection = DesktopConnectionConfig.parseConfig(
-            """{"authToken":"secret","gatewayUrl":"http://localhost:9999"}""",
-            "http://127.0.0.1:8766",
-        )
+    fun `設定に書かれた接続先URLは既定の接続先より優先される`() = withHome { home ->
+        writeManagerConfig(home, """{"authToken":"secret","gatewayUrl":"http://localhost:9999"}""")
+
+        val connection = DesktopConnectionConfig.load(home, environment = emptyMap(), properties = emptyMap())
 
         assertEquals("http://localhost:9999", connection.baseUrl)
     }
 
     @Test
-    fun `a configured non-default listen address is honored`() {
-        val connection = DesktopConnectionConfig.parseConfig(
-            """{"authToken":"secret","listen":"100.99.15.34:8765"}""",
-            "http://127.0.0.1:8766",
-        )
+    fun `既定以外の待ち受けアドレスが設定されていればそこへ接続する`() = withHome { home ->
+        writeManagerConfig(home, """{"authToken":"secret","listen":"100.99.15.34:8765"}""")
+
+        val connection = DesktopConnectionConfig.load(home, environment = emptyMap(), properties = emptyMap())
 
         assertEquals("http://100.99.15.34:8765", connection.baseUrl)
     }

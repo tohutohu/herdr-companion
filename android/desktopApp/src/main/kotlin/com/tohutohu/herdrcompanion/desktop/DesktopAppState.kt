@@ -12,7 +12,6 @@ import com.tohutohu.herdrcompanion.data.api.MessageSnapshot
 import com.tohutohu.herdrcompanion.data.api.MessageDeliveryAttempt
 import com.tohutohu.herdrcompanion.data.api.UnconfirmedMessageDeliveryException
 import com.tohutohu.herdrcompanion.data.api.MessagesResponse
-import com.tohutohu.herdrcompanion.data.api.Status
 import com.tohutohu.herdrcompanion.model.SessionUiModel
 import com.tohutohu.herdrcompanion.model.toUiModel
 import com.tohutohu.herdrcompanion.ui.detail.AttachmentUiState
@@ -450,14 +449,6 @@ class DesktopAppState(
         if (wasSelected) {
             openSessionIdsState.lastOrNull()?.let(selection::select) ?: selection.clear()
         }
-        updateSessionRowSelection()
-        saveLayout()
-    }
-
-    fun clearSelection() {
-        openSessionIdsState.forEach(::removeDetail)
-        setOpenSessionIds(emptyList())
-        selection.clear()
         updateSessionRowSelection()
         saveLayout()
     }

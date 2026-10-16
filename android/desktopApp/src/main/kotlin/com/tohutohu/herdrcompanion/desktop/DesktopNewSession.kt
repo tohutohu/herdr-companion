@@ -31,7 +31,6 @@ import androidx.compose.ui.window.DialogModalityType
 import androidx.compose.ui.window.DialogWindow
 import androidx.compose.ui.window.rememberDialogState
 import com.tohutohu.herdrcompanion.data.AgentPreset
-import com.tohutohu.herdrcompanion.data.AgentPresets
 import com.tohutohu.herdrcompanion.data.lastUsedDirectory
 import com.tohutohu.herdrcompanion.data.pushRecent
 import com.tohutohu.herdrcompanion.data.toggleFavorite

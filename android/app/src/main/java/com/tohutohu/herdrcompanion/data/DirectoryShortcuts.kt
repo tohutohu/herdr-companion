@@ -24,8 +24,6 @@ class DirectoryShortcutsStore(private val context: Context) {
 
     suspend fun setFavoriteOrder(favorites: List<String>) = update(favoritesKey) { favorites }
 
-    suspend fun removeRecent(path: String) = update(recentsKey) { it - path }
-
     private suspend fun update(key: Preferences.Key<String>, f: (List<String>) -> List<String>) {
         context.shortcutStore.edit { it[key] = f(it.list(key)).joinToString("\n") }
     }

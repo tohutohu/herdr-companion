@@ -33,16 +33,6 @@ class DesktopAttachmentTest {
     }
 
     @Test
-    fun `file URLs can be converted for drag and drop implementations`() {
-        val file = Files.createTempFile("herdr-drop", ".md")
-        try {
-            assertEquals(file.toAbsolutePath().normalize(), fileUrlToPath(file.toUri().toString()))
-        } finally {
-            Files.deleteIfExists(file)
-        }
-    }
-
-    @Test
     fun `clipboard images are normalized to PNG attachments`() {
         val source = BufferedImage(3, 2, BufferedImage.TYPE_INT_RGB)
         val target = Files.createTempFile("herdr-clipboard-test", ".png")

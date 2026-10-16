@@ -45,13 +45,13 @@ class UsageFormatTest {
     fun `ウィンドウがないプロバイダーは見出しに出さない`() {
         val empty = UsageProviderDto(provider = "codex", displayName = "Codex", error = "not logged in")
         assertNull(tightestWindow(empty))
-        assertEquals("Claude 23%", usageHeadline(listOf(claude, empty)))
+        assertEquals("Claude 23%", usageHeadlineWithReset(listOf(claude, empty), nowMillis = 0))
     }
 
     @Test
     fun `見出しはプロバイダーごとの最大消費率を並べる`() {
-        assertEquals("Claude 23% · Codex 53%", usageHeadline(listOf(claude, codex)))
-        assertEquals("", usageHeadline(emptyList()))
+        assertEquals("Claude 23% · Codex 53%", usageHeadlineWithReset(listOf(claude, codex), nowMillis = 0))
+        assertEquals("", usageHeadlineWithReset(emptyList(), nowMillis = 0))
     }
 
     @Test

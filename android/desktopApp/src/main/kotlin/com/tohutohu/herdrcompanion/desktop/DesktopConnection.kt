@@ -105,24 +105,6 @@ object DesktopConnectionConfig {
         )
     }
 
-    /** Small pure parser used by tests and by future settings UI. */
-    internal fun parseConfig(jsonText: String, defaultUrl: String): DesktopGatewayConnection {
-        val parsed = runCatching { json.decodeFromString<GatewayConfigFile>(jsonText) }
-        val config = parsed.getOrNull()
-        return DesktopGatewayConnection(
-            baseUrl = config?.gatewayUrl?.trim()?.takeIf { it.isNotEmpty() }
-                ?: config?.listen?.let(::configuredListenUrl)
-                ?: defaultUrl,
-            token = config?.authToken?.trim().orEmpty(),
-            configPath = null,
-            configIssue = when {
-                parsed.isFailure -> "Gateway config could not be read."
-                config?.authToken.isNullOrBlank() -> "Gateway auth token is missing from the Desktop config."
-                else -> null
-            },
-        )
-    }
-
     /** `:8765` is the Go config default; the menu-bar manager overrides it with 8766. */
     private fun configuredListenUrl(listen: String): String? {
         val value = listen.trim().removePrefix("http://").removePrefix("https://")

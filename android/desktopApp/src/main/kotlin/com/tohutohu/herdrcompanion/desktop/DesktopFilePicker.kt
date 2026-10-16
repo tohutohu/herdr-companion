@@ -8,7 +8,6 @@ import java.io.File
 import java.io.FilenameFilter
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.Paths
 import java.net.URLConnection
 import javax.swing.JFileChooser
 import javax.swing.filechooser.FileSystemView

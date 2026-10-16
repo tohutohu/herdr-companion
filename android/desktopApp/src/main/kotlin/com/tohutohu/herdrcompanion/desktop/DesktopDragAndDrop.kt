@@ -15,9 +15,7 @@ import java.awt.datatransfer.DataFlavor
 import java.awt.dnd.DropTargetDragEvent
 import java.awt.dnd.DropTargetDropEvent
 import java.io.File
-import java.net.URI
 import java.nio.file.Path
-import java.nio.file.Paths
 
 data class DesktopAttachmentDropState(
     val modifier: Modifier,
@@ -81,9 +79,3 @@ private fun desktopDropFiles(event: DragAndDropEvent): List<Path> {
         .orEmpty()
     return files.filterIsInstance<File>().map(File::toPath).filter { it.toFile().isFile }
 }
-
-/** Kept for tests and for Finder implementations that expose file:// URLs. */
-internal fun fileUrlToPath(value: String): Path? = runCatching {
-    val uri = URI(value)
-    if (uri.scheme == null) Paths.get(value) else Paths.get(uri)
-}.getOrNull()

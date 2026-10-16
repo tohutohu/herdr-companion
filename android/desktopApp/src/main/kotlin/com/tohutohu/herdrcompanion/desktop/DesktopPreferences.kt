@@ -154,9 +154,6 @@ object DesktopPreferences {
         get() = store.getBoolean(UPDATE_CHECKS_KEY, true)
         set(value) { store.putBoolean(UPDATE_CHECKS_KEY, value) }
 
-    fun clearWindow() {
-        store.remove(WINDOW_KEY)
-    }
 }
 
 /** Newline is sufficient here: the values are absolute filesystem paths. */

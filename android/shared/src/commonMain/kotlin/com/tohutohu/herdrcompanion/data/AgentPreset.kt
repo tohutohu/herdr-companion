@@ -49,8 +49,3 @@ fun upsertPreset(presets: List<AgentPreset>, previousKey: String?, preset: Agent
 /** Removes the preset with the same combination, regardless of its display name. */
 fun removePreset(presets: List<AgentPreset>, preset: AgentPreset): List<AgentPreset> =
     presets.filterNot { it.key == preset.key }
-
-fun movePreset(presets: List<AgentPreset>, fromIndex: Int, toIndex: Int): List<AgentPreset> {
-    if (fromIndex !in presets.indices || toIndex !in presets.indices || fromIndex == toIndex) return presets
-    return presets.toMutableList().apply { add(toIndex, removeAt(fromIndex)) }
-}

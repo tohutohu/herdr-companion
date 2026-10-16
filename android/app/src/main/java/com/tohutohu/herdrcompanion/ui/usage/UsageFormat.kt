@@ -16,13 +16,6 @@ private val RESET_DATE_TIME_FORMAT = DateTimeFormatter.ofPattern("M/d HH:mm", Lo
 fun tightestWindow(provider: UsageProviderDto): UsageWindowDto? =
     provider.windows.maxByOrNull { it.usedPercent }
 
-/** "Claude 23% · Codex 53%", the one-line form shown while the card is collapsed. */
-fun usageHeadline(providers: List<UsageProviderDto>): String =
-    providers.mapNotNull { p ->
-        val w = tightestWindow(p) ?: return@mapNotNull null
-        "${p.displayName} ${w.usedPercent}%"
-    }.joinToString(" · ")
-
 /** The collapsed form with the reset text for each provider's tightest window. */
 fun usageHeadlineWithReset(
     providers: List<UsageProviderDto>,

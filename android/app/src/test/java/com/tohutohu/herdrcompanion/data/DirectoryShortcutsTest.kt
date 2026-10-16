@@ -34,8 +34,4 @@ class DirectoryShortcutsTest {
         assertEquals(listOf("/a"), toggleFavorite(listOf("/a", "/b"), "/b"))
     }
 
-    @Test
-    fun `お気に入りは指定位置へ移動できる`() {
-        assertEquals(listOf("/a", "/c", "/b"), moveFavorite(listOf("/a", "/b", "/c"), 1, 2))
-    }
 }

@@ -80,14 +80,6 @@ object DesktopPlatformActions {
         }.getOrDefault(false)
     }
 
-    fun revealInFinder(path: String, baseDirectory: String? = null): Boolean {
-        val resolved = resolvePath(path, baseDirectory) ?: return false
-        return runCatching {
-            ProcessBuilder("/usr/bin/open", "-R", resolved.toString()).start()
-            true
-        }.getOrDefault(false)
-    }
-
     /** The menu-bar manager, Finder and `open` exist only on macOS. */
     val isMacOs: Boolean get() = DesktopOs.current == DesktopOs.MAC
 

@@ -12,8 +12,3 @@ fun pushRecent(recents: List<String>, path: String, max: Int = MAX_RECENT_DIRECT
 
 fun toggleFavorite(favorites: List<String>, path: String): List<String> =
     if (path in favorites) favorites - path else favorites + path
-
-fun moveFavorite(favorites: List<String>, fromIndex: Int, toIndex: Int): List<String> {
-    if (fromIndex !in favorites.indices || toIndex !in favorites.indices || fromIndex == toIndex) return favorites
-    return favorites.toMutableList().apply { add(toIndex, removeAt(fromIndex)) }
-}
