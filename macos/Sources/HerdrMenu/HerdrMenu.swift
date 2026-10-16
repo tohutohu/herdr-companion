@@ -309,8 +309,8 @@ struct SetupError: LocalizedError {
         else { return false }
         return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) == "ok"
     }
-    func request(_ path: String, method: String, base: URL? = nil) async throws -> Data {
-        guard let url = (base ?? baseURL)?.appendingPathComponent(String(path.dropFirst())) else { throw SetupError(message: "接続先が未設定です。") }
+    func request(_ path: String, method: String) async throws -> Data {
+        guard let url = baseURL?.appendingPathComponent(String(path.dropFirst())) else { throw SetupError(message: "接続先が未設定です。") }
         let config = try JSONDecoder().decode(LocalConfig.self, from: Data(contentsOf: configURL))
         var request = URLRequest(url: url); request.httpMethod = method; request.timeoutInterval = 3
         request.setValue("Bearer \(config.authToken)", forHTTPHeaderField: "Authorization")
