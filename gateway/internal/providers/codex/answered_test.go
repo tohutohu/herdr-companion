@@ -1,6 +1,7 @@
 package codex
 
 import (
+	"bufio"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -159,4 +160,26 @@ func BenchmarkAnsweredAppend(b *testing.B) {
 			}
 		})
 	}
+}
+
+// readAnsweredInputs parses the whole file from scratch: the reference the
+// incremental cache in answeredInputs is compared against.
+func readAnsweredInputs(path string) []answeredInput {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	var p answeredParser
+	r := bufio.NewReaderSize(f, 64<<10)
+	for {
+		line, err := r.ReadBytes('\n')
+		if len(line) > 0 {
+			p.consume(line)
+		}
+		if err != nil {
+			break
+		}
+	}
+	return p.out
 }

@@ -95,12 +95,6 @@ func (sp selectPrompt) keys(label string) ([]string, error) {
 	return append(keys, "enter"), nil
 }
 
-// planPromptRows reads the prompt's rows, or ok=false when it is not shown.
-func planPromptRows(screen string) (rows []model.Option, ok bool) {
-	sp, ok := planSelectPrompt(screen)
-	return sp.Rows, ok
-}
-
 func planSelectPrompt(screen string) (selectPrompt, bool) {
 	sp, ok := readSelectPrompt(screen, planPromptTitle)
 	return sp, ok && len(sp.Lines) == 0

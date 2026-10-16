@@ -136,3 +136,9 @@ func Test実行中や計画のないターンでは実装確認を出さない(t
 		t.Errorf("turn without plan = %q", id)
 	}
 }
+
+// planPromptRows reads the prompt's rows, or ok=false when it is not shown.
+func planPromptRows(screen string) (rows []model.Option, ok bool) {
+	sp, ok := planSelectPrompt(screen)
+	return sp.Rows, ok
+}

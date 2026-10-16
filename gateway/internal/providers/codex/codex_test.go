@@ -1176,3 +1176,10 @@ func Test起動時のPlanモードはTUIのショートカットで設定する(
 		t.Errorf("err = %v keys = %v", err, stuck.keys)
 	}
 }
+
+// infoFromRollout returns the newest token accounting in the thread's rollout
+// file, or nil when the file is missing or has no usable count (an
+// interrupted turn records one without an info block).
+func infoFromRollout(path string) *tokenInfo {
+	return tokenInfoFrom(rolloutTailLines(path))
+}

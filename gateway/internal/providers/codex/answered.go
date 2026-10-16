@@ -124,26 +124,6 @@ func answeredInputs(path string) []answeredInput {
 	return append([]answeredInput(nil), e.parser.out...)
 }
 
-func readAnsweredInputs(path string) []answeredInput {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil
-	}
-	defer f.Close()
-	var p answeredParser
-	r := bufio.NewReaderSize(f, 64<<10)
-	for {
-		line, err := r.ReadBytes('\n')
-		if len(line) > 0 {
-			p.consume(line)
-		}
-		if err != nil {
-			break
-		}
-	}
-	return p.out
-}
-
 func (r *answeredParser) consume(line []byte) {
 	if !relevantRecord(line, len(r.calls) > 0, len(r.open) > 0) {
 		return

@@ -31,14 +31,6 @@ func OneLine(s string, n int) string {
 	return s
 }
 
-func IsImagePath(p string) bool {
-	switch strings.ToLower(filepath.Ext(p)) {
-	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp":
-		return true
-	}
-	return false
-}
-
 // TextWithFiles returns the prompt text with every non-image attachment
 // appended as its own line. Agents have no structured form for these, so the
 // path is all they get; they read the file themselves.

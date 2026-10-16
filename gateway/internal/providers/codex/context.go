@@ -73,13 +73,6 @@ func (i *tokenInfo) cost(modelID string) *model.Cost {
 	return &model.Cost{USD: usd, Estimated: true}
 }
 
-// infoFromRollout returns the newest token accounting in the thread's rollout
-// file, or nil when the file is missing or has no usable count (an
-// interrupted turn records one without an info block).
-func infoFromRollout(path string) *tokenInfo {
-	return tokenInfoFrom(rolloutTailLines(path))
-}
-
 // rolloutTailLines returns the whole records in the last rolloutTail bytes of
 // a rollout file, oldest first.
 func rolloutTailLines(path string) [][]byte {
