@@ -66,12 +66,12 @@ class SessionRepository(
 
     /**
      * Fetches messages for a session. Incremental fetches ask for everything
-     * from the last cached message on; the gateway includes that anchor so
+     * from the last cached non-queued message on; the gateway includes that anchor so
      * in-progress changes to it are picked up. An incremental fetch the
      * gateway reports unchanged leaves the cache as it is.
      */
     suspend fun refreshMessages(sessionId: String, full: Boolean = false): Unit = messageLock(sessionId).withLock {
-        val anchor = if (full) null else db.messages().lastId(sessionId)
+        val anchor = if (full) null else db.messages().lastAnchorId(sessionId)
         val snapshot = if (anchor == null) {
             null
         } else {

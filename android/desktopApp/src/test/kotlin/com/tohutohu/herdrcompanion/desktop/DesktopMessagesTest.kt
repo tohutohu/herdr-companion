@@ -8,6 +8,31 @@ class DesktopMessagesTest {
     private fun msg(id: String, queued: Boolean = false) = Message(id, "user", 0, emptyList(), queued)
 
     @Test
+    fun `キューの手前に届いた質問を差分取得で取り込む`() {
+        val old = listOf(msg("a"), msg("b"), msg("queued:one", queued = true), msg("queued:two", queued = true))
+        val anchor = messageAnchor(old)
+        assertEquals("b", anchor)
+        val incoming = listOf(msg("b"), msg("question"), msg("queued:one", queued = true), msg("queued:two", queued = true))
+
+        val merged = mergeMessages(old, incoming, anchor)
+
+        assertEquals(listOf("a", "b", "question", "queued:one", "queued:two"), merged.map(Message::id))
+        assertEquals("question", messageAnchor(merged))
+        assertEquals(listOf("a", "b", "question"), mergeMessages(merged, listOf(msg("question")), "question").map(Message::id))
+    }
+
+    @Test
+    fun `キューしかない会話と空の会話は全件取得する`() {
+        assertEquals(null, messageAnchor(emptyList()))
+        assertEquals(null, messageAnchor(listOf(msg("queued:one", queued = true), msg("queued:two", queued = true))))
+    }
+
+    @Test
+    fun `キュー属性がない古いキャッシュでも仮IDをアンカーにしない`() {
+        assertEquals("a", messageAnchor(listOf(msg("a"), msg("queued:legacy"))))
+    }
+
+    @Test
     fun `差分取得ではアンカー以降を置き換える`() {
         val old = listOf(msg("a"), msg("b"), msg("c"))
 

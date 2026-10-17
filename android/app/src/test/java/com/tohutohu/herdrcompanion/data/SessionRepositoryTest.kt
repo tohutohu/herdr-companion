@@ -37,6 +37,73 @@ class SessionRepositoryTest {
     @Test
     fun `全再読込も通常の増分取得と同じセッションロックを使う`() = concurrentRefresh(reload = true)
 
+    @Test
+    fun `キューの手前に届いた質問を古いGatewayからも増分取得できる`() = queuedRefresh(
+        oldIds = listOf("a", "b", "queued:one", "queued:two"),
+        incomingIds = listOf("a", "b", "question", "queued:one", "queued:two"),
+        expectedAnchor = "b",
+    )
+
+    @Test
+    fun `キューしかない会話は全件取得して質問を表示する`() = queuedRefresh(
+        oldIds = listOf("queued:one"),
+        incomingIds = listOf("question", "queued:one"),
+        expectedAnchor = null,
+    )
+
+    @Test
+    fun `キューしかない会話が空になった場合もキャッシュを消す`() = queuedRefresh(
+        oldIds = listOf("queued:one"),
+        incomingIds = emptyList(),
+        expectedAnchor = null,
+    )
+
+    @Test
+    fun `キュー属性がない古いキャッシュでも仮IDをアンカーにしない`() = queuedRefresh(
+        oldIds = listOf("a", "queued:legacy"),
+        incomingIds = listOf("a", "question", "queued:legacy"),
+        expectedAnchor = "a",
+        cachedQueuedFlag = false,
+    )
+
+    private fun queuedRefresh(
+        oldIds: List<String>,
+        incomingIds: List<String>,
+        expectedAnchor: String?,
+        cachedQueuedFlag: Boolean = true,
+    ) = runBlocking(Dispatchers.IO) {
+        val server = MockWebServer()
+        // Emulate the old gateway's inclusive slice, including its queued-anchor bug.
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val anchor = request.url.queryParameter("after")
+                val start = incomingIds.indexOf(anchor).coerceAtLeast(0)
+                val messages = incomingIds.drop(start).joinToString { id ->
+                    val blocks = if (id == "question") """[{"type":"interaction","interaction":{"id":"ask","type":"questions","state":"pending","supported":true}}]""" else "[]"
+                    """{"id":"$id","role":"assistant","timestamp":"2026-10-17T00:00:00Z","blocks":$blocks,"queued":${id.startsWith("queued:")}}"""
+                }
+                return MockResponse.Builder().body("""{"session":{"id":"s","provider":"claude","status":"waiting_input","updatedAt":"2026-10-17T00:00:00Z"},"messages":[$messages]}""").build()
+            }
+        }
+        server.start()
+        val db = Room.inMemoryDatabaseBuilder(RuntimeEnvironment.getApplication(), AppDatabase::class.java).build()
+        try {
+            db.messages().upsert(oldIds.mapIndexed { i, id ->
+                MessageEntity("s", id, i, "assistant", 0, "[]", queued = cachedQueuedFlag && id.startsWith("queued:"))
+            })
+            val repo = SessionRepository(db, GatewayApi(OkHttpClient()) { Settings(server.url("/").toString(), "test") })
+            repo.refreshMessages("s")
+            assertEquals(expectedAnchor, server.takeRequest(5, TimeUnit.SECONDS)!!.url.queryParameter("after"))
+            val rows = db.messages().observe("s").first()
+            assertEquals(incomingIds, rows.map { it.id })
+            assertEquals(incomingIds.indices.toList(), rows.map { it.position })
+            if ("question" in incomingIds) assertTrue(rows.single { it.id == "question" }.blocksJson.contains("pending"))
+        } finally {
+            db.close()
+            server.close()
+        }
+    }
+
     private fun concurrentRefresh(reload: Boolean) = runBlocking(Dispatchers.IO) {
         val firstArrived = CountDownLatch(1)
         val releaseFirst = CountDownLatch(1)

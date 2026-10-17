@@ -638,7 +638,7 @@ class DesktopAppState(
                     if (detailsBySession[id]?.error != null) updateDetail(id) { it.copy(error = null) }
                 } else {
                     messages = mergeMessages(messages, response.messages.map(MessageDto::toMessage), since)
-                    anchor = messages.lastOrNull()?.id
+                    anchor = messageAnchor(messages)
                     settlePending(id, messages)
                     updateDetail(id, SessionDetailUiState(
                         sessionId = id,
@@ -1156,6 +1156,10 @@ internal fun DesktopAttachment.toUiState() = AttachmentUiState(
 )
 
 private fun normalize(value: String): String = value.replace(Regex("\\s+"), " ").trim()
+
+/** Queued prompts float at the tail, after any newly added transcript entries. */
+internal fun messageAnchor(messages: List<Message>): String? =
+    messages.lastOrNull { !it.queued && !it.id.startsWith("queued:") }?.id
 
 /**
  * Applies a messages response. An incremental response starts at [anchor] and

@@ -95,8 +95,9 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE sessionId = :sessionId ORDER BY position")
     fun observe(sessionId: String): Flow<List<MessageEntity>>
 
-    @Query("SELECT id FROM messages WHERE sessionId = :sessionId ORDER BY position DESC LIMIT 1")
-    suspend fun lastId(sessionId: String): String?
+    /** Queued prompts float at the tail; new transcript entries appear before them. */
+    @Query("SELECT id FROM messages WHERE sessionId = :sessionId AND queued = 0 AND id NOT LIKE 'queued:%' ORDER BY position DESC LIMIT 1")
+    suspend fun lastAnchorId(sessionId: String): String?
 
     @Query("SELECT position FROM messages WHERE sessionId = :sessionId AND id = :id")
     suspend fun positionOf(sessionId: String, id: String): Int?
