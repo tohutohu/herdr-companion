@@ -793,31 +793,87 @@ func (a *attachment) promptBlocks() []contentBlock {
 // the conversation so a message sent from the app is visible right away; each
 // is replaced by the real entry once the agent takes it.
 func queuedPrompts(entries []*entry) []model.Message {
-	absorbed := map[time.Time]bool{}
-	for _, e := range entries {
-		if e.Type == "attachment" && e.Attachment != nil && e.Attachment.Type == attachmentQueuedCommand {
-			absorbed[e.Timestamp] = true
+	// Contentless dequeues do not identify which kind of command was picked
+	// up. Task notifications can be delivered ahead of older queued commands.
+	// Defer the FIFO fallback until user/attachment entries identify the prompt.
+	// Remember the transcript position so a dequeue cannot consume a later
+	// enqueue, without retaining a copy of the queue for every dequeue.
+	type dequeue struct {
+		before  int // only enqueues preceding this transcript position are eligible
+		matched bool
+	}
+	var dequeues []*dequeue
+	var queue []*entry
+	enqueuedAt := map[*entry]int{}
+	remove := func(i int) {
+		if i == 0 {
+			queue = queue[1:]
+		} else {
+			queue = slices.Delete(queue, i, i+1)
 		}
 	}
-	var queue []*entry
-	for _, e := range entries {
-		if e.Type != "queue-operation" {
+	consume := func(i int, requireDequeue bool) {
+		if i < 0 {
+			return
+		}
+		matched := false
+		for _, d := range dequeues {
+			if !d.matched && enqueuedAt[queue[i]] < d.before {
+				d.matched = true
+				matched = true
+				break
+			}
+		}
+		if matched || !requireDequeue {
+			remove(i)
+		}
+	}
+	for at, e := range entries {
+		if e.IsSidechain {
 			continue
 		}
-		switch e.Operation {
-		case "enqueue":
-			queue = append(queue, e)
-		case "dequeue", "remove":
-			if i := queueIndex(queue, e.contentText()); i >= 0 {
-				queue = append(queue[:i:i], queue[i+1:]...)
+		switch e.Type {
+		case "queue-operation":
+			switch e.Operation {
+			case "enqueue":
+				enqueuedAt[e] = at
+				queue = append(queue, e)
+			case "dequeue":
+				if e.contentText() == "" {
+					dequeues = append(dequeues, &dequeue{before: at})
+				} else if i := queueIndex(queue, e.contentText()); i >= 0 {
+					remove(i)
+				}
+			case "remove":
+				if i := queueIndex(queue, e.contentText()); i >= 0 {
+					remove(i)
+				}
 			}
+		case "user":
+			if e.Message != nil {
+				if text := queuedContentText(e.Message.Content); text != "" {
+					consume(queueIndex(queue, text), true)
+				}
+			}
+		case "attachment":
+			if e.Attachment == nil || e.Attachment.Type != attachmentQueuedCommand {
+				continue
+			}
+			// Attachments retain the enqueue timestamp, including image prompts.
+			i := slices.IndexFunc(queue, func(q *entry) bool { return q.Timestamp.Equal(e.Timestamp) })
+			consume(i, false)
+		}
+	}
+	for _, d := range dequeues {
+		if d.matched {
+			continue
+		}
+		if len(queue) > 0 && enqueuedAt[queue[0]] < d.before {
+			remove(0)
 		}
 	}
 	var out []model.Message
 	for _, e := range queue {
-		if absorbed[e.Timestamp] {
-			continue // already shown from its attachment
-		}
 		role, text := userText(e.contentText())
 		if text == "" {
 			continue
@@ -834,7 +890,8 @@ func queuedPrompts(entries []*entry) []model.Message {
 }
 
 // queueIndex locates the entry a dequeue or remove refers to. The queue is
-// FIFO and a dequeue carries no content, so it takes the head.
+// matched by content when possible. An unresolved contentless operation takes
+// the head for compatibility with older transcripts.
 func queueIndex(queue []*entry, content string) int {
 	if len(queue) == 0 {
 		return -1
@@ -848,6 +905,23 @@ func queueIndex(queue []*entry, content string) int {
 		}
 	}
 	return -1
+}
+
+// queuedContentText extracts the text used to match a delivered prompt with
+// its enqueue record. Tool results and images are not prompt text.
+func queuedContentText(raw json.RawMessage) string {
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return text
+	}
+	blocks, _ := decodeBlocks(raw)
+	var parts []string
+	for _, b := range blocks {
+		if b.Type == "text" {
+			parts = append(parts, b.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 // contentText decodes the plain string carried by system and queue-operation
