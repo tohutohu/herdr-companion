@@ -313,7 +313,8 @@ func (s *Server) getSession(w http.ResponseWriter, r *http.Request) {
 
 // getMessages returns the session plus messages. With ?after=<id> only the
 // messages from that id onward are returned (the anchor is included so that
-// in-progress updates to it are seen). Unknown anchors return everything.
+// in-progress updates to it are seen). Unknown or queued anchors return everything:
+// queued prompts float at the tail, so new messages can appear before them.
 func (s *Server) getMessages(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	sess, msgs, err := s.Sessions.Conversation(r.Context(), id)
@@ -329,7 +330,7 @@ func (s *Server) getMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 func messagesFrom(msgs []model.Message, after string) []model.Message {
-	if after == "" {
+	if after == "" || strings.HasPrefix(after, "queued:") {
 		return msgs
 	}
 	for i := len(msgs) - 1; i >= 0; i-- {
