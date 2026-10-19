@@ -38,11 +38,13 @@ type ThreadStatus struct {
 }
 
 type Turn struct {
-	ID        string            `json:"id"`
-	Status    string            `json:"status"` // completed | interrupted | failed | inProgress
-	Error     *TurnError        `json:"error"`
-	StartedAt *int64            `json:"startedAt"`
-	Items     []json.RawMessage `json:"items"`
+	ID        string     `json:"id"`
+	Status    string     `json:"status"` // completed | interrupted | failed | inProgress
+	Error     *TurnError `json:"error"`
+	StartedAt *int64     `json:"startedAt"`
+	// CompletedAt is unset while the turn runs.
+	CompletedAt *int64            `json:"completedAt"`
+	Items       []json.RawMessage `json:"items"`
 }
 
 type TurnError struct {
@@ -158,6 +160,7 @@ func ConvertThread(th *Thread, opt convertOptions) []model.Message {
 				msgs = append(msgs, m)
 			}
 		}
+		start := len(out)
 		out = append(out, withAnswered(turn.ID, ts, msgs, opt.Answered)...)
 		if turn.Status == "failed" {
 			text := "Turn failed"
@@ -165,6 +168,11 @@ func ConvertThread(th *Thread, opt convertOptions) []model.Message {
 				text += ": " + errorText(turn.Error.Message)
 			}
 			out = append(out, model.Message{ID: turn.ID + "#error", Role: model.RoleSystem, Timestamp: ts, Blocks: []model.Block{model.TextBlock(text)}})
+		}
+		// Items carry no time of their own. The last one closes the turn, so
+		// it takes the completion time and clients can tell how long it ran.
+		if turn.CompletedAt != nil && len(out) > start {
+			out[len(out)-1].Timestamp = time.Unix(*turn.CompletedAt, 0).UTC()
 		}
 	}
 	return out
