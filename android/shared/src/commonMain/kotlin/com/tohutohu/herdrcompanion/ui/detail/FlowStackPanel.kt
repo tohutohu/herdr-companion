@@ -35,7 +35,7 @@ import com.tohutohu.herdrcompanion.ui.ExpandChevron
 
 /**
  * Pinned over the top of the message list. Tapping an entry scrolls to its
- * message; the reports can be folded away to leave only the instruction.
+ * message; the reports start folded so only the instruction shows until expanded.
  */
 @Composable
 fun FlowStackPanel(
@@ -45,7 +45,7 @@ fun FlowStackPanel(
     modifier: Modifier = Modifier,
 ) {
     if (stack.isEmpty) return
-    var expanded by rememberSaveable { mutableStateOf(true) }
+    var expanded by rememberSaveable { mutableStateOf(false) }
     Surface(tonalElevation = 3.dp, shadowElevation = 4.dp, modifier = modifier.fillMaxWidth().animateContentSize()) {
         Column(Modifier.padding(vertical = 4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
