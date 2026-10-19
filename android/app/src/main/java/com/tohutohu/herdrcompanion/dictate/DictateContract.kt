@@ -1,7 +1,7 @@
 package com.tohutohu.herdrcompanion.dictate
 
 import android.content.Context
-import android.net.Uri
+import androidx.core.net.toUri
 import android.os.Bundle
 import android.util.Base64
 import android.view.inputmethod.EditorInfo
@@ -43,7 +43,7 @@ object DictateContract {
         .let { Base64.encodeToString(it, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING) }
 
     fun notifyInvalidated(context: Context) {
-        context.contentResolver.notifyChange(Uri.parse("content://$AUTHORITY/CONTEXT_INVALIDATED"), null)
+        context.contentResolver.notifyChange("content://$AUTHORITY/CONTEXT_INVALIDATED".toUri(), null)
     }
 }
 
