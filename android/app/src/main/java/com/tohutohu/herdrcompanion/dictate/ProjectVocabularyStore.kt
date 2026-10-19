@@ -21,10 +21,8 @@ data class ProjectVocabulary(
 @Serializable
 data class Replacement(val id: String, val from: String, val to: String)
 
-enum class AddResult { OK, ALREADY_EXISTS }
-
 /**
- * Per-project vocabulary and replacement rules that Dictate reads and adds to.
+ * Per-project vocabulary and replacement rules that Dictate reads and edits.
  * Kept in its own file, not Room, so a cache reset never drops what the user
  * taught it. Reads come from Binder threads, so the snapshot lives in a
  * StateFlow and writes are serialized.
@@ -37,48 +35,55 @@ class ProjectVocabularyStore(private val file: File) {
 
     operator fun get(project: String): ProjectVocabulary = state.value[project] ?: ProjectVocabulary()
 
-    fun addVocabulary(project: String, term: String): AddResult = mutate(project) { current ->
-        if (current.vocabulary.any { it.equals(term, ignoreCase = true) }) null
-        else current.copy(vocabulary = current.vocabulary + term)
+    /**
+     * Adds [term] and a `reading → term` rule for each of [readings] in one
+     * write. A reading that already maps to another word now maps to this
+     * one, as in Dictate's own vocabulary. Returns whether anything changed.
+     */
+    fun addVocabulary(project: String, term: String, readings: List<String> = emptyList()): Boolean = mutate(project) { current ->
+        val vocabulary = if (current.vocabulary.any { it.equals(term, ignoreCase = true) }) current.vocabulary else current.vocabulary + term
+        val replacements = readings.fold(current.replacements) { rules, reading -> rules.withRule(reading, term) }
+        ProjectVocabulary(vocabulary, replacements, current.revision)
     }
 
-    /** A rule for an existing `from` replaces its `to` rather than adding a second one. */
-    fun addReplacement(project: String, from: String, to: String): AddResult = mutate(project) { current ->
-        val existing = current.replacements.indexOfFirst { it.from.equals(from, ignoreCase = true) }
-        when {
-            existing >= 0 && current.replacements[existing].to == to -> null
-            existing >= 0 -> current.copy(
-                replacements = current.replacements.toMutableList().also { it[existing] = it[existing].copy(to = to) },
-            )
+    /** Rules that replace with [term] stay; Dictate deletes those one by one. */
+    fun deleteVocabulary(project: String, term: String): Boolean = mutate(project) { current ->
+        current.copy(vocabulary = current.vocabulary - term)
+    }
+
+    /** Finds the rule by [id] when Dictate has one, otherwise by its `from` and `to`. */
+    fun deleteReplacement(project: String, id: String?, from: String, to: String): Boolean = mutate(project) { current ->
+        val index = if (id != null) {
+            current.replacements.indexOfFirst { it.id == id }
+        } else {
+            current.replacements.indexOfFirst { it.from == from && it.to == to }
+        }
+        if (index < 0) current else current.copy(replacements = current.replacements.filterIndexed { i, _ -> i != index })
+    }
+
+    private fun List<Replacement>.withRule(from: String, to: String): List<Replacement> {
+        val existing = indexOfFirst { it.from.equals(from, ignoreCase = true) }
+        return when {
+            existing >= 0 && this[existing].to == to -> this
+            existing >= 0 -> toMutableList().also { it[existing] = it[existing].copy(to = to) }
             else -> {
-                val rule = Replacement(UUID.randomUUID().toString(), from, to)
-                val at = current.replacements.indexOfFirst { it.from.length < from.length }
-                    .takeIf { it >= 0 } ?: current.replacements.size
-                current.copy(replacements = current.replacements.toMutableList().also { it.add(at, rule) })
+                val at = indexOfFirst { it.from.length < from.length }.takeIf { it >= 0 } ?: size
+                toMutableList().also { it.add(at, Replacement(UUID.randomUUID().toString(), from, to)) }
             }
         }
     }
 
-    fun removeVocabulary(project: String, term: String) {
-        mutate(project) { current -> current.copy(vocabulary = current.vocabulary - term).takeIf { it != current } }
-    }
-
-    fun removeReplacement(project: String, id: String) {
-        mutate(project) { current ->
-            current.copy(replacements = current.replacements.filterNot { it.id == id }).takeIf { it != current }
-        }
-    }
-
-    /** [change] returns null when nothing changes. */
-    private fun mutate(project: String, change: (ProjectVocabulary) -> ProjectVocabulary?): AddResult = synchronized(lock) {
+    /** Returns false, writing nothing, when [change] leaves the project as it was. */
+    private fun mutate(project: String, change: (ProjectVocabulary) -> ProjectVocabulary): Boolean = synchronized(lock) {
         val all = state.value
         val current = all[project] ?: ProjectVocabulary()
-        val next = change(current) ?: return AddResult.ALREADY_EXISTS
+        val next = change(current)
+        if (next == current) return false
         // An emptied project keeps its entry so its revision never goes back.
         val nextAll = all + (project to next.copy(revision = current.revision + 1))
         save(nextAll)
         state.value = nextAll
-        AddResult.OK
+        true
     }
 
     private fun load(): Map<String, ProjectVocabulary> = runCatching {

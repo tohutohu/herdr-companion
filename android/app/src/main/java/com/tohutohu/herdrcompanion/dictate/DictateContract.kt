@@ -25,8 +25,11 @@ object DictateContract {
     const val GET_CONTEXT = "$BASE.GET_CONTEXT"
     const val CONTEXT_RESULT = "$BASE.CONTEXT_RESULT"
     const val ADD_VOCABULARY = "$BASE.ADD_VOCABULARY"
-    const val ADD_REPLACEMENT = "$BASE.ADD_REPLACEMENT"
+    const val DELETE_VOCABULARY = "$BASE.DELETE_VOCABULARY"
+    const val DELETE_REPLACEMENT = "$BASE.DELETE_REPLACEMENT"
     const val MUTATION_RESULT = "$BASE.MUTATION_RESULT"
+    val MUTATIONS = setOf(ADD_VOCABULARY, DELETE_VOCABULARY, DELETE_REPLACEMENT)
+    val CAPABILITIES = listOf("READ_CONTEXT", "ADD_VOCABULARY", "ADD_READINGS", "DELETE_VOCABULARY", "DELETE_REPLACEMENT")
 
     /** Must match the provider's authority in AndroidManifest.xml. */
     const val AUTHORITY = "${BuildConfig.APPLICATION_ID}.dictatecontext"

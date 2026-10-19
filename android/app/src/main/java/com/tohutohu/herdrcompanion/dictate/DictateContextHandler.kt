@@ -1,5 +1,6 @@
 package com.tohutohu.herdrcompanion.dictate
 
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -21,16 +22,14 @@ class DictateContextHandler(
     private val store: ProjectVocabularyStore,
     private val fields: DictateFieldRegistry,
 ) {
-    /** Recent mutation results, so Dictate's re-sent "register" stays idempotent. */
+    /** Recent mutation ids, so Dictate pressing "register" or "delete" again stays idempotent. */
     private val doneMutations = object : LinkedHashMap<String, Unit>() {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Unit>?) = size > 200
     }
 
     /** Returns null for requests that are not ours or cannot be answered at all. */
     fun handle(method: String, payloadJson: String?, callerAllowed: Boolean): DictateReply? {
-        if (method != DictateContract.GET_CONTEXT && method != DictateContract.ADD_VOCABULARY &&
-            method != DictateContract.ADD_REPLACEMENT
-        ) return null
+        if (method != DictateContract.GET_CONTEXT && method !in DictateContract.MUTATIONS) return null
         val req = payloadJson?.let { runCatching { Json.parseToJsonElement(it).jsonObject }.getOrNull() } ?: return null
         val version = req["version"] as? JsonPrimitive
         if (version == null || version.isString || version.intOrNull != DictateContract.VERSION) return null
@@ -84,11 +83,7 @@ class DictateContextHandler(
             put("displayName", project.take(MAX_DISPLAY_NAME_LENGTH))
             put("revision", entry.revision.toString())
         }
-        putJsonArray("capabilities") {
-            add(JsonPrimitive("READ_CONTEXT"))
-            add(JsonPrimitive("ADD_VOCABULARY"))
-            add(JsonPrimitive("ADD_REPLACEMENT"))
-        }
+        putJsonArray("capabilities") { DictateContract.CAPABILITIES.forEach { add(JsonPrimitive(it)) } }
         putJsonArray("vocabulary") { vocabulary.forEach { add(JsonPrimitive(it)) } }
         putJsonArray("replacements") {
             replacements.forEach { rule ->
@@ -115,26 +110,42 @@ class DictateContextHandler(
         if (!allowed) return reply("denied")
         val project = fields.projectFor(token) ?: return reply("stale_context")
         val revision = store[project].revision
-        if (synchronized(doneMutations) { mutationId in doneMutations }) return reply("already_exists", revision)
+        // A repeat is answered with the current state: still there, or still gone.
+        val unchanged = if (method == DictateContract.ADD_VOCABULARY) "already_exists" else "not_found"
+        if (synchronized(doneMutations) { mutationId in doneMutations }) return reply(unchanged, revision)
         val expected = req.string("expectedRevision")
         if (req.string("contextId") != contextId(project) || (expected != null && expected != revision.toString())) {
             return reply("stale_context", revision)
         }
-        val result = if (method == DictateContract.ADD_VOCABULARY) {
-            val term = req.string("term")?.trim()
-            if (term == null || !valid(term, 1, MAX_TERM_LENGTH)) return reply("invalid_argument", revision)
-            store.addVocabulary(project, term)
-        } else {
-            val from = req.string("from")?.trim()
-            val to = req.string("to")?.trim()
-            if (from == null || to == null || !valid(from, 1, MAX_REPLACEMENT_TEXT_LENGTH) || !valid(to, 0, MAX_REPLACEMENT_TEXT_LENGTH)) {
-                return reply("invalid_argument", revision)
+        val changed = when (method) {
+            DictateContract.ADD_VOCABULARY -> {
+                val term = req.string("term")?.trim()
+                val readings = req.readings(term) ?: return reply("invalid_argument", revision)
+                if (term == null || !valid(term, 1, MAX_TERM_LENGTH)) return reply("invalid_argument", revision)
+                store.addVocabulary(project, term, readings)
             }
-            store.addReplacement(project, from, to)
+            DictateContract.DELETE_VOCABULARY -> {
+                val term = req.string("term") ?: return reply("invalid_argument", revision)
+                store.deleteVocabulary(project, term)
+            }
+            else -> {
+                val from = req.string("from")
+                val to = req.string("to")
+                if (from == null || to == null) return reply("invalid_argument", revision)
+                store.deleteReplacement(project, req.string("replacementId"), from, to)
+            }
         }
         synchronized(doneMutations) { doneMutations[mutationId] = Unit }
-        val status = if (result == AddResult.OK) "ok" else "already_exists"
-        return reply(status, store[project].revision)
+        return reply(if (changed) "ok" else unchanged, store[project].revision)
+    }
+
+    /** The trimmed, distinct readings other than [term]; null when they break the protocol's limits. */
+    private fun JsonObject.readings(term: String?): List<String>? {
+        val raw = this["readings"] ?: return emptyList()
+        val items = (raw as? JsonArray)?.map { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content?.trim() ?: return null }
+            ?: return null
+        val readings = items.filter { it.isNotEmpty() && it != term }.distinct()
+        return readings.takeIf { list -> list.size <= MAX_READINGS && list.all { valid(it, 1, MAX_REPLACEMENT_TEXT_LENGTH) } }
     }
 
     private fun JsonObject.string(key: String): String? =
@@ -148,6 +159,7 @@ class DictateContextHandler(
         const val MAX_REPLACEMENTS = 500
         const val MAX_TERM_LENGTH = 100
         const val MAX_REPLACEMENT_TEXT_LENGTH = 200
+        const val MAX_READINGS = 20
         const val MAX_ID_LENGTH = 256
         const val MAX_DISPLAY_NAME_LENGTH = 100
 

@@ -152,7 +152,6 @@ fun SettingsScreen(onDone: () -> Unit) {
                 api = container.api,
                 gatewayConfigured = current.isConfigured,
             )
-            DictationVocabularySection()
             Button(enabled = !busy && !restart, onClick = {
                 scope.launch {
                     busy = true
