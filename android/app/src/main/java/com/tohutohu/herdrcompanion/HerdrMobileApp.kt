@@ -12,6 +12,9 @@ import com.tohutohu.herdrcompanion.data.Outbox
 import com.tohutohu.herdrcompanion.data.SessionRepository
 import com.tohutohu.herdrcompanion.data.SettingsStore
 import com.tohutohu.herdrcompanion.data.Settings
+import com.tohutohu.herdrcompanion.dictate.DictateContextHandler
+import com.tohutohu.herdrcompanion.dictate.DictateFieldRegistry
+import com.tohutohu.herdrcompanion.dictate.ProjectVocabularyStore
 import com.tohutohu.herdrcompanion.push.FirebaseRuntime
 import com.google.firebase.FirebaseApp
 import com.google.firebase.messaging.FirebaseMessaging
@@ -41,6 +44,9 @@ class AppContainer(private val app: Application) {
     val settings = SettingsStore(app, scope)
     val directoryShortcuts = DirectoryShortcutsStore(app)
     val agentPresets = AgentPresetsStore(app)
+    val projectVocabulary = ProjectVocabularyStore(java.io.File(app.filesDir, "dictate/project-vocabulary.json"))
+    val dictateFields = DictateFieldRegistry()
+    val dictateContexts = DictateContextHandler(projectVocabulary, dictateFields)
 
     private val baseHttp = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)

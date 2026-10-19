@@ -27,6 +27,7 @@ import com.tohutohu.herdrcompanion.data.PendingMessage
 import com.tohutohu.herdrcompanion.data.api.Status
 import com.tohutohu.herdrcompanion.data.db.SessionEntity
 import com.tohutohu.herdrcompanion.data.readAttachment
+import com.tohutohu.herdrcompanion.dictate.DictateContextScope
 import com.tohutohu.herdrcompanion.ui.sessions.SessionRef
 import com.tohutohu.herdrcompanion.ui.sessions.rememberSessionActions
 import com.tohutohu.herdrcompanion.ui.toUiModel
@@ -100,44 +101,47 @@ fun SessionDetailRoute(
         modeChanging = modeChanging,
     )
 
-    SessionDetailScreen(
-        state = uiState,
-        focusLatest = focusLatest,
-        resolveUrl = api::absolute,
-        formatFileSize = { Formatter.formatShortFileSize(context, it) },
-        formatTime = { at ->
-            val date = if (DateUtils.isToday(at)) 0 else DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_NUMERIC_DATE
-            DateUtils.formatDateTime(context, at, DateUtils.FORMAT_SHOW_TIME or date)
-        },
-        resolveAttachmentPreview = { id -> id.toUri() },
-        onAction = { action ->
-            when (action) {
-                SessionDetailAction.Back -> onBack()
-                is SessionDetailAction.OpenFile -> onOpenFile(action.path, action.line)
-                is SessionDetailAction.OpenImage -> onOpenImage(api.absolute(action.url))
-                SessionDetailAction.OpenTerminal -> onOpenTerminal()
-                SessionDetailAction.PickImage -> imagePicker.launch(
-                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                )
-                SessionDetailAction.PickFile -> filePicker.launch(arrayOf("*/*"))
-                is SessionDetailAction.RemoveAttachment -> attachments.removeAll { it.id == action.id }
-                is SessionDetailAction.Send -> {
-                    vm.send(action.text, attachments.map { Attachment(it.id.toUri(), it.name, it.mimeType, it.size) })
-                    attachments.clear()
-                    attachmentError = null
+    // Dictation words and rules are kept per project, shared by its sessions.
+    DictateContextScope(project = session?.dictateProject()) {
+        SessionDetailScreen(
+            state = uiState,
+            focusLatest = focusLatest,
+            resolveUrl = api::absolute,
+            formatFileSize = { Formatter.formatShortFileSize(context, it) },
+            formatTime = { at ->
+                val date = if (DateUtils.isToday(at)) 0 else DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_NUMERIC_DATE
+                DateUtils.formatDateTime(context, at, DateUtils.FORMAT_SHOW_TIME or date)
+            },
+            resolveAttachmentPreview = { id -> id.toUri() },
+            onAction = { action ->
+                when (action) {
+                    SessionDetailAction.Back -> onBack()
+                    is SessionDetailAction.OpenFile -> onOpenFile(action.path, action.line)
+                    is SessionDetailAction.OpenImage -> onOpenImage(api.absolute(action.url))
+                    SessionDetailAction.OpenTerminal -> onOpenTerminal()
+                    SessionDetailAction.PickImage -> imagePicker.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                    )
+                    SessionDetailAction.PickFile -> filePicker.launch(arrayOf("*/*"))
+                    is SessionDetailAction.RemoveAttachment -> attachments.removeAll { it.id == action.id }
+                    is SessionDetailAction.Send -> {
+                        vm.send(action.text, attachments.map { Attachment(it.id.toUri(), it.name, it.mimeType, it.size) })
+                        attachments.clear()
+                        attachmentError = null
+                    }
+                    is SessionDetailAction.Retry -> vm.retry(action.localId)
+                    is SessionDetailAction.Discard -> vm.discard(action.localId)
+                    is SessionDetailAction.Respond -> vm.respond(action.response)
+                    SessionDetailAction.CycleMode -> vm.cycleMode()
+                    SessionDetailAction.Reload -> vm.reload()
+                    SessionDetailAction.DismissReloadNotice -> vm.dismissReloadNotice()
+                    SessionDetailAction.Resume -> session?.let { actions.resume(it.toSessionRef()) }
+                    SessionDetailAction.Archive -> session?.let { actions.archive(it.toSessionRef()) }
+                    SessionDetailAction.Unarchive -> session?.let { actions.unarchive(it.toSessionRef()) }
                 }
-                is SessionDetailAction.Retry -> vm.retry(action.localId)
-                is SessionDetailAction.Discard -> vm.discard(action.localId)
-                is SessionDetailAction.Respond -> vm.respond(action.response)
-                SessionDetailAction.CycleMode -> vm.cycleMode()
-                SessionDetailAction.Reload -> vm.reload()
-                SessionDetailAction.DismissReloadNotice -> vm.dismissReloadNotice()
-                SessionDetailAction.Resume -> session?.let { actions.resume(it.toSessionRef()) }
-                SessionDetailAction.Archive -> session?.let { actions.archive(it.toSessionRef()) }
-                SessionDetailAction.Unarchive -> session?.let { actions.unarchive(it.toSessionRef()) }
-            }
-        },
-    )
+            },
+        )
+    }
 }
 
 private fun Attachment.toUiState() = AttachmentUiState(
@@ -157,3 +161,6 @@ private fun PendingMessage.toUiState() = PendingMessageUiState(
 )
 
 private fun SessionEntity.toSessionRef() = SessionRef(id, live = status != Status.OFFLINE, archived = archived)
+
+private fun SessionEntity.dictateProject(): String? =
+    project.ifBlank { cwd?.trimEnd('/')?.substringAfterLast('/').orEmpty() }.ifBlank { null }

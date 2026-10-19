@@ -32,6 +32,12 @@
             </intent-filter>
         </activity>
 
+        <!-- Dictate reads and adds per-project dictation words; callers are checked in code. -->
+        <provider
+            android:name=".dictate.DictateContextProvider"
+            android:authorities="${applicationId}.dictatecontext"
+            android:exported="true" />
+
         <receiver
             android:name=".push.ReplyReceiver"
             android:exported="false" />
