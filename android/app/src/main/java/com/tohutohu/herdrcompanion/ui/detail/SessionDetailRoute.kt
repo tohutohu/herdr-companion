@@ -28,6 +28,7 @@ import com.tohutohu.herdrcompanion.data.api.Status
 import com.tohutohu.herdrcompanion.data.db.SessionEntity
 import com.tohutohu.herdrcompanion.data.readAttachment
 import com.tohutohu.herdrcompanion.dictate.DictateContextScope
+import com.tohutohu.herdrcompanion.dictate.dictateProject
 import com.tohutohu.herdrcompanion.ui.sessions.SessionRef
 import com.tohutohu.herdrcompanion.ui.sessions.rememberSessionActions
 import com.tohutohu.herdrcompanion.ui.toUiModel
@@ -102,7 +103,7 @@ fun SessionDetailRoute(
     )
 
     // Dictation words and rules are kept per project, shared by its sessions.
-    DictateContextScope(project = session?.dictateProject()) {
+    DictateContextScope(project = session?.let { dictateProject(it.project, it.cwd) }) {
         SessionDetailScreen(
             state = uiState,
             focusLatest = focusLatest,
@@ -161,6 +162,3 @@ private fun PendingMessage.toUiState() = PendingMessageUiState(
 )
 
 private fun SessionEntity.toSessionRef() = SessionRef(id, live = status != Status.OFFLINE, archived = archived)
-
-private fun SessionEntity.dictateProject(): String? =
-    project.ifBlank { cwd?.trimEnd('/')?.substringAfterLast('/').orEmpty() }.ifBlank { null }

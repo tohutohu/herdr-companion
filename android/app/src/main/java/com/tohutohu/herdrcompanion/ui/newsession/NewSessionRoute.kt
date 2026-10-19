@@ -25,6 +25,8 @@ import com.tohutohu.herdrcompanion.data.uploadAttachment
 import com.tohutohu.herdrcompanion.data.api.DirListingDto
 import com.tohutohu.herdrcompanion.data.api.ModelsResponse
 import com.tohutohu.herdrcompanion.data.api.StartSessionRequest
+import com.tohutohu.herdrcompanion.dictate.DictateContextScope
+import com.tohutohu.herdrcompanion.dictate.dictateProject
 import com.tohutohu.herdrcompanion.ui.detail.AttachmentUiState
 import com.tohutohu.herdrcompanion.ui.detail.rememberPickedAttachments
 import com.tohutohu.herdrcompanion.ui.detail.readPickedAttachmentMetadata
@@ -198,6 +200,8 @@ fun NewSessionRoute(
 
     NewSessionScreen(
         state = state,
+        // The first prompt uses the words of the project the session will open in.
+        promptFieldScope = { content -> DictateContextScope(project = dictateProject(null, path), content = content) },
         onAction = { action ->
             when (action) {
                 NewSessionAction.Back -> onBack()

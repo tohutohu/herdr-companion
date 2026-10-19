@@ -10,6 +10,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -87,6 +88,8 @@ fun NewSessionScreen(
     showStartInSplit: Boolean = false,
     resolveAttachmentPreview: (String) -> Any? = { null },
     onPasteImage: (() -> Boolean)? = null,
+    /** Wraps only the prompt field, e.g. so Android can declare it to a dictation app. */
+    promptFieldScope: @Composable (content: @Composable () -> Unit) -> Unit = { it() },
 ) {
     var promptValue by remember { mutableStateOf(TextFieldValue(state.prompt)) }
     LaunchedEffect(state.prompt) {
@@ -210,28 +213,32 @@ fun NewSessionScreen(
                                 onPickFile = { onAction(NewSessionAction.PickFile) },
                             )
                         }
-                        OutlinedTextField(
-                            value = promptValue,
-                            onValueChange = { value ->
-                                promptValue = value
-                                if (value.text != state.prompt) {
-                                    onAction(NewSessionAction.SetPrompt(value.text))
-                                }
-                            },
-                            enabled = editable,
-                            label = { Text("First prompt (optional)") },
-                            maxLines = 4,
-                            modifier = (if (initialPromptFocusRequester != null) {
-                                Modifier.weight(1f).focusRequester(initialPromptFocusRequester)
-                            } else {
-                                Modifier.weight(1f)
-                            }).onPreviewKeyEvent { event ->
-                                editable && state.attachmentsEnabled &&
-                                    event.type == KeyEventType.KeyDown &&
-                                    event.key == Key.V && event.isMetaPressed && !event.isShiftPressed &&
-                                    onPasteImage?.invoke() == true
-                            },
-                        )
+                        Box(Modifier.weight(1f)) {
+                            promptFieldScope {
+                                OutlinedTextField(
+                                    value = promptValue,
+                                    onValueChange = { value ->
+                                        promptValue = value
+                                        if (value.text != state.prompt) {
+                                            onAction(NewSessionAction.SetPrompt(value.text))
+                                        }
+                                    },
+                                    enabled = editable,
+                                    label = { Text("First prompt (optional)") },
+                                    maxLines = 4,
+                                    modifier = (if (initialPromptFocusRequester != null) {
+                                        Modifier.fillMaxWidth().focusRequester(initialPromptFocusRequester)
+                                    } else {
+                                        Modifier.fillMaxWidth()
+                                    }).onPreviewKeyEvent { event ->
+                                        editable && state.attachmentsEnabled &&
+                                            event.type == KeyEventType.KeyDown &&
+                                            event.key == Key.V && event.isMetaPressed && !event.isShiftPressed &&
+                                            onPasteImage?.invoke() == true
+                                    },
+                                )
+                            }
+                        }
                     }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
