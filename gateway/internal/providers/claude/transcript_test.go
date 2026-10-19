@@ -141,7 +141,7 @@ func TestClaudeの作業中に送ったメッセージも会話に表示され�
 		t.Errorf("取り込まれたメッセージ = %d 件, want 1 (%v)", n, texts(msgs))
 	}
 	// 画像付きで取り込まれた分は本文と画像の両方を出す
-	if n := count(msgs, "user:[Image #1] こんな感じでエラーが出る"); n != 1 {
+	if n := count(msgs, "user:こんな感じでエラーが出る"); n != 1 {
 		t.Errorf("画像付きで取り込まれたメッセージ = %d 件, want 1 (%v)", n, texts(msgs))
 	}
 	for _, m := range msgs {
@@ -1251,5 +1251,18 @@ func Test起動時のモード指定をパーミッションモード引数に�
 	}
 	if defaults != 1 {
 		t.Errorf("modes marked default = %d", defaults)
+	}
+}
+
+func Test画像付きの指示は本文から画像ラベルを除き画像のない指示には残す(t *testing.T) {
+	img := model.Block{Type: model.BlockImage, URL: "/img/0"}
+	got := withoutImageLabels([]model.Block{model.TextBlock("[Image #1] [Image #2] こう見える"), img, model.TextBlock("[Image #3]"), img})
+	want := []model.Block{model.TextBlock("こう見える"), img, img}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+	queued := []model.Block{model.TextBlock("[Image #1] こう見える")}
+	if got := withoutImageLabels(queued); !reflect.DeepEqual(got, queued) {
+		t.Fatalf("got %+v, want labels kept", got)
 	}
 }

@@ -55,7 +55,7 @@
     "blocks": [
       {
         "type": "text",
-        "text": "[Image #1] こんな感じでエラーが出る"
+        "text": "こんな感じでエラーが出る"
       },
       {
         "type": "image",

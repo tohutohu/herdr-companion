@@ -691,6 +691,7 @@ func (t *Transcript) convertUser(e *entry, raw []byte, results map[string]toolRe
 			userBlocks = append(userBlocks, model.TextBlock("Unsupported content: "+b.Type))
 		}
 	}
+	userBlocks = withoutImageLabels(userBlocks)
 	var out []model.Message
 	if len(userBlocks) > 0 {
 		out = append(out, model.Message{ID: e.UUID, Role: role, Timestamp: e.Timestamp, Blocks: userBlocks})
@@ -771,10 +772,36 @@ func absorbedPrompt(e *entry, opt ParseOptions) []model.Message {
 			imageIndex++
 		}
 	}
+	out = withoutImageLabels(out)
 	if len(out) == 0 {
 		return nil
 	}
 	return []model.Message{{ID: e.UUID, Role: role, Timestamp: e.Timestamp, Blocks: out}}
+}
+
+// imageLabelRe matches the label Claude Code writes into a prompt for each
+// pasted image.
+var imageLabelRe = regexp.MustCompile(`\[Image #\d+\] ?`)
+
+// withoutImageLabels drops the "[Image #N]" labels from a prompt whose
+// images come as image blocks: there they only repeat the images, and the
+// prompt reads as it was written. A prompt without its images (one still
+// queued) keeps them as the only sign of an attachment.
+func withoutImageLabels(blocks []model.Block) []model.Block {
+	if !slices.ContainsFunc(blocks, func(b model.Block) bool { return b.Type == model.BlockImage }) {
+		return blocks
+	}
+	out := make([]model.Block, 0, len(blocks))
+	for _, b := range blocks {
+		if b.Type == model.BlockText {
+			b.Text = strings.TrimSpace(imageLabelRe.ReplaceAllString(b.Text, ""))
+			if b.Text == "" {
+				continue
+			}
+		}
+		out = append(out, b)
+	}
+	return out
 }
 
 // promptBlocks returns a queued prompt as content blocks. Claude Code writes
