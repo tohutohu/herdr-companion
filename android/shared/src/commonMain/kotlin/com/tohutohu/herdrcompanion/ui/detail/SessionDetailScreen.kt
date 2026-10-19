@@ -86,8 +86,10 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.tohutohu.herdrcompanion.data.SendState
 import com.tohutohu.herdrcompanion.data.api.InteractionResponseDto
 import com.tohutohu.herdrcompanion.data.api.Status
 import com.tohutohu.herdrcompanion.model.headline
@@ -208,12 +210,23 @@ fun SessionDetailScreen(
     }
 
     // Each turn folds its work into one row, leaving its newest report out.
-    val lastTurn = when (session?.status) {
+    val liveTurn = when (session?.status) {
         Status.RUNNING, Status.WAITING_INPUT, Status.WAITING_APPROVAL -> LastTurn.WORKING
         Status.FAILED -> LastTurn.FAILED
         else -> LastTurn.DONE
     }
+    // While a message is on its way, the agent can start on it before the
+    // conversation shows it. That must not reopen the turn before it, so the
+    // newest turn keeps the state it had when the message was sent.
+    val sending = pending.any { it.state != SendState.FAILED }
+    val heldTurn = remember(sending) { liveTurn }
+    val lastTurn = if (sending) heldTurn else liveTurn
     val rows = remember(messages, state.messageKeys, lastTurn) { transcriptRows(messages, state.messageKeys, lastTurn) }
+    // Messages on their way sit below the conversation, as the first items
+    // of the bottom-up list.
+    val entries = remember(pending, rows) {
+        pending.asReversed().map { ListEntry.Sent(it) } + rows.asReversed().map { ListEntry.Shown(it) }
+    }
     // Pending messages sit below the conversation, as the first items of the
     // bottom-up list; row indexes in the list are shifted by them.
     val tail = pending.size
@@ -430,43 +443,53 @@ fun SessionDetailScreen(
                         contentPadding = PaddingValues(vertical = 8.dp),
                         reverseLayout = true,
                     ) {
-                        items(pending.asReversed(), key = { p -> "pending:" + p.localId }) { p ->
-                            PendingMessageItem(
-                                modifier = Modifier
-                                    .animateContentSize(tween(ITEM_ANIMATION_MS))
-                                    .animateItem(placementSpec = if (pausePlacement) null else tween(ITEM_ANIMATION_MS)),
-                                message = p,
-                                resolveAttachmentPreview = resolveAttachmentPreview,
-                                onRetry = { onAction(SessionDetailAction.Retry(p.localId)) },
-                                onDiscard = { onAction(SessionDetailAction.Discard(p.localId)) },
-                            )
-                        }
-                        items(rows.asReversed(), key = { row -> row.key }) { row ->
-                            // Only a sent message is sized here, as it takes the place of
-                            // its pending row. Other rows animate their own changes;
-                            // sizing them again would chase that and drag it out.
-                            val sizeModifier = if (row is MessageRow && row.message.role == "user") {
-                                Modifier.animateContentSize(tween(ITEM_ANIMATION_MS))
-                            } else {
-                                Modifier
+                        items(entries, key = { it.key }) { entry ->
+                            val sent = (entry as? ListEntry.Sent)?.message
+                            val row = (entry as? ListEntry.Shown)?.row
+                            val userMessage = (row as? MessageRow)?.message?.takeIf { it.role == "user" }
+                            val placement = if (pausePlacement) null else tween<IntOffset>(ITEM_ANIMATION_MS)
+                            val onOpenFile = { path: String, line: Int -> onAction(SessionDetailAction.OpenFile(path, line)) }
+                            val onOpenImage = { url: String -> onAction(SessionDetailAction.OpenImage(url)) }
+                            val onOpenTerminal = { onAction(SessionDetailAction.OpenTerminal) }
+                            val onRespond = { it: InteractionResponseDto -> onAction(SessionDetailAction.Respond(it)) }
+                            if (sent != null || userMessage != null) {
+                                // One call for a message on its way and the message it
+                                // becomes: with the key it keeps, the bubble changes in
+                                // place, and only it is sized here as it settles.
+                                UserBubble(
+                                    pending = sent != null,
+                                    delivery = sent?.delivery ?: Delivery.Queued.takeIf { userMessage?.queued == true },
+                                    modifier = Modifier
+                                        .animateContentSize(tween(ITEM_ANIMATION_MS))
+                                        .then(if (settled || sent != null) Modifier.animateItem(placementSpec = placement) else Modifier),
+                                    onRetry = { sent?.let { onAction(SessionDetailAction.Retry(it.localId)) } },
+                                    onDiscard = { sent?.let { onAction(SessionDetailAction.Discard(it.localId)) } },
+                                ) {
+                                    if (sent != null) {
+                                        PendingMessageBody(sent, resolveAttachmentPreview)
+                                    } else if (userMessage != null) {
+                                        MessageBlocks(
+                                            userMessage, resolveUrl, formatFileSize, onOpenFile, onOpenImage, onOpenTerminal,
+                                            interactionsEnabled = !answering, onRespond = onRespond,
+                                        )
+                                    }
+                                }
+                            } else if (row != null) {
+                                // Other rows animate their own changes; sizing them
+                                // again would chase that and drag it out.
+                                TranscriptRowItem(
+                                    row = row,
+                                    modifier = if (settled) Modifier.animateItem(placementSpec = placement) else Modifier,
+                                    formatTime = formatTime,
+                                    resolveUrl = resolveUrl,
+                                    formatFileSize = formatFileSize,
+                                    onOpenFile = onOpenFile,
+                                    onOpenImage = onOpenImage,
+                                    onOpenTerminal = onOpenTerminal,
+                                    interactionsEnabled = !answering,
+                                    onRespond = onRespond,
+                                )
                             }
-                            val itemModifier = if (settled) {
-                                sizeModifier.animateItem(placementSpec = if (pausePlacement) null else tween(ITEM_ANIMATION_MS))
-                            } else {
-                                sizeModifier
-                            }
-                            TranscriptRowItem(
-                                row = row,
-                                modifier = itemModifier,
-                                formatTime = formatTime,
-                                resolveUrl = resolveUrl,
-                                formatFileSize = formatFileSize,
-                                onOpenFile = { path, line -> onAction(SessionDetailAction.OpenFile(path, line)) },
-                                onOpenImage = { url -> onAction(SessionDetailAction.OpenImage(url)) },
-                                onOpenTerminal = { onAction(SessionDetailAction.OpenTerminal) },
-                                interactionsEnabled = !answering,
-                                onRespond = { onAction(SessionDetailAction.Respond(it)) },
-                            )
                         }
                     }
                 }
@@ -491,6 +514,19 @@ fun SessionDetailScreen(
 }
 
 private const val SETTLE_MS = 400L
+
+/** An item of the message list. A sent message's key passes to the message it becomes. */
+private sealed interface ListEntry {
+    val key: String
+
+    data class Sent(val message: PendingMessageUiState) : ListEntry {
+        override val key get() = "pending:" + message.localId
+    }
+
+    data class Shown(val row: TranscriptRow) : ListEntry {
+        override val key get() = row.key
+    }
+}
 
 private const val ITEM_ANIMATION_MS = 260
 

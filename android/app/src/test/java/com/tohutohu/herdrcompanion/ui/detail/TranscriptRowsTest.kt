@@ -91,7 +91,7 @@ class TranscriptRowsTest {
             listOf(
                 msg("u1", "user", text("ビルドして"), at = 1_000),
                 msg("a1", "assistant", text("$ ./gradlew build"), at = 1_000),
-                msg("e1", "system", text("Turn failed: overloaded"), at = 31_000),
+                msg("t1", "tool", text("BUILD FAILED"), at = 31_000),
             ),
             lastTurn = LastTurn.FAILED,
         )
@@ -99,6 +99,25 @@ class TranscriptRowsTest {
         val work = rows[1] as WorkRow
         assertEquals(30_000L, work.durationMs)
         assertEquals(TurnEnd(failed = true, at = 31_000), work.end)
+    }
+
+    @Test
+    fun `システムからの通知は畳まずに作業の行のすぐ後に表示する`() {
+        val rows = transcriptRows(
+            listOf(
+                msg("u1", "user", text("続けて"), at = 1_000),
+                msg("a1", "assistant", text("$ go test ./..."), at = 2_000),
+                msg("s1", "system", text("Conversation compacted"), at = 3_000),
+                msg("a2", "assistant", text("$ go vet ./..."), at = 4_000),
+                msg("e1", "system", text("API Error: overloaded"), at = 5_000),
+                msg("a3", "assistant", text("やり直して通しました。"), at = 9_000),
+            ),
+            lastTurn = LastTurn.DONE,
+        )
+        assertEquals(listOf("message:u1", "work:u1#0", "message:s1", "message:e1", "message:a3"), rows.map { it.key })
+        assertEquals(listOf("tools:a1#0"), (rows[1] as WorkRow).rows.map { it.key })
+        assertEquals(2, (rows[1] as WorkRow).callCount)
+        assertEquals(TurnEnd(failed = false, at = 9_000), rows[4].end)
     }
 
     @Test
@@ -206,8 +225,8 @@ class TranscriptRowsTest {
                 msg("a1", "assistant", text("報告")),
             ),
         )
-        assertEquals(listOf("work:#0", "message:a1"), rows.map { it.key })
-        assertEquals(listOf("message:", "message:@1", "message:a1"), (rows[0] as WorkRow).rows.map { it.key })
+        assertEquals(listOf("work:#0", "message:", "message:@2", "message:a1"), rows.map { it.key })
+        assertEquals(listOf("message:a1"), (rows[0] as WorkRow).rows.map { it.key })
     }
 
     @Test

@@ -10,7 +10,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -39,7 +39,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
@@ -116,37 +115,37 @@ fun MessageItem(
     interactionsEnabled: Boolean,
     onRespond: (InteractionResponseDto) -> Unit,
 ) {
-    val isUser = message.role == "user"
-    Column(
-        modifier
-            .fillMaxWidth()
-            // An instruction opens a turn; the space above it parts the turns.
-            .padding(start = 12.dp, end = 12.dp, top = if (isUser) 14.dp else 2.dp, bottom = 2.dp),
-        horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
-    ) {
-        val content: @Composable () -> Unit = {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                message.blocks.forEach { block ->
-                    BlockView(message.role, block, resolveUrl, formatFileSize, onOpenFile, onOpenImage, onOpenTerminal, interactionsEnabled, onRespond)
-                }
+    val content: @Composable () -> Unit = {
+        MessageBlocks(message, resolveUrl, formatFileSize, onOpenFile, onOpenImage, onOpenTerminal, interactionsEnabled, onRespond)
+    }
+    if (message.role == "user") {
+        UserBubble(pending = false, delivery = if (message.queued) Delivery.Queued else null, modifier = modifier, content = content)
+    } else {
+        Column(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp)) { content() }
+    }
+}
+
+/**
+ * The blocks of a message. One selection container goes around all of them
+ * so the standard long-press toolbar can copy a range or select/copy every
+ * text block in the message, including code and multi-paragraph text.
+ */
+@Composable
+fun MessageBlocks(
+    message: Message,
+    resolveUrl: (String) -> String,
+    formatFileSize: (Long) -> String,
+    onOpenFile: (String, Int) -> Unit,
+    onOpenImage: (String) -> Unit,
+    onOpenTerminal: () -> Unit,
+    interactionsEnabled: Boolean,
+    onRespond: (InteractionResponseDto) -> Unit,
+) {
+    SelectionContainer {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            message.blocks.forEach { block ->
+                BlockView(message.role, block, resolveUrl, formatFileSize, onOpenFile, onOpenImage, onOpenTerminal, interactionsEnabled, onRespond)
             }
-        }
-        // Keep one selection container around the whole message so the
-        // standard long-press toolbar can copy a range or select/copy every
-        // text block in the message, including code and multi-paragraph text.
-        val selectableContent: @Composable () -> Unit = {
-            SelectionContainer { content() }
-        }
-        if (isUser) {
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                contentColor = MaterialTheme.colorScheme.onSurface,
-                shape = UserBubbleShape,
-                modifier = Modifier.userBubbleWidth(),
-            ) { Box(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) { selectableContent() } }
-            if (message.queued) QueuedLine()
-        } else {
-            selectableContent()
         }
     }
 }
@@ -199,13 +198,13 @@ fun WorkGroupItem(
                 .padding(horizontal = 4.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(workSummary(row), style = MaterialTheme.typography.labelMedium, color = muted, maxLines = 1)
+            Text(workSummary(row), style = MaterialTheme.typography.labelSmall, color = muted, maxLines = 1)
             if (expandable) {
                 ExpandChevron(
                     expanded = !expanded,
                     contentDescription = if (expanded) "Hide work" else "Show work",
                     tint = muted,
-                    modifier = Modifier.padding(start = 2.dp).size(16.dp),
+                    modifier = Modifier.padding(start = 2.dp).size(14.dp),
                 )
             }
         }
@@ -297,7 +296,7 @@ fun ActivityGroupItem(
                 Text(
                     latest?.let { "⋯ $it" } ?: "Hide",
                     fontFamily = FontFamily.Monospace,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.labelSmall,
                     color = muted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -317,7 +316,7 @@ fun ActivityGroupItem(
                 expanded = !expanded,
                 contentDescription = if (expanded) "Hide tool calls" else "Show tool calls",
                 tint = muted,
-                modifier = Modifier.padding(start = 4.dp).size(16.dp),
+                modifier = Modifier.padding(start = 4.dp).size(14.dp),
             )
         }
     }
@@ -356,12 +355,17 @@ private fun BlockView(
     when (block.type) {
         "text" -> when (role) {
             "tool" -> CollapsibleTool(block.text.orEmpty(), output = true)
-            "system" -> Text(
-                block.text.orEmpty(),
-                style = MaterialTheme.typography.bodySmall,
-                fontStyle = FontStyle.Italic,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            // A notice from the tool rather than the agent, marked by its icon.
+            "system" -> Row {
+                val muted = MaterialTheme.colorScheme.onSurfaceVariant
+                Icon(
+                    Icons.Outlined.Info,
+                    contentDescription = "Notice",
+                    tint = muted,
+                    modifier = Modifier.padding(top = 2.dp, end = 6.dp).size(14.dp),
+                )
+                Text(block.text.orEmpty(), style = MaterialTheme.typography.bodySmall, color = muted)
+            }
             else -> {
                 val text = block.text.orEmpty()
                 if (role == "assistant" && isToolCallText(text)) {

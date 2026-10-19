@@ -134,7 +134,9 @@ private fun turnRows(
     val split = listOf(work.indexOfLast { it.isReport }, work.indexOfFirst { it.asksReader })
         .filter { it >= 0 }
         .minOrNull() ?: if (over) work.size else 0
-    val folded = work.subList(0, split)
+    // Notices (errors, a compaction, a finished background task) are kept
+    // in view: they come from the tool, not the agent's work, and are rare.
+    val (notices, folded) = work.subList(0, split).partition { it.message.role == "system" }
     val shown = work.subList(split, work.size)
 
     val rows = mutableListOf<TranscriptRow>()
@@ -149,12 +151,13 @@ private fun turnRows(
     if (folded.isNotEmpty() || durationMs != null) {
         rows += WorkRow(
             key = "work:" + (head ?: work.first()).let { "${it.message.id}#${it.start}" },
-            messageIndex = (folded.firstOrNull() ?: shown.first()).index,
+            messageIndex = (folded.firstOrNull() ?: work.first()).index,
             rows = groupRows(folded, messageKeys),
             working = !over,
             durationMs = durationMs,
         )
     }
+    rows += groupRows(notices, messageKeys)
     rows += groupRows(shown, messageKeys)
     if (over && work.isNotEmpty()) {
         rows[rows.lastIndex] = rows.last().withEnd(TurnEnd(failed, work.last().message.timestamp))
