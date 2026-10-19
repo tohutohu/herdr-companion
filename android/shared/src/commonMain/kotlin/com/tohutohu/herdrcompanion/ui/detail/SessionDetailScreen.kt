@@ -13,6 +13,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Box
@@ -32,6 +33,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -49,10 +51,11 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -70,6 +73,8 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -82,6 +87,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.tohutohu.herdrcompanion.data.api.InteractionResponseDto
 import com.tohutohu.herdrcompanion.data.api.Status
 import com.tohutohu.herdrcompanion.model.headline
@@ -542,12 +548,14 @@ private fun Composer(
     onAction: (SessionDetailAction) -> Unit,
 ) {
     var text by rememberSaveable { mutableStateOf("") }
+    // No bar of its own: the field floats on the conversation's background as
+    // one filled pill, with attach and send inside it.
     Surface(
         modifier = composerModifier.fillMaxWidth(),
-        tonalElevation = 3.dp,
+        color = MaterialTheme.colorScheme.background,
         border = if (attachmentDropActive) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
     ) {
-        Column(Modifier.navigationBarsPadding().imePadding().padding(8.dp)) {
+        Column(Modifier.navigationBarsPadding().imePadding().padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 10.dp)) {
             if (attachmentDropActive) {
                 Text(
                     "Drop files to attach",
@@ -561,23 +569,44 @@ private fun Composer(
                 resolvePreview = resolveAttachmentPreview,
                 onRemove = { onAction(SessionDetailAction.RemoveAttachment(it)) },
             )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                AttachButton(
-                    enabled = enabled && attachmentsEnabled,
-                    onPickImage = { onAction(SessionDetailAction.PickImage) },
-                    onPickFile = { onAction(SessionDetailAction.PickFile) },
-                )
-                OutlinedTextField(
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(ComposerShape)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                    .padding(horizontal = 4.dp),
+                // Grown to several lines, the buttons stay at the bottom by the thumb.
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                Box(Modifier.padding(bottom = 4.dp)) {
+                    AttachButton(
+                        enabled = enabled && attachmentsEnabled,
+                        onPickImage = { onAction(SessionDetailAction.PickImage) },
+                        onPickFile = { onAction(SessionDetailAction.PickFile) },
+                    )
+                }
+                val clear = Color.Transparent
+                TextField(
                     value = text,
                     onValueChange = { text = it },
                     enabled = enabled,
-                    textStyle = MaterialTheme.typography.bodyMedium,
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(letterSpacing = 0.sp),
                     placeholder = {
                         Text(
                             if (enabled || busy) "Message…" else "Session is not running in Herdr",
-                            style = MaterialTheme.typography.bodyMedium,
+                            style = MaterialTheme.typography.bodyMedium.copy(letterSpacing = 0.sp),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     },
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = clear,
+                        unfocusedContainerColor = clear,
+                        disabledContainerColor = clear,
+                        focusedIndicatorColor = clear,
+                        unfocusedIndicatorColor = clear,
+                        disabledIndicatorColor = clear,
+                    ),
                     maxLines = 6,
                     modifier = Modifier.weight(1f).onPreviewKeyEvent { event ->
                         if (event.type != KeyEventType.KeyDown) {
@@ -601,7 +630,7 @@ private fun Composer(
                         }
                     },
                 )
-                SwapContent(busy, modifier = Modifier.size(48.dp), iconOnly = true) { spinning ->
+                SwapContent(busy, modifier = Modifier.padding(bottom = 4.dp).size(48.dp), iconOnly = true) { spinning ->
                     if (spinning) {
                         CircularProgressIndicator(Modifier.padding(12.dp).size(24.dp))
                     } else {
@@ -619,9 +648,11 @@ private fun Composer(
     }
 }
 
+private val ComposerShape = RoundedCornerShape(28.dp)
+
 @Composable
 private fun ResumeBar(busy: Boolean, onResume: () -> Unit) {
-    Surface(tonalElevation = 3.dp) {
+    Surface(color = MaterialTheme.colorScheme.background) {
         Row(
             Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,

@@ -20,6 +20,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -54,7 +55,7 @@ import androidx.compose.ui.unit.takeOrElse
 fun MarkdownText(
     text: String,
     modifier: Modifier = Modifier,
-    style: TextStyle = MaterialTheme.typography.bodyMedium,
+    style: TextStyle = proseStyle(),
 ) {
     val blocks = remember(text) { parseMarkdown(text) }
     // No fillMaxWidth: user message bubbles should still hug short text.
@@ -65,15 +66,26 @@ fun MarkdownText(
     }
 }
 
+/**
+ * Prose: a size below the body style with airy lines, so mixed Japanese and
+ * English reads as light blocks. Material's letter spacing is meant for Latin
+ * text and spreads kana apart, so it is dropped.
+ */
+@Composable
+@ReadOnlyComposable
+fun proseStyle(): TextStyle =
+    MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 23.sp, letterSpacing = 0.sp)
+
 @Composable
 private fun MarkdownBlock(block: MdBlock, style: TextStyle, previous: MdBlock?) {
-    // Headings breathe a little; items of one list stay tight.
+    // Paragraphs and headings stand apart; items of one list sit closer, but
+    // still apart enough to read as items. The column adds 2dp to each.
     val gap = when {
         previous == null -> 0.dp
-        block is MdBlock.Heading -> 8.dp
+        block is MdBlock.Heading -> 14.dp
         block is MdBlock.Rule -> 0.dp
-        block is MdBlock.ListItem && previous is MdBlock.ListItem -> 0.dp
-        else -> 4.dp
+        block is MdBlock.ListItem && previous is MdBlock.ListItem -> 3.dp
+        else -> 10.dp
     }
     val top = Modifier.padding(top = gap)
     when (block) {
@@ -154,7 +166,7 @@ private fun MarkdownBlock(block: MdBlock, style: TextStyle, previous: MdBlock?) 
 
         is MdBlock.Table -> MarkdownTable(block, style, top)
 
-        MdBlock.Rule -> HorizontalDivider(Modifier.padding(vertical = 4.dp))
+        MdBlock.Rule -> HorizontalDivider(Modifier.padding(vertical = 8.dp))
     }
 }
 
