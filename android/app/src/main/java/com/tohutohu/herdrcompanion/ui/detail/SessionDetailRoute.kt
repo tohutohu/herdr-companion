@@ -2,6 +2,7 @@ package com.tohutohu.herdrcompanion.ui.detail
 
 import android.app.Application
 import android.net.Uri
+import android.text.format.DateUtils
 import android.text.format.Formatter
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -104,6 +105,10 @@ fun SessionDetailRoute(
         focusLatest = focusLatest,
         resolveUrl = api::absolute,
         formatFileSize = { Formatter.formatShortFileSize(context, it) },
+        formatTime = { at ->
+            val date = if (DateUtils.isToday(at)) 0 else DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_NUMERIC_DATE
+            DateUtils.formatDateTime(context, at, DateUtils.FORMAT_SHOW_TIME or date)
+        },
         resolveAttachmentPreview = { id -> id.toUri() },
         onAction = { action ->
             when (action) {

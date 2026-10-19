@@ -41,7 +41,7 @@ class SessionScrollRestorationTest {
                     Box(Modifier.size(500.dp)) {
                         SessionDetailScreen(
                             state = SessionDetailUiState("session", null, messages, emptyList(), error = null, answering = false),
-                            resolveUrl = { it }, formatFileSize = { "$it bytes" }, onAction = {},
+                            resolveUrl = { it }, formatFileSize = { "$it bytes" }, formatTime = { "$it" }, onAction = {},
                         )
                     }
                 }

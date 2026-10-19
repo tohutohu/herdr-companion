@@ -103,7 +103,7 @@ class DeviceStateRestorationTest {
         var messages by mutableStateOf((1..50).map(::message))
         DeviceTestActivity.content = {
             SessionDetailScreen(SessionDetailUiState("session", null, messages, emptyList(), error = null, answering = false),
-                resolveUrl = { it }, formatFileSize = { "$it bytes" }, onAction = {})
+                resolveUrl = { it }, formatFileSize = { "$it bytes" }, formatTime = { "$it" }, onAction = {})
         }
         launch()
         val transcript = SemanticsMatcher.keyIsDefined(SemanticsActions.ScrollToIndex)

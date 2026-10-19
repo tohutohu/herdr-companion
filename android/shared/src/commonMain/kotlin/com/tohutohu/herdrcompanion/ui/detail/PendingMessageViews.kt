@@ -30,7 +30,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
@@ -46,7 +45,6 @@ import com.tohutohu.herdrcompanion.ui.markdown.MarkdownText
 @Composable
 fun PendingMessageItem(
     message: PendingMessageUiState,
-    showRole: Boolean,
     resolveAttachmentPreview: (String) -> Any?,
     onRetry: () -> Unit,
     onDiscard: () -> Unit,
@@ -54,28 +52,20 @@ fun PendingMessageItem(
 ) {
     val failed = message.state == SendState.FAILED
     Column(
-        modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+        modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 14.dp, bottom = 2.dp),
         horizontalAlignment = Alignment.End,
     ) {
-        if (showRole) {
-            Text(
-                "You",
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(top = 12.dp, bottom = 2.dp),
-            )
-        }
         Surface(
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+            color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.35f),
+            contentColor = MaterialTheme.colorScheme.onSurface,
             border = BorderStroke(
                 1.dp,
-                if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primaryContainer,
+                if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.surfaceContainerHighest,
             ),
-            shape = RoundedCornerShape(12.dp),
+            shape = UserBubbleShape,
             modifier = Modifier.userBubbleWidth(),
         ) {
-            Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 message.attachments.forEach { a ->
                     if (a.isImage) {
                         AsyncImage(

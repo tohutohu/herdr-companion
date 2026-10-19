@@ -909,6 +909,7 @@ internal fun DesktopSessionContent(
                 state = detail,
                 resolveUrl = api::absolute,
                 formatFileSize = ::formatFileSize,
+                formatTime = ::formatTime,
                 resolveAttachmentPreview = { id -> state.resolveAttachmentPreview(id) },
                 composerModifier = dropTarget.modifier,
                 attachmentDropActive = dropTarget.active,
@@ -1287,6 +1288,13 @@ private fun formatFileSize(bytes: Long): String = when {
     bytes < 1024 * 1024 -> "${bytes / 1024} KB"
     bytes < 1024 * 1024 * 1024 -> "${bytes / (1024 * 1024)} MB"
     else -> "${bytes / (1024 * 1024 * 1024)} GB"
+}
+
+/** "19:37" today, "10/18 19:37" before. */
+private fun formatTime(epochMillis: Long): String {
+    val at = java.time.Instant.ofEpochMilli(epochMillis).atZone(java.time.ZoneId.systemDefault())
+    val today = at.toLocalDate() == java.time.LocalDate.now(at.zone)
+    return at.format(java.time.format.DateTimeFormatter.ofPattern(if (today) "H:mm" else "M/d H:mm"))
 }
 
 private object DesktopHttp {

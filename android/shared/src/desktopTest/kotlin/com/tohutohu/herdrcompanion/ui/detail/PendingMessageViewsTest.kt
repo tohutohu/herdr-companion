@@ -23,7 +23,6 @@ class PendingMessageViewsTest {
             MaterialTheme {
                 PendingMessageItem(
                     message = PendingMessageUiState("request", "original prompt", emptyList(), SendState.FAILED, error, canRetry = false),
-                    showRole = false,
                     resolveAttachmentPreview = { null },
                     onRetry = { retries++ },
                     onDiscard = { discards++ },
@@ -46,7 +45,6 @@ class PendingMessageViewsTest {
             MaterialTheme {
                 PendingMessageItem(
                     message = PendingMessageUiState("request", "original prompt", emptyList(), SendState.FAILED, "offline"),
-                    showRole = false,
                     resolveAttachmentPreview = { null },
                     onRetry = { retries++ },
                     onDiscard = {},

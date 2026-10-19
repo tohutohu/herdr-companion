@@ -31,7 +31,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -113,6 +112,8 @@ fun SessionDetailScreen(
     focusLatest: Boolean = false,
     resolveUrl: (String) -> String,
     formatFileSize: (Long) -> String,
+    /** When a turn ended, as a clock time (with the date unless it is today). */
+    formatTime: (Long) -> String,
     resolveAttachmentPreview: (String) -> Any? = { null },
     composerModifier: Modifier = Modifier,
     attachmentDropActive: Boolean = false,
@@ -200,8 +201,13 @@ fun SessionDetailScreen(
         listState.animateScrollToItem(0)
     }
 
-    // Tool calls between two reports share one row.
-    val rows = remember(messages, state.messageKeys) { transcriptRows(messages, state.messageKeys) }
+    // Each turn folds its work into one row, leaving its newest report out.
+    val lastTurn = when (session?.status) {
+        Status.RUNNING, Status.WAITING_INPUT, Status.WAITING_APPROVAL -> LastTurn.WORKING
+        Status.FAILED -> LastTurn.FAILED
+        else -> LastTurn.DONE
+    }
+    val rows = remember(messages, state.messageKeys, lastTurn) { transcriptRows(messages, state.messageKeys, lastTurn) }
     // Pending messages sit below the conversation, as the first items of the
     // bottom-up list; row indexes in the list are shifted by them.
     val tail = pending.size
@@ -418,21 +424,18 @@ fun SessionDetailScreen(
                         contentPadding = PaddingValues(vertical = 8.dp),
                         reverseLayout = true,
                     ) {
-                        itemsIndexed(pending.asReversed(), key = { _, p -> "pending:" + p.localId }) { r, p ->
-                            val i = pending.lastIndex - r
+                        items(pending.asReversed(), key = { p -> "pending:" + p.localId }) { p ->
                             PendingMessageItem(
                                 modifier = Modifier
                                     .animateContentSize(tween(ITEM_ANIMATION_MS))
                                     .animateItem(placementSpec = if (pausePlacement) null else tween(ITEM_ANIMATION_MS)),
                                 message = p,
-                                showRole = i == 0 && messages.lastOrNull()?.role != "user",
                                 resolveAttachmentPreview = resolveAttachmentPreview,
                                 onRetry = { onAction(SessionDetailAction.Retry(p.localId)) },
                                 onDiscard = { onAction(SessionDetailAction.Discard(p.localId)) },
                             )
                         }
-                        itemsIndexed(rows.asReversed(), key = { _, row -> row.key }) { r, row ->
-                            val i = rows.lastIndex - r
+                        items(rows.asReversed(), key = { row -> row.key }) { row ->
                             // Only a sent message is sized here, as it takes the place of
                             // its pending row. Other rows animate their own changes;
                             // sizing them again would chase that and drag it out.
@@ -446,40 +449,18 @@ fun SessionDetailScreen(
                             } else {
                                 sizeModifier
                             }
-                            val showRole = i == 0 || rows[i - 1].speaker != row.speaker
-                            val providerName = session?.providerName ?: "Agent"
-                            val onOpenFile = { path: String, line: Int -> onAction(SessionDetailAction.OpenFile(path, line)) }
-                            val onOpenImage = { url: String -> onAction(SessionDetailAction.OpenImage(url)) }
-                            val onOpenTerminal = { onAction(SessionDetailAction.OpenTerminal) }
-                            val onRespond = { it: InteractionResponseDto -> onAction(SessionDetailAction.Respond(it)) }
-                            when (row) {
-                                is MessageRow -> MessageItem(
-                                    modifier = itemModifier,
-                                    message = row.message,
-                                    showRole = showRole,
-                                    providerName = providerName,
-                                    resolveUrl = resolveUrl,
-                                    formatFileSize = formatFileSize,
-                                    onOpenFile = onOpenFile,
-                                    onOpenImage = onOpenImage,
-                                    onOpenTerminal = onOpenTerminal,
-                                    interactionsEnabled = !answering,
-                                    onRespond = onRespond,
-                                )
-                                is ActivityRow -> ActivityGroupItem(
-                                    row = row,
-                                    modifier = itemModifier,
-                                    showRole = showRole,
-                                    providerName = providerName,
-                                    resolveUrl = resolveUrl,
-                                    formatFileSize = formatFileSize,
-                                    onOpenFile = onOpenFile,
-                                    onOpenImage = onOpenImage,
-                                    onOpenTerminal = onOpenTerminal,
-                                    interactionsEnabled = !answering,
-                                    onRespond = onRespond,
-                                )
-                            }
+                            TranscriptRowItem(
+                                row = row,
+                                modifier = itemModifier,
+                                formatTime = formatTime,
+                                resolveUrl = resolveUrl,
+                                formatFileSize = formatFileSize,
+                                onOpenFile = { path, line -> onAction(SessionDetailAction.OpenFile(path, line)) },
+                                onOpenImage = { url -> onAction(SessionDetailAction.OpenImage(url)) },
+                                onOpenTerminal = { onAction(SessionDetailAction.OpenTerminal) },
+                                interactionsEnabled = !answering,
+                                onRespond = { onAction(SessionDetailAction.Respond(it)) },
+                            )
                         }
                     }
                 }
@@ -489,7 +470,8 @@ fun SessionDetailScreen(
                     providerName = session?.providerName ?: "Agent",
                     onHeight = { panelHeight = it },
                     onJump = { id ->
-                        val i = rows.indexOfFirst { it is MessageRow && it.message.id == id }
+                        // A report folded into a turn's work is jumped to by its row.
+                        val i = rows.indexOfFirst { it.shows(id) }
                         if (i >= 0) {
                             readFromStart = false
                             followNewest = i == rows.lastIndex

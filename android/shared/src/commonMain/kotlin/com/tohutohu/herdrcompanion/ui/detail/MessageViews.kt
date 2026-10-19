@@ -28,6 +28,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -39,7 +40,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
@@ -50,12 +50,64 @@ import com.tohutohu.herdrcompanion.ui.ExpandChevron
 import com.tohutohu.herdrcompanion.ui.UiMotion
 import com.tohutohu.herdrcompanion.ui.markdown.MarkdownText
 
+/** A row of the message list, with how its turn ended when it is the last. */
+@Composable
+fun TranscriptRowItem(
+    row: TranscriptRow,
+    modifier: Modifier = Modifier,
+    formatTime: (Long) -> String,
+    resolveUrl: (String) -> String,
+    formatFileSize: (Long) -> String,
+    onOpenFile: (String, Int) -> Unit,
+    onOpenImage: (String) -> Unit,
+    onOpenTerminal: () -> Unit,
+    interactionsEnabled: Boolean,
+    onRespond: (InteractionResponseDto) -> Unit,
+) {
+    Column(modifier.fillMaxWidth()) {
+        when (row) {
+            is MessageRow -> MessageItem(
+                message = row.message,
+                resolveUrl = resolveUrl,
+                formatFileSize = formatFileSize,
+                onOpenFile = onOpenFile,
+                onOpenImage = onOpenImage,
+                onOpenTerminal = onOpenTerminal,
+                interactionsEnabled = interactionsEnabled,
+                onRespond = onRespond,
+            )
+            is ActivityRow -> ActivityGroupItem(
+                row = row,
+                resolveUrl = resolveUrl,
+                formatFileSize = formatFileSize,
+                onOpenFile = onOpenFile,
+                onOpenImage = onOpenImage,
+                onOpenTerminal = onOpenTerminal,
+                interactionsEnabled = interactionsEnabled,
+                onRespond = onRespond,
+            )
+            is WorkRow -> WorkGroupItem(row) { child ->
+                TranscriptRowItem(
+                    row = child,
+                    formatTime = formatTime,
+                    resolveUrl = resolveUrl,
+                    formatFileSize = formatFileSize,
+                    onOpenFile = onOpenFile,
+                    onOpenImage = onOpenImage,
+                    onOpenTerminal = onOpenTerminal,
+                    interactionsEnabled = interactionsEnabled,
+                    onRespond = onRespond,
+                )
+            }
+        }
+        row.end?.let { TurnEndLine(it, formatTime) }
+    }
+}
+
 @Composable
 fun MessageItem(
     message: Message,
     modifier: Modifier = Modifier,
-    showRole: Boolean,
-    providerName: String,
     resolveUrl: (String) -> String,
     formatFileSize: (Long) -> String,
     onOpenFile: (String, Int) -> Unit,
@@ -68,10 +120,10 @@ fun MessageItem(
     Column(
         modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 2.dp),
+            // An instruction opens a turn; the space above it parts the turns.
+            .padding(start = 12.dp, end = 12.dp, top = if (isUser) 14.dp else 2.dp, bottom = 2.dp),
         horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
     ) {
-        if (showRole && message.role != "tool") RoleLabel(message.role, providerName)
         val content: @Composable () -> Unit = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 message.blocks.forEach { block ->
@@ -87,10 +139,11 @@ fun MessageItem(
         }
         if (isUser) {
             Surface(
-                color = MaterialTheme.colorScheme.primaryContainer,
-                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                shape = UserBubbleShape,
                 modifier = Modifier.userBubbleWidth(),
-            ) { Box(Modifier.padding(10.dp)) { selectableContent() } }
+            ) { Box(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) { selectableContent() } }
             if (message.queued) QueuedLine()
         } else {
             selectableContent()
@@ -107,18 +160,81 @@ internal const val RESIZE_MS = UiMotion.ResizeMs
  */
 internal val LocalRowResize = staticCompositionLocalOf<() -> Unit> { {} }
 
+/** The reader's own messages: a plain neutral bubble, sent or on its way. */
+internal val UserBubbleShape = RoundedCornerShape(20.dp)
+
+/**
+ * The work of a turn before its newest report, as one quiet line: how long it
+ * took and how many tools it called. Like a tool line it opens upward, so the
+ * line stays under the finger and the work unrolls toward the report.
+ */
 @Composable
-private fun RoleLabel(role: String, providerName: String) {
+fun WorkGroupItem(
+    row: WorkRow,
+    modifier: Modifier = Modifier,
+    child: @Composable (TranscriptRow) -> Unit,
+) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val onResize = LocalRowResize.current
+    val expandable = row.rows.isNotEmpty()
+    Column(modifier.fillMaxWidth()) {
+        AnimatedVisibility(
+            visible = expanded,
+            enter = expandVertically(UiMotion.resize(), expandFrom = Alignment.Bottom) + fadeIn(UiMotion.resize()),
+            exit = shrinkVertically(UiMotion.resize(), shrinkTowards = Alignment.Bottom) + fadeOut(tween(UiMotion.FadeOutMs)),
+        ) {
+            Column(Modifier.padding(vertical = 4.dp)) {
+                row.rows.forEach { key(it.key) { child(it) } }
+            }
+        }
+        val muted = MaterialTheme.colorScheme.onSurfaceVariant
+        Row(
+            Modifier
+                .padding(horizontal = 12.dp, vertical = 2.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .clickable(enabled = expandable) {
+                    onResize()
+                    expanded = !expanded
+                }
+                .padding(horizontal = 4.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(workSummary(row), style = MaterialTheme.typography.labelMedium, color = muted, maxLines = 1)
+            if (expandable) {
+                ExpandChevron(
+                    expanded = !expanded,
+                    contentDescription = if (expanded) "Hide work" else "Show work",
+                    tint = muted,
+                    modifier = Modifier.padding(start = 2.dp).size(16.dp),
+                )
+            }
+        }
+    }
+}
+
+/** "Worked for 1m 26s · 4 tool calls", or "Working · 2 tool calls" until the turn is over. */
+internal fun workSummary(row: WorkRow): String {
+    val what = when {
+        row.working -> "Working"
+        row.durationMs != null -> "Worked for ${durationLabel(row.durationMs)}"
+        else -> "Worked"
+    }
+    return when (val calls = row.callCount) {
+        0 -> what
+        1 -> "$what · 1 tool call"
+        else -> "$what · $calls tool calls"
+    }
+}
+
+/** Under a finished turn, small and quiet: "✓ Done · 19:37". */
+@Composable
+private fun TurnEndLine(end: TurnEnd, formatTime: (Long) -> String) {
+    val label = if (end.failed) "✕ Failed" else "✓ Done"
     Text(
-        when (role) {
-            "user" -> "You"
-            "assistant" -> providerName.substringBefore(' ')
-            else -> "System"
-        },
-        style = MaterialTheme.typography.labelMedium,
-        fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(top = 12.dp, bottom = 2.dp),
+        listOfNotNull(label, end.at.takeIf { it > 0 }?.let(formatTime)).joinToString(" · "),
+        style = MaterialTheme.typography.labelSmall,
+        color = if (end.failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 6.dp),
     )
 }
 
@@ -130,8 +246,6 @@ private fun RoleLabel(role: String, providerName: String) {
 fun ActivityGroupItem(
     row: ActivityRow,
     modifier: Modifier = Modifier,
-    showRole: Boolean,
-    providerName: String,
     resolveUrl: (String) -> String,
     formatFileSize: (Long) -> String,
     onOpenFile: (String, Int) -> Unit,
@@ -147,7 +261,6 @@ fun ActivityGroupItem(
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 2.dp),
     ) {
-        if (showRole) RoleLabel("assistant", providerName)
         // The list is anchored at the bottom, so a row grows upward. The calls
         // open above the line, which stays under the finger, and unroll from
         // the newest one next to it.
