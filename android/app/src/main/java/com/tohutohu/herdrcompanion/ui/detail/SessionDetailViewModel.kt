@@ -134,7 +134,8 @@ class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidV
      * Called in a loop while the screen is started (foreground only). The
      * session's notification is cleared on entering and on leaving, but not
      * the moment one arrives while the user is reading, so it can still be
-     * noticed.
+     * noticed. Sending or answering from here clears it too: the turn it
+     * announced is over.
      */
     suspend fun pollWhileVisible() {
         Notifications.cancel(getApplication(), sessionId)
@@ -222,6 +223,7 @@ class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidV
 
     /** Shown at once and sent in the background; the screen may be left right away. */
     fun send(text: String, attachments: List<Attachment>) {
+        Notifications.cancel(getApplication(), sessionId)
         outbox.send(sessionId, text, attachments, messages.value.mapTo(HashSet()) { it.id })
     }
 
@@ -230,6 +232,7 @@ class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidV
     fun discard(localId: String) = outbox.discard(localId)
 
     fun respond(response: InteractionResponseDto) {
+        Notifications.cancel(getApplication(), sessionId)
         viewModelScope.launch {
             _answering.value = true
             try {
