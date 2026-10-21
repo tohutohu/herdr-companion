@@ -173,7 +173,7 @@ func serve(args []string) error {
 	limits := usage.New(cfg.UsageCommand, time.Duration(cfg.UsageRefreshMinutes)*time.Minute, codexProvider)
 	go limits.Run(ctx)
 
-	watcher := &notifications.Watcher{Herdr: hc, Sessions: svc, Config: store, Sink: sink}
+	watcher := &notifications.Watcher{Herdr: hc, Sessions: svc, Conversations: svc, Config: store, Sink: sink}
 	if sender, err := newSender(cfg); err != nil {
 		slog.Warn("push notifications disabled", "operation", "fcm", "error", err)
 	} else {

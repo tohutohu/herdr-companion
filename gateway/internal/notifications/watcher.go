@@ -1,7 +1,9 @@
 package notifications
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -26,6 +28,11 @@ type Sessions interface {
 	LiveSessions(ctx context.Context) ([]model.Session, error)
 }
 
+// Conversations reads a session's messages for the report sent with a push.
+type Conversations interface {
+	Conversation(ctx context.Context, id string) (model.Session, []model.Message, error)
+}
+
 // Subscriber is the Herdr event stream.
 type Subscriber interface {
 	Snapshot(ctx context.Context) (*herdr.Snapshot, error)
@@ -37,9 +44,11 @@ type Subscriber interface {
 type Watcher struct {
 	Herdr    Subscriber
 	Sessions Sessions
-	Sender   Sender // nil disables sending (transitions are still logged)
-	Config   *config.Store
-	Sink     deadletter.Sink
+	// Conversations supplies the last report sent with a push; nil sends none.
+	Conversations Conversations
+	Sender        Sender // nil disables sending (transitions are still logged)
+	Config        *config.Store
+	Sink          deadletter.Sink
 
 	// Debounce lets providers flush transcripts before we read them.
 	Debounce time.Duration
@@ -225,12 +234,13 @@ func Title(s model.Session, kind model.Status) string {
 
 func Payload(s model.Session, kind model.Status) map[string]string {
 	return map[string]string{
-		"sessionId": s.ID,
-		"status":    string(kind),
-		"title":     Title(s, kind),
-		"body":      truncate(Body(s), 300),
-		"provider":  s.Provider,
-		"project":   s.Project,
+		"sessionId":    s.ID,
+		"status":       string(kind),
+		"title":        Title(s, kind),
+		"body":         truncate(Body(s), 300),
+		"provider":     s.Provider,
+		"providerName": s.ProviderName,
+		"project":      s.Project,
 		// Lets Android offer a reply field only where a message would arrive.
 		"canSend": strconv.FormatBool(s.CanSend),
 	}
@@ -250,6 +260,87 @@ func Body(s model.Session) string {
 	return strings.TrimSpace(head + "\n" + s.LastMessage)
 }
 
+// KeyReport carries the agent's last report, so the app can show it before
+// it reaches the Gateway to fetch the conversation.
+const KeyReport = "report"
+
+// maxPayloadBytes keeps a push under FCM's 4096-byte limit on data keys
+// and values, with room to spare.
+const maxPayloadBytes = 3800
+
+// reportTimeout bounds reading the conversation; a slow read sends the push
+// without its report rather than late.
+const reportTimeout = 5 * time.Second
+
+// LastReport is the newest assistant message with text, reduced to that text:
+// images, files and interactions need the Gateway anyway.
+func LastReport(msgs []model.Message) (model.Message, bool) {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m := msgs[i]
+		if m.Role != model.RoleAssistant || m.Queued {
+			continue
+		}
+		var parts []string
+		for _, b := range m.Blocks {
+			if b.Type == model.BlockText && strings.TrimSpace(b.Text) != "" {
+				parts = append(parts, strings.TrimSpace(b.Text))
+			}
+		}
+		if len(parts) > 0 {
+			return model.Message{ID: m.ID, Role: m.Role, Timestamp: m.Timestamp, Blocks: []model.Block{model.TextBlock(strings.Join(parts, "\n\n"))}}, true
+		}
+	}
+	return model.Message{}, false
+}
+
+// AttachReport adds the report as message JSON, cutting its text to what fits
+// next to the rest of data. It reports false when not even a start fits.
+func AttachReport(data map[string]string, report model.Message) bool {
+	budget := maxPayloadBytes - len(KeyReport)
+	for k, v := range data {
+		budget -= len(k) + len(v)
+	}
+	full := []rune(report.Blocks[0].Text)
+	for keep := len(full); keep > 0; {
+		text := string(full[:keep])
+		if keep < len(full) {
+			text = strings.TrimRight(text, " \t\n") + "…"
+		}
+		report.Blocks = []model.Block{model.TextBlock(text)}
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
+		enc.SetEscapeHTML(false)
+		if err := enc.Encode(report); err != nil {
+			return false
+		}
+		encoded := bytes.TrimSpace(buf.Bytes())
+		if len(encoded) <= budget {
+			data[KeyReport] = string(encoded)
+			return true
+		}
+		// Escapes and multi-byte runes make bytes per rune uneven, so shrink
+		// in proportion and always by at least one rune.
+		keep = min(keep-1, keep*budget/len(encoded))
+	}
+	return false
+}
+
+func (w *Watcher) attachReport(ctx context.Context, s model.Session, data map[string]string) {
+	if w.Conversations == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, reportTimeout)
+	defer cancel()
+	_, msgs, err := w.Conversations.Conversation(ctx, s.ID)
+	if err != nil {
+		slog.Warn("push sent without report", "provider", s.Provider, "session_id", s.ID, "operation", "push", "error", err)
+		return
+	}
+	if report, ok := LastReport(msgs); ok {
+		AttachReport(data, report)
+	}
+}
+
 func truncate(s string, n int) string {
 	r := []rune(s)
 	if len(r) <= n {
@@ -265,6 +356,7 @@ func (w *Watcher) push(ctx context.Context, s model.Session, kind model.Status) 
 	}
 	data := Payload(s, kind)
 	data["gatewayId"] = config.GatewayID(w.Config.Get().AuthToken)
+	w.attachReport(ctx, s, data)
 	for _, d := range w.Config.Get().Devices {
 		err := w.Sender.Send(ctx, d.FCMToken, data)
 		switch {

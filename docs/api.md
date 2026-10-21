@@ -643,7 +643,15 @@ UUID のみを渡す。長文を Data の10KB制限で失わず、同じセッ�
   "title": "Claude Code needs approval",
   "body": "<タイトルまたはプロジェクト>\n<最後の発言（全体で300文字まで）>",
   "provider": "claude",
+  "providerName": "Claude Code",
   "project": "herdr-android-client",
-  "canSend": "true"
+  "canSend": "true",
+  "gatewayId": "…",
+  "report": "{\"id\":\"…\",\"role\":\"assistant\",\"timestamp\":\"…\",\"blocks\":[{\"type\":\"text\",\"text\":\"…\"}]}"
 }
 ```
+
+`report` は最後の報告（テキストを持つ最新の assistant メッセージ）を、テキストブロック1つにまとめた
+メッセージ JSON。FCM の data 上限 4096 バイトに収まるよう、ペイロード全体が 3800 バイト以下になるまで
+本文を切り詰め、末尾に `…` を付ける。会話を読めないときや報告がないときは省く。
+アプリは会話を取得する前でもこれを画面に出し、取得した会話で置き換える。

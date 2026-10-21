@@ -121,6 +121,107 @@ func Testペイロードの見出しはセッションタイトルにする(t *t
 	}
 }
 
+type fakeConversations struct {
+	msgs []model.Message
+	err  error
+}
+
+func (f *fakeConversations) Conversation(context.Context, string) (model.Session, []model.Message, error) {
+	return model.Session{}, f.msgs, f.err
+}
+
+func payloadSize(data map[string]string) int {
+	n := 0
+	for k, v := range data {
+		n += len(k) + len(v)
+	}
+	return n
+}
+
+func decodeReport(t *testing.T, data map[string]string) model.Message {
+	t.Helper()
+	var m model.Message
+	if err := json.Unmarshal([]byte(data[KeyReport]), &m); err != nil {
+		t.Fatalf("report = %q: %v", data[KeyReport], err)
+	}
+	return m
+}
+
+func Test通知に最後の報告を添える(t *testing.T) {
+	fs := &fakeSessions{list: []model.Session{sess(model.StatusRunning)}}
+	sender := &fakeSender{}
+	w, _ := newWatcher(t, fs, sender)
+	at := time.Date(2026, 10, 21, 1, 2, 3, 0, time.UTC)
+	w.Conversations = &fakeConversations{msgs: []model.Message{
+		{ID: "u1", Role: model.RoleUser, Blocks: []model.Block{model.TextBlock("直して")}},
+		{ID: "a1", Role: model.RoleAssistant, Timestamp: at, Blocks: []model.Block{
+			model.TextBlock("修正しました。"),
+			{Type: model.BlockImage, URL: "/v1/files/x.png"},
+			model.TextBlock("テストも通っています。"),
+		}},
+		{ID: "t1", Role: model.RoleTool, Blocks: []model.Block{model.TextBlock("go test ./...")}},
+		{ID: "queued:x", Role: model.RoleAssistant, Queued: true, Blocks: []model.Block{model.TextBlock("待機中")}},
+	}}
+	ctx := context.Background()
+	w.Evaluate(ctx)
+	fs.list = []model.Session{sess(model.StatusCompleted)}
+	w.Evaluate(ctx)
+
+	if len(sender.sent) != 1 {
+		t.Fatalf("sent %d pushes", len(sender.sent))
+	}
+	got := decodeReport(t, sender.sent[0].data)
+	want := model.Message{ID: "a1", Role: model.RoleAssistant, Timestamp: at, Blocks: []model.Block{model.TextBlock("修正しました。\n\nテストも通っています。")}}
+	if got.ID != want.ID || got.Role != want.Role || !got.Timestamp.Equal(at) || len(got.Blocks) != 1 || got.Blocks[0] != want.Blocks[0] {
+		t.Errorf("report = %+v", got)
+	}
+	if sender.sent[0].data["providerName"] != "Claude Code" {
+		t.Errorf("providerName = %q", sender.sent[0].data["providerName"])
+	}
+}
+
+func Test長い報告はFCMの上限に収まるよう切り詰める(t *testing.T) {
+	data := Payload(sess(model.StatusCompleted), model.StatusCompleted)
+	data["gatewayId"] = strings.Repeat("g", 16)
+	long := strings.Repeat("日本語の報告<&>\"です。\n", 400)
+	report := model.Message{ID: "a1", Role: model.RoleAssistant, Blocks: []model.Block{model.TextBlock(long)}}
+	if !AttachReport(data, report) {
+		t.Fatal("report not attached")
+	}
+	if n := payloadSize(data); n > maxPayloadBytes || n < maxPayloadBytes-200 {
+		t.Errorf("payload size = %d", n)
+	}
+	text := decodeReport(t, data).Blocks[0].Text
+	if !strings.HasSuffix(text, "…") || !strings.HasPrefix(long, strings.TrimSuffix(text, "…")) {
+		t.Errorf("text = %q", text)
+	}
+}
+
+func Test報告がなければ添えずに通知する(t *testing.T) {
+	fs := &fakeSessions{list: []model.Session{sess(model.StatusRunning)}}
+	sender := &fakeSender{}
+	w, _ := newWatcher(t, fs, sender)
+	conv := &fakeConversations{err: errors.New("transcript unreadable")}
+	w.Conversations = conv
+	ctx := context.Background()
+	w.Evaluate(ctx)
+	fs.list = []model.Session{sess(model.StatusWaitingInput)}
+	w.Evaluate(ctx)
+	conv.err = nil
+	conv.msgs = []model.Message{{ID: "u1", Role: model.RoleUser, Blocks: []model.Block{model.TextBlock("直して")}}}
+	fs.list = []model.Session{sess(model.StatusCompleted)}
+	w.Evaluate(ctx)
+
+	if len(sender.sent) != 2 {
+		t.Fatalf("sent %d pushes", len(sender.sent))
+	}
+	for _, p := range sender.sent {
+		if _, ok := p.data[KeyReport]; ok {
+			t.Errorf("unexpected report: %+v", p.data)
+		}
+	}
+}
+
 func Test古い完了ターンの状態が揺れても再通知しない(t *testing.T) {
 	for _, terminal := range []model.Status{model.StatusCompleted, model.StatusIdle, model.StatusFailed} {
 		for _, initial := range []model.Status{terminal, model.StatusRunning} {
