@@ -101,8 +101,19 @@ fun <T> ReorderableChipRow(
         return true
     }
 
-    LaunchedEffect(rowItems) {
-        if (!dragging) orderedItems = rowItems
+    // Synced while composing, not in an effect: a frame drawn with the old
+    // list would still show an item the caller has just removed.
+    var syncedItems by remember { mutableStateOf(rowItems) }
+    if (rowItems != syncedItems) {
+        syncedItems = rowItems
+        if (dragging) {
+            // Keep the drag's order, without removed items and with added ones last.
+            fun reconcile(items: List<T>) = items.filter { it in rowItems } + rowItems.filter { it !in items }
+            orderedItems = reconcile(orderedItems)
+            dragOrigin = dragOrigin?.let(::reconcile)
+        } else {
+            orderedItems = rowItems
+        }
     }
 
     fun endDrag(commit: Boolean) {

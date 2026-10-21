@@ -19,6 +19,8 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.performSemanticsAction
@@ -142,6 +144,20 @@ class ReorderableChipRowTest {
         // B takes A's slot; the row itself stays where it was.
         assertNear(slot(2) + scrolled, left("C"), "C は動かない")
         assertTrue(chip("B").getBoundsInRoot().right > 0.dp, "B は画面に残る")
+    }
+
+    @Test
+    fun ドラッグ中に外された項目はドロップ後の順序に戻らない() {
+        setRow()
+        drag("A", (CHIP + SPACING) * 1.5f, release = false)
+
+        items = listOf("A", "B", "C")
+        rule.waitForIdle()
+        rule.onAllNodesWithTag("D").assertCountEquals(0)
+        chip("A").performTouchInput { up() }
+        rule.waitForIdle()
+
+        assertEquals(listOf(listOf("B", "A", "C")), moves)
     }
 
     @Test
