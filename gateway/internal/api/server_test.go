@@ -37,6 +37,8 @@ type fakeHerdr struct {
 	calls []string
 	// worktree is the checkout OpenWorktree opened a workspace in.
 	worktree string
+	// visible is what every pane shows.
+	visible string
 }
 
 func (f *fakeHerdr) Snapshot(context.Context) (*herdr.Snapshot, error) { return f.snap, nil }
@@ -73,7 +75,7 @@ func (f *fakeHerdr) StartAgent(_ context.Context, name, kind, pane string, args 
 	})
 	return nil
 }
-func (f *fakeHerdr) ReadVisible(context.Context, string) (string, error) { return "", nil }
+func (f *fakeHerdr) ReadVisible(context.Context, string) (string, error) { return f.visible, nil }
 func (f *fakeHerdr) Prompt(_ context.Context, _ string, text string) error {
 	f.calls = append(f.calls, "prompt:"+text)
 	return nil
@@ -216,7 +218,12 @@ func (p *fakeProvider) Send(ctx context.Context, id string, live *providers.Live
 }
 func (p *fakeProvider) LaunchArgs(providers.LaunchOptions) []string { return nil }
 func (p *fakeProvider) ResumeArgs(id, _ string) []string            { return []string{"resume", id} }
-func (p *fakeProvider) StartupKeys(string) []string                 { return nil }
+func (p *fakeProvider) StartupKeys(screen string) []string {
+	if strings.Contains(screen, "Yes, I trust this folder") {
+		return []string{"down", "enter"}
+	}
+	return nil
+}
 func (p *fakeProvider) Models(context.Context) (providers.ModelCatalog, error) {
 	return providers.ModelCatalog{
 		Models:  []providers.ModelOption{{ID: "fake-large", Name: "Large", Default: true}},

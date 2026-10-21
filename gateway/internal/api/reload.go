@@ -63,6 +63,7 @@ func (s *Server) reloadSession(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, id, "reload", err)
 		return
 	}
+	msgs = s.withFolderTrust(r.Context(), sess, msgs)
 	if msgs == nil {
 		msgs = []model.Message{}
 	}

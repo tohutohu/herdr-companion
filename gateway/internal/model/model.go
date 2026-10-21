@@ -137,6 +137,10 @@ type Interaction struct {
 // questions (one choice per way to proceed) but counts as an approval.
 const KindPlan = "plan"
 
+// KindTrust is the agent's folder-trust dialog in a running session. It is
+// an approval: approve trusts the folder, deny stops the agent.
+const KindTrust = "trust"
+
 // Awaits is what a pending interaction is waiting for, as the session status
 // reports it.
 func (ia *Interaction) Awaits() InteractionType {

@@ -460,6 +460,51 @@ func (l *Launcher) AnswerTrust(ctx context.Context, pane string, accept bool) (*
 	return l.finishPending(ctx, pane, pl), nil
 }
 
+// trustDialogLines is how much of the bottom of a running session's screen
+// its folder-trust dialog must fit in. The whole screen could also show the
+// dialog's wording quoted in a conversation.
+const trustDialogLines = 20
+
+// PaneTrust reports whether a running session's agent shows its folder-trust
+// dialog. Herdr restores its workspaces after a restart by resuming their
+// agents in place, and those can stop at the dialog without a launch of this
+// gateway waiting on it.
+func (l *Launcher) PaneTrust(ctx context.Context, provider, pane string) bool {
+	keys, err := l.paneTrustKeys(ctx, provider, pane)
+	return err == nil && keys != nil
+}
+
+// AnswerPaneTrust accepts the dialog PaneTrust found or, declined, stops the
+// session in its pane as the dialog's own "No" would.
+func (l *Launcher) AnswerPaneTrust(ctx context.Context, provider, pane string, accept bool) error {
+	keys, err := l.paneTrustKeys(ctx, provider, pane)
+	if err != nil {
+		return err
+	}
+	if keys == nil {
+		return providers.ErrInteractionGone
+	}
+	if !accept {
+		slog.Info("folder trust declined", "provider", provider, "pane", pane)
+		return l.Stop(ctx, pane)
+	}
+	slog.Info("folder trust accepted", "provider", provider, "pane", pane)
+	return l.Herdr.SendKeys(ctx, pane, keys...)
+}
+
+func (l *Launcher) paneTrustKeys(ctx context.Context, provider, pane string) ([]string, error) {
+	_, lp, err := l.provider(provider)
+	if err != nil {
+		return nil, err
+	}
+	screen, err := l.Herdr.ReadVisible(ctx, pane)
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(strings.TrimRight(screen, " \n"), "\n")
+	return lp.StartupKeys(strings.Join(lines[max(0, len(lines)-trustDialogLines):], "\n")), nil
+}
+
 // TerminalPane allows fallback access only to panes launched by this gateway.
 func (l *Launcher) TerminalPane(ctx context.Context, pane string) (string, error) {
 	l.mu.Lock()

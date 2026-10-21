@@ -351,6 +351,11 @@ answered (or the gateway restarts), and returns `trustRequired: true`. The app t
 answers with `POST /v1/launches/{pane}/trust`, which continues the launch
 (first prompt, session id) or closes the workspace. The native session id is then read from the pane's
 `agent_session`, which the Herdr integration hook reports at startup.
+Herdr restores its workspaces after a restart by resuming their agents in
+place. Such an agent can stop at the folder-trust dialog with no launch
+waiting on it, so the messages of a `waiting_input` session with nothing else
+pending end with a `kind: "trust"` approval while that dialog fills the bottom
+of its pane. Approving it sends the same keys; denying it stops the pane.
 The first prompt can carry uploads like a message: Claude Code gets them the
 way `Send` enters them (images pasted, other paths in the text); the other
 agents get every path appended to the text, which their TUIs attach (Codex

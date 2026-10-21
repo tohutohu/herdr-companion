@@ -322,7 +322,7 @@ func (s *Server) getMessages(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, id, "get_messages", err)
 		return
 	}
-	msgs = messagesFrom(msgs, r.URL.Query().Get("after"))
+	msgs = messagesFrom(s.withFolderTrust(r.Context(), sess, msgs), r.URL.Query().Get("after"))
 	if msgs == nil {
 		msgs = []model.Message{}
 	}
@@ -485,6 +485,10 @@ func (s *Server) respond(w http.ResponseWriter, r *http.Request) {
 	}
 	if res.Live == nil {
 		s.fail(w, r, id, "respond", providers.ErrNotLive)
+		return
+	}
+	if strings.HasPrefix(req.InteractionID, trustPrefix) {
+		s.respondTrust(w, r, id, res.Provider.Name(), res.Live.PaneID, req)
 		return
 	}
 	if err := res.Provider.Respond(r.Context(), res.NativeID, res.Live, req); err != nil {

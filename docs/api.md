@@ -387,10 +387,12 @@ DELETE: アーカイブを解除し Session を返す。
 | フィールド | 値 |
 |---|---|
 | `type` | `questions` / `approval` |
-| `kind` | `plan` は完成したプランの承認（questions 形式だが承認扱い） |
+| `kind` | `plan` は完成したプランの承認（questions 形式だが承認扱い）。`trust` は実行中のセッションのフォルダ信頼ダイアログ（下記） |
 | `state` | `pending` / `answered` / `closed`（未回答のまま操作不能になった） |
 | `supported` | `false` なら表示のみ。回答はターミナル経由で行う |
 | `questions[].type` | `select` / `multiselect` / `text` |
+
+Herdr が再起動後にワークスペースを復元してエージェントを再開すると、そのエージェントがフォルダ信頼ダイアログで止まることがある。ゲートウェイの起動処理を経ていないため `/v1/launches/{pane}/trust` では答えられない。セッションが `waiting_input` で他に `pending` がなく、画面下部にそのダイアログがあるとき、ゲートウェイは末尾に `trust:<pane>` を ID とするメッセージを加える。これは `type: approval`・`kind: trust` の対話で、`detail` にはフォルダを入れる。`respond` に `decision: approve` を送るとダイアログを通し、`deny` を送るとそのペインを止める。どちらも回答の前に画面を読み直し、ダイアログが消えていれば `409` を返す。
 
 ### `POST /v1/sessions/{id}/messages`
 
