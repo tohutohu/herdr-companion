@@ -2,7 +2,9 @@ package com.tohutohu.herdrcompanion.data
 
 import android.app.Application
 import androidx.room.Room
+import com.tohutohu.herdrcompanion.data.api.BlockDto
 import com.tohutohu.herdrcompanion.data.api.GatewayApi
+import com.tohutohu.herdrcompanion.data.api.MessageDto
 import com.tohutohu.herdrcompanion.data.db.AppDatabase
 import com.tohutohu.herdrcompanion.data.db.MessageEntity
 import java.util.concurrent.CountDownLatch
@@ -65,6 +67,106 @@ class SessionRepositoryTest {
         expectedAnchor = "a",
         cachedQueuedFlag = false,
     )
+
+    @Test
+    fun `通知の報告を会話の末尾に出し増分取得のアンカーにはしない`() = withRepo(
+        respond = { anchor ->
+            val ids = listOf("a", "b", "tool", "report")
+            val from = ids.indexOf(anchor).coerceAtLeast(0)
+            ok(ids.drop(from))
+        },
+    ) { repo, db, server ->
+        db.messages().upsert(listOf("a", "b").mapIndexed { i, id -> MessageEntity("s", id, i, "assistant", 0, "[]") })
+        repo.showPushedReport(pushed("report"))
+        val shown = db.messages().observe("s").first()
+        assertEquals(listOf("a", "b", "push:report"), shown.map { it.id })
+        assertEquals(2, shown.last().position)
+        assertTrue(shown.last().blocksJson.contains("修正しました。"))
+
+        repo.refreshMessages("s")
+        assertEquals("b", server.takeRequest(5, TimeUnit.SECONDS)!!.url.queryParameter("after"))
+        val rows = db.messages().observe("s").first()
+        assertEquals(listOf("a", "b", "tool", "report"), rows.map { it.id })
+        assertEquals(listOf(0, 1, 2, 3), rows.map { it.position })
+    }
+
+    @Test
+    fun `取得済みの報告は通知から重ねて出さない`() = withRepo(respond = { ok(emptyList()) }) { repo, db, _ ->
+        db.messages().upsert(listOf("a", "report").mapIndexed { i, id -> MessageEntity("s", id, i, "assistant", 0, "[]") })
+        repo.showPushedReport(pushed("report"))
+        assertEquals(listOf("a", "report"), db.messages().observe("s").first().map { it.id })
+    }
+
+    @Test
+    fun `一覧にまだないセッションも通知の報告だけで開ける`() = withRepo(respond = { ok(emptyList()) }) { repo, db, _ ->
+        repo.showPushedReport(pushed("report"))
+        val session = requireNotNull(db.sessions().get("s"))
+        assertEquals("completed", session.status)
+        assertEquals("Claude Code", session.providerName)
+        assertTrue(session.listed)
+        assertEquals(listOf("push:report"), db.messages().observe("s").first().map { it.id })
+        // 次の通知は前の報告を置き換える
+        repo.showPushedReport(pushed("next"))
+        assertEquals(listOf("push:next"), db.messages().observe("s").first().map { it.id })
+    }
+
+    @Test
+    fun `会話が変わっていない応答でも通知の報告を片付ける`() = withRepo(
+        respond = { anchor, etag ->
+            val ids = listOf("a", "report")
+            if (etag == "\"v1\"") MockResponse.Builder().code(304).build() else ok(ids.drop(ids.indexOf(anchor).coerceAtLeast(0)), etag = "\"v1\"")
+        },
+    ) { repo, db, server ->
+        db.messages().upsert(listOf(MessageEntity("s", "a", 0, "assistant", 0, "[]")))
+        repo.refreshMessages("s")
+        repo.refreshMessages("s")
+        // 取得済みの報告と同じIDなら通知は重ねないため、別IDの古い仮行を置いて確かめる
+        db.messages().upsert(listOf(MessageEntity("s", "push:stale", 2, "assistant", 0, "[]")))
+        repo.refreshMessages("s")
+        repeat(2) { server.takeRequest(5, TimeUnit.SECONDS) }
+        assertEquals("\"v1\"", server.takeRequest(5, TimeUnit.SECONDS)!!.headers["If-None-Match"])
+        assertEquals(listOf("a", "report"), db.messages().observe("s").first().map { it.id })
+    }
+
+    private fun pushed(id: String) = PushedReport(
+        sessionId = "s",
+        status = "completed",
+        provider = "claude",
+        providerName = "Claude Code",
+        project = "my-project",
+        canSend = true,
+        report = MessageDto(id, "assistant", "2026-10-21T01:02:03Z", listOf(BlockDto(type = "text", text = "修正しました。"))),
+    )
+
+    private fun ok(ids: List<String>, etag: String? = null): MockResponse {
+        val messages = ids.joinToString { """{"id":"$it","role":"assistant","timestamp":"2026-10-21T00:00:00Z","blocks":[]}""" }
+        return MockResponse.Builder()
+            .body("""{"session":{"id":"s","provider":"claude","status":"idle","updatedAt":"2026-10-21T00:00:00Z"},"messages":[$messages]}""")
+            .apply { if (etag != null) addHeader("ETag", etag) }
+            .build()
+    }
+
+    private fun withRepo(respond: (anchor: String?) -> MockResponse, body: suspend (SessionRepository, AppDatabase, MockWebServer) -> Unit) =
+        withRepo({ anchor, _ -> respond(anchor) }, body)
+
+    private fun withRepo(
+        respond: (anchor: String?, etag: String?) -> MockResponse,
+        body: suspend (SessionRepository, AppDatabase, MockWebServer) -> Unit,
+    ) = runBlocking(Dispatchers.IO) {
+        val server = MockWebServer()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest) =
+                respond(request.url.queryParameter("after"), request.headers["If-None-Match"])
+        }
+        server.start()
+        val db = Room.inMemoryDatabaseBuilder(RuntimeEnvironment.getApplication(), AppDatabase::class.java).build()
+        try {
+            body(SessionRepository(db, GatewayApi(OkHttpClient()) { Settings(server.url("/").toString(), "test") }), db, server)
+        } finally {
+            db.close()
+            server.close()
+        }
+    }
 
     private fun queuedRefresh(
         oldIds: List<String>,

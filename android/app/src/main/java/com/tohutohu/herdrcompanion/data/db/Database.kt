@@ -95,12 +95,21 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE sessionId = :sessionId ORDER BY position")
     fun observe(sessionId: String): Flow<List<MessageEntity>>
 
-    /** Queued prompts float at the tail; new transcript entries appear before them. */
-    @Query("SELECT id FROM messages WHERE sessionId = :sessionId AND queued = 0 AND id NOT LIKE 'queued:%' ORDER BY position DESC LIMIT 1")
+    /**
+     * Queued prompts float at the tail; new transcript entries appear before
+     * them. A pushed report may follow messages the cache does not have yet.
+     */
+    @Query("SELECT id FROM messages WHERE sessionId = :sessionId AND queued = 0 AND id NOT LIKE 'queued:%' AND id NOT LIKE 'push:%' ORDER BY position DESC LIMIT 1")
     suspend fun lastAnchorId(sessionId: String): String?
 
     @Query("SELECT position FROM messages WHERE sessionId = :sessionId AND id = :id")
     suspend fun positionOf(sessionId: String, id: String): Int?
+
+    @Query("SELECT MAX(position) FROM messages WHERE sessionId = :sessionId")
+    suspend fun lastPosition(sessionId: String): Int?
+
+    @Query("DELETE FROM messages WHERE sessionId = :sessionId AND id LIKE 'push:%'")
+    suspend fun deletePushed(sessionId: String)
 
     @Query("DELETE FROM messages WHERE sessionId = :sessionId")
     suspend fun deleteAll(sessionId: String)

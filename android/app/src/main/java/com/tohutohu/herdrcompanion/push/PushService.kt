@@ -17,14 +17,19 @@ import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import com.tohutohu.herdrcompanion.R
 import com.tohutohu.herdrcompanion.container
+import com.tohutohu.herdrcompanion.data.PushedReport
+import com.tohutohu.herdrcompanion.data.api.GatewayApi
 import com.tohutohu.herdrcompanion.data.api.GatewayException
+import com.tohutohu.herdrcompanion.data.api.MessageDto
+import kotlinx.coroutines.runBlocking
 import java.util.concurrent.TimeUnit
 import android.util.Log
 
 /**
  * Gateway pushes are data-only, high priority messages:
- * {sessionId, status, title, body, canSend}. We show the notification ourselves and
- * prefetch the conversation so it is readable immediately on tap.
+ * {sessionId, status, title, body, canSend, report}. We show the notification
+ * ourselves, keep the last report so it is readable on tap even when the
+ * Gateway cannot be reached, and prefetch the whole conversation.
  */
 class PushService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
@@ -41,12 +46,40 @@ class PushService : FirebaseMessagingService() {
             body = data["body"].orEmpty(),
             canSend = data["canSend"] == "true",
         )
+        pushedReport(data)?.let { report ->
+            // Runs on FCM's worker thread, which may block briefly.
+            runBlocking {
+                runCatching { container.repository.showPushedReport(report) }
+                    .onFailure { Log.w(TAG, "could not keep the pushed report for $sessionId", it) }
+            }
+        }
         PrefetchWorker.enqueue(this, sessionId)
     }
 
     override fun onNewToken(token: String) {
         container.pushRegistration.register(token)
     }
+
+    private companion object {
+        const val TAG = "PushService"
+    }
+}
+
+/** The report a push carried; null when the Gateway sent none or it does not parse. */
+internal fun pushedReport(data: Map<String, String>): PushedReport? {
+    val sessionId = data["sessionId"] ?: return null
+    val report = data["report"]?.let {
+        runCatching { GatewayApi.json.decodeFromString(MessageDto.serializer(), it) }.getOrNull()
+    } ?: return null
+    return PushedReport(
+        sessionId = sessionId,
+        status = data["status"].orEmpty(),
+        provider = data["provider"].orEmpty(),
+        providerName = data["providerName"] ?: data["provider"].orEmpty(),
+        project = data["project"].orEmpty(),
+        canSend = data["canSend"] == "true",
+        report = report,
+    )
 }
 
 /** Fetches a session's messages into Room after a push. */

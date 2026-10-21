@@ -75,7 +75,8 @@ class SessionRepository(
         val snapshot = if (anchor == null) {
             null
         } else {
-            api.messagesIfChanged(sessionId, after = anchor) ?: return@withLock
+            // Unchanged since the last fetch: a pushed report is already cached.
+            api.messagesIfChanged(sessionId, after = anchor) ?: return@withLock db.messages().deletePushed(sessionId)
         }
         val resp = snapshot?.response ?: api.messages(sessionId)
         val now = System.currentTimeMillis()
@@ -87,9 +88,47 @@ class SessionRepository(
             val incremental = anchor != null && anchorPos != null && resp.messages.firstOrNull()?.id == anchor
             val start = if (incremental) requireNotNull(anchorPos) else 0
             val rows = resp.messages.mapIndexed { i, m -> m.toEntity(sessionId, start + i) }
+            db.messages().deletePushed(sessionId)
             db.messages().replaceFrom(sessionId, start, rows)
         }
         snapshot?.acknowledge()
+    }
+
+    /**
+     * Shows the report a push carried until the conversation can be fetched,
+     * at the end of what is cached. Its `push:` id keeps it from serving as
+     * the incremental anchor, and the next fetch replaces it. It takes no
+     * session lock: a fetch in flight would hold up the push handler, and
+     * either order of the two transactions ends with the fetched rows.
+     */
+    suspend fun showPushedReport(push: PushedReport) = db.withTransaction {
+        val sessionId = push.sessionId
+        val existing = db.sessions().get(sessionId)
+        val reportedAt = parseTime(push.report.timestamp)
+        db.sessions().upsert(
+            listOf(
+                existing?.copy(status = push.status, updatedAt = maxOf(existing.updatedAt, reportedAt))
+                    ?: SessionEntity(
+                        id = sessionId,
+                        provider = push.provider,
+                        providerName = push.providerName,
+                        project = push.project,
+                        title = null,
+                        cwd = null,
+                        status = push.status,
+                        updatedAt = reportedAt,
+                        lastMessage = null,
+                        paneId = null,
+                        canSend = push.canSend,
+                        listed = true,
+                        lastSyncedAt = System.currentTimeMillis(),
+                    ),
+            ),
+        )
+        db.messages().deletePushed(sessionId)
+        if (db.messages().positionOf(sessionId, push.report.id) != null) return@withTransaction
+        val position = (db.messages().lastPosition(sessionId) ?: -1) + 1
+        db.messages().upsert(listOf(push.report.copy(id = PUSHED_PREFIX + push.report.id).toEntity(sessionId, position)))
     }
 
     /**
@@ -155,10 +194,22 @@ class SessionRepository(
 
     companion object {
         private const val STALE_MS = 14L * 24 * 60 * 60 * 1000
+        private const val PUSHED_PREFIX = "push:"
 
         fun parseTime(s: String): Long = runCatching { Instant.parse(s).toEpochMilli() }.getOrDefault(0L)
     }
 }
+
+/** What a push says about a session, enough to show its last report. */
+data class PushedReport(
+    val sessionId: String,
+    val status: String,
+    val provider: String,
+    val providerName: String,
+    val project: String,
+    val canSend: Boolean,
+    val report: MessageDto,
+)
 
 fun SessionDto.toEntity(now: Long, listed: Boolean) = SessionEntity(
     id = id,
