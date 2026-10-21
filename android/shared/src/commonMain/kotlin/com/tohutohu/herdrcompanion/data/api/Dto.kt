@@ -107,7 +107,10 @@ data class BlockDto(
 data class InteractionDto(
     val id: String,
     val type: String,
-    /** Refines [type]; "plan" is a finished plan waiting for the go-ahead. */
+    /**
+     * Refines [type]; "plan" is a finished plan waiting for the go-ahead, and
+     * "trust" a running agent's folder-trust dialog.
+     */
     val kind: String? = null,
     val state: String,
     val title: String? = null,

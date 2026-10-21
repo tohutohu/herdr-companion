@@ -69,6 +69,13 @@ class SessionRepositoryTest {
     )
 
     @Test
+    fun `回答済みで消えるフォルダ信頼の確認は増分取得のアンカーにしない`() = queuedRefresh(
+        oldIds = listOf("a", "trust:w1:p1"),
+        incomingIds = listOf("a", "b"),
+        expectedAnchor = "a",
+    )
+
+    @Test
     fun `通知の報告を会話の末尾に出し増分取得のアンカーにはしない`() = withRepo(
         respond = { anchor ->
             val ids = listOf("a", "b", "tool", "report")

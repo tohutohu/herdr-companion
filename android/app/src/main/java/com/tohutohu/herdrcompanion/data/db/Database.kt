@@ -97,9 +97,10 @@ interface MessageDao {
 
     /**
      * Queued prompts float at the tail; new transcript entries appear before
-     * them. A pushed report may follow messages the cache does not have yet.
+     * them. A pushed report may follow messages the cache does not have yet,
+     * and a folder-trust dialog is gone once answered.
      */
-    @Query("SELECT id FROM messages WHERE sessionId = :sessionId AND queued = 0 AND id NOT LIKE 'queued:%' AND id NOT LIKE 'push:%' ORDER BY position DESC LIMIT 1")
+    @Query("SELECT id FROM messages WHERE sessionId = :sessionId AND queued = 0 AND id NOT LIKE 'queued:%' AND id NOT LIKE 'push:%' AND id NOT LIKE 'trust:%' ORDER BY position DESC LIMIT 1")
     suspend fun lastAnchorId(sessionId: String): String?
 
     @Query("SELECT position FROM messages WHERE sessionId = :sessionId AND id = :id")

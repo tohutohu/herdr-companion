@@ -130,6 +130,28 @@ class InteractionCardTest {
     }
 
     @Test
+    fun フォルダ信頼の確認は信頼と停止のボタンで回答する() {
+        rule.setContent {
+            MaterialTheme {
+                InteractionCard(
+                    interaction = InteractionDto(
+                        id = "trust:w1:p1", type = "approval", kind = "trust", state = "pending", supported = true,
+                        title = "Trust this folder?", detail = "/Users/me/workspace/app",
+                        decisions = listOf("approve", "deny"),
+                    ),
+                    enabled = true,
+                    onRespond = { response = it },
+                    onOpenTerminal = {},
+                )
+            }
+        }
+        rule.onNodeWithText("/Users/me/workspace/app").assertExists()
+        rule.onNodeWithText("Stop").assertIsEnabled()
+        rule.onNodeWithText("Trust").performClick()
+        assertEquals(InteractionResponseDto(interactionId = "trust:w1:p1", decision = "approve"), response)
+    }
+
+    @Test
     fun 同じ位置に別の質問が来ても前の回答を送信しない() {
         content()
         enterAnswers()

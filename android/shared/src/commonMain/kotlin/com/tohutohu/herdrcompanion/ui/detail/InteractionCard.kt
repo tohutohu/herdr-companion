@@ -222,15 +222,17 @@ private fun Approval(
     submittingDecision: String?,
     onRespond: (InteractionResponseDto) -> Unit,
 ) {
+    val trust = interaction.kind == "trust"
+    if (trust) Text("Allow the agent to access the files in this folder? Stopping closes its pane.")
     interaction.detail?.let {
         Text(it, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
     }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         interaction.decisions.forEach { d ->
             val label = when (d) {
-                "approve" -> "Approve"
+                "approve" -> if (trust) "Trust" else "Approve"
                 "approve_session" -> "Always"
-                "deny" -> "Deny"
+                "deny" -> if (trust) "Stop" else "Deny"
                 else -> d
             }
             val onClick = { onRespond(InteractionResponseDto(interactionId = interaction.id, decision = d)) }
