@@ -20,8 +20,10 @@ import (
 // neither held in memory nor scanned again on every conversion.
 const (
 	maxCachedTranscripts = 16
-	// maxCachedTranscriptBytes bounds the kept lines of all cached transcripts.
-	maxCachedTranscriptBytes = 64 << 20
+	// DefaultCacheBytes bounds the kept lines of all cached transcripts unless
+	// SetCacheBytes changes it. A long session alone keeps well over 100 MiB,
+	// and a smaller budget drops it whenever another transcript is read.
+	DefaultCacheBytes = 2 << 30
 	// imageDataLine is the line length from which image payloads are dropped;
 	// shorter lines cannot hold an image worth the extra decoding.
 	imageDataLine = 16 << 10
@@ -85,6 +87,22 @@ func (p *Provider) transcript(path, nativeID string) (*cachedTranscript, error) 
 	return c, nil
 }
 
+// SetCacheBytes bounds the kept lines of all cached transcripts; n <= 0
+// keeps DefaultCacheBytes.
+func (p *Provider) SetCacheBytes(n int64) {
+	p.transcriptMu.Lock()
+	defer p.transcriptMu.Unlock()
+	p.cacheBytes = n
+}
+
+// cacheLimit is the transcript budget. Caller holds transcriptMu.
+func (p *Provider) cacheLimit() int64 {
+	if p.cacheBytes > 0 {
+		return p.cacheBytes
+	}
+	return DefaultCacheBytes
+}
+
 // evictTranscripts drops the least recently used transcripts over the limits,
 // never the one just read. keep's size is passed because its lock is held.
 func (p *Provider) evictTranscripts(keep string, keptSize int64) {
@@ -103,7 +121,7 @@ func (p *Provider) evictTranscripts(keep string, keptSize int64) {
 				oldest, used = path, c.used
 			}
 		}
-		if oldest == "" || (len(p.transcripts) <= maxCachedTranscripts && total <= maxCachedTranscriptBytes) {
+		if oldest == "" || (len(p.transcripts) <= maxCachedTranscripts && total <= p.cacheLimit()) {
 			return
 		}
 		delete(p.transcripts, oldest)

@@ -35,6 +35,7 @@ type Provider struct {
 	summaries    map[summaryKey]cachedSummary
 	transcriptMu sync.Mutex
 	transcripts  map[string]*cachedTranscript
+	cacheBytes   int64
 	modeMu       sync.Mutex
 	modeOverride map[string]claudeModeOverride
 	configDir    string

@@ -140,6 +140,8 @@ func serve(args []string) error {
 
 	claudeProvider := claude.New(cfg.ClaudeConfigDir, hc, sink)
 	codexProvider := codex.New(cfg.CodexBinary, cfg.CodexDaemonSock, hc, sink)
+	claudeProvider.SetCacheBytes(int64(cfg.HistoryCacheMB) << 20)
+	codexProvider.SetCacheBytes(cfg.HistoryCacheMB << 20)
 	go codexProvider.Run(ctx)
 	openCodeProvider := opencode.New(cfg.OpenCode, hc, sink)
 	devinProvider := devin.New(cfg.Devin, hc, sink)

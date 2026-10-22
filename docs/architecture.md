@@ -94,6 +94,10 @@ identity; the native database schema selects the history format.
 - History: the transcript JSONL. `user` / `assistant` / `system` entries become
   messages; metadata entries (`attachment`, `mode`, `ai-title`, …) are skipped.
   Tool calls and results are rendered as short text; thinking is hidden.
+- Polled transcripts stay decoded and only appended lines are read. Up to 16
+  transcripts are kept within `historyCacheMB` (default 2048 MiB), image
+  payloads excluded. A long session keeps well over 100 MiB, and one dropped
+  from the cache is decoded again from the start on its next poll.
 - Cross-session peer messages are visible even in meta user entries and
   queued-command attachments. The body and sender become a `session_message`
   notice, separate from user prompts. Sender links are resolved on each read
@@ -142,8 +146,8 @@ identity; the native database schema selects the history format.
   `codex app-server` (stdio) or the shared daemon when connected.
 - Display reads reuse history and converted messages while the rollout file
   identity, size, mtime and daemon event/connection generation remain unchanged.
-  The cache holds at most 64 entries and approximately 64 MiB of history and
-  message projections, with a 30-second reconciliation deadline. Small metadata
+  The cache holds at most 64 entries and approximately `historyCacheMB`
+  (default 2048 MiB) of history and message projections, with a 30-second reconciliation deadline. Small metadata
   (`includeTurns:false`) has a 5-second deadline. Actions always read fresh data
   and invalidate display reads. Pending requests, mode and terminal dialogs are
   recomputed rather than cached with the history.

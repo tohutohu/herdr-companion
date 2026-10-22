@@ -14,8 +14,26 @@ const (
 	metadataLifetime  = 5 * time.Second
 	historyLifetime   = 30 * time.Second // reconcile missed notifications or buffered rollouts
 	maxDisplayEntries = 64
-	maxDisplayBytes   = 64 << 20
+	// DefaultCacheBytes bounds history and message projections unless
+	// SetCacheBytes changes it.
+	DefaultCacheBytes = 2 << 30
 )
+
+// SetCacheBytes bounds the cached history and message projections; n <= 0
+// keeps DefaultCacheBytes.
+func (p *Provider) SetCacheBytes(n int) {
+	p.displayMu.Lock()
+	defer p.displayMu.Unlock()
+	p.cacheBytes = n
+}
+
+// cacheLimit is the history budget. Caller holds displayMu.
+func (p *Provider) cacheLimit() int {
+	if p.cacheBytes > 0 {
+		return p.cacheBytes
+	}
+	return DefaultCacheBytes
+}
 
 type displayVersion struct {
 	client          *rpcClient
@@ -140,7 +158,7 @@ func (p *Provider) displayThread(ctx context.Context, id string) (*Thread, error
 		}
 		// Remove an old snapshot even when the replacement exceeds the budget.
 		delete(p.historyEntries, id)
-		if n <= maxDisplayBytes {
+		if n <= p.cacheLimit() {
 			p.historyEntries[id] = &historyEntry{thread: th, info: after, version: v, at: time.Now(), used: time.Now(), bytes: n}
 			p.evictHistory()
 		}
@@ -170,7 +188,7 @@ func (p *Provider) evictHistory() {
 				oldest = id
 			}
 		}
-		if len(p.historyEntries) <= maxDisplayEntries && total <= maxDisplayBytes {
+		if len(p.historyEntries) <= maxDisplayEntries && total <= p.cacheLimit() {
 			return
 		}
 		delete(p.historyEntries, oldest)

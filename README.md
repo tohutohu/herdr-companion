@@ -132,7 +132,7 @@ The generated ~/.config/herdr-mobile/config.json has mode 600:
 }
 ```
 
-Optional fields include fcmCredentialsFile, herdrSocket, claudeConfigDir, opencode, devin, codexBinary, codexDaemonSocket, uploadDir, workspaceRoots, usageCommand, and usageRefreshMinutes. The Gateway automatically reads Devin's `~/.local/share/devin/cli/sessions.db`; set `devin.database` or `devin.binary` only when using a custom location or executable.
+Optional fields include fcmCredentialsFile, herdrSocket, claudeConfigDir, opencode, devin, codexBinary, codexDaemonSocket, uploadDir, workspaceRoots, usageCommand, usageRefreshMinutes, and historyCacheMB (memory each agent may keep for decoded conversation histories, default 2048 MiB). The Gateway automatically reads Devin's `~/.local/share/devin/cli/sessions.db`; set `devin.database` or `devin.binary` only when using a custom location or executable.
 
 workspaceRoots (default: ~/workspace, or the home directory if it does not exist) limits the directories where the app can browse, create folders, and start sessions.
 

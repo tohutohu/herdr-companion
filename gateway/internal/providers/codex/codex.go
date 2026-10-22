@@ -56,6 +56,7 @@ type Provider struct {
 	displayMu       sync.Mutex
 	metadataEntries map[string]*metadataEntry
 	historyEntries  map[string]*historyEntry
+	cacheBytes      int
 	actionVersion   atomic.Uint64
 	summaryEntries  map[string]*summaryRolloutEntry
 }

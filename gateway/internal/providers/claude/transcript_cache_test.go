@@ -224,3 +224,46 @@ func Test再読込のためにForgetするとトランスクリプトと要約�
 	}
 	assertCachedMessages(t, p, path, nil)
 }
+
+// cachedAfterReadingAnother reads a transcript, then a second one, and
+// reports whether the first is still cached under the given budget.
+func cachedAfterReadingAnother(t *testing.T, budget func(size int64) int64) bool {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(testdata, "normal.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	first, second := filepath.Join(dir, "first.jsonl"), filepath.Join(dir, "second.jsonl")
+	for _, path := range []string{first, second} {
+		if err := os.WriteFile(path, raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p := New(dir, nil, deadletter.Nop{})
+	c, err := p.transcript(first, cacheSession)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept := c.kept
+	c.mu.Unlock()
+	p.SetCacheBytes(budget(kept))
+	if c, err = p.transcript(second, cacheSession); err != nil {
+		t.Fatal(err)
+	}
+	c.mu.Unlock()
+	_, ok := p.transcripts[first]
+	return ok
+}
+
+func Testキャッシュの上限に収まる間は別のトランスクリプトを読んでも追い出さない(t *testing.T) {
+	if !cachedAfterReadingAnother(t, func(size int64) int64 { return 2 * size }) {
+		t.Error("上限内なのに最初のトランスクリプトが追い出された")
+	}
+}
+
+func Testキャッシュの上限を超えると最も古いトランスクリプトを追い出す(t *testing.T) {
+	if cachedAfterReadingAnother(t, func(size int64) int64 { return 2*size - 1 }) {
+		t.Error("上限を超えても最初のトランスクリプトが残っている")
+	}
+}

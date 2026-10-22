@@ -132,7 +132,7 @@ go build -o ~/.local/bin/herdr-mobile-gateway ./cmd/herdr-mobile-gateway
 }
 ```
 
-任意項目: `fcmCredentialsFile`, `herdrSocket`, `claudeConfigDir`, `opencode`, `devin`, `codexBinary`, `codexDaemonSocket`, `uploadDir`, `workspaceRoots`, `usageCommand`, `usageRefreshMinutes`。Devin の DB は既定で `~/.local/share/devin/cli/sessions.db` を読み取ります。保存先や実行ファイルを変える場合だけ `devin.database` / `devin.binary` を指定します。
+任意項目: `fcmCredentialsFile`, `herdrSocket`, `claudeConfigDir`, `opencode`, `devin`, `codexBinary`, `codexDaemonSocket`, `uploadDir`, `workspaceRoots`, `usageCommand`, `usageRefreshMinutes`, `historyCacheMB`（エージェントごとに会話履歴のデコード結果を保持するメモリ上限。既定 2048 MiB）。Devin の DB は既定で `~/.local/share/devin/cli/sessions.db` を読み取ります。保存先や実行ファイルを変える場合だけ `devin.database` / `devin.binary` を指定します。
 
 `workspaceRoots`（既定: `~/workspace`、なければホーム）は、アプリからフォルダを選択・作成してセッションを起動できる範囲です。
 

@@ -52,6 +52,10 @@ type Config struct {
 	UsageCommand string `json:"usageCommand,omitempty"`
 	// How often the limits are re-read in the background (default 5).
 	UsageRefreshMinutes int `json:"usageRefreshMinutes,omitempty"`
+	// Memory each provider may keep for decoded conversation histories, in
+	// MiB (default 2048). Detail screens poll every few seconds, and a history
+	// dropped from the cache is decoded again from the start.
+	HistoryCacheMB int `json:"historyCacheMB,omitempty"`
 }
 
 // FirebaseAndroid is client configuration, never a service-account private key.
