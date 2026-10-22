@@ -78,10 +78,11 @@ type Message struct {
 type BlockType string
 
 const (
-	BlockText        BlockType = "text"
-	BlockImage       BlockType = "image"
-	BlockFile        BlockType = "file"
-	BlockInteraction BlockType = "interaction"
+	BlockText           BlockType = "text"
+	BlockImage          BlockType = "image"
+	BlockFile           BlockType = "file"
+	BlockInteraction    BlockType = "interaction"
+	BlockSessionMessage BlockType = "session_message"
 )
 
 // Block is a flat union; only fields relevant to Type are set.
@@ -95,6 +96,10 @@ type Block struct {
 	Line        int          `json:"line,omitempty"`
 	Size        int64        `json:"size,omitempty"` // file: bytes
 	Interaction *Interaction `json:"interaction,omitempty"`
+	SessionID   string       `json:"sessionId,omitempty"` // session_message: resolved sender
+	SenderName  string       `json:"senderName,omitempty"`
+	// SenderAddress is resolved from Claude's local registry before serving.
+	SenderAddress string `json:"-"`
 }
 
 func TextBlock(s string) Block { return Block{Type: BlockText, Text: s} }

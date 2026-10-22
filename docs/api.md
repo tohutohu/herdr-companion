@@ -346,6 +346,7 @@ DELETE: アーカイブを解除し Session を返す。
     { "type": "text", "text": "…" },
     { "type": "image", "url": "/v1/sessions/claude:…/messages/<mid>/images/0" },
     { "type": "file", "path": "src/main.go", "line": 42, "size": 1024 },
+    { "type": "session_message", "text": "確認しました。", "senderName": "reviewer-a", "sessionId": "claude:…" },
     { "type": "interaction", "interaction": Interaction }
   ]
 }
@@ -356,6 +357,7 @@ DELETE: アーカイブを解除し Session を返す。
 - `queued`: エージェントが受け取ったがまだ会話に取り込んでいないプロンプト（Claude Code の作業中キュー）。
 - Block は `type` ごとに該当フィールドだけが入る平坦な union。未知の `type` は `text` として描画すること。
 - 画像の `url` は Gateway 相対。ベース URL を前に付け、Bearer トークン付きで取得する。
+- `session_message` は別の Claude セッションから受け取った本文。`role` は `system` とし、ユーザーの発言と区別する。`senderName` は任意。送信時刻以前から存在する送信元の登録とローカル履歴を確認できた場合だけ `sessionId` を返し、そのセッション画面を開ける。登録がなくなった場合や PID 再利用で特定できない場合はリンクなしで本文を表示する。
 
 ### Interaction（質問・承認）
 

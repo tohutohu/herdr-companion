@@ -94,6 +94,11 @@ identity; the native database schema selects the history format.
 - History: the transcript JSONL. `user` / `assistant` / `system` entries become
   messages; metadata entries (`attachment`, `mode`, `ai-title`, …) are skipped.
   Tool calls and results are rendered as short text; thinking is hidden.
+- Cross-session peer messages are visible even in meta user entries and
+  queued-command attachments. The body and sender become a `session_message`
+  notice, separate from user prompts. Sender links are resolved on each read
+  from the public `sessions/<pid>.json` record, with socket, name and start-time
+  checks to avoid PID reuse. Missing peers remain readable without a link.
 - `AskUserQuestion`: an `interaction` block built from the tool input. It is
   `pending` only while the pane is `blocked` and the tool has no result.
 - Approvals: any other unanswered tool call while `blocked`.

@@ -33,6 +33,7 @@ type entry struct {
 	Content           json.RawMessage `json:"content"`   // system and queue-operation entries
 	Operation         string          `json:"operation"` // queue-operation entries
 	Attachment        *attachment     `json:"attachment"`
+	Origin            *peerOrigin     `json:"origin"`
 	Effort            string          `json:"effort"`         // assistant entries
 	PermissionMode    string          `json:"permissionMode"` // user prompts and permission-mode entries
 	AITitle           string          `json:"aiTitle"`
@@ -92,6 +93,8 @@ type attachment struct {
 	Type string `json:"type"`
 	// Prompt is a string, or content blocks when the prompt has images.
 	Prompt   json.RawMessage `json:"prompt"`
+	Origin   *peerOrigin     `json:"origin"`
+	IsMeta   bool            `json:"isMeta"`
 	Identity *struct {
 		ModelID string `json:"modelId"`
 	} `json:"identity"`
@@ -637,6 +640,9 @@ func compactSummary(e *entry) []model.Message {
 }
 
 func (t *Transcript) convertUser(e *entry, raw []byte, results map[string]toolResult, opt ParseOptions) []model.Message {
+	if m := crossSessionMessage(e); m != nil {
+		return []model.Message{*m}
+	}
 	if e.IsMeta {
 		return nil
 	}
@@ -750,6 +756,11 @@ func toolResultBlocks(b contentBlock, sessionID, messageID string, imageIndex in
 // records it as a queued_command attachment: it never becomes a user entry, so
 // without this the message is missing from the conversation.
 func absorbedPrompt(e *entry, opt ParseOptions) []model.Message {
+	if e.Attachment != nil && e.Attachment.Type == attachmentQueuedCommand {
+		if m := crossSessionMessage(e); m != nil {
+			return []model.Message{*m}
+		}
+	}
 	if e.Attachment == nil || e.Attachment.Type != attachmentQueuedCommand {
 		return nil // hooks, reminders and the other attachment kinds: metadata
 	}
@@ -901,6 +912,12 @@ func queuedPrompts(entries []*entry) []model.Message {
 	}
 	var out []model.Message
 	for _, e := range queue {
+		if m := crossSessionMessage(e); m != nil {
+			m.ID = "queued:" + e.Timestamp.UTC().Format(time.RFC3339Nano)
+			m.Queued = true
+			out = append(out, *m)
+			continue
+		}
 		role, text := userText(e.contentText())
 		if text == "" {
 			continue

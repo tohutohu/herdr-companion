@@ -1,0 +1,73 @@
+[
+  {
+    "id": "u1",
+    "role": "user",
+    "timestamp": "2026-10-22T09:00:00Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "認証を修正して"
+      }
+    ]
+  },
+  {
+    "id": "peer-user",
+    "role": "system",
+    "timestamp": "2026-10-22T09:00:01Z",
+    "blocks": [
+      {
+        "type": "session_message",
+        "text": "## 確認結果\n\n認証の修正を確認しました。\n- テストも通りました。",
+        "senderName": "reviewer-a"
+      }
+    ]
+  },
+  {
+    "id": "peer-attachment",
+    "role": "system",
+    "timestamp": "2026-10-22T09:00:02Z",
+    "blocks": [
+      {
+        "type": "session_message",
+        "text": "共有の変更を取り込みました。",
+        "senderName": "reviewer-a"
+      }
+    ]
+  },
+  {
+    "id": "peer-frame",
+    "role": "system",
+    "timestamp": "2026-10-22T09:00:03Z",
+    "blocks": [
+      {
+        "type": "session_message",
+        "text": "## 確認結果\n\n認証の修正を確認しました。\n- テストも通りました。",
+        "senderName": "reviewer-a"
+      }
+    ]
+  },
+  {
+    "id": "quoted",
+    "role": "user",
+    "timestamp": "2026-10-22T09:00:04Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "\u003ccross-session-message from=\"uds:/tmp/cc-socks/12345.sock\" from-name=\"reviewer-a\" from-mode=\"prompting\"\u003e\n## 確認結果\n\n認証の修正を確認しました。\n- テストも通りました。\n\u003c/cross-session-message\u003e"
+      }
+    ]
+  },
+  {
+    "id": "queued:2026-10-22T09:00:06Z",
+    "role": "system",
+    "timestamp": "2026-10-22T09:00:06Z",
+    "blocks": [
+      {
+        "type": "session_message",
+        "text": "待機中の共有です。",
+        "senderName": "reviewer-a"
+      }
+    ],
+    "queued": true
+  }
+]

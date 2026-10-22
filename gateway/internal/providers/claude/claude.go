@@ -210,6 +210,7 @@ func (p *Provider) Messages(ctx context.Context, nativeID string, live *provider
 	msgs := c.messages(ParseOptions{SessionID: gatewayID(nativeID), Root: root(c.t, live), Live: live, Sink: p.sink})
 	updated := c.info.ModTime()
 	c.mu.Unlock()
+	msgs = p.resolveSessionSenders(msgs)
 	return withScreenPlan(msgs, screenPlan, updated), nil
 }
 
