@@ -46,8 +46,8 @@ type cachedTranscript struct {
 	// mtimeUpdated means t.Updated is the file time, not an entry timestamp.
 	mtimeUpdated bool
 	t            *Transcript
-	// msgs holds converted messages for the decoded part of the file.
-	msgs map[messagesKey][]model.Message
+	// conversions convert the decoded part of the file as it grows.
+	conversions map[messagesKey]*conversion
 	// dialogs depends only on transcript content; the visible screen is read
 	// separately on every request while one of these calls is unanswered.
 	dialogs      []contentBlock
@@ -141,7 +141,7 @@ func (c *cachedTranscript) update(path, sessionID string, sink deadletter.Sink) 
 		return err
 	}
 	if c.t == nil || !os.SameFile(c.info, info) || info.Size() < c.offset {
-		c.t, c.offset, c.kept, c.mtimeUpdated, c.msgs = newTranscript(), 0, 0, false, nil
+		c.t, c.offset, c.kept, c.mtimeUpdated, c.conversions = newTranscript(), 0, 0, false, nil
 		c.dialogs, c.dialogsKnown = nil, false
 	}
 	c.info = info
@@ -157,7 +157,6 @@ func (c *cachedTranscript) update(path, sessionID string, sink deadletter.Sink) 
 		}
 		if used := c.decode(data[:n], sessionID, sink); used > 0 {
 			c.offset += int64(used)
-			c.msgs = nil
 			c.dialogs, c.dialogsKnown = nil, false
 		}
 	}
@@ -236,22 +235,22 @@ func blankImageData(v any) bool {
 	return changed
 }
 
-// messages converts the transcript, reusing the last conversion while the
-// file is unchanged. The result is shared; callers must not modify it.
+// messages converts the transcript, converting only what changed since the
+// last call. The messages are shared; callers must not modify them.
 func (c *cachedTranscript) messages(opt ParseOptions) []model.Message {
 	if opt.Live.Blocked() {
 		return c.t.Messages(opt)
 	}
 	key := messagesKey{root: opt.Root, live: opt.Live != nil}
-	if msgs, ok := c.msgs[key]; ok {
-		return slices.Clone(msgs)
+	conv := c.conversions[key]
+	if conv == nil {
+		conv = new(conversion)
+		if c.conversions == nil {
+			c.conversions = make(map[messagesKey]*conversion)
+		}
+		c.conversions[key] = conv
 	}
-	msgs := c.t.Messages(opt)
-	if c.msgs == nil {
-		c.msgs = make(map[messagesKey][]model.Message)
-	}
-	c.msgs[key] = msgs
-	return slices.Clone(msgs)
+	return slices.Clone(conv.update(c.t, opt))
 }
 
 // Forget drops the session's decoded transcript and cached summaries.

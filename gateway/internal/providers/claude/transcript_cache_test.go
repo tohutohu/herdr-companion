@@ -60,17 +60,161 @@ func assertCachedMessages(t *testing.T, p *Provider, path string, live *provider
 	}
 }
 
-func Testキャッシュしたメッセージは追記のたびに従来の解析結果と一致する(t *testing.T) {
-	for _, fixture := range []string{"normal.jsonl", "pending_approval.jsonl", "queued_message.jsonl", "compaction.jsonl", "ask_user_question.jsonl"} {
-		raw, err := os.ReadFile(filepath.Join(testdata, fixture))
+// fixtureLines returns every transcript fixture's lines, with "/work/app"
+// pointing at the test workspace so file references resolve.
+func fixtureLines(t *testing.T) (map[string][][]byte, string) {
+	t.Helper()
+	ws, err := filepath.Abs(filepath.Join(testdata, "workspace"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths, err := filepath.Glob(filepath.Join(testdata, "*.jsonl"))
+	if err != nil || len(paths) == 0 {
+		t.Fatal("no fixtures", err)
+	}
+	out := map[string][][]byte{}
+	for _, path := range paths {
+		raw, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
 		}
+		raw = bytes.ReplaceAll(raw, []byte("/work/app"), []byte(ws))
+		out[filepath.Base(path)] = bytes.SplitAfter(raw, []byte("\n"))
+	}
+	return out, ws
+}
+
+func decodeFixture(lines [][]byte, sink deadletter.Sink) *Transcript {
+	tr := newTranscript()
+	for _, l := range lines {
+		tr.decodeLine(l, gatewayID(cacheSession), sink)
+	}
+	return tr
+}
+
+func Test差分変換は何行ずつ追記しても毎回すべて変換し直した結果と一致する(t *testing.T) {
+	fixtures, ws := fixtureLines(t)
+	working := &providers.Live{HerdrStatus: herdr.StatusWorking, Cwd: ws}
+	// The cache never converts a blocked session incrementally, but blocked
+	// is where a call's pending state shows, so it checks that dependency.
+	blocked := &providers.Live{HerdrStatus: herdr.StatusBlocked, Cwd: ws}
+	for name, lines := range fixtures {
+		for _, root := range []string{"", ws} {
+			for _, live := range []*providers.Live{nil, working, blocked} {
+				for _, step := range []int{1, 2, 3, 5, 7} {
+					opt := ParseOptions{SessionID: gatewayID(cacheSession), Root: root, Live: live}
+					tr, conv := newTranscript(), new(conversion)
+					for n := 0; n < len(lines); {
+						next := min(n+step, len(lines))
+						for _, l := range lines[n:next] {
+							tr.decodeLine(l, gatewayID(cacheSession), deadletter.Nop{})
+						}
+						n = next
+						got := conv.update(tr, opt)
+						if want := decodeFixture(lines[:n], deadletter.Nop{}).Messages(opt); !reflect.DeepEqual(got, want) {
+							t.Fatalf("%s root=%q live=%v step=%d n=%d\ngot=%+v\nwant=%+v", name, root, live != nil, step, n, got, want)
+						}
+						// Nothing appended: the same messages again.
+						if again := conv.update(tr, opt); !reflect.DeepEqual(again, got) {
+							t.Fatalf("%s n=%d: 追記なしの再変換が変わった", name, n)
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+func Test結果が先に書かれた呼び出しはツール名がわかった時点で変換し直す(t *testing.T) {
+	result := `{"type":"user","uuid":"u1","timestamp":"2026-10-01T00:00:01Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call1","content":"\"Color\"=\"Red\""}]}}`
+	call := `{"type":"assistant","uuid":"a1","timestamp":"2026-10-01T00:00:02Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"call1","name":"AskUserQuestion","input":{"questions":[{"question":"Which color?","header":"Color","options":[{"label":"Red"}]}]}}]}}`
+	opt := ParseOptions{SessionID: gatewayID(cacheSession)}
+	tr, conv := newTranscript(), new(conversion)
+	tr.decodeLine([]byte(result), opt.SessionID, deadletter.Nop{})
+	if got := conv.update(tr, opt); len(got) != 1 || got[0].Role != model.RoleTool {
+		t.Fatalf("名前がわかる前は通常の結果として出る: %+v", got)
+	}
+	tr.decodeLine([]byte(call), opt.SessionID, deadletter.Nop{})
+	got := conv.update(tr, opt)
+	if want := tr.Messages(opt); !reflect.DeepEqual(got, want) {
+		t.Fatalf("got=%+v\nwant=%+v", got, want)
+	}
+	if len(got) != 1 || got[0].ID != "a1" {
+		t.Fatalf("質問への回答は質問カードに含まれ、結果としては出ない: %+v", got)
+	}
+}
+
+// assertIncremental appends lines one at a time and compares each update
+// with converting everything again.
+func assertIncremental(t *testing.T, opt ParseOptions, lines ...string) {
+	t.Helper()
+	tr, conv := newTranscript(), new(conversion)
+	for n, l := range lines {
+		tr.decodeLine([]byte(l), opt.SessionID, deadletter.Nop{})
+		got := conv.update(tr, opt)
+		want := decodeFixture(func() (out [][]byte) {
+			for _, l := range lines[:n+1] {
+				out = append(out, []byte(l))
+			}
+			return out
+		}(), deadletter.Nop{}).Messages(opt)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("n=%d\ngot=%+v\nwant=%+v", n+1, got, want)
+		}
+	}
+}
+
+func Test新しい指示で放棄された呼び出しは結果がなくても承認待ちでなくなる(t *testing.T) {
+	blocked := &providers.Live{HerdrStatus: herdr.StatusBlocked}
+	assertIncremental(t, ParseOptions{SessionID: gatewayID(cacheSession), Live: blocked},
+		`{"type":"user","uuid":"u1","timestamp":"2026-10-01T00:00:01Z","message":{"role":"user","content":"消して"}}`,
+		`{"type":"assistant","uuid":"a1","timestamp":"2026-10-01T00:00:02Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"call1","name":"Bash","input":{"command":"rm -rf build"}}]}}`,
+		`{"type":"user","uuid":"u2","timestamp":"2026-10-01T00:00:03Z","message":{"role":"user","content":"やっぱりやめて"}}`,
+	)
+}
+
+func Test放棄されたあとに届いた結果で質問は回答済みになる(t *testing.T) {
+	assertIncremental(t, ParseOptions{SessionID: gatewayID(cacheSession)},
+		`{"type":"assistant","uuid":"a1","timestamp":"2026-10-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"call1","name":"AskUserQuestion","input":{"questions":[{"question":"Which color?","header":"Color","options":[{"label":"Red"}]}]}}]}}`,
+		`{"type":"user","uuid":"u1","timestamp":"2026-10-01T00:00:02Z","message":{"role":"user","content":"別の話"}}`,
+		`{"type":"user","uuid":"u2","timestamp":"2026-10-01T00:00:03Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call1","content":"\"Which color?\"=\"Red\""}]}}`,
+	)
+}
+
+func Test差分変換でもdead_letterを落とさない(t *testing.T) {
+	fixtures, ws := fixtureLines(t)
+	key := func(e deadletter.Entry) string { return string(e.Kind) + "\x00" + e.Error + "\x00" + string(e.Raw) }
+	for name, lines := range fixtures {
+		opt := ParseOptions{SessionID: gatewayID(cacheSession), Root: ws}
+		full := &deadletter.Recorder{}
+		decodeFixture(lines, deadletter.Nop{}).Messages(ParseOptions{SessionID: opt.SessionID, Root: ws, Sink: full})
+		inc := &deadletter.Recorder{}
+		opt.Sink = inc
+		tr, conv := newTranscript(), new(conversion)
+		for _, l := range lines {
+			tr.decodeLine(l, gatewayID(cacheSession), deadletter.Nop{})
+			conv.update(tr, opt)
+		}
+		recorded := map[string]bool{}
+		for _, e := range inc.Entries {
+			recorded[key(e)] = true
+		}
+		for _, e := range full.Entries {
+			if !recorded[key(e)] {
+				t.Errorf("%s: 差分変換で記録されなかった: %s %s", name, e.Kind, e.Error)
+			}
+		}
+	}
+}
+
+func Testキャッシュしたメッセージは追記のたびに従来の解析結果と一致する(t *testing.T) {
+	fixtures, ws := fixtureLines(t)
+	for _, raw := range fixtures {
 		p, path, write := cacheProvider(t)
-		lines := bytes.SplitAfter(raw, []byte("\n"))
+		lines := raw
 		for n := 1; n <= len(lines); n++ {
 			write(bytes.Join(lines[:n], nil))
-			for _, live := range []*providers.Live{nil, {HerdrStatus: herdr.StatusWorking, Cwd: "/work"}} {
+			for _, live := range []*providers.Live{nil, {HerdrStatus: herdr.StatusWorking, Cwd: "/work"}, {HerdrStatus: herdr.StatusWorking, Cwd: ws}} {
 				assertCachedMessages(t, p, path, live)
 			}
 		}
@@ -176,13 +320,16 @@ func Test画像データはキャッシュに残さず画像は元のファイ�
 }
 
 func Test実行中セッションの要約は追記分だけ読み直しても従来と一致する(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join(testdata, "queued_message.jsonl"))
-	if err != nil {
-		t.Fatal(err)
+	fixtures, _ := fixtureLines(t)
+	for _, lines := range fixtures {
+		summariesMatch(t, lines)
 	}
+}
+
+func summariesMatch(t *testing.T, lines [][]byte) {
+	t.Helper()
 	p, path, write := cacheProvider(t)
 	live := &providers.Live{HerdrStatus: herdr.StatusWorking}
-	lines := bytes.SplitAfter(raw, []byte("\n"))
 	for n := 1; n <= len(lines); n++ {
 		write(bytes.Join(lines[:n], nil))
 		got, err := p.summaryPath(context.Background(), path, cacheSession, live)

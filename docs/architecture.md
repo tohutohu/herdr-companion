@@ -98,6 +98,14 @@ identity; the native database schema selects the history format.
   transcripts are kept within `historyCacheMB` (default 2048 MiB), image
   payloads excluded. A long session keeps well over 100 MiB, and one dropped
   from the cache is decoded again from the start on its next poll.
+- Conversion is incremental too, for the detail screen and the list summary
+  alike. An entry's messages depend on its own line plus what it looks up
+  about tool calls: the result, whether the call is pending, the tool name.
+  Each lookup is recorded, and when a later line changes one, only the
+  entries that asked are converted again. File links and sizes are those of
+  the entry's conversion, as for file references; a reload refreshes them.
+  Blocked sessions are converted in full on every read: their cards are
+  completed from the screen.
 - Cross-session peer messages are visible even in meta user entries and
   queued-command attachments. The body and sender become a `session_message`
   notice, separate from user prompts. Sender links are resolved on each read

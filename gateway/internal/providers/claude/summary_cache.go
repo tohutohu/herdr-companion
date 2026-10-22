@@ -65,12 +65,12 @@ func (p *Provider) summaryPath(ctx context.Context, path, id string, live *provi
 	var summary providers.Summary
 	if live != nil {
 		// A running transcript changes between most requests and is the one
-		// being read, so decode only what was appended.
+		// being read, so decode and convert only what was appended.
 		c, err := p.transcript(path, id)
 		if err != nil {
 			return providers.Summary{}, err
 		}
-		summary = c.t.summary(opt)
+		summary = c.t.summaryOf(c.messages(ParseOptions{SessionID: opt.SessionID, Live: live, Sink: p.sink}))
 		c.mu.Unlock()
 	} else {
 		tr, err := p.loadPath(path, id)

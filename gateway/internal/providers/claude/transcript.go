@@ -220,11 +220,19 @@ type toolResult struct {
 	entry *entry
 }
 
+// resultRef locates the tool_result answering a tool call: the at-th content
+// block of entry. A later result for the same id replaces an earlier one.
+type resultRef struct {
+	entry *entry
+	at    int
+}
+
 // Transcript holds decoded entries plus derived metadata.
 type Transcript struct {
 	entries   []*entry
 	raws      [][]byte
 	toolNames map[string]string // tool_use id -> tool name
+	results   map[string]resultRef
 	Cwd       string
 	// cwds are the distinct working directories entries were written in.
 	cwds []string
@@ -270,7 +278,7 @@ func Decode(r io.Reader, sessionID string, sink deadletter.Sink) (*Transcript, e
 }
 
 func newTranscript() *Transcript {
-	return &Transcript{toolNames: map[string]string{},
+	return &Transcript{toolNames: map[string]string{}, results: map[string]resultRef{},
 		tokens: map[string]pricing.Tokens{}, counted: map[string]bool{}}
 }
 
@@ -321,6 +329,13 @@ func (t *Transcript) add(e *entry, raw []byte) {
 		if json.Unmarshal(e.Message.Content, &s) == nil {
 			if m := modelChangeRe.FindStringSubmatch(s); m != nil {
 				t.Model = m[1]
+			}
+		}
+		if blocks, ok := decodeBlocks(e.Message.Content); ok {
+			for i, b := range blocks {
+				if b.Type == "tool_result" {
+					t.results[b.ToolUseID] = resultRef{entry: e, at: i}
+				}
 			}
 		}
 	}
@@ -392,42 +407,65 @@ func (t *Transcript) cost() *model.Cost {
 
 // Messages converts the transcript into provider-neutral messages.
 func (t *Transcript) Messages(opt ParseOptions) []model.Message {
+	return new(conversion).update(t, opt)
+}
+
+// conversion converts a transcript that only grows, for one Root and one
+// Live state (none, running or blocked), keeping each entry's messages.
+// Besides its own line, an entry's messages depend only on what it looks up
+// about tool calls (see toolLookup) and on the file system. A later line can change such a lookup: a result
+// arrives, a call stops being pending, a name becomes known. The entries that
+// looked up a changed id are converted again; the others are kept, so like
+// file references (see fileRefs) their links and sizes are those of the
+// conversion.
+type conversion struct {
+	// done is how many entries are converted; msgs holds their messages.
+	done int
+	msgs [][]model.Message
+	// roots memoizes refRoot.
+	roots map[string]string
+	// seen is what each looked-up id was when last looked up, and askedBy
+	// the entries that looked it up.
+	seen    map[string]toolState
+	askedBy map[string][]int
+	// out is the last result while no entry has been added since.
+	out   []model.Message
+	fresh bool
+}
+
+// update converts what was added to t since the last update, and the entries
+// whose lookups changed, and returns all messages. t must only have grown.
+func (c *conversion) update(t *Transcript, opt ParseOptions) []model.Message {
+	if c.fresh && c.done == len(t.entries) {
+		return c.out
+	}
 	if opt.Sink == nil {
 		opt.Sink = deadletter.Nop{}
 	}
-	results := map[string]toolResult{}
-	for _, e := range t.entries {
-		if e.Type != "user" || e.Message == nil {
-			continue
-		}
-		blocks, ok := decodeBlocks(e.Message.Content)
-		if !ok {
-			continue
-		}
-		for _, b := range blocks {
-			if b.Type == "tool_result" {
-				results[b.ToolUseID] = toolResult{block: b, entry: e}
-			}
-		}
+	if c.roots == nil {
+		c.roots, c.seen, c.askedBy = map[string]string{}, map[string]toolState{}, map[string][]int{}
 	}
 	// Tool calls still waiting for a result: the newest ones are the ones the
 	// terminal is currently asking about.
-	pending := pendingToolUses(t.entries, results)
+	l := &toolLookup{t: t, pending: pendingToolUses(t.entries, t.results), c: c}
+	var redo []int
+	for id, was := range c.seen {
+		if l.state(id) != was {
+			redo = append(redo, c.askedBy[id]...)
+		}
+	}
+	slices.Sort(redo)
+	for _, i := range slices.Compact(redo) {
+		c.convert(t, i, l, opt)
+	}
+	for i := c.done; i < len(t.entries); i++ {
+		c.msgs = append(c.msgs, nil)
+		c.convert(t, i, l, opt)
+	}
+	c.done = len(t.entries)
 
 	var out []model.Message
-	roots := map[string]string{}
-	for i, e := range t.entries {
-		if e.IsSidechain {
-			continue
-		}
-		opt.refRoot = refRoot(e.Cwd, opt.Root, roots)
-		msgs := t.convert(e, t.raws[i], results, pending, opt)
-		// A line without a uuid still needs an ID the app can key and page by.
-		for j := range msgs {
-			if msgs[j].ID == "" {
-				msgs[j].ID = fmt.Sprintf("line-%d-%d", i, j)
-			}
-		}
+	for _, msgs := range c.msgs {
 		out = append(out, msgs...)
 	}
 	// Only a running session can still pick up what is queued; in an ended
@@ -435,10 +473,71 @@ func (t *Transcript) Messages(opt ParseOptions) []model.Message {
 	if opt.Live != nil {
 		out = append(out, queuedPrompts(t.entries)...)
 	}
+	c.out, c.fresh = out, true
 	return out
 }
 
-func (t *Transcript) convert(e *entry, raw []byte, results map[string]toolResult, pending map[string]bool, opt ParseOptions) []model.Message {
+func (c *conversion) convert(t *Transcript, i int, l *toolLookup, opt ParseOptions) {
+	e := t.entries[i]
+	if e.IsSidechain {
+		return
+	}
+	opt.refRoot = refRoot(e.Cwd, opt.Root, c.roots)
+	l.entry = i
+	msgs := t.convert(e, t.raws[i], l, opt)
+	// A line without a uuid still needs an ID the app can key and page by.
+	for j := range msgs {
+		if msgs[j].ID == "" {
+			msgs[j].ID = fmt.Sprintf("line-%d-%d", i, j)
+		}
+	}
+	c.msgs[i] = msgs
+}
+
+// toolState is everything a conversion can learn about one tool call.
+type toolState struct {
+	result  resultRef
+	pending bool
+	name    string
+}
+
+// toolLookup answers what converting an entry asks about tool calls, and
+// records the asking entry so a change converts it again.
+type toolLookup struct {
+	t       *Transcript
+	pending map[string]bool
+	c       *conversion
+	entry   int
+}
+
+func (l *toolLookup) state(id string) toolState {
+	return toolState{result: l.t.results[id], pending: l.pending[id], name: l.t.toolNames[id]}
+}
+
+func (l *toolLookup) ask(id string) toolState {
+	s := l.state(id)
+	l.c.seen[id] = s
+	if by := l.c.askedBy[id]; !slices.Contains(by, l.entry) {
+		l.c.askedBy[id] = append(by, l.entry)
+	}
+	return s
+}
+
+// result returns the tool_result answering the call id.
+func (l *toolLookup) result(id string) (toolResult, bool) {
+	ref := l.ask(id).result
+	if ref.entry == nil {
+		return toolResult{}, false
+	}
+	blocks, _ := decodeBlocks(ref.entry.Message.Content)
+	return toolResult{block: blocks[ref.at], entry: ref.entry}, true
+}
+
+func (l *toolLookup) isPending(id string) bool { return l.ask(id).pending }
+
+func (l *toolLookup) name(id string) string { return l.ask(id).name }
+
+func (t *Transcript) convert(e *entry, raw []byte, l *toolLookup, opt ParseOptions) []model.Message {
 	switch {
 	case e.Type == "user" || e.Type == "assistant":
 		if e.Message == nil {
@@ -446,9 +545,9 @@ func (t *Transcript) convert(e *entry, raw []byte, results map[string]toolResult
 			return []model.Message{fallback(e, "Unsupported event: "+e.Type+" without message")}
 		}
 		if e.Type == "user" {
-			return t.convertUser(e, raw, results, opt)
+			return t.convertUser(e, raw, l, opt)
 		}
-		return t.convertAssistant(e, raw, results, pending, opt)
+		return t.convertAssistant(e, raw, l, opt)
 	case e.Type == "system":
 		return convertSystem(e, raw, opt)
 	case e.Type == "attachment":
@@ -639,7 +738,7 @@ func compactSummary(e *entry) []model.Message {
 		Blocks: []model.Block{model.TextBlock("Compaction summary\n" + text)}}}
 }
 
-func (t *Transcript) convertUser(e *entry, raw []byte, results map[string]toolResult, opt ParseOptions) []model.Message {
+func (t *Transcript) convertUser(e *entry, raw []byte, l *toolLookup, opt ParseOptions) []model.Message {
 	if m := crossSessionMessage(e); m != nil {
 		return []model.Message{*m}
 	}
@@ -686,7 +785,7 @@ func (t *Transcript) convertUser(e *entry, raw []byte, results map[string]toolRe
 			userBlocks = append(userBlocks, model.Block{Type: model.BlockImage, URL: providers.ImageURL(opt.SessionID, e.UUID, imageIndex)})
 			imageIndex++
 		case "tool_result":
-			if isAskUserQuestionResult(b, t, e) {
+			if l.name(b.ToolUseID) == toolAskUserQuestion {
 				continue // shown on the interaction itself
 			}
 			tb, n := toolResultBlocks(b, opt.SessionID, e.UUID, imageIndex)
@@ -710,11 +809,6 @@ func (t *Transcript) convertUser(e *entry, raw []byte, results map[string]toolRe
 		out = append(out, model.Message{ID: id, Role: model.RoleTool, Timestamp: e.Timestamp, Blocks: toolBlocks})
 	}
 	return out
-}
-
-// isAskUserQuestionResult checks whether a tool_result answers an AskUserQuestion call.
-func isAskUserQuestionResult(b contentBlock, t *Transcript, _ *entry) bool {
-	return t.toolName(b.ToolUseID) == toolAskUserQuestion
 }
 
 func (t *Transcript) toolName(toolUseID string) string { return t.toolNames[toolUseID] }
@@ -843,6 +937,17 @@ func queuedPrompts(entries []*entry) []model.Message {
 	var dequeues []*dequeue
 	var queue []*entry
 	enqueuedAt := map[*entry]int{}
+	// Every delivered prompt is matched against the whole queue, and a prompt
+	// that was never dequeued stays in it, so decode each queued text once.
+	texts := map[*entry]string{}
+	queuedText := func(e *entry) string {
+		s, ok := texts[e]
+		if !ok {
+			s = e.contentText()
+			texts[e] = s
+		}
+		return s
+	}
 	remove := func(i int) {
 		if i == 0 {
 			queue = queue[1:]
@@ -879,18 +984,18 @@ func queuedPrompts(entries []*entry) []model.Message {
 			case "dequeue":
 				if e.contentText() == "" {
 					dequeues = append(dequeues, &dequeue{before: at})
-				} else if i := queueIndex(queue, e.contentText()); i >= 0 {
+				} else if i := queueIndex(queue, e.contentText(), queuedText); i >= 0 {
 					remove(i)
 				}
 			case "remove":
-				if i := queueIndex(queue, e.contentText()); i >= 0 {
+				if i := queueIndex(queue, e.contentText(), queuedText); i >= 0 {
 					remove(i)
 				}
 			}
 		case "user":
 			if e.Message != nil {
 				if text := queuedContentText(e.Message.Content); text != "" {
-					consume(queueIndex(queue, text), true)
+					consume(queueIndex(queue, text, queuedText), true)
 				}
 			}
 		case "attachment":
@@ -936,7 +1041,7 @@ func queuedPrompts(entries []*entry) []model.Message {
 // queueIndex locates the entry a dequeue or remove refers to. The queue is
 // matched by content when possible. An unresolved contentless operation takes
 // the head for compatibility with older transcripts.
-func queueIndex(queue []*entry, content string) int {
+func queueIndex(queue []*entry, content string, text func(*entry) string) int {
 	if len(queue) == 0 {
 		return -1
 	}
@@ -944,7 +1049,7 @@ func queueIndex(queue []*entry, content string) int {
 		return 0
 	}
 	for i, e := range queue {
-		if e.contentText() == content {
+		if text(e) == content {
 			return i
 		}
 	}
@@ -1006,7 +1111,7 @@ func convertSystem(e *entry, raw []byte, opt ParseOptions) []model.Message {
 	return []model.Message{{ID: e.UUID, Role: model.RoleSystem, Timestamp: e.Timestamp, Blocks: []model.Block{model.TextBlock(model.Truncate(text, maxToolOutput))}}}
 }
 
-func (t *Transcript) convertAssistant(e *entry, raw []byte, results map[string]toolResult, pending map[string]bool, opt ParseOptions) []model.Message {
+func (t *Transcript) convertAssistant(e *entry, raw []byte, l *toolLookup, opt ParseOptions) []model.Message {
 	blocks, ok := decodeBlocks(e.Message.Content)
 	if !ok {
 		var s string
@@ -1031,8 +1136,8 @@ func (t *Transcript) convertAssistant(e *entry, raw []byte, results map[string]t
 		case "thinking", "redacted_thinking":
 			// Not user-facing.
 		case "tool_use":
-			res, answered := results[b.ID]
-			out = append(out, t.toolUseBlocks(b, res, answered, pending[b.ID], raw, opt)...)
+			res, answered := l.result(b.ID)
+			out = append(out, t.toolUseBlocks(b, res, answered, l.isPending(b.ID), raw, opt)...)
 		case "server_tool_use", "web_search_tool_result", "web_fetch_tool_result":
 			out = append(out, model.TextBlock("▸ "+b.Type+" "+b.Name))
 		default:
@@ -1052,7 +1157,7 @@ func (t *Transcript) textWithRefs(text string, opt ParseOptions) []model.Block {
 
 // pendingToolUses returns tool_use ids without results in the last assistant
 // turn (after the last real user prompt).
-func pendingToolUses(entries []*entry, results map[string]toolResult) map[string]bool {
+func pendingToolUses(entries []*entry, results map[string]resultRef) map[string]bool {
 	out := map[string]bool{}
 	for i := len(entries) - 1; i >= 0; i-- {
 		e := entries[i]
@@ -1339,11 +1444,16 @@ func (t *Transcript) startCwd() string {
 
 // summary extracts list information.
 func (t *Transcript) summary(opt ParseOptions) providers.Summary {
+	return t.summaryOf(t.Messages(ParseOptions{SessionID: opt.SessionID, Live: opt.Live, Sink: deadletter.Nop{}}))
+}
+
+// summaryOf extracts list information given the transcript's messages
+// without file references (an empty Root).
+func (t *Transcript) summaryOf(msgs []model.Message) providers.Summary {
 	s := providers.Summary{Cwd: t.startCwd(), Title: t.Title, UpdatedAt: t.Updated,
 		Model: t.Model, Effort: t.Effort, Mode: modeLabel(t.PermissionMode),
 		Context: model.NewContextUsage(t.ContextTokens, contextWindow(t.ModelID, t.Model)),
 		Cost:    t.cost()}
-	msgs := t.Messages(ParseOptions{SessionID: opt.SessionID, Live: opt.Live, Sink: deadletter.Nop{}})
 	s.LastMessage = t.lastReport(msgs)
 	for i := len(msgs) - 1; i >= 0; i-- {
 		m := msgs[i]
