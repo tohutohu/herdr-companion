@@ -26,6 +26,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -62,6 +63,7 @@ fun TranscriptRowItem(
     onOpenTerminal: () -> Unit,
     interactionsEnabled: Boolean,
     onRespond: (InteractionResponseDto) -> Unit,
+    onOpenSession: (String) -> Unit = {},
 ) {
     Column(modifier.fillMaxWidth()) {
         when (row) {
@@ -74,6 +76,7 @@ fun TranscriptRowItem(
                 onOpenTerminal = onOpenTerminal,
                 interactionsEnabled = interactionsEnabled,
                 onRespond = onRespond,
+                onOpenSession = onOpenSession,
             )
             is ActivityRow -> ActivityGroupItem(
                 row = row,
@@ -84,6 +87,7 @@ fun TranscriptRowItem(
                 onOpenTerminal = onOpenTerminal,
                 interactionsEnabled = interactionsEnabled,
                 onRespond = onRespond,
+                onOpenSession = onOpenSession,
             )
             is WorkRow -> WorkGroupItem(row) { child ->
                 TranscriptRowItem(
@@ -96,6 +100,7 @@ fun TranscriptRowItem(
                     onOpenTerminal = onOpenTerminal,
                     interactionsEnabled = interactionsEnabled,
                     onRespond = onRespond,
+                    onOpenSession = onOpenSession,
                 )
             }
         }
@@ -114,9 +119,10 @@ fun MessageItem(
     onOpenTerminal: () -> Unit,
     interactionsEnabled: Boolean,
     onRespond: (InteractionResponseDto) -> Unit,
+    onOpenSession: (String) -> Unit = {},
 ) {
     val content: @Composable () -> Unit = {
-        MessageBlocks(message, resolveUrl, formatFileSize, onOpenFile, onOpenImage, onOpenTerminal, interactionsEnabled, onRespond)
+        MessageBlocks(message, resolveUrl, formatFileSize, onOpenFile, onOpenImage, onOpenTerminal, interactionsEnabled, onRespond, onOpenSession)
     }
     if (message.role == "user") {
         UserBubble(pending = false, delivery = if (message.queued) Delivery.Queued else null, modifier = modifier, content = content)
@@ -140,11 +146,12 @@ fun MessageBlocks(
     onOpenTerminal: () -> Unit,
     interactionsEnabled: Boolean,
     onRespond: (InteractionResponseDto) -> Unit,
+    onOpenSession: (String) -> Unit = {},
 ) {
     SelectionContainer {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             message.blocks.forEach { block ->
-                BlockView(message.role, block, resolveUrl, formatFileSize, onOpenFile, onOpenImage, onOpenTerminal, interactionsEnabled, onRespond)
+                BlockView(message.role, block, resolveUrl, formatFileSize, onOpenFile, onOpenImage, onOpenTerminal, interactionsEnabled, onRespond, onOpenSession)
             }
         }
     }
@@ -252,6 +259,7 @@ fun ActivityGroupItem(
     onOpenTerminal: () -> Unit,
     interactionsEnabled: Boolean,
     onRespond: (InteractionResponseDto) -> Unit,
+    onOpenSession: (String) -> Unit = {},
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     val onResize = LocalRowResize.current
@@ -272,7 +280,7 @@ fun ActivityGroupItem(
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(vertical = 4.dp)) {
                     row.parts.forEach { part ->
                         part.blocks.forEach { block ->
-                            BlockView(part.role, block, resolveUrl, formatFileSize, onOpenFile, onOpenImage, onOpenTerminal, interactionsEnabled, onRespond)
+                            BlockView(part.role, block, resolveUrl, formatFileSize, onOpenFile, onOpenImage, onOpenTerminal, interactionsEnabled, onRespond, onOpenSession)
                         }
                     }
                 }
@@ -351,6 +359,7 @@ private fun BlockView(
     onOpenTerminal: () -> Unit,
     interactionsEnabled: Boolean,
     onRespond: (InteractionResponseDto) -> Unit,
+    onOpenSession: (String) -> Unit = {},
 ) {
     when (block.type) {
         "text" -> when (role) {
@@ -372,6 +381,23 @@ private fun BlockView(
                     CollapsibleTool(text, output = false)
                 } else {
                     MarkdownText(text)
+                }
+            }
+        }
+        "session_message" -> Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    block.senderName?.takeIf { it.isNotBlank() }?.let { "Message from $it" } ?: "Message from another session",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                MarkdownText(block.text.orEmpty())
+                block.sessionId?.takeIf { it.isNotBlank() }?.let { id ->
+                    TextButton(onClick = { onOpenSession(id) }) { Text("Open session") }
                 }
             }
         }

@@ -451,6 +451,7 @@ fun SessionDetailScreen(
                             val onOpenFile = { path: String, line: Int -> onAction(SessionDetailAction.OpenFile(path, line)) }
                             val onOpenImage = { url: String -> onAction(SessionDetailAction.OpenImage(url)) }
                             val onOpenTerminal = { onAction(SessionDetailAction.OpenTerminal) }
+                            val onOpenSession = { id: String -> onAction(SessionDetailAction.OpenSession(id)) }
                             val onRespond = { it: InteractionResponseDto -> onAction(SessionDetailAction.Respond(it)) }
                             if (sent != null || userMessage != null) {
                                 // One call for a message on its way and the message it
@@ -471,6 +472,7 @@ fun SessionDetailScreen(
                                         MessageBlocks(
                                             userMessage, resolveUrl, formatFileSize, onOpenFile, onOpenImage, onOpenTerminal,
                                             interactionsEnabled = !answering, onRespond = onRespond,
+                                            onOpenSession = onOpenSession,
                                         )
                                     }
                                 }
@@ -488,6 +490,7 @@ fun SessionDetailScreen(
                                     onOpenTerminal = onOpenTerminal,
                                     interactionsEnabled = !answering,
                                     onRespond = onRespond,
+                                    onOpenSession = onOpenSession,
                                 )
                             }
                         }

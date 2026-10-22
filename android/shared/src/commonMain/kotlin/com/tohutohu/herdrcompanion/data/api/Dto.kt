@@ -101,6 +101,8 @@ data class BlockDto(
     val line: Int? = null,
     val size: Long? = null,
     val interaction: InteractionDto? = null,
+    val sessionId: String? = null,
+    val senderName: String? = null,
 )
 
 @Serializable

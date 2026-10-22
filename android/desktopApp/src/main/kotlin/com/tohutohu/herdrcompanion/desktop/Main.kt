@@ -1254,6 +1254,7 @@ private fun handleDetailAction(
 ) {
     when (action) {
         SessionDetailAction.Back -> state.closeSession(sessionId)
+        is SessionDetailAction.OpenSession -> state.openSession(action.sessionId)
         is SessionDetailAction.Send -> state.send(sessionId, action.text)
         is SessionDetailAction.Retry -> state.retry(sessionId, action.localId)
         is SessionDetailAction.Discard -> state.discard(sessionId, action.localId)

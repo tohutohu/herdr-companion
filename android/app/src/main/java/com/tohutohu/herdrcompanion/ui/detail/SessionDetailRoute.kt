@@ -45,6 +45,7 @@ fun SessionDetailRoute(
     onOpenFile: (String, Int) -> Unit,
     onOpenImage: (String) -> Unit,
     onOpenTerminal: () -> Unit,
+    onOpenSession: (String) -> Unit,
 ) {
     val context = LocalContext.current
     val vm: SessionDetailViewModel = viewModel(key = sessionId) {
@@ -117,6 +118,7 @@ fun SessionDetailRoute(
             onAction = { action ->
                 when (action) {
                     SessionDetailAction.Back -> onBack()
+                    is SessionDetailAction.OpenSession -> onOpenSession(action.sessionId)
                     is SessionDetailAction.OpenFile -> onOpenFile(action.path, action.line)
                     is SessionDetailAction.OpenImage -> onOpenImage(api.absolute(action.url))
                     SessionDetailAction.OpenTerminal -> onOpenTerminal()

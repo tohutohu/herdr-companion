@@ -54,6 +54,7 @@ sealed interface SessionDetailAction {
     data object Back : SessionDetailAction
     data class OpenFile(val path: String, val line: Int) : SessionDetailAction
     data class OpenImage(val url: String) : SessionDetailAction
+    data class OpenSession(val sessionId: String) : SessionDetailAction
     data object OpenTerminal : SessionDetailAction
     data object PickImage : SessionDetailAction
     data object PickFile : SessionDetailAction

@@ -10,6 +10,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TranscriptRowsTest {
+    @Test
+    fun 別セッションからのメッセージは完了後も作業の中に畳まれない() {
+        val peer = msg("peer", "system", BlockDto("session_message", text = "確認しました。", senderName = "reviewer-a"))
+        val rows = transcriptRows(listOf(msg("user", "user", text("直して")), peer, msg("answer", "assistant", text("直しました。"))), lastTurn = LastTurn.DONE)
+        assertTrue(rows.any { it is MessageRow && it.message == peer })
+        assertFalse(rows.filterIsInstance<WorkRow>().any { it.shows("peer") })
+    }
+
     private fun text(t: String) = BlockDto(type = "text", text = t)
     private fun file(p: String) = BlockDto(type = "file", path = p)
     private fun question(id: String) = BlockDto(type = "interaction", interaction = InteractionDto(id = id, type = "questions", state = "pending"))

@@ -99,6 +99,7 @@ fun AppNavigation(start: Route, openSession: String?, onSessionOpened: () -> Uni
                 SessionDetailRoute(
                     sessionId = route.sessionId,
                     focusLatest = route.focusLatest,
+                    onOpenSession = { id -> lifecycle.ifResumed { nav.openLinkedSession(id) } },
                     onBack = { lifecycle.ifResumed { nav.back(orReplaceWith = SessionsRoute) } },
                     onOpenFile = { path, line -> lifecycle.ifResumed { nav.push(FileRoute(route.sessionId, path, line)) } },
                     onOpenImage = { url -> lifecycle.ifResumed { nav.push(ImageRoute(url)) } },
@@ -131,9 +132,16 @@ private inline fun Lifecycle.ifResumed(block: () -> Unit) {
 }
 
 /** The operations the screens need on the back stack. */
-private class Navigator(private val stack: NavBackStack<Route>) {
+internal class Navigator(private val stack: NavBackStack<Route>) {
     fun push(route: Route) {
         stack.add(route)
+    }
+
+    /** Reuse an earlier detail entry, preserving its history position and draft. */
+    fun openLinkedSession(sessionId: String) {
+        val at = stack.indexOfLast { it is DetailRoute && it.sessionId == sessionId }
+        if (at >= 0) stack.subList(at + 1, stack.size).clear()
+        else push(DetailRoute(sessionId))
     }
 
     /**
