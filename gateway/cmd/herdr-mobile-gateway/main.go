@@ -46,6 +46,7 @@ Usage:
   herdr-mobile-gateway import-firebase --service-account FILE --android-config FILE
                                           import Firebase files while gateway is stopped
   herdr-mobile-gateway set-jev-key         read optional Jev key from stdin (empty removes it)
+  herdr-mobile-gateway set-history-cache MB  memory per agent for conversation histories (0 = default 2048)
   herdr-mobile-gateway debug replay FILE   re-parse dead-letter entries with the current adapters
 
 Environment:
@@ -64,6 +65,8 @@ func main() {
 	switch cmd {
 	case "set-jev-key":
 		err = setJevKeyCmd()
+	case "set-history-cache":
+		err = setHistoryCacheCmd(args)
 	case "import-firebase":
 		err = importFirebaseCmd(args)
 	case "serve":

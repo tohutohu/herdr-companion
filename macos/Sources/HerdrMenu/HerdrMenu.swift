@@ -53,6 +53,7 @@ struct LocalConfig: Decodable {
     let authToken: String
     let firebaseAndroid: AndroidFirebase?
     let jevApiKey: String?
+    let historyCacheMB: Int?
 }
 struct AndroidFirebase: Decodable { let projectId: String }
 
@@ -71,6 +72,9 @@ struct SetupError: LocalizedError {
     @Published var firebaseProject: String?
     @Published var jevKey = ""
     @Published var jevEnabled = false
+    /// Saved history cache size in MiB; 0 means the Gateway default.
+    @Published var historyCacheMB = 0
+    @Published var historyCacheChoice = 0
     @Published var qr: NSImage?
     @Published var pairingLink: String?
     @Published var expires: Date?
@@ -183,6 +187,8 @@ struct SetupError: LocalizedError {
         if let data = try? Data(contentsOf: configURL), let config = try? JSONDecoder().decode(LocalConfig.self, from: data) {
             firebaseProject = config.firebaseAndroid?.projectId
             jevEnabled = !(config.jevApiKey ?? "").isEmpty
+            historyCacheMB = config.historyCacheMB ?? 0
+            historyCacheChoice = historyCacheMB
         }
     }
     func command(_ args: [String], input: String? = nil) async throws -> String {
@@ -423,6 +429,20 @@ struct SetupError: LocalizedError {
         }
         if wasRunning { await start() }
     }
+    /// The Gateway reads the setting at start, so a running one is restarted.
+    func saveHistoryCache() async throws {
+        let wasRunning = running
+        await stop()
+        guard child == nil else { throw SetupError(message: "Gatewayの終了を待ってください。") }
+        do {
+            _ = try await command(["set-history-cache", String(historyCacheChoice)])
+            loadConfig()
+        } catch {
+            if wasRunning { await start() }
+            throw error
+        }
+        if wasRunning { await start() }
+    }
 }
 
 struct Panel: View {
@@ -490,6 +510,21 @@ struct Panel: View {
                             Button("保存して有効化") { model.perform { try await model.saveJev() } }.disabled(model.jevKey.isEmpty)
                             if model.jevEnabled { Button("キーを削除") { model.perform { try await model.saveJev(remove: true) } } }
                         }
+                    }.padding(6)
+                }
+                GroupBox("会話履歴のキャッシュ") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Picker("上限（エージェントごと）", selection: $model.historyCacheChoice) {
+                            Text("既定（2 GB）").tag(0)
+                            ForEach([1024, 4096, 8192], id: \.self) { Text("\($0 / 1024) GB").tag($0) }
+                            if ![0, 1024, 4096, 8192].contains(model.historyCacheMB) {
+                                Text("\(model.historyCacheMB) MB").tag(model.historyCacheMB)
+                            }
+                        }
+                        Text("長い会話をデコード済みのまま保持し、詳細画面の更新を速くします。超えると古い会話から捨て、次の表示で読み直します。")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Button(model.running ? "保存してGatewayを再起動" : "保存") { model.perform { try await model.saveHistoryCache() } }
+                            .disabled(model.historyCacheChoice == model.historyCacheMB)
                     }.padding(6)
                 }
                 UpdateBox(model: model, updater: updater)

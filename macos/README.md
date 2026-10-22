@@ -35,6 +35,10 @@ Firebase APIキーをAndroidアプリに制限する場合、配布APKのパッ�
 
 メニューバーの「フォルダ確認」にTypeSafe APIキーを入力して保存します。「キーを削除」で無効化できます。指示・フォルダ情報・READMEなど・最近の会話の抜粋をTypeSafeへ送る機能です。詳しい対象は[ルートREADME](../README.md#開始前のフォルダ確認jev任意)を参照してください。キーなし・判定失敗でもセッションを開始できます。
 
+## 会話履歴のキャッシュ
+
+Gatewayは詳細画面がポーリングする会話をデコード済みのまま保持します。「会話履歴のキャッシュ」で上限（Claude Code・Codexそれぞれ、既定2 GB）を選び、保存するとアプリが所有するGatewayだけを再起動します。設定は`historyCacheMB`（`herdr-mobile-gateway set-history-cache MB`、0で既定）です。長い会話が上限を超えると、別の会話を開くたびに最初から読み直すため表示が遅くなります。
+
 ## 既存CLI版との関係
 
 - 設定: `~/.config/herdr-mobile/desktop/config.json`
