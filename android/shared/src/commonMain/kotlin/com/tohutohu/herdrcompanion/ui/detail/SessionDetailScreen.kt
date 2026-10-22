@@ -74,6 +74,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.key.Key
@@ -84,6 +85,7 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -435,7 +437,13 @@ fun SessionDetailScreen(
                 visible = state.reloading || (state.loading && session == null && messages.isEmpty()),
                 label = if (state.reloading) "Reloading…" else "Loading…",
             )
-            Box(Modifier.fillMaxSize()) {
+            val pull = rememberBottomPullState { onAction(SessionDetailAction.PullRefresh) }
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .clipToBounds()
+                    .then(if (state.pullToRefresh) Modifier.nestedScroll(pull.connection) else Modifier),
+            ) {
                 CompositionLocalProvider(LocalRowResize provides onRowResize) {
                     LazyColumn(
                         state = listState,
@@ -496,6 +504,7 @@ fun SessionDetailScreen(
                         }
                     }
                 }
+                BottomPullIndicator(pull, refreshing = state.pullRefreshing)
                 PinnedFlowStack(
                     stack = stack,
                     animate = settled,

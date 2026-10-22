@@ -335,7 +335,9 @@ leaves any other pane alone), which works with no Herdr terminal attached but
 does switch the pane an attached one shows. Android marks the session seen while
 its detail screen is open; the Mac UI does so when the user opens or selects a
 session, not while it merely stays open.
-Foreground screens poll every 3 s (detail) / 5 s (list).
+Foreground screens poll every 3 s (detail) / 5 s (list). On Android, dragging
+the conversation up past its newest message fetches it at once, without
+waiting for the next poll; a fling that reaches the end does not.
 
 A notification carries an inline *Reply* field when `canSend` is set and the
 session is not waiting on a question or an approval — those expect that exact

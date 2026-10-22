@@ -29,6 +29,7 @@ import kotlinx.coroutines.sync.withLock
 
 private const val POLL_MS = 3_000L
 private const val NOTICE_MS = 4_000L
+private const val PULL_MIN_MS = 500L
 
 /**
  * Runs a message refresh and returns the error to show, or null on success.
@@ -164,6 +165,29 @@ class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidV
                 }
             } finally {
                 _loading.value = false
+            }
+        }
+    }
+
+    private val _pullRefreshing = MutableStateFlow(false)
+    val pullRefreshing = _pullRefreshing.asStateFlow()
+
+    /**
+     * Fetches now, for a pull past the newest message, without waiting for
+     * the next poll. A fetch already running is waited for and followed by a
+     * fresh one. The spinner stays up briefly even for an unchanged
+     * conversation, so the pull visibly did something.
+     */
+    fun pullRefresh() {
+        if (_pullRefreshing.value) return
+        _pullRefreshing.value = true
+        viewModelScope.launch {
+            try {
+                val started = System.currentTimeMillis()
+                refresh()
+                delay(PULL_MIN_MS - (System.currentTimeMillis() - started))
+            } finally {
+                _pullRefreshing.value = false
             }
         }
     }

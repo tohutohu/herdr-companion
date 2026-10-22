@@ -43,6 +43,10 @@ data class SessionDetailUiState(
     /** A manual reload is reading the conversation again. */
     val reloading: Boolean = false,
     val reloadNotice: ReloadNotice? = null,
+    /** Pulling the list past its newest message fetches it now (touch screens). */
+    val pullToRefresh: Boolean = false,
+    /** A fetch asked for by that pull is running. */
+    val pullRefreshing: Boolean = false,
     val attachmentsEnabled: Boolean = true,
     val showBackButton: Boolean = true,
     val sendOnEnter: Boolean = false,
@@ -65,6 +69,7 @@ sealed interface SessionDetailAction {
     data class Respond(val response: InteractionResponseDto) : SessionDetailAction
     data object CycleMode : SessionDetailAction
     data object Reload : SessionDetailAction
+    data object PullRefresh : SessionDetailAction
     data object DismissReloadNotice : SessionDetailAction
     data object Resume : SessionDetailAction
     data object Archive : SessionDetailAction

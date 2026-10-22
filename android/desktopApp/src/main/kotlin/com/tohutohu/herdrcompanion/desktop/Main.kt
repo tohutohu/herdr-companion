@@ -1261,6 +1261,8 @@ private fun handleDetailAction(
         is SessionDetailAction.Respond -> state.respond(sessionId, action.response)
         SessionDetailAction.CycleMode -> state.cycleMode(sessionId)
         SessionDetailAction.Reload -> state.reload(sessionId)
+        // The desktop list does not offer the pull.
+        SessionDetailAction.PullRefresh -> Unit
         SessionDetailAction.DismissReloadNotice -> state.dismissReloadNotice(sessionId)
         SessionDetailAction.Archive -> state.detailFor(sessionId)?.session?.let { state.requestArchive(it.toRef()) }
         SessionDetailAction.Unarchive -> state.detailFor(sessionId)?.session?.let { state.unarchive(it.toRef()) }
