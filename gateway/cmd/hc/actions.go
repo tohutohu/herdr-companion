@@ -66,7 +66,7 @@ func addWaitFlags(fs *flag.FlagSet) waitFlags {
 func (a *app) afterAct(ctx context.Context, short, id string, before time.Time, wf waitFlags) error {
 	if !*wf.wait {
 		if !a.json {
-			fmt.Fprintf(a.out, "follow up: hc wait %s   then: hc read %s\n", short, short)
+			fmt.Fprintf(a.out, "follow up: hc until %s   then: hc read %s\n", short, short)
 		}
 		return nil
 	}
@@ -78,7 +78,7 @@ func (a *app) afterAct(ctx context.Context, short, id string, before time.Time, 
 		if a.json {
 			return a.printJSON(map[string]any{"session": s, "timedOut": true})
 		}
-		fmt.Fprintf(a.out, "still %s after %s; continue with: hc wait %s\n", s.Status, *wf.timeout, short)
+		fmt.Fprintf(a.out, "still %s after %s; continue with: hc until %s --timeout %s\n", s.Status, *wf.timeout, short, *wf.timeout)
 		return nil
 	}
 	return a.cmdRead([]string{short})

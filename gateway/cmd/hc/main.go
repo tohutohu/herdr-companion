@@ -17,39 +17,6 @@ import (
 	"strings"
 )
 
-const usageText = `hc — Herdr Companion CLI for agents (run "hc guide" first)
-
-Sessions:
-  hc ls [--all|--archived]            running sessions, one line each ("!" = needs you)
-  hc show ID                          status, pending question with answer hint, last report
-  hc read ID [--all|--last N] [--tools] [--full] [--peek]
-                                      messages new since your last read of ID
-  hc read ID --msg MSG                one message in full
-  hc export ID [--out FILE]           whole transcript as Markdown to a file; prints the path
-Changes:
-  hc changes [--peek]                 what changed in any session since your last call
-  hc wait [ID...] [--timeout 110s] [--any]
-                                      block until a session needs you (or IDs finish)
-Acting:
-  hc send ID TEXT... | -              send a prompt ("-" reads stdin) [--file F] [--wait]
-  hc answer ID [ANSWER...]            answer the pending question/approval (see "hc show")
-  hc start --cwd DIR [--provider claude] [--model M] [--effort E] [--mode M]
-           [--worktree] [--no-trust] [--wait] PROMPT... | -
-  hc term ID [--lines N]              raw terminal screen (fallback)
-  hc keys ID [--text T] KEY...        type into the terminal (enter esc tab up down y n 1-9 ...)
-  hc mode ID                          cycle the agent's mode (Plan, Accept edits, ...)
-  hc archive ID... | hc resume ID     stop and archive / restart in a new pane
-Other:
-  hc usage                            subscription limits
-  hc guide                            how to use hc as a resident agent
-  hc version                          the release this hc was built for
-
-ID: any unique prefix of the session id, a full id (claude:…), or a Herdr pane id.
-Global flags (anywhere): --json  --url URL  --token TOKEN  --cursor NAME
-Environment: HC_URL, HC_TOKEN, HC_CURSOR, HC_STATE_DIR. Without HC_URL/HC_TOKEN the
-local Gateway's config is used (HERDR_MOBILE_CONFIG or ~/.config/herdr-mobile/...).
-`
-
 // version is set at release build time (-ldflags "-X main.version=1.3.0").
 var version = "dev"
 
@@ -62,6 +29,12 @@ func (e usageError) Error() string   { return e.msg }
 func (e usageError) Is(t error) bool { return t == errUsage }
 
 func usagef(format string, a ...any) error { return usageError{fmt.Sprintf(format, a...)} }
+
+// exitStatus ends hc with a status other than 0 without printing an error:
+// the command has already said what happened.
+type exitStatus int
+
+func (e exitStatus) Error() string { return fmt.Sprintf("exit status %d", int(e)) }
 
 // app is what every command gets: where to send requests, where to keep
 // cursors and where to print.
@@ -86,17 +59,26 @@ func main() {
 func (a *app) run(args []string) int {
 	args, g, err := splitGlobal(args)
 	if err == nil && len(args) == 0 {
-		fmt.Fprint(a.out, usageText)
+		fmt.Fprint(a.out, overview())
 		return 0
 	}
 	if err == nil {
 		err = a.dispatch(args[0], args[1:], g)
 	}
+	var status exitStatus
 	switch {
 	case err == nil:
 		return 0
+	case errors.As(err, &status):
+		return int(status)
 	case errors.Is(err, errUsage):
 		fmt.Fprintln(a.errOut, "error:", err)
+		if len(args) > 0 {
+			if _, ok := findHelp(commandHelp, args[0]); ok && args[0] != "help" {
+				fmt.Fprintf(a.errOut, "run \"hc help %s\" for usage\n", args[0])
+				return 2
+			}
+		}
 		fmt.Fprintln(a.errOut, `run "hc help" for usage`)
 		return 2
 	default:
@@ -158,7 +140,15 @@ func splitGlobal(args []string) ([]string, globalFlags, error) {
 func (a *app) dispatch(cmd string, args []string, g globalFlags) error {
 	switch cmd {
 	case "help", "-h", "--help":
-		fmt.Fprint(a.out, usageText)
+		if len(args) == 0 {
+			fmt.Fprint(a.out, overview())
+			return nil
+		}
+		page, err := helpFor(args[0])
+		if err != nil {
+			return err
+		}
+		fmt.Fprint(a.out, page)
 		return nil
 	case "guide":
 		fmt.Fprint(a.out, guideText)
@@ -167,13 +157,31 @@ func (a *app) dispatch(cmd string, args []string, g globalFlags) error {
 		fmt.Fprintf(a.out, "hc %s\n", version)
 		return nil
 	}
-	cmds := map[string]func([]string) error{
+	run, ok := a.commands()[cmd]
+	if !ok {
+		return usagef("unknown command %q", cmd)
+	}
+	if wantsHelp(args) {
+		page, _ := helpFor(cmd)
+		fmt.Fprint(a.out, page)
+		return nil
+	}
+	if err := a.setup(g); err != nil {
+		return err
+	}
+	return run(args)
+}
+
+// commands are the commands that talk to the Gateway.
+func (a *app) commands() map[string]func([]string) error {
+	return map[string]func([]string) error{
 		"ls":      a.cmdList,
 		"show":    a.cmdShow,
 		"read":    a.cmdRead,
 		"export":  a.cmdExport,
 		"changes": a.cmdChanges,
 		"wait":    a.cmdWait,
+		"until":   a.cmdUntil,
 		"send":    a.cmdSend,
 		"answer":  a.cmdAnswer,
 		"start":   a.cmdStart,
@@ -184,14 +192,6 @@ func (a *app) dispatch(cmd string, args []string, g globalFlags) error {
 		"resume":  a.cmdResume,
 		"usage":   a.cmdUsage,
 	}
-	run, ok := cmds[cmd]
-	if !ok {
-		return usagef("unknown command %q", cmd)
-	}
-	if err := a.setup(g); err != nil {
-		return err
-	}
-	return run(args)
 }
 
 func (a *app) setup(g globalFlags) error {

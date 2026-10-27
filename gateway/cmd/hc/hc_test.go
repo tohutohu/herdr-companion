@@ -537,3 +537,159 @@ func Testバージョンは接続設定なしで表示できる(t *testing.T) {
 		t.Fatalf("code %d: %q", code, out.String())
 	}
 }
+
+func Test状態を指定した待機はその状態になると保留中の質問を添えて返す(t *testing.T) {
+	g := sampleGateway()
+	a, _ := newTestApp(t, g)
+	id := "claude:aaaa2222-0000"
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+		g.setStatus(id, model.StatusIdle) // not what was asked for
+		time.Sleep(30 * time.Millisecond)
+		g.set(func() {
+			g.messages[id] = []model.Message{{ID: "q", Role: model.RoleAssistant, Timestamp: t0,
+				Blocks: []model.Block{{Type: model.BlockInteraction, Interaction: &model.Interaction{
+					ID: "ask", Type: model.InteractionQuestions, State: model.InteractionPending, Supported: true, Title: "色は？",
+					Questions: []model.Question{{ID: "q1", Type: model.QuestionSelect, Question: "色は？",
+						Options: []model.Option{{Label: "赤"}, {Label: "青"}}}}}}}}}
+		})
+		g.setStatus(id, model.StatusWaitingInput)
+	}()
+	got := a.mustRun(t, "until", "aaaa2222", "--for", "needs-you", "--timeout", "5s")
+	for _, want := range []string{"reached after", "aaaa2222 waiting_input", "1) 赤", "hc answer aaaa2222 1", "next: hc read aaaa2222"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+}
+
+func Test既に指定の状態なら待たずに返す(t *testing.T) {
+	g := sampleGateway()
+	a, _ := newTestApp(t, g)
+	got := a.mustRun(t, "until", "aaaa1111", "--timeout", "5s")
+	if !strings.Contains(got, "already there:") || !strings.Contains(got, "next: hc read aaaa1111") {
+		t.Fatalf("got:\n%s", got)
+	}
+}
+
+func Test送ったばかりの指示に応答していないidleは完了とみなさない(t *testing.T) {
+	g := sampleGateway()
+	a, _ := newTestApp(t, g)
+	id := "claude:aaaa1111-0000"
+	g.messages[id] = append(g.messages[id], model.Message{ID: "u", Role: model.RoleUser, Timestamp: time.Now(),
+		Blocks: []model.Block{model.TextBlock("テストを実行して")}})
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		g.set(func() {
+			g.messages[id] = append(g.messages[id], model.Message{ID: "r", Role: model.RoleAssistant, Timestamp: time.Now(),
+				Blocks: []model.Block{model.TextBlock("全部通りました")}})
+		})
+		g.setStatus(id, model.StatusIdle)
+	}()
+	got := a.mustRun(t, "until", "aaaa1111", "--for", "done", "--timeout", "5s")
+	if !strings.Contains(got, "reached after") {
+		t.Fatalf("must wait for the reply, got:\n%s", got)
+	}
+	if posted := len(g.messages[id]); posted != 7 {
+		t.Fatalf("returned before the reply: %d messages", posted)
+	}
+}
+
+func Test全員を待つ指定では全セッションが揃うまで返らない(t *testing.T) {
+	g := sampleGateway()
+	a, _ := newTestApp(t, g)
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+		g.setStatus("codex:bbbb3333", model.StatusCompleted)
+		time.Sleep(30 * time.Millisecond)
+		g.setStatus("claude:aaaa2222-0000", model.StatusCompleted)
+	}()
+	start := time.Now()
+	got := a.mustRun(t, "until", "aaaa2222", "bbbb3333", "--all", "--for", "done", "--timeout", "5s")
+	if time.Since(start) < 60*time.Millisecond || strings.Contains(got, "(not yet)") {
+		t.Fatalf("returned before both were done:\n%s", got)
+	}
+}
+
+func Test状態待ちの時間切れは終了コード3で続きのコマンドを示す(t *testing.T) {
+	g := sampleGateway()
+	a, out := newTestApp(t, g)
+	code := a.run([]string{"until", "aaaa2222", "aaaa1111", "--for", "failed,input", "--timeout", "20ms"})
+	got := out.String()
+	if code != 3 || !strings.Contains(got, "timed out after") || strings.Contains(got, "error:") {
+		t.Fatalf("code %d:\n%s", code, got)
+	}
+	if !strings.Contains(got, "aaaa2222 running") || !strings.Contains(got, "(not yet)") ||
+		!strings.Contains(got, "continue: hc until aaaa2222 aaaa1111 --for failed,input --timeout 20ms") {
+		t.Fatalf("got:\n%s", got)
+	}
+}
+
+func Test状態待ちは自分自身と知らない状態名を拒む(t *testing.T) {
+	g := sampleGateway()
+	a, out := newTestApp(t, g)
+	if code := a.run([]string{"until", "ffff0000"}); code != 1 || !strings.Contains(out.String(), "itself") {
+		t.Fatalf("code %d: %s", code, out.String())
+	}
+	out.Reset()
+	if code := a.run([]string{"until", "aaaa1111", "--for", "finished"}); code != 2 || !strings.Contains(out.String(), `hc help until`) {
+		t.Fatalf("code %d: %s", code, out.String())
+	}
+}
+
+func Test状態名は別名をまとめ生の状態名は完全一致にする(t *testing.T) {
+	tg, err := parseUntilTarget([]string{"done", "idle"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if turnOver, ok := tg[model.StatusCompleted]; !ok || !turnOver {
+		t.Errorf("done must wait for the turn to be over on completed: %v", tg)
+	}
+	if turnOver, ok := tg[model.StatusIdle]; !ok || turnOver {
+		t.Errorf("an explicit idle must match idle exactly: %v", tg)
+	}
+	tg, _ = parseUntilTarget(nil)
+	if _, ok := tg[model.StatusRunning]; ok || len(tg) != 6 {
+		t.Errorf("the default must be every status but running: %v", tg)
+	}
+}
+
+func Test全コマンドに索引に載ったヘルプページがある(t *testing.T) {
+	a := &app{}
+	indexed := map[string]bool{}
+	for _, grp := range commandGroups {
+		for _, name := range grp.names {
+			indexed[name] = true
+		}
+	}
+	names := []string{"guide", "version"}
+	for name := range a.commands() {
+		names = append(names, name)
+	}
+	for _, name := range names {
+		if !indexed[name] {
+			t.Errorf("%s is missing from the index in hc help", name)
+		}
+		if p, ok := findHelp(commandHelp, name); !ok || !strings.HasPrefix(p.body, "hc "+name+" — ") || p.summary == "" {
+			t.Errorf("%s has no help page", name)
+		}
+	}
+	if len(commandHelp) != len(names) {
+		t.Errorf("%d help pages for %d commands", len(commandHelp), len(names))
+	}
+}
+
+func Testコマンドのヘルプは接続設定なしで表示できる(t *testing.T) {
+	for _, args := range [][]string{{"until", "--help"}, {"help", "until"}, {"read", "abc", "-h"}, {"help", "states"}, {"help"}} {
+		out := &bytes.Buffer{}
+		a := &app{out: out, errOut: out}
+		if code := a.run(args); code != 0 || !strings.Contains(out.String(), "USAGE") && !strings.Contains(out.String(), "hc help ") {
+			t.Errorf("hc %s: code %d\n%s", strings.Join(args, " "), code, out.String())
+		}
+	}
+	out := &bytes.Buffer{}
+	a := &app{out: out, errOut: out}
+	if code := a.run([]string{"help", "nothing"}); code != 2 || !strings.Contains(out.String(), "try one of") {
+		t.Errorf("code %d: %s", code, out.String())
+	}
+}

@@ -1,57 +1,65 @@
 package main
 
-const guideText = `hc guide — supervising coding-agent sessions through Herdr Companion
+const guideText = `hc guide — playbook for supervising coding-agent sessions through Herdr Companion
 
-WHAT YOU SEE
-  Every Claude Code / Codex / OpenCode / Devin session running in Herdr on the Mac.
-  A session is "claude:<uuid>"; type any unique prefix (8 chars is shown) or its pane id.
-  Statuses: running · waiting_input (question) · waiting_approval (tool/plan approval)
-            · completed · idle · failed · offline (not running; hc resume restarts it).
-  "!" marks a session that is waiting for an answer. Your own session is marked (you)
-  and is never reported as a change.
+PURPOSE
+  You are an agent that delegates to, watches or answers other agent sessions (Claude Code,
+  Codex, OpenCode, Devin) running in Herdr on the Mac. hc does the polling and the diffing,
+  so each call prints only what you have to act on, plus the exact command for the next step.
 
-THE LOOP (for a resident agent)
-  1. hc wait --timeout 9m        blocks until some session needs you: a question, an
-                                 approval, or a turn that ended. Prints those sessions,
-                                 their last line and any pending question WITH the
-                                 exact answer command. Returns "nothing needs you yet"
-                                 on timeout; just call it again.
-                                 Give your shell tool a timeout above --timeout
-                                 (Claude Code Bash: timeout 600000), or run it in the
-                                 background and act when it exits.
-  2. hc read ID                  what the session said since you last read it (tool calls
-                                 folded into one line; --tools lists them).
-  3. Act:
-       hc answer ID 2            pick option 2 of the pending question (or a label, or
-                                 free text: hc answer ID "use sqlite")
-       hc answer ID approve      approvals: approve | approve_session | deny
-       hc send ID "next step"    a new prompt (long text: pipe it and use "-")
-  4. Back to 1.
+BEFORE YOU START
+  hc ls                     sessions and their short IDs ("!" = waiting for an answer;
+                            "(you)" = your own session, which hc never acts on)
+  Long waits: give your shell tool a timeout above hc's --timeout (Claude Code Bash:
+  timeout 600000 with --timeout 9m), or run the wait in the background.  hc help timeouts
 
-  Prefer hc changes (non-blocking) when you check in on your own schedule.
-  Delegate and wait in one step: hc send ID "run the tests" --wait --timeout 9m
-  Start new work:               hc start --cwd ~/workspace/app "fix the login bug" --wait
+WORKFLOW 1 — delegate a task and collect the result
+  hc send ID "run the tests and fix failures"
+  hc until ID --timeout 9m          returns when it asks something, is done or fails
+  hc read ID                        what it said (only what is new to you)
+  One step for short tasks:  hc send ID "..." --wait --timeout 9m
 
-READING IS INCREMENTAL
-  hc read / hc changes / hc wait remember what you were shown (per cursor), so calling
-  them again prints only what is new. --peek reads without moving the cursor.
-  The cursor is per Herdr pane by default; set HC_CURSOR (or --cursor NAME) to share
-  or separate cursors. Cursors live in ~/.local/state/herdr-mobile/hc.
-  First read of a session shows the last 8 rows; --last N / --all for more.
-  Cut text ends with the command that shows it in full (hc read ID --msg MSG).
-  Whole transcript to a file you can grep: hc export ID   (prints the path)
+WORKFLOW 2 — start new work
+  hc start --cwd ~/workspace/app "fix the login bug"
+  hc until ID --timeout 9m   →  hc read ID
+  Add --worktree for a separate checkout, --mode plan to review a plan first.
 
-WHEN THE STRUCTURED ANSWER IS NOT ENOUGH
-  A question marked "not supported here" (or an odd dialog) must be handled in the
-  terminal: hc term ID shows the screen, hc keys ID down enter / hc keys ID --text "y" enter
-  types into it. Check the screen again after each step.
+WORKFLOW 3 — fan out and join
+  hc start --cwd DIR "part A"  ·  hc start --cwd DIR "part B"  ·  ...
+  hc until A B --all --for done --timeout 9m     all finished
+  hc until A B --for needs-you                   the first one that asks something
 
-MACHINE-READABLE OUTPUT
-  Add --json to any command for the Gateway's own objects (ids in full).
+WORKFLOW 4 — resident supervisor (watch every session)
+  1. hc wait --timeout 9m     blocks until any session needs you: a question, an approval,
+                              a turn that ended, a failure. Prints the pending question with
+                              its answer command. "nothing needs you yet": call it again.
+  2. hc read ID               what that session said since you last read it
+  3. act (workflow 5, or hc send ID "next step")
+  4. back to 1
+  Check in on your own schedule instead: hc changes (does not block).
+
+WORKFLOW 5 — answer a question or an approval
+  hc show ID                  the pending question, its options, and "answer: …"
+  hc answer ID 2              option 2 (or a label, or free text: hc answer ID "use sqlite")
+  hc answer ID approve        approvals: approve | approve_session | deny
+  Add --wait to see what the agent does with the answer.
+
+WORKFLOW 6 — when the structured answer is not enough
+  A question marked "not supported here", an odd dialog, or a stuck agent:
+  hc term ID                  the screen
+  hc keys ID down enter       type into it (or hc keys ID --text "y" enter)
+  Look at hc term again after each step.
 
 RULES OF THUMB
-  - Read before you answer: the question may have been answered by the user meanwhile;
-    hc answer refuses when nothing is pending.
+  - Read before you answer: the user may have answered meanwhile (hc answer refuses when
+    nothing is pending).
   - Do not send prompts to a session the user is driving unless asked to.
-  - Archiving (hc archive) stops the agent and closes its pane.
+  - hc archive stops the agent and closes its pane; it is for finished work.
+  - Long transcripts: hc export ID writes Markdown to a file you can grep.
+  - Scripts and exact ids: add --json to any command.
+
+GOING DEEPER
+  hc help                     command index and topics
+  hc help COMMAND             one command: when to use it, flags, output, examples
+  hc help states | ids | cursors | timeouts | connect | output
 `

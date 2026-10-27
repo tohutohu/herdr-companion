@@ -4,8 +4,16 @@
 別の AI エージェントが見張り、答え、指示するための CLI。Gateway の HTTP API
 （[api.md](api.md)）のクライアントで、Gateway 側の変更は要らない。
 
-使い方の全体は `hc help`、エージェント向けの手引きは `hc guide` が出力する。
-エージェントには「まず `hc guide` を読んで」と伝えれば足りる。
+ヘルプはエージェントスキルと同じく段階的に開示する。エージェントには「まず `hc guide` を読んで」と伝えれば足りる。
+
+| 層 | コマンド | 内容 |
+|---|---|---|
+| 1 | `hc help`（引数なしの `hc`） | 用途（使う場面・使わない場面）、クイックスタート、用途別のコマンド索引とトピック一覧 |
+| 2 | `hc help COMMAND`（`hc COMMAND --help`） | 1 コマンドの USE WHEN / USAGE / FLAGS / OUTPUT / EXAMPLES / SEE ALSO |
+| 2 | `hc help TOPIC` | `states` `ids` `cursors` `timeouts` `connect` `output` の概念説明 |
+| 3 | `hc guide` | 常駐して見張るエージェント向けの手順書（委任・起動・並列・監視・回答・端末操作） |
+
+ヘルプの表示には接続設定が要らない。コマンドラインの誤りは該当コマンドのヘルプページ名を添えて終了コード 2 で返す。
 
 ## インストール
 
@@ -46,7 +54,7 @@ env -u GOROOT go build -o ~/.local/bin/hc ./cmd/hc
 |---|---|
 | 出力はモデルが読む前提 | 既定は短いテキスト。1 セッション 1 行、ツール呼び出しは「⋯ 7 tool calls, latest: …」の 1 行に畳む。長い本文は切り、末尾に全文を出すコマンドを付ける。`--json` で Gateway のオブジェクトそのもの |
 | 差分で読む | `read` / `changes` / `wait` は読み手（カーソル）ごとに「どこまで見せたか」を覚え、次は新着だけを出す。`--peek` はカーソルを動かさない |
-| 待つのは CLI 側 | `wait` は対応が要る変化（質問・承認・ターン終了）まで内部でポーリングして返る。エージェントがループで `ls` を繰り返してトークンを使わずに済む |
+| 待つのは CLI 側 | `wait` は対応が要る変化（質問・承認・ターン終了）まで、`until` は指定セッションが指定の状態になるまで内部でポーリングして返る。エージェントがループで `ls` を繰り返してトークンを使わずに済む |
 | 次の一手を示す | 保留中の質問・承認には、そのまま実行できる `hc answer …` を添える |
 | 誤操作を手前で止める | 回答は選択肢と照合してから送る（番号・ラベル・自由入力を受け付け、合わなければ選択肢を表示）。自分自身のセッションへの送信・アーカイブは拒否する |
 | 大きいものはファイルへ | `export` は会話全体を Markdown に書き出してパスだけを表示する。grep や部分読みに使う |
@@ -69,11 +77,30 @@ env -u GOROOT go build -o ~/.local/bin/hc ./cmd/hc
   短いターンは `running` が見えないまま `idle` に戻ることがある（Herdr はフォーカス中のペインを `completed` にしない）ため、
   操作後にエージェントの発言が増えたことでも終わりとみなす。
 
+### 状態を待つ（`until`）
+
+`wait` が「前回見たときからの変化」を待つのに対し、`until ID…` は指定セッションの**今の状態**を見て、
+`--for` の状態になるまで待つ。既にその状態なら即座に返る（`already there:`）。
+
+| `--for` | 状態 |
+|---|---|
+| `input` / `approval` / `needs-you` | `waiting_input` / `waiting_approval` / その両方 |
+| `done` | `completed` か `idle`（ターン終了） |
+| `failed` / `offline` / `running` | それぞれの状態。アーカイブされて一覧から消えたセッションは `offline` |
+| `stopped`（既定） | `running` 以外のすべて |
+
+- 生の状態名（`idle` など）も受け付け、完全一致で判定する。カンマ区切りか繰り返しで複数指定できる。
+- `hc send` の直後に呼んでもよい。`done` と `stopped` は、最新のメッセージが 1 分以内の指示（エージェントがまだ着手していない）なら `idle` / `completed` を終わりとみなさない。中断されたターンで待ち続けないよう、1 分を過ぎた指示は見ない。
+- 複数 ID は最初の 1 件が着いた時点で返る。`--all` で全件を待つ。
+- 到達したセッションは保留中の質問と回答コマンド、または最後の発言を表示し、カーソルもそのセッション分進める（後の `wait` で同じ変化を再報告しない）。
+- 時間切れは終了コード 3。各セッションの現状と、待ち続けるための `continue: hc until …` を表示する。
+- `send` / `answer` / `start` の `--wait` が時間切れのときの案内も `hc until ID` にした。
+
 ### シェルのタイムアウト
 
-`wait` の既定 `--timeout` は 110 秒で、Claude Code の Bash の既定タイムアウト（2 分）に収まる。
+`wait` / `until` の既定 `--timeout` は 110 秒で、Claude Code の Bash の既定タイムアウト（2 分）に収まる。
 長く待つときは `--timeout 9m` と Bash の `timeout: 600000` を組み合わせるか、バックグラウンドで実行する。
-時間切れは正常終了で、「nothing needs you yet」と動作中のセッションを表示する。
+`wait` の時間切れは正常終了で、「nothing needs you yet」と動作中のセッションを表示する。`until` の時間切れは終了コード 3。
 
 ## 例
 
@@ -89,6 +116,16 @@ $ hc wait --timeout 9m
       …/proj/hello.txt
       answer: hc answer a9b7233a approve | deny
 next: hc read a9b7233a   (or hc show ID)
+
+$ hc send 5b27 "テストを実行して"
+sent to 5b27
+follow up: hc until 5b27   then: hc read 5b27
+
+$ hc until 5b27 --timeout 9m
+reached after 1m12s:
+  5b27a61d idle               now  claude proj · テスト実行
+    last: テストは 42 件すべて通りました。
+next: hc read 5b27a61d
 
 $ hc answer a9b7 approve --wait
 answered a9b7: approve
