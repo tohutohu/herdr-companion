@@ -294,6 +294,9 @@ func convertItem(raw json.RawMessage, ts time.Time, opt convertOptions) (model.M
 	case "collabAgentToolCall":
 		return msg(model.RoleTool, model.TextBlock(fmt.Sprintf("▸ agent %s: %s", it.Tool, providers.OneLine(it.Prompt, 200))))
 	case "functionCallOutput":
+		if m, ok := delegationMessage(&it, ts, opt.SessionID); ok {
+			return m, true
+		}
 		return msg(model.RoleTool, model.TextBlock(fmt.Sprintf("▸ %s\n%s", it.Name, model.Truncate(compact(it.Output, maxToolOutput), maxToolOutput))))
 	case "webSearch":
 		return msg(model.RoleTool, model.TextBlock("WebSearch "+it.Query))

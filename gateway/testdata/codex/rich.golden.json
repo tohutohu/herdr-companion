@@ -111,6 +111,29 @@
     ]
   },
   {
+    "id": "fco_1",
+    "role": "system",
+    "timestamp": "2026-09-16T23:06:40Z",
+    "blocks": [
+      {
+        "type": "session_message",
+        "text": "検証用VMを作成しました。接続: ssh deploy@10.0.0.5。新テスト \u003cUUID\u003e の fixture は片付け済みです。",
+        "sessionId": "codex:01a0f000-0000-7000-8000-000000000002"
+      }
+    ]
+  },
+  {
+    "id": "fco_2",
+    "role": "tool",
+    "timestamp": "2026-09-16T23:06:40Z",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "▸ list_threads\n[]"
+      }
+    ]
+  },
+  {
     "id": "x1",
     "role": "system",
     "timestamp": "2026-09-16T23:06:40Z",

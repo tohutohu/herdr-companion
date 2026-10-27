@@ -32,6 +32,8 @@
       "result": {"content": [{"type": "text", "text": "found 3"}]}, "error": null},
      {"type": "imageView", "id": "v1", "path": "/work/app/screenshot.png"},
      {"type": "webSearch", "id": "w1", "query": "jetpack compose lazycolumn"},
+     {"type": "functionCallOutput", "id": "fco_1", "name": "send_message_to_thread", "namespace": "codex_tui", "output": "<codex_delegation>\n  <source_thread_id>01a0f000-0000-7000-8000-000000000002</source_thread_id>\n  <input>検証用VMを作成しました。接続: ssh deploy@10.0.0.5。新テスト &lt;UUID&gt; の fixture は片付け済みです。</input>\n</codex_delegation>"},
+     {"type": "functionCallOutput", "id": "fco_2", "name": "list_threads", "namespace": "codex_tui", "output": "[]"},
      {"type": "hologramCall", "id": "x1", "payload": 42},
      {"type": "agentMessage", "id": "a2", "text": "完了しました。", "phase": "final_answer"}
     ]
