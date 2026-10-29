@@ -106,7 +106,7 @@ func Testゲートウェイが作ったクリーンなworktreeはHerdrに削除�
 	os.MkdirAll(filepath.Join(wt, "sub"), 0o755)
 	h := &fakeHerdr{}
 
-	out, err := Cleanup(ctx, h, filepath.Join(wt, "sub"))
+	out, err := Cleanup(ctx, h, filepath.Join(wt, "sub"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func Testマーカーのないworktreeや通常のチェックアウトには触
 	wt := addWorktree(t, repo, "mine", "mine")
 	h := &fakeHerdr{}
 	for _, dir := range []string{wt, repo, t.TempDir(), filepath.Join(repo, "missing"), ""} {
-		out, err := Cleanup(ctx, h, dir)
+		out, err := Cleanup(ctx, h, dir, nil)
 		if err != nil || out != nil {
 			t.Errorf("%s: outcome = %+v, err = %v", dir, out, err)
 		}
@@ -148,7 +148,7 @@ func Test作業中の変更があるworktreeは開いたワークスペースを
 	os.WriteFile(filepath.Join(wt, "new.txt"), []byte("x"), 0o644)
 	h := &fakeHerdr{}
 
-	out, err := Cleanup(ctx, h, wt)
+	out, err := Cleanup(ctx, h, wt, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestHerdrのワークスペースが開いているworktreeは残す(t *tes
 	Mark(ctx, wt, "claude")
 	h := &fakeHerdr{open: map[string]bool{wt: true}}
 
-	out, err := Cleanup(ctx, h, wt)
+	out, err := Cleanup(ctx, h, wt, nil)
 	if err != nil || out == nil || out.Removed || out.Reason != "another pane is still using it" {
 		t.Fatalf("outcome = %+v, err = %v", out, err)
 	}
@@ -186,7 +186,7 @@ func Test削除できなかったときは開いたワークスペースを閉�
 	Mark(ctx, wt, "claude")
 	h := &fakeHerdr{fail: &herdr.Error{Code: "worktree_remove_failed", Message: "locked"}}
 
-	out, err := Cleanup(ctx, h, wt)
+	out, err := Cleanup(ctx, h, wt, nil)
 	if err == nil || out != nil {
 		t.Fatalf("outcome = %+v, err = %v", out, err)
 	}

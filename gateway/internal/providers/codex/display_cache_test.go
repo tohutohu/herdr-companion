@@ -22,8 +22,8 @@ func cacheTestProvider(t *testing.T, th *Thread) (*Provider, *fakeServer) {
 	pt := &pipeTransport{in: make(chan []byte, 16), out: make(chan []byte, 16), closed: make(chan struct{})}
 	go f.serve(pt, func(v any) { b, _ := json.Marshal(v); pt.in <- b })
 	p := New("unused", "/nonexistent.sock", &fakeTerm{}, deadletter.Nop{})
-	p.reader = newRPCClient(pt, nil)
-	t.Cleanup(p.reader.close)
+	p.owned = testOwned(pt)
+	t.Cleanup(p.owned.c.close)
 	return p, f
 }
 
@@ -84,7 +84,7 @@ func Test履歴不変でも承認の解消とモード変更を即座に反映�
 	os.WriteFile(th.Path, []byte("stable\n"), 0600)
 	p, f := cacheTestProvider(t, th)
 	d := newDaemonConn(deadletter.Nop{})
-	d.c = p.reader
+	d.c = p.owned.c
 	p.daemon = d
 	d.Request(json.RawMessage(`1`), "item/commandExecution/requestApproval", json.RawMessage(`{"threadId":"`+th.ID+`","turnId":"t","itemId":"i","command":"go test"}`))
 	ctx := context.Background()
@@ -129,7 +129,7 @@ func Test履歴キャッシュはファイルの置換と接続の切替えと�
 		t.Fatal("expiry did not invalidate", err)
 	}
 	other, server := cacheTestProvider(t, th)
-	p.reader = other.reader
+	p.owned = other.owned
 	if _, err := p.displayThread(ctx, th.ID); err != nil || historyCalls(server) != 1 {
 		t.Fatal("connection did not invalidate", err)
 	}
@@ -174,10 +174,10 @@ func Test取得中に追記やイベントが来た履歴を最新として保�
 			os.WriteFile(th.Path, []byte("stable\n"), 0600)
 			pt := &pipeTransport{in: make(chan []byte, 16), out: make(chan []byte, 16), closed: make(chan struct{})}
 			p := New("unused", "/nonexistent.sock", &fakeTerm{}, deadletter.Nop{})
-			p.reader = newRPCClient(pt, nil)
-			t.Cleanup(p.reader.close)
+			p.owned = testOwned(pt)
+			t.Cleanup(p.owned.c.close)
 			d := newDaemonConn(deadletter.Nop{})
-			d.c = p.reader
+			d.c = p.owned.c
 			p.daemon = d
 			meta := *th
 			meta.Turns = nil

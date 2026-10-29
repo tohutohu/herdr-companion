@@ -1,11 +1,15 @@
-// Package worktree finds the git worktrees sessions were started in and has
-// Herdr, which creates them, remove them again. The gateway keeps no record
-// of them: a worktree it created carries a marker file in its git directory.
+// Package worktree creates the git worktrees sessions start in and removes
+// them again once the session is archived. Worktrees for directly managed
+// sessions are made and removed with git itself; those of Herdr launches are
+// made and removed by Herdr. The gateway keeps no record of them: a worktree
+// it created carries a marker file in its git directory.
 package worktree
 
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -94,6 +98,10 @@ func MainCheckout(ctx context.Context, dir string) (string, error) {
 // Mark records that the gateway had the linked worktree dir is in created
 // for a new session, so archiving the session may remove it.
 func Mark(ctx context.Context, dir, provider string) error {
+	return mark(ctx, dir, provider, "herdr")
+}
+
+func mark(ctx context.Context, dir, provider, backend string) error {
 	c, err := inspect(ctx, dir)
 	if err != nil {
 		return err
@@ -101,8 +109,84 @@ func Mark(ctx context.Context, dir, provider string) error {
 	if !c.linked() {
 		return fmt.Errorf("%s is not a linked worktree", c.top)
 	}
-	b, _ := json.Marshal(map[string]any{"version": 1, "provider": provider, "createdAt": time.Now().UTC()})
+	b, _ := json.Marshal(map[string]any{"version": 1, "provider": provider, "backend": backend, "createdAt": time.Now().UTC()})
 	return os.WriteFile(filepath.Join(c.gitDir, markerFile), b, 0o644)
+}
+
+// Create makes a new linked worktree of the repository dir is in, on a new
+// branch worktree/<name> from HEAD, under base/<repository>/<name>, and marks
+// it as the gateway's. It is what Herdr's worktree.create does, for sessions
+// that run without Herdr.
+func Create(ctx context.Context, dir, base, provider string) (string, error) {
+	c, err := inspect(ctx, dir)
+	if err != nil {
+		return "", err
+	}
+	b := make([]byte, 3)
+	rand.Read(b)
+	name := provider + "-" + hex.EncodeToString(b)
+	path := filepath.Join(base, filepath.Base(c.main()), name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", err
+	}
+	if _, err := git(ctx, c.top, "worktree", "add", "-b", "worktree/"+name, path, "HEAD"); err != nil {
+		return "", err
+	}
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		path = real
+	}
+	if err := mark(ctx, path, provider, "direct"); err != nil {
+		slog.Warn("marking worktree failed", "provider", provider, "path", path, "error", err)
+	}
+	return path, nil
+}
+
+// Discard removes a worktree Create made for a launch that did not go ahead.
+// Nothing was done in it yet; the branch is kept like any other.
+func Discard(ctx context.Context, path string) error {
+	c, err := inspect(ctx, path)
+	if err != nil || !c.linked() {
+		return err
+	}
+	_, err = git(ctx, c.main(), "worktree", "remove", c.top)
+	return err
+}
+
+// removeWithGit removes a clean worktree with git. git refuses one with
+// modified or untracked files without --force, which is never given.
+func removeWithGit(ctx context.Context, c *checkout, out *Outcome) (*Outcome, error) {
+	status, err := git(ctx, c.top, "status", "--porcelain")
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(status) != "" {
+		out.Reason = "it has uncommitted changes"
+		return out, nil
+	}
+	if _, err := git(ctx, c.main(), "worktree", "remove", c.top); err != nil {
+		if strings.Contains(err.Error(), "modified or untracked") || strings.Contains(err.Error(), "contains modified") {
+			out.Reason = "it has uncommitted changes"
+			return out, nil
+		}
+		return nil, err
+	}
+	out.Removed = true
+	return out, nil
+}
+
+func markerBackend(c *checkout) string {
+	b, err := os.ReadFile(filepath.Join(c.gitDir, markerFile))
+	if err != nil {
+		return ""
+	}
+	var m struct {
+		Backend string `json:"backend"`
+	}
+	json.Unmarshal(b, &m)
+	if m.Backend == "" {
+		return "herdr"
+	}
+	return m.Backend
 }
 
 // Herdr is the part of the Herdr client that removes worktrees.
@@ -128,12 +212,14 @@ func (o *Outcome) Warning() string {
 	return "Worktree kept because " + o.Reason + ": " + o.Path
 }
 
-// Cleanup has Herdr remove the worktree dir is in once its session is
-// archived. It only touches linked worktrees the gateway created, and keeps
-// any that a Herdr workspace still has open or that Herdr refuses to remove
-// because of uncommitted changes. Herdr keeps the branch, so commits are
-// never lost. A nil Outcome means dir is not such a worktree.
-func Cleanup(ctx context.Context, h Herdr, dir string) (*Outcome, error) {
+// Cleanup removes the worktree dir is in once its session is archived. It
+// only touches linked worktrees the gateway created, and keeps any that
+// another live session (inUse) or a Herdr workspace still uses, or that has
+// uncommitted or untracked changes (ignored files do not count). The branch
+// is always kept, so commits are never lost. Worktrees made for direct
+// sessions, or any when Herdr is not given, are removed with git; others
+// through Herdr. A nil Outcome means dir is not such a worktree.
+func Cleanup(ctx context.Context, h Herdr, dir string, inUse func(path string) bool) (*Outcome, error) {
 	if dir == "" {
 		return nil, nil
 	}
@@ -144,10 +230,18 @@ func Cleanup(ctx context.Context, h Herdr, dir string) (*Outcome, error) {
 	if err != nil || !c.linked() {
 		return nil, nil
 	}
-	if _, err := os.Stat(filepath.Join(c.gitDir, markerFile)); err != nil {
+	backend := markerBackend(c)
+	if backend == "" {
 		return nil, nil
 	}
 	out := &Outcome{Path: c.top}
+	if inUse != nil && inUse(c.top) {
+		out.Reason = "another session is still using it"
+		return out, nil
+	}
+	if backend == "direct" || h == nil {
+		return removeWithGit(ctx, c, out)
+	}
 	// Herdr removes a worktree through the workspace open in it.
 	ws, alreadyOpen, err := h.OpenWorktree(ctx, c.main(), c.top)
 	if err != nil {

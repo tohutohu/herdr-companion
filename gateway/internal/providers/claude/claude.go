@@ -45,6 +45,8 @@ type Provider struct {
 	keyDelay time.Duration
 	// attachWait is how long a pasted image may take to show in the composer.
 	attachWait time.Duration
+	// direct runs sessions through the Agent SDK sidecar (direct.go).
+	direct directState
 }
 
 // DefaultConfigDir honours CLAUDE_CONFIG_DIR like Claude Code itself.
@@ -123,6 +125,9 @@ func root(t *Transcript, live *providers.Live) string {
 }
 
 func (p *Provider) Summary(ctx context.Context, nativeID string, live *providers.Live) (*providers.Summary, error) {
+	if live.IsDirect() {
+		return p.directSummary(ctx, nativeID, live)
+	}
 	reported := live
 	live, screenPlan := p.dialogState(ctx, nativeID, live)
 	path, err := p.transcriptPath(nativeID)
@@ -199,6 +204,9 @@ func (p *Provider) RecentExcluding(ctx context.Context, since time.Time, exclude
 // Messages returns messages that may be shared with other callers; they must
 // not be modified.
 func (p *Provider) Messages(ctx context.Context, nativeID string, live *providers.Live) ([]model.Message, error) {
+	if live.IsDirect() {
+		return p.directMessages(nativeID, live)
+	}
 	live, screenPlan := p.dialogState(ctx, nativeID, live)
 	path, err := p.transcriptPath(nativeID)
 	if err != nil {
@@ -257,6 +265,9 @@ func (p *Provider) Image(ctx context.Context, nativeID, messageID string, index 
 func (p *Provider) Send(ctx context.Context, nativeID string, live *providers.Live, in model.Input) error {
 	if live == nil {
 		return providers.ErrNotLive
+	}
+	if live.Direct {
+		return p.directSend(ctx, nativeID, in)
 	}
 	text := providers.TextWithFiles(in)
 	if text == "" && len(in.Images) == 0 {
@@ -478,6 +489,9 @@ func (p *Provider) CycleMode(ctx context.Context, nativeID string, live *provide
 	if live == nil {
 		return providers.ErrNotLive
 	}
+	if live.Direct {
+		return p.DirectSetMode(ctx, nativeID, "")
+	}
 	path, _ := p.transcriptPath(nativeID)
 	var before os.FileInfo
 	if path != "" {
@@ -520,6 +534,9 @@ func (p *Provider) wait(ctx context.Context) error {
 func (p *Provider) Respond(ctx context.Context, nativeID string, live *providers.Live, r model.InteractionResponse) error {
 	if live == nil {
 		return providers.ErrNotLive
+	}
+	if live.Direct {
+		return p.directRespond(ctx, nativeID, r)
 	}
 	msgs, err := p.Messages(ctx, nativeID, live)
 	if err != nil {
@@ -846,4 +863,48 @@ func (p *Provider) StartupKeys(screen string) []string {
 		return []string{"enter"}
 	}
 	return nil
+}
+
+// directSummary summarizes a direct session: the transcript, with the
+// pending interaction kind from the runtime instead of a pane.
+func (p *Provider) directSummary(ctx context.Context, nativeID string, live *providers.Live) (*providers.Summary, error) {
+	path, err := p.transcriptPath(nativeID)
+	if err != nil {
+		return nil, err
+	}
+	s, err := p.summaryPath(ctx, path, nativeID, parseLive(live))
+	if err != nil {
+		return nil, err
+	}
+	s.NativeID = nativeID
+	if s.Cwd == "" {
+		s.Cwd = live.Cwd
+	}
+	pending, _, _, _ := p.directSnapshot(nativeID)
+	s.Pending = pendingKind(pending)
+	return &s, nil
+}
+
+// directMessages is the transcript plus what only the runtime knows yet:
+// pending approvals and questions, and the reply being streamed.
+func (p *Provider) directMessages(nativeID string, live *providers.Live) ([]model.Message, error) {
+	pending, partialID, partialText, partialAt := p.directSnapshot(nativeID)
+	path, err := p.transcriptPath(nativeID)
+	if errors.Is(err, providers.ErrNotFound) {
+		// A new session writes its transcript with the first prompt.
+		return withDirectState(nil, pending, partialID, partialText, partialAt, false), nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	c, err := p.transcript(path, nativeID)
+	if err != nil {
+		return nil, err
+	}
+	pl := parseLive(live)
+	msgs := c.messages(ParseOptions{SessionID: gatewayID(nativeID), Root: root(c.t, pl), Live: pl, Sink: p.sink})
+	inTranscript := partialID != "" && c.t.counted[partialID]
+	c.mu.Unlock()
+	msgs = p.resolveSessionSenders(msgs)
+	return withDirectState(msgs, pending, partialID, partialText, partialAt, inTranscript), nil
 }

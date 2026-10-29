@@ -30,6 +30,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/launcher"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/runtime"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/sessions"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/uploads"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/usage"
@@ -65,6 +66,8 @@ type Server struct {
 	Archive   *archive.Store
 	// Usage is nil when subscription limit reporting is turned off.
 	Usage *usage.Service
+	// Direct runs sessions without Herdr; nil when not available.
+	Direct *runtime.Manager
 }
 
 func (s *Server) Handler() http.Handler {
@@ -99,6 +102,9 @@ func (s *Server) Handler() http.Handler {
 	})
 	api.HandleFunc("POST /v1/sessions/{id}/respond", s.respond)
 	api.HandleFunc("POST /v1/sessions/{id}/mode", s.cycleMode)
+	api.HandleFunc("POST /v1/sessions/{id}/model", s.setModel)
+	api.HandleFunc("POST /v1/sessions/{id}/effort", s.setEffort)
+	api.HandleFunc("POST /v1/sessions/{id}/interrupt", s.interrupt)
 	api.HandleFunc("POST /v1/sessions/{id}/seen", s.markSeen)
 	api.HandleFunc("POST /v1/sessions/{id}/reload", s.reloadSession)
 	api.HandleFunc("GET /v1/sessions/{id}/messages/{mid}/images/{n}", s.getImage)
@@ -218,6 +224,12 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, sessionID, op stri
 	case errors.Is(err, providers.ErrNotFound), errors.Is(err, files.ErrNotFound), errors.Is(err, uploads.ErrNotFound),
 		errors.Is(err, launcher.ErrNoPendingTrust):
 		status = http.StatusNotFound
+	case errors.Is(err, providers.ErrRuntimeUnavailable):
+		status = http.StatusServiceUnavailable
+	case errors.Is(err, providers.ErrNoTerminal), errors.Is(err, providers.ErrNotDirect), errors.Is(err, runtime.ErrNotManaged):
+		status = http.StatusConflict
+	case errors.Is(err, errInvalidSetting):
+		status = http.StatusBadRequest
 	case errors.Is(err, providers.ErrNotLive), errors.Is(err, providers.ErrInteractionGone),
 		errors.Is(err, errAlreadyLive), errors.Is(err, launcher.ErrNoCwd), errors.Is(err, launcher.ErrCwdGone):
 		status = http.StatusConflict
@@ -234,7 +246,7 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, sessionID, op stri
 		if herr.Code == "agent_blocked" {
 			status = http.StatusConflict
 		}
-	case errors.Is(err, errBadRequest), errors.Is(err, launcher.ErrInvalidName), errors.Is(err, launcher.ErrUnknownProvider), errors.Is(err, launcher.ErrInvalidModel),
+	case errors.Is(err, errBadRequest), errors.Is(err, launcher.ErrInvalidName), errors.Is(err, launcher.ErrUnknownProvider), errors.Is(err, launcher.ErrInvalidModel), errors.Is(err, launcher.ErrInvalidBackend),
 		errors.Is(err, worktree.ErrNotRepository):
 		status = http.StatusBadRequest
 	case errors.Is(err, os.ErrExist):
@@ -251,7 +263,7 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, sessionID, op stri
 
 var (
 	errBadRequest  = errors.New("bad request")
-	errAlreadyLive = errors.New("session is already running in herdr")
+	errAlreadyLive = errors.New("session is already running")
 )
 
 func badRequest(msg string) error { return errors.Join(errBadRequest, errors.New(msg)) }
@@ -446,7 +458,7 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 	// pane would be worse than finishing it.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), sendTimeout)
 	defer cancel()
-	if err := res.Provider.Send(ctx, res.NativeID, res.Live, in); err != nil {
+	if err := s.Sessions.Send(ctx, res, in); err != nil {
 		s.recordSendError(id, "send message: "+err.Error(), req, err)
 		if req.RequestID != "" {
 			writeError(w, http.StatusConflict, errDeliveryUnknown.Error())
@@ -487,7 +499,7 @@ func (s *Server) respond(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, id, "respond", providers.ErrNotLive)
 		return
 	}
-	if strings.HasPrefix(req.InteractionID, trustPrefix) {
+	if strings.HasPrefix(req.InteractionID, trustPrefix) && res.Live.InPane() {
 		s.respondTrust(w, r, id, res.Provider.Name(), res.Live.PaneID, req)
 		return
 	}
@@ -510,9 +522,38 @@ func (s *Server) respond(w http.ResponseWriter, r *http.Request) {
 // provider decides which key or structured operation is safe for its agent.
 func (s *Server) cycleMode(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	var req struct {
+		Mode string `json:"mode"`
+	}
+	if r.ContentLength != 0 {
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+			s.fail(w, r, id, "cycle_mode", badRequest("invalid json"))
+			return
+		}
+	}
 	res, err := s.Sessions.Resolve(r.Context(), id)
 	if err != nil {
 		s.fail(w, r, id, "cycle_mode", err)
+		return
+	}
+	if res.Live.IsDirect() {
+		if req.Mode != "" {
+			if err := s.validSetting(r.Context(), res.Provider.Name(), "mode", req.Mode, ""); err != nil {
+				s.fail(w, r, id, "cycle_mode", err)
+				return
+			}
+		}
+		if err := s.Direct.SetMode(r.Context(), id, req.Mode); err != nil {
+			s.fail(w, r, id, "cycle_mode", err)
+			return
+		}
+		s.Sessions.Forget(id)
+		writeJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
+		return
+	}
+	if req.Mode != "" {
+		// A Herdr TUI only has its mode shortcut.
+		s.fail(w, r, id, "cycle_mode", providers.ErrNotDirect)
 		return
 	}
 	changer, ok := res.Provider.(providers.ModeChanger)
@@ -537,7 +578,9 @@ func (s *Server) markSeen(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, id, "mark_seen", err)
 		return
 	}
-	if res.Live != nil && res.Live.HerdrStatus == herdr.StatusDone {
+	if res.Live.IsDirect() {
+		s.Direct.MarkSeen(id)
+	} else if res.Live != nil && res.Live.HerdrStatus == herdr.StatusDone {
 		if err := s.Focus.FocusPane(r.Context(), res.Live.PaneID); err != nil {
 			s.fail(w, r, id, "mark_seen", err)
 			return
@@ -698,6 +741,9 @@ func (s *Server) livePane(ctx context.Context, id string) (string, error) {
 	}
 	if res.Live == nil {
 		return "", providers.ErrNotLive
+	}
+	if res.Live.Direct {
+		return "", providers.ErrNoTerminal
 	}
 	return res.Live.PaneID, nil
 }
@@ -934,12 +980,22 @@ func (s *Server) archiveOne(ctx context.Context, id string) (archivedSession, bo
 	if err != nil {
 		return archivedSession{}, false, err
 	}
-	stopped := res.Live != nil
-	if res.Live != nil {
+	stopped := res.Live != nil && !res.Live.Dormant
+	switch {
+	case res.Live.IsDirect():
+		if err := s.Direct.Forget(ctx, id); err != nil {
+			return archivedSession{}, false, err
+		}
+		sess.Status, sess.Backend, sess.CanSend = model.StatusOffline, "", false
+	case res.Live != nil:
 		if err := s.Launcher.Stop(ctx, res.Live.PaneID); err != nil {
 			return archivedSession{}, false, err
 		}
-		sess.Status, sess.PaneID, sess.CanSend = model.StatusOffline, "", false
+		sess.Status, sess.PaneID, sess.Backend, sess.CanSend = model.StatusOffline, "", "", false
+	}
+	if s.Direct != nil && s.Direct.Owns(id) {
+		// A dormant direct record of a session that now runs in Herdr.
+		s.Direct.Forget(ctx, id)
 	}
 	sess.Archived = true
 	return archivedSession{Session: sess, Warning: s.removeWorktree(ctx, sess)}, stopped, nil
@@ -948,7 +1004,7 @@ func (s *Server) archiveOne(ctx context.Context, id string) (archivedSession, bo
 // removeWorktree has Herdr remove the session's worktree and returns a
 // warning when it was kept or could not be removed.
 func (s *Server) removeWorktree(ctx context.Context, sess model.Session) string {
-	out, err := worktree.Cleanup(ctx, s.Worktrees, sess.Cwd)
+	out, err := worktree.Cleanup(ctx, s.Worktrees, sess.Cwd, func(path string) bool { return s.worktreeInUse(ctx, sess.ID, path) })
 	if err != nil {
 		slog.Warn("removing worktree failed", "provider", sess.Provider, "session_id", sess.ID, "cwd", sess.Cwd, "error", err)
 		return "Could not remove the session's worktree: " + err.Error()
@@ -1052,6 +1108,8 @@ func (s *Server) unarchiveSession(w http.ResponseWriter, r *http.Request) {
 
 type resumeRequest struct {
 	Trust bool `json:"trust"`
+	// Backend is "direct" (default where supported) or "herdr".
+	Backend string `json:"backend,omitempty"`
 }
 
 // resumeSession reopens a session that is not running in Herdr and takes it
@@ -1070,15 +1128,20 @@ func (s *Server) resumeSession(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, id, "resume_session", err)
 		return
 	}
-	if res.Live != nil {
+	if res.Live != nil && !res.Live.Dormant {
 		s.fail(w, r, id, "resume_session", errAlreadyLive)
 		return
 	}
-	out, err := s.Launcher.Resume(r.Context(), res.Provider.Name(), res.NativeID, sess.Cwd, req.Trust)
+	out, err := s.Launcher.Resume(r.Context(), res.Provider.Name(), res.NativeID, sess.Cwd, req.Trust, req.Backend)
 	if err != nil {
 		s.Sink.Record(res.Provider.Name(), id, deadletter.SendError, "resume session: "+err.Error(), nil)
 		s.fail(w, r, id, "resume_session", err)
 		return
+	}
+	if out.Backend != model.BackendDirect && s.Direct != nil && s.Direct.Owns(id) {
+		// The session moved to Herdr: drop the gateway's dormant record so
+		// only one runtime owns it.
+		s.Direct.Forget(r.Context(), id)
 	}
 	if err := s.Archive.Remove(id); err != nil {
 		slog.Warn("unarchive after resume failed", "session_id", id, "error", err)

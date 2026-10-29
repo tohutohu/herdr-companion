@@ -110,8 +110,8 @@ func Test会話の要約とメッセージを一度のスレッド取得で返�
 				pt.in <- b
 			})
 			p := New("codex-not-used", "/nonexistent.sock", &fakeTerm{}, deadletter.Nop{})
-			p.reader = newRPCClient(pt, nil)
-			t.Cleanup(p.reader.close)
+			p.owned = testOwned(pt)
+			t.Cleanup(p.owned.c.close)
 			ctx := context.Background()
 			sum, msgs, err := p.Conversation(ctx, th.ID, nil)
 			if err != nil {
@@ -150,8 +150,8 @@ func (c *readWaitContext) Done() <-chan struct{} {
 func Test同じ履歴の並行取得を共有し一方の切断で他方を中断しない(t *testing.T) {
 	pt := &pipeTransport{in: make(chan []byte, 16), out: make(chan []byte, 16), closed: make(chan struct{})}
 	p := New("unused", "/nonexistent.sock", &fakeTerm{}, deadletter.Nop{})
-	p.reader = newRPCClient(pt, nil)
-	t.Cleanup(p.reader.close)
+	p.owned = testOwned(pt)
+	t.Cleanup(p.owned.c.close)
 	base, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	first := &readWaitContext{Context: base, waiting: make(chan struct{})}
@@ -388,8 +388,8 @@ func Test呼び出し元が中断したスレッド読み込みはdeadletterに�
 	pt := &pipeTransport{in: make(chan []byte), out: make(chan []byte, 16), closed: make(chan struct{})}
 	rec := &deadletter.Recorder{}
 	p := New("codex-not-used", "/nonexistent.sock", &fakeTerm{}, rec)
-	p.reader = newRPCClient(pt, nil)
-	defer p.reader.close()
+	p.owned = testOwned(pt)
+	defer p.owned.c.close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -783,8 +783,8 @@ func Testモデル一覧をページングしてReserve以外の非表示や不�
 		pt.in <- b
 	})
 	p := New("codex-not-used", "/nonexistent.sock", &fakeTerm{}, deadletter.Nop{})
-	p.reader = newRPCClient(pt, nil)
-	defer p.reader.close()
+	p.owned = testOwned(pt)
+	defer p.owned.c.close()
 
 	cat, err := p.Models(context.Background())
 	if err != nil {
@@ -821,8 +821,8 @@ func TestReserveのレート制限を別ウィンドウとして取得する(t *
 		pt.in <- b
 	})
 	p := New("codex-not-used", "/nonexistent.sock", &fakeTerm{}, deadletter.Nop{})
-	p.reader = newRPCClient(pt, nil)
-	defer p.reader.close()
+	p.owned = testOwned(pt)
+	defer p.owned.c.close()
 
 	window, err := p.ReadReserveWindow(context.Background())
 	if err != nil {
@@ -1182,4 +1182,11 @@ func Test起動時のPlanモードはTUIのショートカットで設定する(
 // interrupted turn records one without an info block).
 func infoFromRollout(path string) *tokenInfo {
 	return tokenInfoFrom(rolloutTailLines(path))
+}
+
+// testOwned stands in for the gateway's own app-server with a fake transport.
+func testOwned(t transport) *daemonConn {
+	d := newDaemonConn(deadletter.Nop{})
+	d.c = newRPCClient(t, nil)
+	return d
 }

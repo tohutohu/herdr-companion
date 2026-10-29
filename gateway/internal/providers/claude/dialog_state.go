@@ -18,7 +18,7 @@ func (p *Provider) dialogLive(ctx context.Context, id string, live *providers.Li
 }
 
 func (p *Provider) dialogState(ctx context.Context, id string, live *providers.Live) (*providers.Live, *model.Interaction) {
-	if live == nil {
+	if !live.InPane() {
 		return live, nil
 	}
 	// Plans can survive compaction/resume without an unanswered tool call.

@@ -1,10 +1,13 @@
 // Package codex adapts Codex sessions through the Codex app-server protocol.
 //
-// History is read with thread/read. When Codex runs on the shared app-server
-// daemon (TUI started with `codex --remote unix://`), the gateway also
-// subscribes to loaded threads, which gives structured approvals and
-// requestUserInput prompts and lets it start turns. Otherwise input falls back
-// to the Herdr pane.
+// History is read with thread/read. The gateway runs its own `codex
+// app-server` child (stdio), which also hosts the sessions it manages directly:
+// it starts and resumes their threads, starts and steers turns with the
+// session's model, effort and collaboration mode, and answers approvals and
+// requestUserInput prompts (see direct.go). When Codex TUIs run on the shared
+// app-server daemon (`codex --remote unix://`) inside Herdr panes, the gateway
+// also subscribes to their threads for the same structured interactions;
+// other Herdr sessions fall back to the pane.
 package codex
 
 import (
@@ -48,7 +51,7 @@ type Provider struct {
 	sink       deadletter.Sink
 
 	mu              sync.Mutex
-	reader          *rpcClient
+	owned           *daemonConn
 	daemon          *daemonConn
 	terminalInputMu sync.Mutex
 	readMu          sync.Mutex
@@ -59,6 +62,10 @@ type Provider struct {
 	cacheBytes      int
 	actionVersion   atomic.Uint64
 	summaryEntries  map[string]*summaryRolloutEntry
+
+	directMu sync.Mutex
+	direct   map[string]*directThread
+	listener func(string)
 }
 
 type threadReadKey struct {
@@ -113,29 +120,70 @@ func gatewayID(native string) string { return providerName + ":" + native }
 // --- connections ---
 
 // client returns a connection for reads: the daemon when connected,
-// otherwise a private `codex app-server` child.
+// otherwise the gateway's own `codex app-server` child.
 func (p *Provider) client(ctx context.Context) (*rpcClient, error) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	if p.daemon != nil && p.daemon.c.alive() {
-		return p.daemon.c, nil
+		c := p.daemon.c
+		p.mu.Unlock()
+		return c, nil
 	}
-	if p.reader != nil && p.reader.alive() {
-		return p.reader, nil
-	}
-	t, err := startStdio(p.bin)
+	p.mu.Unlock()
+	d, err := p.ownedConn(ctx)
 	if err != nil {
 		return nil, err
 	}
-	c := newRPCClient(t, nil)
+	return d.c, nil
+}
+
+// ownedConn returns the gateway's own app-server, starting it when needed.
+// It serves reads and hosts the directly managed threads; it is the child of
+// the gateway and ends with it.
+func (p *Provider) ownedConn(ctx context.Context) (*daemonConn, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.owned != nil && p.owned.c.alive() {
+		return p.owned, nil
+	}
+	t, err := startStdio(p.bin)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", providers.ErrRuntimeUnavailable, err)
+	}
+	d := newDaemonConn(p.sink)
+	d.events = p.directEvent
+	d.closed = func(err error) { p.ownedClosed(d, err) }
+	d.c = newRPCClient(t, d)
 	ictx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
-	if err := c.initialize(ictx); err != nil {
-		c.close()
-		return nil, fmt.Errorf("codex app-server initialize: %w", err)
+	if err := d.c.initialize(ictx); err != nil {
+		d.c.close()
+		return nil, fmt.Errorf("%w: codex app-server initialize: %v", providers.ErrRuntimeUnavailable, err)
 	}
-	p.reader = c
-	return c, nil
+	p.owned = d
+	slog.Info("started codex app-server", "provider", providerName, "operation", "app-server.start", "pid", t.pid())
+	return d, nil
+}
+
+// currentOwned is the gateway's app-server when it runs.
+func (p *Provider) currentOwned() *daemonConn {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.owned != nil && p.owned.c.alive() {
+		return p.owned
+	}
+	return nil
+}
+
+// connFor is the connection with structured state for a thread: the
+// gateway's own app-server for a direct session, else the shared daemon.
+func (p *Provider) connFor(thread string, live *providers.Live) *daemonConn {
+	if live.IsDirect() || (live == nil && p.isDirect(thread)) {
+		if d := p.currentOwned(); d != nil {
+			return d
+		}
+		return nil
+	}
+	return p.currentDaemon()
 }
 
 func (p *Provider) currentDaemon() *daemonConn {
@@ -158,10 +206,11 @@ func (p *Provider) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			p.mu.Lock()
-			if p.reader != nil {
-				p.reader.close()
-			}
+			owned := p.owned
 			p.mu.Unlock()
+			if owned != nil {
+				owned.c.close()
+			}
 			return
 		case <-time.After(daemonRetryEvery):
 		}
@@ -309,7 +358,7 @@ func (p *Provider) Summary(ctx context.Context, nativeID string, live *providers
 	}
 	if scanErr == nil && state.available && state.turnID != "" && !state.unsupported {
 		th := state.thread(meta)
-		if d := p.currentDaemon(); d != nil {
+		if d := p.connFor(nativeID, live); d != nil {
 			d.mu.Lock()
 			if turn, ok := d.latestTurns[nativeID]; ok && turn.Status != "" && (turn.ID == state.turnID || d.latestTurnTimes[nativeID].After(state.turnAt)) {
 				if turn.ID != state.turnID {
@@ -356,11 +405,15 @@ func (p *Provider) summaryWithBase(ctx context.Context, th *Thread, live *provid
 		s.LastTurnFailed = lt.Status == "failed"
 		s.CompletionRevision = completionRevision(lt)
 	}
-	if d := p.currentDaemon(); d != nil {
+	if d := p.connFor(th.ID, live); d != nil {
 		s.Pending, s.Status = d.state(th.ID, live)
 		s.Mode = d.mode(th.ID, s.Mode)
 	}
-	if s.Pending == "" && live != nil && p.asyncInteraction(ctx, th, live) != nil {
+	if !live.InPane() {
+		// Screen-only dialogs exist only in a TUI.
+		return &s
+	}
+	if s.Pending == "" && p.asyncInteraction(ctx, th, live) != nil {
 		s.Pending, s.Status = model.InteractionQuestions, model.StatusWaitingInput
 	}
 	if s.Pending == "" && p.planPrompt(ctx, th, live) != nil {
@@ -466,10 +519,13 @@ func (p *Provider) messagesFromThread(ctx context.Context, th *Thread, live *pro
 	}
 
 	var pending []model.Message
-	if d := p.currentDaemon(); d != nil {
+	if d := p.connFor(nativeID, live); d != nil {
 		pending = d.interactions(nativeID, p.sink)
 	}
-	if len(pending) == 0 && live != nil {
+	if !live.InPane() {
+		return append(msgs, pending...)
+	}
+	if len(pending) == 0 {
 		if ia := p.asyncInteraction(ctx, th, live); ia != nil {
 			pending = []model.Message{{ID: ia.ID, Role: model.RoleAssistant, Timestamp: time.Unix(th.UpdatedAt, 0).UTC(), Blocks: []model.Block{{Type: model.BlockInteraction, Interaction: ia}}}}
 		} else if ia := p.planPrompt(ctx, th, live); ia != nil {
@@ -516,6 +572,9 @@ func (p *Provider) Send(ctx context.Context, nativeID string, live *providers.Li
 	if live == nil {
 		return providers.ErrNotLive
 	}
+	if live.Direct {
+		return p.directSend(ctx, nativeID, in)
+	}
 	if d := p.currentDaemon(); d != nil && d.loaded(nativeID) {
 		return p.sendStructured(ctx, d, nativeID, in)
 	}
@@ -532,6 +591,9 @@ func (p *Provider) CycleMode(ctx context.Context, nativeID string, live *provide
 	defer p.actionVersion.Add(1)
 	if live == nil {
 		return providers.ErrNotLive
+	}
+	if live.Direct {
+		return p.DirectSetMode(ctx, nativeID, "")
 	}
 	if d := p.currentDaemon(); d != nil && d.loaded(nativeID) {
 		if current, ok := d.collaborationMode(nativeID); ok && current.Settings != nil && current.Settings.Model != "" {
@@ -588,19 +650,21 @@ func (p *Provider) Respond(ctx context.Context, nativeID string, live *providers
 	if live == nil {
 		return providers.ErrNotLive
 	}
-	if strings.HasPrefix(r.InteractionID, asyncInputPrefix) {
+	if live.Direct {
+		defer p.notifyDirect(nativeID)
+	} else if strings.HasPrefix(r.InteractionID, asyncInputPrefix) {
 		return p.respondAsync(ctx, nativeID, live, r)
 	}
-	if strings.HasPrefix(r.InteractionID, planPromptPrefix) {
+	if strings.HasPrefix(r.InteractionID, planPromptPrefix) && live.InPane() {
 		return p.respondPlan(ctx, nativeID, live, r)
 	}
-	if strings.HasPrefix(r.InteractionID, rateLimitPromptPrefix) {
+	if strings.HasPrefix(r.InteractionID, rateLimitPromptPrefix) && live.InPane() {
 		return p.respondRateLimit(ctx, nativeID, live, r)
 	}
 	if r.InteractionID == blockedPromptID {
 		return providers.ErrUnsupported
 	}
-	d := p.currentDaemon()
+	d := p.connFor(nativeID, live)
 	if d == nil {
 		return providers.ErrInteractionGone
 	}
@@ -633,6 +697,11 @@ type pendingRequest struct {
 type daemonConn struct {
 	c    *rpcClient
 	sink deadletter.Sink
+	// events and closed are set on the gateway's own app-server, which hosts
+	// direct sessions. They run on the connection's read loop and must not
+	// make calls on it.
+	events func(method string, params json.RawMessage)
+	closed func(error)
 
 	mu         sync.Mutex
 	subscribed map[string]bool
@@ -807,6 +876,9 @@ func (d *daemonConn) Request(id json.RawMessage, method string, params json.RawM
 		d.pending[thread] = map[string]pendingRequest{}
 	}
 	d.pending[thread][string(id)] = pendingRequest{ID: id, Method: method, Params: params, Received: time.Now()}
+	if d.events != nil {
+		go d.events("request:"+method, params)
+	}
 }
 
 func (d *daemonConn) Notification(method string, params json.RawMessage) {
@@ -868,9 +940,16 @@ func (d *daemonConn) Notification(method string, params json.RawMessage) {
 		delete(d.settings, p.ThreadID)
 		d.mu.Unlock()
 	}
+	if d.events != nil {
+		d.events(method, params)
+	}
 }
 
-func (d *daemonConn) Closed(error) {}
+func (d *daemonConn) Closed(err error) {
+	if d.closed != nil {
+		d.closed(err)
+	}
+}
 
 // mode is the display label of a loaded thread's mode, or rolloutLabel (the
 // label summaryFromThread read from the rollout) when the daemon has no

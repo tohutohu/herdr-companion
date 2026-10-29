@@ -1,6 +1,6 @@
-// Package sessions joins Herdr's live view (which pane runs which native
-// session, and its status) with provider data. Nothing is stored: every call
-// reads current state.
+// Package sessions joins the live views (sessions the gateway runs directly,
+// and which Herdr pane runs which native session) with provider data. Herdr
+// is optional: without it only directly managed sessions are live.
 package sessions
 
 import (
@@ -15,6 +15,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/runtime"
 )
 
 // Snapshotter is the Herdr dependency.
@@ -34,6 +35,10 @@ type Service struct {
 	offlineWindow time.Duration
 	// Archive hides archived offline sessions from List. Optional.
 	Archive Archive
+	// Direct is the runtime of sessions the gateway runs itself. Optional.
+	Direct *runtime.Manager
+
+	snapshotFailures atomicCounter
 }
 
 func New(h Snapshotter, offlineWindow time.Duration, ps ...providers.Provider) *Service {
@@ -46,6 +51,8 @@ type Resolved struct {
 	NativeID string
 	Live     *providers.Live
 	Label    string // Herdr workspace label
+	// Direct holds the runtime details of a directly managed session.
+	Direct *runtime.Session
 }
 
 func (r *Resolved) ID() string { return r.Provider.Name() + ":" + r.NativeID }
@@ -65,12 +72,51 @@ func SplitID(id string) (provider, native string, ok bool) {
 }
 
 func (s *Service) snapshot(ctx context.Context) *herdr.Snapshot {
-	snap, err := s.herdr.Snapshot(ctx)
-	if err != nil {
-		slog.Warn("herdr snapshot failed; sessions shown as offline", "operation", "session.snapshot", "error", err)
+	if s.herdr == nil {
 		return nil
 	}
+	snap, err := s.herdr.Snapshot(ctx)
+	if err != nil {
+		// Herdr is optional: without its server only direct sessions are
+		// live. Say so once per outage rather than on every poll.
+		if s.snapshotFailures.add() == 1 {
+			slog.Warn("herdr unavailable; only directly managed sessions are live", "operation", "session.snapshot", "error", err)
+		} else {
+			slog.Debug("herdr snapshot failed", "operation", "session.snapshot", "error", err)
+		}
+		return nil
+	}
+	if s.snapshotFailures.reset() > 0 {
+		slog.Info("herdr available again", "operation", "session.snapshot")
+	}
 	return snap
+}
+
+// liveAll returns every live session: Herdr's panes and the direct runtime.
+// A session both claim (resumed in a terminal while the gateway also holds
+// it) belongs to the runtime whose process is running; a dormant direct
+// record gives way to the Herdr pane.
+func (s *Service) liveAll(ctx context.Context) map[string]*Resolved {
+	out := s.live(ctx, s.snapshot(ctx))
+	if s.Direct == nil {
+		return out
+	}
+	for id, d := range s.Direct.Sessions() {
+		pname, native, ok := SplitID(id)
+		p := s.provider(pname)
+		if !ok || p == nil {
+			continue
+		}
+		if h, dup := out[id]; dup {
+			if d.Live.Dormant {
+				continue
+			}
+			slog.Warn("session runs both in herdr and directly; using the direct runtime", "session_id", id, "pane", h.Live.PaneID)
+		}
+		d := d
+		out[id] = &Resolved{Provider: p, NativeID: native, Live: d.Live, Direct: &d}
+	}
+	return out
 }
 
 // live returns sessions currently hosted by Herdr panes, keyed by gateway id.
@@ -144,7 +190,7 @@ func (s *Service) Resolve(ctx context.Context, id string) (*Resolved, error) {
 	if p == nil {
 		return nil, providers.ErrNotFound
 	}
-	if r, ok := s.live(ctx, s.snapshot(ctx))[id]; ok {
+	if r, ok := s.liveAll(ctx)[id]; ok {
 		return r, nil
 	}
 	return &Resolved{Provider: p, NativeID: native}, nil
@@ -219,13 +265,10 @@ func (s *Service) Forget(id string) {
 	}
 }
 
-// LiveSessions returns only sessions currently hosted by Herdr.
+// LiveSessions returns only live sessions: directly managed ones and those
+// in Herdr panes. Herdr being unavailable is not an error.
 func (s *Service) LiveSessions(ctx context.Context) ([]model.Session, error) {
-	snap, err := s.herdr.Snapshot(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return s.liveSessions(ctx, s.live(ctx, snap)), nil
+	return s.liveSessions(ctx, s.liveAll(ctx)), nil
 }
 
 // liveSessions summarizes each live session concurrently: providers read
@@ -259,7 +302,7 @@ func (s *Service) liveSessions(ctx context.Context, live map[string]*Resolved) [
 // List returns live sessions first plus recently updated offline ones. Live
 // summaries and each provider's recent sessions are read concurrently.
 func (s *Service) List(ctx context.Context) ([]model.Session, error) {
-	live := s.live(ctx, s.snapshot(ctx))
+	live := s.liveAll(ctx)
 	var liveOut []model.Session
 	offline := make([][]model.Session, len(s.providers))
 	var wg sync.WaitGroup
@@ -354,7 +397,7 @@ func (s *Service) Archived(ctx context.Context, offset, limit int) (out []model.
 		ids = ids[:limit]
 		next = max(offset, 0) + limit
 	}
-	live := s.live(ctx, s.snapshot(ctx))
+	live := s.liveAll(ctx)
 	// Summaries read transcripts or call the Codex app-server; reading them
 	// one by one made a long archive take seconds.
 	found := make([]*model.Session, len(ids))
@@ -397,6 +440,15 @@ func (s *Service) archived(id string) bool { return s.Archive != nil && s.Archiv
 func (s *Service) toSession(r *Resolved, sum *providers.Summary) model.Session {
 	sess := toSession(r, sum)
 	sess.Archived = s.archived(sess.ID)
+	if d := r.Direct; d != nil {
+		if d.Mode != "" {
+			sess.Mode = d.Mode
+		}
+		sess.PendingModel, sess.PendingEffort, sess.SettingsApply = d.PendingModel, d.PendingEffort, d.SettingsApply
+		if sess.Status == model.StatusFailed {
+			sess.Error = d.Error
+		}
+	}
 	return sess
 }
 
@@ -417,7 +469,14 @@ func toSession(r *Resolved, sum *providers.Summary) model.Session {
 		Cost:               sum.Cost,
 		Status:             Normalize(r.Live, sum),
 	}
+	if sess.CompletionRevision == "" && r.Live != nil {
+		sess.CompletionRevision = r.Live.Revision
+	}
 	if r.Live != nil {
+		sess.Backend = model.BackendHerdr
+		if r.Live.Direct {
+			sess.Backend = model.BackendDirect
+		}
 		sess.PaneID = r.Live.PaneID
 		sess.Unread = r.Live.HerdrStatus == herdr.StatusDone
 		// Providers resolve file links against the pane cwd, so the file API
@@ -442,6 +501,10 @@ func Normalize(live *providers.Live, sum *providers.Summary) model.Status {
 	if sum.Status != "" {
 		return sum.Status
 	}
+	if live.Failed && live.HerdrStatus != herdr.StatusWorking && live.HerdrStatus != herdr.StatusBlocked {
+		// A direct session whose process died during a turn.
+		return model.StatusFailed
+	}
 	switch live.HerdrStatus {
 	case herdr.StatusWorking:
 		return model.StatusRunning
@@ -461,4 +524,48 @@ func Normalize(live *providers.Live, sum *providers.Summary) model.Status {
 		}
 		return model.StatusIdle
 	}
+}
+
+// atomicCounter counts consecutive failures.
+type atomicCounter struct {
+	mu sync.Mutex
+	n  int
+}
+
+func (c *atomicCounter) add() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.n++
+	return c.n
+}
+
+func (c *atomicCounter) reset() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n := c.n
+	c.n = 0
+	return n
+}
+
+// Send delivers input to a live session. A direct session without a process
+// is resumed first, under the same id, with nothing replayed.
+func (s *Service) Send(ctx context.Context, r *Resolved, in model.Input) error {
+	if r.Live == nil {
+		return providers.ErrNotLive
+	}
+	live := r.Live
+	if live.Direct && live.Dormant {
+		if s.Direct == nil {
+			return providers.ErrNotLive
+		}
+		if err := s.Direct.EnsureRunning(ctx, r.ID()); err != nil {
+			return err
+		}
+		fresh, ok := s.Direct.Sessions()[r.ID()]
+		if !ok || fresh.Live.Dormant {
+			return providers.ErrRuntimeUnavailable
+		}
+		live = fresh.Live
+	}
+	return r.Provider.Send(ctx, r.NativeID, live, in)
 }

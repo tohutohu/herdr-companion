@@ -448,7 +448,7 @@ func Test起動に失敗したら作ったワークスペースを閉じる(t *t
 func Test既存セッションを作業ディレクトリで再開する(t *testing.T) {
 	fh := &fakeHerdr{status: herdr.StatusIdle, session: &herdr.AgentSession{Agent: "claude", Kind: "id", Value: "abc-123"}}
 	l, root := newLauncher(t, fh)
-	res, err := l.Resume(context.Background(), "claude", "abc-123", filepath.Join(root, "app-b"), false)
+	res, err := l.Resume(context.Background(), "claude", "abc-123", filepath.Join(root, "app-b"), false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -458,10 +458,10 @@ func Test既存セッションを作業ディレクトリで再開する(t *test
 	if got := strings.Join(fh.calls, "|"); got != "create app-b|start claude --resume abc-123" {
 		t.Errorf("calls = %s", got)
 	}
-	if _, err := l.Resume(context.Background(), "claude", "abc-123", "", false); !errors.Is(err, ErrNoCwd) {
+	if _, err := l.Resume(context.Background(), "claude", "abc-123", "", false, ""); !errors.Is(err, ErrNoCwd) {
 		t.Errorf("no cwd err = %v", err)
 	}
-	if _, err := l.Resume(context.Background(), "claude", "abc-123", "/etc", false); !errors.Is(err, files.ErrForbidden) {
+	if _, err := l.Resume(context.Background(), "claude", "abc-123", "/etc", false, ""); !errors.Is(err, files.ErrForbidden) {
 		t.Errorf("outside err = %v", err)
 	}
 }
@@ -552,7 +552,7 @@ func Testフックが報告しないセッションはproviderが見つけてHer
 	// 再開時は既知の id をそのまま報告する
 	fh = &fakeHerdr{status: herdr.StatusIdle}
 	l.Herdr = fh
-	res, err = l.Resume(context.Background(), "claude", "known-1", root, false)
+	res, err = l.Resume(context.Background(), "claude", "known-1", root, false, "")
 	if err != nil || res.SessionID != "claude:known-1" {
 		t.Errorf("resume = %+v %v", res, err)
 	}
@@ -912,7 +912,7 @@ func Testルート外にあるworktreeのセッションもリポジトリがル
 	wt := filepath.Join(outside, "worktrees", "repo-a")
 	gitRun(t, repo, "worktree", "add", "-q", "-b", "worktree/a", wt)
 
-	res, err := l.Resume(context.Background(), "claude", "abc-123", wt, true)
+	res, err := l.Resume(context.Background(), "claude", "abc-123", wt, true, "")
 	if err != nil || res.SessionID != "claude:abc-123" {
 		t.Fatalf("res = %+v err = %v", res, err)
 	}
@@ -920,11 +920,11 @@ func Testルート外にあるworktreeのセッションもリポジトリがル
 		t.Errorf("calls = %s", got)
 	}
 	// ルート外の普通のディレクトリは引き続き拒否する
-	if _, err := l.Resume(context.Background(), "claude", "abc-123", outside, true); !errors.Is(err, files.ErrForbidden) {
+	if _, err := l.Resume(context.Background(), "claude", "abc-123", outside, true, ""); !errors.Is(err, files.ErrForbidden) {
 		t.Errorf("outside err = %v", err)
 	}
 	// 削除済みのworktreeは分かるエラーにする
-	if _, err := l.Resume(context.Background(), "claude", "abc-123", filepath.Join(root, "gone"), true); !errors.Is(err, ErrCwdGone) {
+	if _, err := l.Resume(context.Background(), "claude", "abc-123", filepath.Join(root, "gone"), true, ""); !errors.Is(err, ErrCwdGone) {
 		t.Errorf("gone err = %v", err)
 	}
 }

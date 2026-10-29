@@ -248,7 +248,7 @@ func Test要約と詳細の並行取得でキャッシュを破壊しない(t *t
 	}
 	wg.Wait()
 	d := newDaemonConn(deadletter.Nop{})
-	d.c = p.reader
+	d.c = p.owned.c
 	p.daemon = d
 	d.Notification("turn/started", json.RawMessage(`{"threadId":"`+th.ID+`","turn":{"id":"new-turn","status":"inProgress"}}`))
 	sum, err := p.Summary(ctx, th.ID, nil)
@@ -261,7 +261,7 @@ func Test巻き戻しイベントはファイル変更前でも要約を再照�
 	th, _ := summaryTestThread(t)
 	p, f := cacheTestProvider(t, th)
 	d := newDaemonConn(deadletter.Nop{})
-	d.c = p.reader
+	d.c = p.owned.c
 	p.daemon = d
 	ctx := context.Background()
 	if _, err := p.Summary(ctx, th.ID, nil); err != nil {

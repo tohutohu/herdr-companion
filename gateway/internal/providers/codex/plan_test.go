@@ -45,8 +45,8 @@ func planTestProvider(t *testing.T, th *Thread, term *asyncTerminal) *Provider {
 	pt := &pipeTransport{in: make(chan []byte, 16), out: make(chan []byte, 16), closed: make(chan struct{})}
 	go f.serve(pt, func(v any) { b, _ := json.Marshal(v); pt.in <- b })
 	p := New("unused", "/nonexistent", term, deadletter.Nop{})
-	p.reader = newRPCClient(pt, nil)
-	t.Cleanup(p.reader.close)
+	p.owned = testOwned(pt)
+	t.Cleanup(p.owned.c.close)
 	return p
 }
 

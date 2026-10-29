@@ -5,6 +5,7 @@ package providers
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -18,16 +19,109 @@ var (
 	ErrNotLive         = errors.New("session is not running in herdr")
 	ErrUnsupported     = errors.New("not supported for this session")
 	ErrInteractionGone = errors.New("interaction is no longer pending")
+	// ErrNoTerminal is returned for terminal operations on a directly managed
+	// session, which has no TUI.
+	ErrNoTerminal = errors.New("this session is managed directly by the gateway and has no terminal")
+	// ErrNotDirect is returned for runtime operations (model, effort,
+	// interrupt) on a session that is not managed directly.
+	ErrNotDirect = errors.New("only sessions managed directly by the gateway support this; this one runs in Herdr")
+	// ErrRuntimeUnavailable means the agent's runtime (Claude sidecar, Codex
+	// app-server) could not be started.
+	ErrRuntimeUnavailable = errors.New("agent runtime unavailable")
 )
 
-// Live describes where a session currently runs. Nil means not in Herdr.
+// DirectStart describes a session the gateway starts or resumes itself.
+type DirectStart struct {
+	Cwd    string
+	Model  string
+	Effort string
+	Mode   string
+	// Resume is the native id of an existing session to continue; empty
+	// starts a new one.
+	Resume string
+	// Prompt is sent as the first message; it may be empty.
+	Prompt model.Input
+}
+
+// DirectInfo is a directly managed session's runtime state.
+type DirectInfo struct {
+	NativeID string
+	Cwd      string
+	// Alive means the runtime process holds the session.
+	Alive bool
+	// Running means a turn is in progress.
+	Running bool
+	// Waiting means the agent waits on an approval or a question.
+	Waiting bool
+	// Model, Effort and Mode are what the runtime runs with now (empty when
+	// unknown); RequestedModel / RequestedEffort are changes not yet used by
+	// a model response.
+	Model, Effort, Mode             string
+	RequestedModel, RequestedEffort string
+	// Turns counts finished turns; LastTurnFailed is the latest one's outcome.
+	Turns          int
+	LastTurnFailed bool
+	// Error is the reason the runtime or the latest turn failed.
+	Error string
+}
+
+// SettingsApply says when a model or effort change takes effect.
+const (
+	ApplyNextRequest = "next_request" // the next model call, even inside a turn (Claude)
+	ApplyNextTurn    = "next_turn"    // the next turn (Codex)
+)
+
+// DirectRuntime is implemented by providers the gateway can run without Herdr.
+// Send and Respond of the Provider handle a Live with Direct set.
+type DirectRuntime interface {
+	// DirectStart starts (or resumes) a session and returns its native id.
+	DirectStart(ctx context.Context, opts DirectStart) (string, error)
+	// DirectStop ends the session's process; its history stays.
+	DirectStop(ctx context.Context, nativeID string) error
+	DirectInterrupt(ctx context.Context, nativeID string) error
+	DirectSetModel(ctx context.Context, nativeID, model string) error
+	DirectSetEffort(ctx context.Context, nativeID, effort string) error
+	// DirectSetMode sets a mode id from the catalog; "" advances to the next one.
+	DirectSetMode(ctx context.Context, nativeID, mode string) error
+	// DirectSessions lists the sessions the runtime holds.
+	DirectSessions() []DirectInfo
+	// SettingsApply is ApplyNextRequest or ApplyNextTurn.
+	SettingsApply() string
+	// SetDirectListener registers a callback run after any runtime change.
+	SetDirectListener(func(nativeID string))
+}
+
+// Live describes where a session currently runs. Nil means it runs nowhere:
+// neither in a Herdr pane nor under the gateway's own runtime.
 type Live struct {
-	PaneID      string
+	// PaneID is the Herdr pane; empty for a directly managed session.
+	PaneID string
+	// HerdrStatus is Herdr's agent status. For a directly managed session the
+	// runtime fills in the equivalent value (working, blocked, done, idle), so
+	// status normalization is the same for both backends.
 	HerdrStatus string
 	Cwd         string
+	// Direct marks a session the gateway runs itself (Claude Agent SDK or its
+	// own Codex app-server) rather than in a Herdr pane.
+	Direct bool
+	// Dormant marks a direct session with no process: the gateway restarted
+	// or the runtime exited. The next message resumes it in a new process.
+	Dormant bool
+	// Failed marks a direct session whose process died during a turn.
+	Failed bool
+	// Revision changes each time a direct session finishes a turn, for
+	// providers whose history has no completion revision of its own.
+	Revision string
 }
 
 func (l *Live) Blocked() bool { return l != nil && l.HerdrStatus == herdr.StatusBlocked }
+
+// IsDirect reports whether l is a directly managed session.
+func (l *Live) IsDirect() bool { return l != nil && l.Direct }
+
+// InPane reports whether l is a session in a Herdr pane, whose screen and
+// keys may be used.
+func (l *Live) InPane() bool { return l != nil && !l.Direct && l.PaneID != "" }
 
 // visibleTerminal reads what a pane shows right now. Herdr's client has it;
 // test terminals may not, so it is not part of Terminal.
@@ -302,4 +396,23 @@ type StartupSessionReporter interface {
 // model selection is an API operation rather than a command-line option.
 type PreparedLauncher interface {
 	PrepareLaunch(context.Context, LaunchOptions) (args []string, nativeID string, err error)
+}
+
+// TrustChecker reports whether the user already trusted a folder in the
+// agent itself. A session the gateway runs directly gets no folder-trust
+// dialog from the agent, so the gateway asks before starting in a folder the
+// agent has never been trusted in (project hooks and MCP servers run code).
+type TrustChecker interface {
+	FolderTrusted(cwd string) bool
+}
+
+// ParentDirs returns dir and every parent directory, nearest first.
+func ParentDirs(dir string) []string {
+	var out []string
+	for d := filepath.Clean(dir); ; d = filepath.Dir(d) {
+		out = append(out, d)
+		if d == filepath.Dir(d) {
+			return out
+		}
+	}
 }

@@ -1,5 +1,6 @@
-// Package launcher starts new agent sessions in Herdr and lets the app pick or
-// create their working directory under configured workspace roots.
+// Package launcher starts new agent sessions — directly under the gateway's
+// own runtime by default, or in a Herdr pane when asked — and lets the app
+// pick or create their working directory under configured workspace roots.
 package launcher
 
 import (
@@ -21,6 +22,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/runtime"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/worktree"
 )
 
@@ -33,6 +35,7 @@ var (
 	ErrNoCwd           = errors.New("session has no known working directory")
 	ErrNoPendingTrust  = errors.New("no launch is waiting on a trust answer for this pane")
 	ErrCwdGone         = errors.New("the session's working directory no longer exists")
+	ErrInvalidBackend  = errors.New(`backend must be "direct" or "herdr", and "direct" is only available for Claude Code and Codex`)
 )
 
 // Herdr is the subset of the Herdr client used to launch agents.
@@ -56,6 +59,10 @@ type Launcher struct {
 	Herdr     Herdr
 	Roots     []string
 	Providers []providers.Provider
+	// Direct runs sessions without Herdr; nil starts every session in Herdr.
+	Direct *runtime.Manager
+	// WorktreeDir is where worktrees for direct sessions are made.
+	WorktreeDir string
 
 	// Timings (overridable in tests).
 	StartTimeout time.Duration
@@ -74,6 +81,9 @@ type Launcher struct {
 	// ones are simply kept.
 	pending map[string]*pendingLaunch
 	panes   map[string]bool
+	// directPending holds direct starts waiting on the folder-trust answer,
+	// by launch id.
+	directPending map[string]*StartRequest
 }
 
 // pendingLaunch retains the context needed to finish a partial launch.
@@ -223,9 +233,11 @@ type StartRequest struct {
 	// Trust accepts the agent's folder-trust dialog on the user's behalf.
 	// Without it the launch stops at the dialog and reports TrustRequired.
 	Trust bool `json:"trust"`
-	// Worktree starts the session in a new git worktree of Cwd's repository,
-	// made by Herdr.
+	// Worktree starts the session in a new git worktree of Cwd's repository.
 	Worktree bool `json:"worktree,omitempty"`
+	// Backend is "direct" (the gateway's own runtime, the default where the
+	// agent supports it) or "herdr" (a new Herdr workspace).
+	Backend string `json:"backend,omitempty"`
 	// Images and Files are attachments of the first prompt, as local paths
 	// the API has already resolved from upload ids.
 	Images []string `json:"-"`
@@ -234,7 +246,11 @@ type StartRequest struct {
 
 type StartResult struct {
 	SessionID string `json:"sessionId,omitempty"`
-	PaneID    string `json:"paneId"`
+	// PaneID is the Herdr pane of a Herdr launch; a direct session has none.
+	PaneID string `json:"paneId,omitempty"`
+	// LaunchID names a direct start waiting on the folder-trust answer.
+	LaunchID string `json:"launchId,omitempty"`
+	Backend  string `json:"backend,omitempty"`
 	// Warning explains a partial start (e.g. waiting on a dialog, no identity yet).
 	Warning string `json:"warning,omitempty"`
 	// TrustRequired means the agent is showing its folder-trust dialog; the
@@ -268,9 +284,34 @@ func agentName(kind string) string {
 	return kind + "-" + hex.EncodeToString(b)
 }
 
-// Start opens a Herdr workspace in cwd and launches the agent there.
+// backend picks where a session runs.
+func (l *Launcher) backend(provider, asked string) (string, error) {
+	direct := l.Direct != nil && l.Direct.Supports(provider)
+	switch asked {
+	case "":
+		if direct {
+			return model.BackendDirect, nil
+		}
+		return model.BackendHerdr, nil
+	case model.BackendDirect:
+		if !direct {
+			return "", ErrInvalidBackend
+		}
+		return asked, nil
+	case model.BackendHerdr:
+		return asked, nil
+	}
+	return "", ErrInvalidBackend
+}
+
+// Start launches the agent: directly by default, or in a new Herdr
+// workspace in cwd.
 func (l *Launcher) Start(ctx context.Context, req StartRequest) (*StartResult, error) {
 	p, lp, err := l.provider(req.Provider)
+	if err != nil {
+		return nil, err
+	}
+	backend, err := l.backend(req.Provider, req.Backend)
 	if err != nil {
 		return nil, err
 	}
@@ -286,6 +327,9 @@ func (l *Launcher) Start(ctx context.Context, req StartRequest) (*StartResult, e
 	cwd, err := l.resolveDir(req.Cwd)
 	if err != nil {
 		return nil, err
+	}
+	if backend == model.BackendDirect {
+		return l.startDirect(ctx, p, req, cwd)
 	}
 	opts := providers.LaunchOptions{Model: req.Model, Effort: req.Effort, Mode: req.Mode, Cwd: cwd}
 	prompt := model.Input{Text: req.Prompt, Images: req.Images, Files: req.Files}
@@ -318,11 +362,14 @@ func (l *Launcher) Start(ctx context.Context, req StartRequest) (*StartResult, e
 	return l.launch(ctx, plan)
 }
 
-// Resume reopens an existing session (not currently in Herdr) in a new
-// workspace in its working directory.
-func (l *Launcher) Resume(ctx context.Context, provider, nativeID, cwd string, trust bool) (*StartResult, error) {
+// Resume reopens an existing session that runs nowhere, under its own id:
+// directly by default, or in a new Herdr workspace in its working directory.
+func (l *Launcher) Resume(ctx context.Context, provider, nativeID, cwd string, trust bool, backend string) (*StartResult, error) {
 	p, lp, err := l.provider(provider)
 	if err != nil {
+		return nil, err
+	}
+	if backend, err = l.backend(provider, backend); err != nil {
 		return nil, err
 	}
 	if cwd == "" {
@@ -338,6 +385,13 @@ func (l *Launcher) Resume(ctx context.Context, provider, nativeID, cwd string, t
 	}
 	if err != nil {
 		return nil, err
+	}
+	if backend == model.BackendDirect {
+		id := p.Name() + ":" + nativeID
+		if err := l.Direct.Resume(ctx, id, providers.DirectStart{Cwd: dir}); err != nil {
+			return nil, err
+		}
+		return &StartResult{SessionID: id, Backend: model.BackendDirect}, nil
 	}
 	return l.launch(ctx, launchPlan{p: p, lp: lp, cwd: dir, args: lp.ResumeArgs(nativeID, dir), trust: trust, knownID: nativeID, logKV: []any{"resume", nativeID}})
 }
@@ -442,6 +496,17 @@ func (l *Launcher) discard(ctx context.Context, ws, wt string, p providers.Provi
 // AnswerTrust resumes a launch stopped at the folder-trust dialog. Declining
 // closes the workspace that was opened for it.
 func (l *Launcher) AnswerTrust(ctx context.Context, pane string, accept bool) (*StartResult, error) {
+	if req := l.takeDirectPending(pane); req != nil {
+		if !accept {
+			slog.Info("folder trust declined", "provider", req.Provider, "launch", pane, "cwd", req.Cwd)
+			return &StartResult{LaunchID: pane, Backend: model.BackendDirect}, nil
+		}
+		p, _, err := l.provider(req.Provider)
+		if err != nil {
+			return nil, err
+		}
+		return l.runDirect(ctx, p, *req)
+	}
 	pl := l.takePending(pane)
 	if pl == nil {
 		return nil, ErrNoPendingTrust
@@ -849,3 +914,61 @@ func (l *Launcher) sessionReportWait() time.Duration {
 
 // readyPoll paces the polls of a starting agent, which hold up the response.
 func (l *Launcher) readyPoll() time.Duration { return min(l.pollInterval(), 200*time.Millisecond) }
+
+// startDirect runs a session under the gateway's own runtime. The agent shows
+// no folder-trust dialog there, so a folder the agent was never trusted in
+// is confirmed with the user first (TrustRequired with a launch id), as the
+// Herdr launch does with the agent's own dialog.
+func (l *Launcher) startDirect(ctx context.Context, p providers.Provider, req StartRequest, cwd string) (*StartResult, error) {
+	req.Cwd = cwd
+	if tc, ok := p.(providers.TrustChecker); ok && !req.Trust && !tc.FolderTrusted(cwd) {
+		id := "launch-" + agentName(p.Name())
+		l.mu.Lock()
+		if l.directPending == nil {
+			l.directPending = map[string]*StartRequest{}
+		}
+		l.directPending[id] = &req
+		l.mu.Unlock()
+		slog.Info("direct launch waiting on folder trust", "provider", p.Name(), "launch", id, "cwd", cwd)
+		return &StartResult{LaunchID: id, Backend: model.BackendDirect, TrustRequired: true}, nil
+	}
+	return l.runDirect(ctx, p, req)
+}
+
+func (l *Launcher) takeDirectPending(id string) *StartRequest {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	req := l.directPending[id]
+	delete(l.directPending, id)
+	return req
+}
+
+func (l *Launcher) runDirect(ctx context.Context, p providers.Provider, req StartRequest) (*StartResult, error) {
+	cwd, wt := req.Cwd, ""
+	if req.Worktree {
+		path, err := worktree.Create(ctx, cwd, l.WorktreeDir, p.Name())
+		if err != nil {
+			return nil, fmt.Errorf("create worktree: %w", err)
+		}
+		cwd, wt = path, path
+	}
+	opts := providers.DirectStart{Cwd: cwd, Model: req.Model, Effort: req.Effort, Mode: req.Mode,
+		Prompt: model.Input{Text: req.Prompt, Images: req.Images, Files: req.Files}}
+	id, err := l.Direct.Start(ctx, p.Name(), opts)
+	if id == "" {
+		if wt != "" {
+			if derr := worktree.Discard(context.WithoutCancel(ctx), wt); derr != nil {
+				slog.Warn("removing worktree of a failed start failed", "provider", p.Name(), "path", wt, "error", derr)
+			}
+		}
+		return nil, err
+	}
+	res := &StartResult{SessionID: id, Backend: model.BackendDirect}
+	if err != nil {
+		// The session exists, but its first prompt did not go through.
+		res.Warning = "The session started, but its first message was not delivered: " + err.Error()
+	}
+	slog.Info("direct session started", "provider", p.Name(), "session_id", id, "operation", "launch", "cwd", cwd,
+		"model", req.Model, "effort", req.Effort, "mode", req.Mode, "worktree", req.Worktree)
+	return res, nil
+}

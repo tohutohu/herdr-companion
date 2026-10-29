@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
 	"strconv"
 	"sync"
@@ -18,6 +19,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+
+	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 )
 
 // Codex app-server speaks JSON-RPC 2.0 without the "jsonrpc" field.
@@ -219,6 +222,10 @@ type stdioTransport struct {
 
 func startStdio(bin string) (*stdioTransport, error) {
 	cmd := exec.Command(bin, "app-server")
+	// The gateway may itself run in a Herdr pane during development; its
+	// pane must not leak into the agent's tools (hc and herdr would act on
+	// that pane).
+	cmd.Env = providers.ChildEnv(os.Environ(), nil)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -235,6 +242,13 @@ func startStdio(bin string) (*stdioTransport, error) {
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 1<<20), 256<<20)
 	return &stdioTransport{cmd: cmd, stdin: stdin, sc: sc}, nil
+}
+
+func (s *stdioTransport) pid() int {
+	if s.cmd.Process == nil {
+		return 0
+	}
+	return s.cmd.Process.Pid
 }
 
 func (s *stdioTransport) write(_ context.Context, b []byte) error {

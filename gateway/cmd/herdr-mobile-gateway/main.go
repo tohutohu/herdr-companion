@@ -1,5 +1,7 @@
-// Command herdr-mobile-gateway is the Herdr Companion Gateway. It serves
-// Herdr-managed coding-agent sessions to the Herdr Companion apps.
+// Command herdr-mobile-gateway is the Herdr Companion Gateway. It runs
+// Claude Code and Codex sessions itself (Claude Agent SDK sidecar, its own
+// Codex app-server) and also serves sessions running in Herdr panes to the
+// Herdr Companion apps.
 package main
 
 import (
@@ -10,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"syscall"
@@ -30,6 +33,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/codex"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/devin"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/opencode"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/runtime"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/sessions"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/uploads"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/usage"
@@ -53,6 +57,7 @@ Environment:
   HERDR_MOBILE_CONFIG      config file (default ~/.config/herdr-mobile/config.json)
   HERDR_MOBILE_STATE_DIR   state dir for logs and dead letters (default ~/.local/state/herdr-mobile)
   HERDR_MOBILE_FCM_CREDENTIALS  Firebase service account JSON
+  HERDR_CLAUDE_SIDECAR     herdr-claude-sidecar executable (default: next to this one, then PATH)
 `
 
 func main() {
@@ -144,6 +149,7 @@ func serve(args []string) error {
 	claudeProvider := claude.New(cfg.ClaudeConfigDir, hc, sink)
 	codexProvider := codex.New(cfg.CodexBinary, cfg.CodexDaemonSock, hc, sink)
 	claudeProvider.SetCacheBytes(int64(cfg.HistoryCacheMB) << 20)
+	claudeProvider.SetDirect(claude.DirectConfig{Sidecar: sidecarPath(cfg.ClaudeSidecar), Claude: claudePath(cfg.ClaudeBinary), AllowAPIKey: cfg.ClaudeAllowAPIKey})
 	codexProvider.SetCacheBytes(cfg.HistoryCacheMB << 20)
 	go codexProvider.Run(ctx)
 	openCodeProvider := opencode.New(cfg.OpenCode, hc, sink)
@@ -154,6 +160,12 @@ func serve(args []string) error {
 		return err
 	}
 	svc.Archive = archived
+	offlineWindow := time.Duration(cfg.OfflineSessionDays) * 24 * time.Hour
+	direct, err := runtime.New(filepath.Join(config.StateDir(), "direct-sessions.json"), offlineWindow, claudeProvider, codexProvider)
+	if err != nil {
+		return err
+	}
+	svc.Direct = direct
 	delivery, err := api.OpenMessageDeliveryStore(filepath.Join(config.StateDir(), "message-delivery"))
 	if err != nil {
 		return err
@@ -163,7 +175,8 @@ func serve(args []string) error {
 	if len(roots) == 0 {
 		roots = launcher.DefaultRoots()
 	}
-	launch := &launcher.Launcher{Herdr: hc, Roots: roots, Providers: []providers.Provider{claudeProvider, codexProvider, openCodeProvider, devinProvider}}
+	launch := &launcher.Launcher{Herdr: hc, Roots: roots, Providers: []providers.Provider{claudeProvider, codexProvider, openCodeProvider, devinProvider},
+		Direct: direct, WorktreeDir: filepath.Join(config.StateDir(), "worktrees")}
 
 	jevKey := os.Getenv("TYPESAFE_API_KEY")
 	if jevKey == "" {
@@ -184,11 +197,12 @@ func serve(args []string) error {
 	} else {
 		watcher.Sender = sender
 	}
+	direct.SetListener(watcher.Kick)
 	go watcher.Run(ctx)
 
 	srv := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           (&api.Server{MessageDelivery: delivery, AgentUpdates: agentupdate.New(ctx, cfg.CodexBinary, cfg.OpenCode.Binary, devinBinary), Sessions: svc, Terminal: hc, Focus: hc, Uploads: up, Config: store, Sink: sink, Launcher: launch, Worktrees: hc, Archive: archived, Usage: limits, DirectoryCheck: dirCheck}).Handler(),
+		Handler:           (&api.Server{MessageDelivery: delivery, AgentUpdates: agentupdate.New(ctx, cfg.CodexBinary, cfg.OpenCode.Binary, devinBinary), Sessions: svc, Terminal: hc, Focus: hc, Uploads: up, Config: store, Sink: sink, Launcher: launch, Worktrees: hc, Archive: archived, Usage: limits, DirectoryCheck: dirCheck, Direct: direct}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {
@@ -196,8 +210,13 @@ func serve(args []string) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		srv.Shutdown(shutdownCtx)
+		// Record which direct sessions were cut off, then end their
+		// processes (the Codex app-server ends with ctx).
+		direct.Shutdown()
+		claudeProvider.Close()
 	}()
-	slog.Info("gateway listening", "operation", "serve", "addr", cfg.Listen, "herdr_socket", hc.Socket(), "config", store.Path())
+	slog.Info("gateway listening", "operation", "serve", "addr", cfg.Listen, "herdr_socket", hc.Socket(), "config", store.Path(),
+		"claude_sidecar", sidecarPath(cfg.ClaudeSidecar), "claude", claudePath(cfg.ClaudeBinary))
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
@@ -300,4 +319,44 @@ func notifyTestCmd() error {
 		}
 	}
 	return nil
+}
+
+// sidecarPath finds herdr-claude-sidecar: configured, from the environment,
+// next to this executable (as the Mac app bundles it), or on PATH.
+func sidecarPath(configured string) string {
+	const name = "herdr-claude-sidecar"
+	if configured != "" {
+		return configured
+	}
+	if p := os.Getenv("HERDR_CLAUDE_SIDECAR"); p != "" {
+		return p
+	}
+	if exe, err := os.Executable(); err == nil {
+		p := filepath.Join(filepath.Dir(exe), name)
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p
+		}
+	}
+	if p, err := exec.LookPath(name); err == nil {
+		return p
+	}
+	return ""
+}
+
+// claudePath finds the user's Claude Code CLI. A GUI app's PATH is short, so
+// the native installer's location is tried too.
+func claudePath(configured string) string {
+	if configured != "" {
+		return configured
+	}
+	if p, err := exec.LookPath("claude"); err == nil {
+		return p
+	}
+	home, _ := os.UserHomeDir()
+	for _, p := range []string{filepath.Join(home, ".local", "bin", "claude"), filepath.Join(home, ".claude", "local", "claude")} {
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p
+		}
+	}
+	return ""
 }

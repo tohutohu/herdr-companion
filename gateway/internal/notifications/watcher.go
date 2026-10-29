@@ -41,6 +41,10 @@ type Subscriber interface {
 
 // Watcher notices state transitions of live sessions and pushes them.
 // Statuses and finished turn revisions are kept in memory per session.
+//
+// It re-evaluates when Herdr reports a pane status change, when the direct
+// runtime calls Kick, and every Resync, which also catches anything missed.
+// Herdr is optional (nil, or its server stopped).
 type Watcher struct {
 	Herdr    Subscriber
 	Sessions Sessions
@@ -57,6 +61,22 @@ type Watcher struct {
 
 	mu   sync.Mutex
 	last map[string]observation
+
+	triggerOnce sync.Once
+	trigger     chan struct{}
+}
+
+func (w *Watcher) triggers() chan struct{} {
+	w.triggerOnce.Do(func() { w.trigger = make(chan struct{}, 1) })
+	return w.trigger
+}
+
+// Kick asks for a re-evaluation soon (after Debounce). It never blocks.
+func (w *Watcher) Kick() {
+	select {
+	case w.triggers() <- struct{}{}:
+	default:
+	}
 }
 
 type observation struct {
@@ -71,19 +91,28 @@ func (w *Watcher) Run(ctx context.Context) {
 	if w.Resync == 0 {
 		w.Resync = 15 * time.Second
 	}
+	w.mu.Lock()
 	w.last = map[string]observation{}
-	trigger := make(chan struct{}, 1)
-	kick := func() {
-		select {
-		case trigger <- struct{}{}:
-		default:
-		}
-	}
-	go w.evaluator(ctx, trigger)
+	w.mu.Unlock()
+	kick := w.Kick
+	go w.evaluator(ctx, w.triggers())
 	kick()
+	if w.Herdr == nil {
+		<-ctx.Done()
+		return
+	}
+	failures := 0
 	for ctx.Err() == nil {
 		if err := w.stream(ctx, kick); err != nil && ctx.Err() == nil {
-			slog.Warn("herdr event stream ended", "operation", "watch", "error", err)
+			// Herdr not running is normal now; say so once per outage.
+			failures++
+			if failures == 1 {
+				slog.Info("herdr event stream unavailable; watching direct sessions and polling", "operation", "watch", "error", err)
+			} else {
+				slog.Debug("herdr event stream ended", "operation", "watch", "error", err)
+			}
+		} else {
+			failures = 0
 		}
 		select {
 		case <-ctx.Done():
@@ -157,6 +186,9 @@ func (w *Watcher) Evaluate(ctx context.Context) {
 	for _, s := range sessions {
 		seen[s.ID] = true
 		w.mu.Lock()
+		if w.last == nil {
+			w.last = map[string]observation{}
+		}
 		prev, known := w.last[s.ID]
 		next := observation{status: s.Status, completionRevision: prev.completionRevision}
 		// Seed from the first read, including an old finished turn in a pane
