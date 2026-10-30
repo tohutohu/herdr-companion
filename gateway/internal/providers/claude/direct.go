@@ -13,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 )
@@ -54,7 +53,7 @@ type permissionRequest struct {
 	CanAlwaysAllow bool            `json:"canAlwaysAllow"`
 	received       time.Time
 	// autoMode: the session's model could run in auto mode when this was
-	// asked, so a plan can be approved into it as in the terminal.
+	// asked, so a plan can be approved into it as in the CLI.
 	autoMode bool
 }
 
@@ -84,7 +83,7 @@ type directState struct {
 	listener func(string)
 }
 
-// SetDirect enables running sessions without Herdr.
+// SetDirect configures how sessions are run.
 func (p *Provider) SetDirect(cfg DirectConfig) {
 	p.direct.mu.Lock()
 	p.direct.cfg = cfg
@@ -406,7 +405,7 @@ func (p *Provider) DirectSetMode(ctx context.Context, id, mode string) error {
 		}
 	}
 	if mode == "bypassPermissions" {
-		return errors.New("bypass permissions mode can only be chosen in the terminal")
+		return errors.New("the gateway never sets bypass permissions mode")
 	}
 	if err := p.control(ctx, id, "setMode", map[string]any{"mode": mode}); err != nil {
 		return err
@@ -618,8 +617,8 @@ func (p *Provider) directSnapshot(id string) (pending []*permissionRequest, part
 // not dialogs to read off a screen.
 func parseLive(live *providers.Live) *providers.Live {
 	cp := *live
-	if cp.HerdrStatus == herdr.StatusBlocked {
-		cp.HerdrStatus = herdr.StatusWorking
+	if cp.State == providers.StateBlocked {
+		cp.State = providers.StateWorking
 	}
 	return &cp
 }
@@ -848,36 +847,4 @@ func questionAnswers(ia *model.Interaction, resp model.InteractionResponse) (map
 		out[q.Question] = strings.Join(parts, ", ")
 	}
 	return out, nil
-}
-
-// ResumeSettings is what a Herdr session ran with, read from its transcript:
-// the exact model id ("[1m]" kept), effort and permission mode. Bypass
-// permissions is not carried over; it stays a choice made in a terminal.
-func (p *Provider) ResumeSettings(_ context.Context, nativeID string) (string, string, string) {
-	path, err := p.transcriptPath(nativeID)
-	if err != nil {
-		return "", "", ""
-	}
-	c, err := p.transcript(path, nativeID)
-	if err != nil {
-		return "", "", ""
-	}
-	defer c.mu.Unlock()
-	t := c.t
-	m := t.ModelID
-	if m == "" {
-		m = t.Model
-	}
-	if !providers.ValidModelID(m) {
-		m = ""
-	}
-	mode := t.PermissionMode
-	if mode == "bypassPermissions" || !providers.ValidModeID(mode) {
-		mode = ""
-	}
-	effort := t.Effort
-	if !providers.ValidEffortID(effort) {
-		effort = ""
-	}
-	return m, effort, mode
 }

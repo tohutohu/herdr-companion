@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/config"
-	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/sessions"
@@ -32,7 +31,7 @@ func Testキューの手前に追加した質問も差分取得で返しETagを�
 	}
 	queued := model.Message{ID: "queued:2026-10-17T00:00:00Z", Queued: true}
 	p := &queuedMessageProvider{fakeProvider: &fakeProvider{}, messages: []model.Message{{ID: "m1"}, queued}}
-	srv := &Server{Config: cfg, Sessions: sessions.New(&fakeHerdr{snap: &herdr.Snapshot{}}, 0, p)}
+	srv := &Server{Config: cfg, Sessions: sessions.New(0, p)}
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 	path := "/v1/sessions/fake:s1/messages?after=" + queued.ID

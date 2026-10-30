@@ -17,14 +17,11 @@ func Test非同期質問の回答をタグではなく回答済みカードで�
 	if ia == nil || ia.State != model.InteractionAnswered || ia.Answer != "このプロジェクトのリポジトリ" || len(ia.Questions[0].Options) != 2 {
 		t.Fatalf("reply = %+v", ia)
 	}
-	if len(pendingAsyncQuestions(th)) != 0 {
-		t.Fatal("answered question is still pending")
-	}
 	// Replies can arrive in a later turn, and that must not change ordering.
 	reply := th.Turns[0].Items[1]
 	th.Turns[0].Items = th.Turns[0].Items[:1]
 	th.Turns = append(th.Turns, Turn{ID: "turn-2", Items: []json.RawMessage{reply}})
-	if len(pendingAsyncQuestions(th)) != 0 || ConvertThread(th, convertOptions{})[1].Blocks[0].Interaction == nil {
+	if ConvertThread(th, convertOptions{})[1].Blocks[0].Interaction == nil {
 		t.Fatal("cross-turn reply was lost")
 	}
 }
@@ -64,25 +61,5 @@ func Test非同期回答は複数回答と他の入力を保持する(t *testing
 	blocks := ConvertThread(th, convertOptions{})[1].Blocks
 	if len(blocks) != 4 || blocks[1].Interaction.Answer != "second" || blocks[2].Text != "Extra" || blocks[3].Type != model.BlockImage {
 		t.Fatalf("blocks = %+v", blocks)
-	}
-}
-
-func Test回答済みの質問だけを待機対象から除外する(t *testing.T) {
-	th, _ := loadThread(t, "async_reply.json")
-	var old item
-	json.Unmarshal(th.Turns[0].Items[0], &old)
-	old.ID = "call_older"
-	raw, _ := json.Marshal(old)
-	th.Turns[0].Items = append([]json.RawMessage{raw}, th.Turns[0].Items...)
-	if ia := asyncQuestionOnScreen(pendingAsyncQuestions(th), collapsedAsync); ia == nil || ia.ID != asyncInputPrefix+old.ID {
-		t.Fatalf("older unanswered question = %+v", ia)
-	}
-	// A reply to index zero must not mark a whole multi-question call answered.
-	var multi item
-	json.Unmarshal(th.Turns[0].Items[1], &multi)
-	multi.Questions = append(multi.Questions, asyncQuestion{Title: "Second?"})
-	th.Turns[0].Items[1], _ = json.Marshal(multi)
-	if ia := asyncQuestionOnScreen(pendingAsyncQuestions(th), collapsedAsync); ia == nil || ia.Questions[0].ID != "1" {
-		t.Fatal("remaining question was not shown")
 	}
 }

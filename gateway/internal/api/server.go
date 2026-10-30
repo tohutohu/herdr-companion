@@ -26,7 +26,6 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/directorycheck"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/files"
-	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/launcher"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
@@ -37,36 +36,20 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/worktree"
 )
 
-// Terminal is the Herdr subset used by the terminal fallback endpoints.
-type Terminal interface {
-	ReadPane(ctx context.Context, paneID string, lines int) (*herdr.ReadResult, error)
-	SendKeys(ctx context.Context, paneID string, keys ...string) error
-	SendText(ctx context.Context, paneID, text string) error
-}
-
-// Focuser marks a pane seen in Herdr by focusing it.
-type Focuser interface {
-	FocusPane(ctx context.Context, paneID string) error
-}
-
 type Server struct {
 	pairing         pairingState
 	MessageDelivery *MessageDeliveryStore
 	AgentUpdates    *agentupdate.Service
 	DirectoryCheck  *directorycheck.Checker
 	Sessions        *sessions.Service
-	Terminal        Terminal
-	Focus           Focuser
 	Uploads         *uploads.Store
 	Config          *config.Store
 	Sink            deadletter.Sink
 	Launcher        *launcher.Launcher
-	// Worktrees removes the worktrees of archived sessions.
-	Worktrees worktree.Herdr
-	Archive   *archive.Store
+	Archive         *archive.Store
 	// Usage is nil when subscription limit reporting is turned off.
 	Usage *usage.Service
-	// Direct runs sessions without Herdr; nil when not available.
+	// Direct runs the sessions.
 	Direct *runtime.Manager
 }
 
@@ -81,13 +64,10 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("GET /v1/sessions", s.listSessions)
 	api.HandleFunc("POST /v1/sessions", s.startSession)
 	api.HandleFunc("POST /v1/sessions/archive", s.archiveSessions)
-	api.HandleFunc("POST /v1/launches/{pane}/trust", s.answerTrust)
+	api.HandleFunc("POST /v1/launches/{launch}/trust", s.answerTrust)
 	api.HandleFunc("GET /v1/models", s.listModels)
 	api.HandleFunc("GET /v1/agents", s.listAgents)
 	api.HandleFunc("POST /v1/agents/{provider}/update", s.updateAgent)
-	api.HandleFunc("GET /v1/launches/{pane}/terminal", s.readTerminal)
-	api.HandleFunc("POST /v1/launches/{pane}/terminal", s.writeTerminal)
-	api.HandleFunc("POST /v1/launches/{pane}/continue", s.continueLaunch)
 	api.HandleFunc("GET /v1/directories", s.listDirectories)
 	api.HandleFunc("POST /v1/directories", s.createDirectory)
 	api.HandleFunc("POST /v1/directories/check", s.checkDirectory)
@@ -105,15 +85,12 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("POST /v1/sessions/{id}/model", s.setModel)
 	api.HandleFunc("POST /v1/sessions/{id}/effort", s.setEffort)
 	api.HandleFunc("POST /v1/sessions/{id}/interrupt", s.interrupt)
-	api.HandleFunc("POST /v1/sessions/{id}/migrate", s.migrateSession)
 	api.HandleFunc("POST /v1/sessions/{id}/seen", s.markSeen)
 	api.HandleFunc("POST /v1/sessions/{id}/reload", s.reloadSession)
 	api.HandleFunc("GET /v1/sessions/{id}/messages/{mid}/images/{n}", s.getImage)
 	api.HandleFunc("GET /v1/sessions/{id}/files", s.listFiles)
 	api.HandleFunc("GET /v1/sessions/{id}/files/content", s.fileContent)
 	api.HandleFunc("GET /v1/sessions/{id}/files/stat", s.fileStat)
-	api.HandleFunc("GET /v1/sessions/{id}/terminal", s.readTerminal)
-	api.HandleFunc("POST /v1/sessions/{id}/terminal", s.writeTerminal)
 	api.HandleFunc("POST /v1/uploads", s.upload)
 	api.HandleFunc("GET /v1/usage", s.getUsage)
 	api.HandleFunc("POST /v1/usage/refresh", s.refreshUsage)
@@ -220,19 +197,14 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 // fail maps domain errors to HTTP statuses and logs them.
 func (s *Server) fail(w http.ResponseWriter, r *http.Request, sessionID, op string, err error) {
 	status := http.StatusInternalServerError
-	var herr *herdr.Error
 	switch {
 	case errors.Is(err, providers.ErrNotFound), errors.Is(err, files.ErrNotFound), errors.Is(err, uploads.ErrNotFound),
 		errors.Is(err, launcher.ErrNoPendingTrust):
 		status = http.StatusNotFound
 	case errors.Is(err, providers.ErrRuntimeUnavailable):
 		status = http.StatusServiceUnavailable
-	case errors.Is(err, providers.ErrNoTerminal), errors.Is(err, providers.ErrNotDirect), errors.Is(err, runtime.ErrNotManaged):
+	case errors.Is(err, runtime.ErrNotManaged):
 		status = http.StatusConflict
-	case errors.Is(err, errBusy), errors.Is(err, launcher.ErrSharedWriter):
-		status = http.StatusConflict
-	case errors.Is(err, launcher.ErrPaneClosed):
-		status = http.StatusBadGateway
 	case errors.Is(err, errInvalidSetting):
 		status = http.StatusBadRequest
 	case errors.Is(err, providers.ErrNotLive), errors.Is(err, providers.ErrInteractionGone),
@@ -246,12 +218,8 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, sessionID, op stri
 		status = http.StatusRequestEntityTooLarge
 	case errors.Is(err, files.ErrNoRoot):
 		status = http.StatusConflict
-	case errors.As(err, &herr):
-		status = http.StatusBadGateway
-		if herr.Code == "agent_blocked" {
-			status = http.StatusConflict
-		}
-	case errors.Is(err, errBadRequest), errors.Is(err, launcher.ErrInvalidName), errors.Is(err, launcher.ErrUnknownProvider), errors.Is(err, launcher.ErrInvalidModel), errors.Is(err, launcher.ErrInvalidBackend),
+	case errors.Is(err, errBadRequest), errors.Is(err, launcher.ErrInvalidName), errors.Is(err, launcher.ErrUnknownProvider),
+		errors.Is(err, launcher.ErrInvalidModel), errors.Is(err, launcher.ErrInvalidEffort), errors.Is(err, launcher.ErrInvalidMode),
 		errors.Is(err, worktree.ErrNotRepository):
 		status = http.StatusBadRequest
 	case errors.Is(err, os.ErrExist):
@@ -339,7 +307,7 @@ func (s *Server) getMessages(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, id, "get_messages", err)
 		return
 	}
-	msgs = messagesFrom(s.withFolderTrust(r.Context(), sess, msgs), r.URL.Query().Get("after"))
+	msgs = messagesFrom(msgs, r.URL.Query().Get("after"))
 	if msgs == nil {
 		msgs = []model.Message{}
 	}
@@ -364,8 +332,8 @@ type sendRequest struct {
 	RequestID string   `json:"requestId,omitempty"`
 }
 
-// sendTimeout bounds a send that no longer has a client waiting on it. Claude
-// needs a pause after each pasted image, so a message with several is slow.
+// sendTimeout bounds a send that no longer has a client waiting on it, which
+// may first resume the session in a new process.
 const sendTimeout = 2 * time.Minute
 
 // uploadPaths resolves upload ids to the stored files' paths, split into
@@ -459,8 +427,8 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// Once the message is here it goes to the agent even if the phone hangs up
-	// (leaves the screen, loses the network): typing half a prompt into the
-	// pane would be worse than finishing it.
+	// (leaves the screen, loses the network): a client that retries could
+	// otherwise send it twice.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), sendTimeout)
 	defer cancel()
 	if err := s.Sessions.Send(ctx, res, in); err != nil {
@@ -504,10 +472,6 @@ func (s *Server) respond(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, id, "respond", providers.ErrNotLive)
 		return
 	}
-	if strings.HasPrefix(req.InteractionID, trustPrefix) && res.Live.InPane() {
-		s.respondTrust(w, r, id, res.Provider.Name(), res.Live.PaneID, req)
-		return
-	}
 	if err := res.Provider.Respond(r.Context(), res.NativeID, res.Live, req); err != nil {
 		kind := deadletter.SendError
 		if errors.Is(err, providers.ErrUnsupported) {
@@ -523,59 +487,38 @@ func (s *Server) respond(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
 }
 
-// cycleMode delegates to the provider's own live-TUI mode switch. The
-// provider decides which key or structured operation is safe for its agent.
+// cycleMode sets the session's mode to a mode id from the catalog, or, with
+// no mode, advances it to the next one.
 func (s *Server) cycleMode(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
 	var req struct {
 		Mode string `json:"mode"`
 	}
 	if r.ContentLength != 0 {
 		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
-			s.fail(w, r, id, "cycle_mode", badRequest("invalid json"))
+			s.fail(w, r, r.PathValue("id"), "cycle_mode", badRequest("invalid json"))
 			return
 		}
 	}
-	res, err := s.Sessions.Resolve(r.Context(), id)
-	if err != nil {
-		s.fail(w, r, id, "cycle_mode", err)
-		return
-	}
-	if res.Live.IsDirect() {
-		if req.Mode != "" {
-			if err := s.validSetting(r.Context(), res.Provider.Name(), "mode", req.Mode, ""); err != nil {
-				s.fail(w, r, id, "cycle_mode", err)
-				return
-			}
-		}
-		if err := s.Direct.SetMode(r.Context(), id, req.Mode); err != nil {
-			s.fail(w, r, id, "cycle_mode", err)
-			return
-		}
-		s.Sessions.Forget(id)
-		writeJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
+	id, provider, ok := s.liveSession(w, r, "cycle_mode")
+	if !ok {
 		return
 	}
 	if req.Mode != "" {
-		// A Herdr TUI only has its mode shortcut.
-		s.fail(w, r, id, "cycle_mode", providers.ErrNotDirect)
-		return
+		if err := s.validSetting(r.Context(), provider, "mode", req.Mode, ""); err != nil {
+			s.fail(w, r, id, "cycle_mode", err)
+			return
+		}
 	}
-	changer, ok := res.Provider.(providers.ModeChanger)
-	if !ok {
-		s.fail(w, r, id, "cycle_mode", providers.ErrUnsupported)
-		return
-	}
-	if err := changer.CycleMode(r.Context(), res.NativeID, res.Live); err != nil {
+	if err := s.Direct.SetMode(r.Context(), id, req.Mode); err != nil {
 		s.fail(w, r, id, "cycle_mode", err)
 		return
 	}
+	s.Sessions.Forget(id)
 	writeJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
 }
 
-// markSeen hands read state to Herdr: focusing the pane of a finished agent
-// turns its done into idle. Other panes are left alone so the Mac's Herdr
-// view only moves when there is something to mark.
+// markSeen turns a finished turn the user has now looked at into idle, so
+// the session is no longer unread.
 func (s *Server) markSeen(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	res, err := s.Sessions.Resolve(r.Context(), id)
@@ -583,13 +526,8 @@ func (s *Server) markSeen(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, id, "mark_seen", err)
 		return
 	}
-	if res.Live.IsDirect() {
+	if res.Live != nil {
 		s.Direct.MarkSeen(id)
-	} else if res.Live != nil && res.Live.HerdrStatus == herdr.StatusDone {
-		if err := s.Focus.FocusPane(r.Context(), res.Live.PaneID); err != nil {
-			s.fail(w, r, id, "mark_seen", err)
-			return
-		}
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
@@ -739,87 +677,6 @@ func (s *Server) fileError(id, path string, err error) {
 	s.Sink.Record(provider, id, deadletter.FileError, err.Error(), map[string]string{"path": path})
 }
 
-func (s *Server) livePane(ctx context.Context, id string) (string, error) {
-	res, err := s.Sessions.Resolve(ctx, id)
-	if err != nil {
-		return "", err
-	}
-	if res.Live == nil {
-		return "", providers.ErrNotLive
-	}
-	if res.Live.Direct {
-		return "", providers.ErrNoTerminal
-	}
-	return res.Live.PaneID, nil
-}
-
-func (s *Server) readTerminal(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	lines := 200
-	if v, err := strconv.Atoi(r.URL.Query().Get("lines")); err == nil && v > 0 && v <= 2000 {
-		lines = v
-	}
-	pane, err := s.terminalPane(r)
-	if err != nil {
-		s.fail(w, r, id, "read_terminal", err)
-		return
-	}
-	out, err := s.Terminal.ReadPane(r.Context(), pane, lines)
-	if err != nil {
-		s.fail(w, r, id, "read_terminal", err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"paneId": pane, "text": out.Text, "revision": out.Revision})
-}
-
-type terminalInput struct {
-	Text string   `json:"text"`
-	Keys []string `json:"keys"`
-}
-
-// Allowed keys for the terminal fallback; keeps the surface small.
-var allowedKeys = map[string]bool{
-	"enter": true, "esc": true, "tab": true, "shift+tab": true, "space": true, "backspace": true,
-	"up": true, "down": true, "left": true, "right": true, "ctrl+c": true, "ctrl+d": true,
-	"1": true, "2": true, "3": true, "4": true, "5": true, "6": true, "7": true, "8": true, "9": true,
-	"y": true, "n": true,
-}
-
-func (s *Server) writeTerminal(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	var req terminalInput
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
-		s.fail(w, r, id, "write_terminal", badRequest("invalid json"))
-		return
-	}
-	for _, k := range req.Keys {
-		if !allowedKeys[k] {
-			s.fail(w, r, id, "write_terminal", badRequest("key not allowed: "+k))
-			return
-		}
-	}
-	pane, err := s.terminalPane(r)
-	if err != nil {
-		s.fail(w, r, id, "write_terminal", err)
-		return
-	}
-	if req.Text != "" {
-		if err := s.Terminal.SendText(r.Context(), pane, req.Text); err != nil {
-			s.recordSendError(id, "terminal text: "+err.Error(), req, err)
-			s.fail(w, r, id, "write_terminal", err)
-			return
-		}
-	}
-	if len(req.Keys) > 0 {
-		if err := s.Terminal.SendKeys(r.Context(), pane, req.Keys...); err != nil {
-			s.recordSendError(id, "terminal keys: "+err.Error(), req, err)
-			s.fail(w, r, id, "write_terminal", err)
-			return
-		}
-	}
-	writeJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
-}
-
 // upload accepts the raw file body with its Content-Type. The client may name
 // the file with a Content-Disposition header; without one the name is derived
 // from the content type.
@@ -907,7 +764,7 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
 }
 
 // answerTrust continues (or, when declined, cancels) a new session that
-// stopped at the agent's folder-trust dialog.
+// waits on the user's folder-trust answer.
 func (s *Server) answerTrust(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Trust bool `json:"trust"`
@@ -916,7 +773,7 @@ func (s *Server) answerTrust(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, "", "answer_trust", badRequest("invalid json"))
 		return
 	}
-	res, err := s.Launcher.AnswerTrust(r.Context(), r.PathValue("pane"), req.Trust)
+	res, err := s.Launcher.AnswerTrust(r.Context(), r.PathValue("launch"), req.Trust)
 	if err != nil {
 		s.fail(w, r, "", "answer_trust", err)
 		return
@@ -976,40 +833,31 @@ type archivedSession struct {
 	Warning string `json:"warning,omitempty"`
 }
 
-// archiveOne stops a running session (closing its Herdr pane), removes the
-// worktree it was started in when nothing there would be lost, and marks
-// the returned model as archived. The archive store is updated by the
-// caller so a batch can persist all ids in one write.
+// archiveOne stops a running session, removes the worktree it was started
+// in when nothing there would be lost, and marks the returned model as
+// archived. The archive store is updated by the caller so a batch can
+// persist all ids in one write.
 func (s *Server) archiveOne(ctx context.Context, id string) (archivedSession, bool, error) {
 	sess, res, err := s.Sessions.Get(ctx, id)
 	if err != nil {
 		return archivedSession{}, false, err
 	}
 	stopped := res.Live != nil && !res.Live.Dormant
-	switch {
-	case res.Live.IsDirect():
+	if res.Live != nil {
 		if err := s.Direct.Forget(ctx, id); err != nil {
 			return archivedSession{}, false, err
 		}
-		sess.Status, sess.Backend, sess.CanSend = model.StatusOffline, "", false
-	case res.Live != nil:
-		if err := s.Launcher.Stop(ctx, res.Live.PaneID); err != nil {
-			return archivedSession{}, false, err
-		}
-		sess.Status, sess.PaneID, sess.Backend, sess.CanSend = model.StatusOffline, "", "", false
-	}
-	if s.Direct != nil && s.Direct.Owns(id) {
-		// A dormant direct record of a session that now runs in Herdr.
-		s.Direct.Forget(ctx, id)
+		sess.Status, sess.CanSend, sess.Unread = model.StatusOffline, false, false
+		sess.PendingModel, sess.PendingEffort, sess.SettingsApply = "", "", ""
 	}
 	sess.Archived = true
 	return archivedSession{Session: sess, Warning: s.removeWorktree(ctx, sess)}, stopped, nil
 }
 
-// removeWorktree has Herdr remove the session's worktree and returns a
-// warning when it was kept or could not be removed.
+// removeWorktree removes the session's worktree and returns a warning when
+// it was kept or could not be removed.
 func (s *Server) removeWorktree(ctx context.Context, sess model.Session) string {
-	out, err := worktree.Cleanup(ctx, s.Worktrees, sess.Cwd, func(path string) bool { return s.worktreeInUse(ctx, sess.ID, path) })
+	out, err := worktree.Cleanup(ctx, sess.Cwd, func(path string) bool { return s.worktreeInUse(ctx, sess.ID, path) })
 	if err != nil {
 		slog.Warn("removing worktree failed", "provider", sess.Provider, "session_id", sess.ID, "cwd", sess.Cwd, "error", err)
 		return "Could not remove the session's worktree: " + err.Error()
@@ -1021,8 +869,7 @@ func (s *Server) removeWorktree(ctx context.Context, sess model.Session) string 
 	return out.Warning()
 }
 
-// archiveSession stops a running session (closing its Herdr pane) and hides
-// it from the session list.
+// archiveSession stops a running session and hides it from the session list.
 func (s *Server) archiveSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	sess, stopped, err := s.archiveOne(r.Context(), id)
@@ -1040,7 +887,7 @@ func (s *Server) archiveSession(w http.ResponseWriter, r *http.Request) {
 
 // archiveSessions archives several sessions in one request. Running sessions
 // are stopped before the archive ids are persisted. When one fails, the ones
-// already stopped are still archived so they do not linger, paneless, in the
+// already stopped are still archived so they do not linger, stopped, in the
 // session list.
 func (s *Server) archiveSessions(w http.ResponseWriter, r *http.Request) {
 	var req archiveSessionsRequest
@@ -1111,23 +958,10 @@ func (s *Server) unarchiveSession(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, sess)
 }
 
-type resumeRequest struct {
-	Trust bool `json:"trust"`
-	// Backend is "direct" (default where supported) or "herdr".
-	Backend string `json:"backend,omitempty"`
-}
-
-// resumeSession reopens a session that is not running in Herdr and takes it
-// out of the archive.
+// resumeSession reopens a session that runs nowhere, in a new process under
+// the same id, and takes it out of the archive.
 func (s *Server) resumeSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	var req resumeRequest
-	if r.ContentLength != 0 {
-		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
-			s.fail(w, r, id, "resume_session", badRequest("invalid json"))
-			return
-		}
-	}
 	sess, res, err := s.Sessions.Get(r.Context(), id)
 	if err != nil {
 		s.fail(w, r, id, "resume_session", err)
@@ -1137,16 +971,11 @@ func (s *Server) resumeSession(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, id, "resume_session", errAlreadyLive)
 		return
 	}
-	out, err := s.Launcher.Resume(r.Context(), res.Provider.Name(), res.NativeID, sess.Cwd, req.Trust, req.Backend)
+	out, err := s.Launcher.Resume(r.Context(), res.Provider.Name(), res.NativeID, sess.Cwd)
 	if err != nil {
 		s.Sink.Record(res.Provider.Name(), id, deadletter.SendError, "resume session: "+err.Error(), nil)
 		s.fail(w, r, id, "resume_session", err)
 		return
-	}
-	if out.Backend != model.BackendDirect && s.Direct != nil && s.Direct.Owns(id) {
-		// The session moved to Herdr: drop the gateway's dormant record so
-		// only one runtime owns it.
-		s.Direct.Forget(r.Context(), id)
 	}
 	if err := s.Archive.Remove(id); err != nil {
 		slog.Warn("unarchive after resume failed", "session_id", id, "error", err)

@@ -13,9 +13,6 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
-
-	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/devin"
-	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/opencode"
 )
 
 type Device struct {
@@ -37,11 +34,8 @@ type Config struct {
 	// HERDR_MOBILE_FCM_CREDENTIALS or GOOGLE_APPLICATION_CREDENTIALS).
 	FCMCredentialsFile string `json:"fcmCredentialsFile,omitempty"`
 
-	HerdrSocket     string          `json:"herdrSocket,omitempty"`
-	ClaudeConfigDir string          `json:"claudeConfigDir,omitempty"`
-	OpenCode        opencode.Config `json:"opencode,omitempty"`
-	Devin           devin.Config    `json:"devin,omitempty"`
-	CodexBinary     string          `json:"codexBinary,omitempty"`
+	ClaudeConfigDir string `json:"claudeConfigDir,omitempty"`
+	CodexBinary     string `json:"codexBinary,omitempty"`
 	// ClaudeBinary is the Claude Code CLI that directly managed sessions run
 	// (default: claude on PATH, then ~/.local/bin/claude).
 	ClaudeBinary string `json:"claudeBinary,omitempty"`
@@ -51,11 +45,10 @@ type Config struct {
 	// ClaudeAllowAPIKey lets direct Claude sessions use an API key, billed
 	// per token, instead of the subscription. Off by default.
 	ClaudeAllowAPIKey bool   `json:"claudeAllowApiKey,omitempty"`
-	CodexDaemonSock   string `json:"codexDaemonSocket,omitempty"`
 	UploadDir         string `json:"uploadDir,omitempty"`
 	// Directories under which the app may browse, create folders and start sessions.
 	WorkspaceRoots []string `json:"workspaceRoots,omitempty"`
-	// Sessions not running in Herdr are listed as offline when updated within this window.
+	// Sessions the gateway does not run are listed as offline when updated within this window.
 	OfflineSessionDays int `json:"offlineSessionDays,omitempty"`
 	// Command that reports subscription limits (CodexBar's CLI). "off" disables it.
 	UsageCommand string `json:"usageCommand,omitempty"`

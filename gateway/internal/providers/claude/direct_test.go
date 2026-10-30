@@ -105,7 +105,7 @@ func newSidecarProvider(t *testing.T) (*Provider, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := New(t.TempDir(), nil, deadletter.Nop{})
+	p := New(t.TempDir(), deadletter.Nop{})
 	p.SetDirect(DirectConfig{Sidecar: exe, Claude: "/usr/bin/true"})
 	t.Cleanup(p.Close)
 	return p, log
@@ -147,7 +147,7 @@ func eventually(t *testing.T, what string, ok func() bool) {
 	}
 }
 
-var direct = &providers.Live{Direct: true, HerdrStatus: "working"}
+var direct = &providers.Live{State: "working"}
 
 func Testサイドカーで開始したセッションはIDを先に決め応答をストリーミング表示する(t *testing.T) {
 	p, log := newSidecarProvider(t)
@@ -347,4 +347,15 @@ func Test記録済みの質問カードは回答待ちのカードに置き換�
 	if len(out) != 2 || out[1].ID != streamingPrefix+"msg_2" {
 		t.Errorf("streaming = %+v", out)
 	}
+}
+
+func findInteraction(msgs []model.Message, id string) *model.Interaction {
+	for _, m := range msgs {
+		for _, b := range m.Blocks {
+			if b.Type == model.BlockInteraction && b.Interaction.ID == id {
+				return b.Interaction
+			}
+		}
+	}
+	return nil
 }

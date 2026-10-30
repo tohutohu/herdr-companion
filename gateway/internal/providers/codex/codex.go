@@ -4,10 +4,7 @@
 // app-server` child (stdio), which also hosts the sessions it manages directly:
 // it starts and resumes their threads, starts and steers turns with the
 // session's model, effort and collaboration mode, and answers approvals and
-// requestUserInput prompts (see direct.go). When Codex TUIs run on the shared
-// app-server daemon (`codex --remote unix://`) inside Herdr panes, the gateway
-// also subscribes to their threads for the same structured interactions;
-// other Herdr sessions fall back to the pane.
+// requestUserInput prompts (see direct.go).
 package codex
 
 import (
@@ -31,29 +28,20 @@ import (
 )
 
 const (
-	providerName     = "codex"
-	maxRecent        = 30
-	requestIDPrefix  = "codex-request:"
-	blockedPromptID  = "codex-terminal-prompt"
-	callTimeout      = 30 * time.Second
-	daemonRetryEvery = 10 * time.Second
-	daemonSyncEvery  = 5 * time.Second
-	// modeKeyDelay lets the TUI re-render before its mode is read back.
-	modeKeyDelay = 300 * time.Millisecond
+	providerName    = "codex"
+	maxRecent       = 30
+	requestIDPrefix = "codex-request:"
+	callTimeout     = 30 * time.Second
 )
 
 var threadIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{8,64}$`)
 
 type Provider struct {
-	bin        string
-	daemonSock string
-	term       providers.Terminal
-	sink       deadletter.Sink
+	bin  string
+	sink deadletter.Sink
 
 	mu              sync.Mutex
-	owned           *daemonConn
-	daemon          *daemonConn
-	terminalInputMu sync.Mutex
+	owned           *serverConn
 	readMu          sync.Mutex
 	reads           map[threadReadKey]*threadReadFlight
 	displayMu       sync.Mutex
@@ -86,13 +74,9 @@ func codexHome() string {
 	return filepath.Join(h, ".codex")
 }
 
-func DefaultDaemonSocket() string {
-	return filepath.Join(codexHome(), "app-server-control", "app-server-control.sock")
-}
-
 // inManagedWorktree reports whether cwd is in a worktree Codex created with
-// --worktree. The TUI runs there without changing its process directory, so
-// the pane keeps showing the repository it was started from.
+// --worktree. The agent works there without changing its process directory,
+// so the runtime keeps reporting the repository it was started from.
 func inManagedWorktree(cwd string) bool {
 	if cwd == "" {
 		return false
@@ -101,34 +85,22 @@ func inManagedWorktree(cwd string) bool {
 	return err == nil && rel != "." && !strings.HasPrefix(rel, "..")
 }
 
-func New(bin, daemonSock string, term providers.Terminal, sink deadletter.Sink) *Provider {
+func New(bin string, sink deadletter.Sink) *Provider {
 	if bin == "" {
 		bin = "codex"
 	}
-	if daemonSock == "" {
-		daemonSock = DefaultDaemonSocket()
-	}
-	return &Provider{bin: bin, daemonSock: daemonSock, term: term, sink: sink}
+	return &Provider{bin: bin, sink: sink}
 }
 
 func (p *Provider) Name() string        { return providerName }
 func (p *Provider) DisplayName() string { return "Codex" }
-func (p *Provider) HerdrAgent() string  { return "codex" }
 
 func gatewayID(native string) string { return providerName + ":" + native }
 
 // --- connections ---
 
-// client returns a connection for reads: the daemon when connected,
-// otherwise the gateway's own `codex app-server` child.
+// client returns the gateway's own `codex app-server` child for reads.
 func (p *Provider) client(ctx context.Context) (*rpcClient, error) {
-	p.mu.Lock()
-	if p.daemon != nil && p.daemon.c.alive() {
-		c := p.daemon.c
-		p.mu.Unlock()
-		return c, nil
-	}
-	p.mu.Unlock()
 	d, err := p.ownedConn(ctx)
 	if err != nil {
 		return nil, err
@@ -139,7 +111,7 @@ func (p *Provider) client(ctx context.Context) (*rpcClient, error) {
 // ownedConn returns the gateway's own app-server, starting it when needed.
 // It serves reads and hosts the directly managed threads; it is the child of
 // the gateway and ends with it.
-func (p *Provider) ownedConn(ctx context.Context) (*daemonConn, error) {
+func (p *Provider) ownedConn(ctx context.Context) (*serverConn, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.owned != nil && p.owned.c.alive() {
@@ -149,7 +121,7 @@ func (p *Provider) ownedConn(ctx context.Context) (*daemonConn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", providers.ErrRuntimeUnavailable, err)
 	}
-	d := newDaemonConn(p.sink)
+	d := newServerConn(p.sink)
 	d.events = p.directEvent
 	d.closed = func(err error) { p.ownedClosed(d, err) }
 	d.c = newRPCClient(t, d)
@@ -165,7 +137,7 @@ func (p *Provider) ownedConn(ctx context.Context) (*daemonConn, error) {
 }
 
 // currentOwned is the gateway's app-server when it runs.
-func (p *Provider) currentOwned() *daemonConn {
+func (p *Provider) currentOwned() *serverConn {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.owned != nil && p.owned.c.alive() {
@@ -175,87 +147,22 @@ func (p *Provider) currentOwned() *daemonConn {
 }
 
 // connFor is the connection with structured state for a thread: the
-// gateway's own app-server for a direct session, else the shared daemon.
-func (p *Provider) connFor(thread string, live *providers.Live) *daemonConn {
-	if live.IsDirect() || (live == nil && p.isDirect(thread)) {
-		if d := p.currentOwned(); d != nil {
-			return d
-		}
+// gateway's own app-server while it runs the thread.
+func (p *Provider) connFor(thread string, live *providers.Live) *serverConn {
+	if live == nil && !p.isDirect(thread) {
 		return nil
 	}
-	return p.currentDaemon()
+	return p.currentOwned()
 }
 
-func (p *Provider) currentDaemon() *daemonConn {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.daemon != nil && p.daemon.c.alive() {
-		return p.daemon
-	}
-	return nil
-}
-
-// Run keeps a daemon connection when the shared app-server is running.
+// Run ends the gateway's app-server when ctx ends.
 func (p *Provider) Run(ctx context.Context) {
-	for {
-		if _, err := os.Stat(p.daemonSock); err == nil {
-			if err := p.runDaemon(ctx); err != nil && ctx.Err() == nil {
-				slog.Debug("codex daemon connection ended", "provider", providerName, "operation", "daemon", "error", err)
-			}
-		}
-		select {
-		case <-ctx.Done():
-			p.mu.Lock()
-			owned := p.owned
-			p.mu.Unlock()
-			if owned != nil {
-				owned.c.close()
-			}
-			return
-		case <-time.After(daemonRetryEvery):
-		}
-	}
-}
-
-func (p *Provider) runDaemon(ctx context.Context) error {
-	t, err := dialDaemon(ctx, p.daemonSock)
-	if err != nil {
-		return err
-	}
-	d := newDaemonConn(p.sink)
-	d.c = newRPCClient(t, d)
-	defer d.c.close()
-	ictx, cancel := context.WithTimeout(ctx, callTimeout)
-	err = d.c.initialize(ictx)
-	cancel()
-	if err != nil {
-		return err
-	}
+	<-ctx.Done()
 	p.mu.Lock()
-	p.daemon = d
+	owned := p.owned
 	p.mu.Unlock()
-	slog.Info("connected to codex app-server daemon", "provider", providerName, "operation", "daemon", "socket", p.daemonSock)
-	defer func() {
-		p.mu.Lock()
-		if p.daemon == d {
-			p.daemon = nil
-		}
-		p.mu.Unlock()
-	}()
-
-	tick := time.NewTicker(daemonSyncEvery)
-	defer tick.Stop()
-	for {
-		if err := d.sync(ctx); err != nil {
-			slog.Warn("codex daemon sync failed", "provider", providerName, "operation", "daemon.sync", "error", err)
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-d.c.done:
-			return d.c.err
-		case <-tick.C:
-		}
+	if owned != nil {
+		owned.c.close()
 	}
 }
 
@@ -323,30 +230,6 @@ func (p *Provider) fetchThread(ctx context.Context, id string, turns bool) (*Thr
 
 // --- Provider ---
 
-func (p *Provider) ValidateLiveSession(ctx context.Context, nativeID string, live *providers.Live) (bool, error) {
-	th, err := p.metadata(ctx, nativeID)
-	if err != nil {
-		return false, err
-	}
-	// Managed worktrees intentionally differ from the TUI process cwd.
-	if live.Cwd == "" || th.Cwd == "" || inManagedWorktree(th.Cwd) {
-		return true, nil
-	}
-	return sameDirectory(th.Cwd, live.Cwd), nil
-}
-
-func sameDirectory(a, b string) bool {
-	if filepath.Clean(a) == filepath.Clean(b) {
-		return true
-	}
-	left, err := os.Stat(a)
-	if err != nil {
-		return false
-	}
-	right, err := os.Stat(b)
-	return err == nil && os.SameFile(left, right)
-}
-
 func (p *Provider) Summary(ctx context.Context, nativeID string, live *providers.Live) (*providers.Summary, error) {
 	meta, err := p.metadata(ctx, nativeID)
 	if err != nil {
@@ -409,21 +292,6 @@ func (p *Provider) summaryWithBase(ctx context.Context, th *Thread, live *provid
 		s.Pending, s.Status = d.state(th.ID, live)
 		s.Mode = d.mode(th.ID, s.Mode)
 	}
-	if !live.InPane() {
-		// Screen-only dialogs exist only in a TUI.
-		return &s
-	}
-	if s.Pending == "" && p.asyncInteraction(ctx, th, live) != nil {
-		s.Pending, s.Status = model.InteractionQuestions, model.StatusWaitingInput
-	}
-	if s.Pending == "" && p.planPrompt(ctx, th, live) != nil {
-		s.Pending, s.Status = model.InteractionApproval, model.StatusWaitingApproval
-	}
-	if s.Pending == "" {
-		if ia, _ := p.rateLimitPrompt(ctx, th, live); ia != nil {
-			s.Pending, s.Status = model.InteractionQuestions, model.StatusWaitingInput
-		}
-	}
 	return &s
 }
 
@@ -431,7 +299,7 @@ func (p *Provider) summaryWithBase(ctx context.Context, th *Thread, live *provid
 const planLabel = "Plan"
 
 // summaryFromThread fills Mode only for Plan mode, the one mode the rollout
-// shows on its own; the permission preset comes from the daemon.
+// shows on its own; the permission preset comes from the app-server.
 func summaryFromThread(th *Thread) providers.Summary {
 	lines := rolloutTailLines(th.Path)
 	info := tokenInfoFrom(lines)
@@ -472,19 +340,13 @@ func (p *Provider) Recent(ctx context.Context, since time.Time) ([]providers.Sum
 	if err := c.call(cctx, "thread/list", params, &r); err != nil {
 		return nil, err
 	}
-	d := p.currentDaemon()
 	var out []providers.Summary
 	for i := range r.Data {
 		th := &r.Data[i]
 		if th.UpdatedAt < since.Unix() {
 			continue
 		}
-		s := summaryFromThread(th)
-		if d != nil {
-			s.Pending, s.Status = d.state(th.ID, nil)
-			s.Mode = d.mode(th.ID, s.Mode)
-		}
-		out = append(out, s)
+		out = append(out, summaryFromThread(th))
 	}
 	return out, nil
 }
@@ -522,36 +384,6 @@ func (p *Provider) messagesFromThread(ctx context.Context, th *Thread, live *pro
 	if d := p.connFor(nativeID, live); d != nil {
 		pending = d.interactions(nativeID, p.sink)
 	}
-	if !live.InPane() {
-		return append(msgs, pending...)
-	}
-	if len(pending) == 0 {
-		if ia := p.asyncInteraction(ctx, th, live); ia != nil {
-			pending = []model.Message{{ID: ia.ID, Role: model.RoleAssistant, Timestamp: time.Unix(th.UpdatedAt, 0).UTC(), Blocks: []model.Block{{Type: model.BlockInteraction, Interaction: ia}}}}
-		} else if ia := p.planPrompt(ctx, th, live); ia != nil {
-			pending = []model.Message{screenPromptMessage(th, ia)}
-		} else if ia, _ := p.rateLimitPrompt(ctx, th, live); ia != nil {
-			pending = []model.Message{screenPromptMessage(th, ia)}
-		}
-	}
-	if len(pending) == 0 && live.Blocked() {
-		// Codex shows a dialog we have no structured data for (TUI not on
-		// the shared daemon): offer the terminal.
-		pending = []model.Message{{
-			ID:        blockedPromptID,
-			Role:      model.RoleAssistant,
-			Timestamp: time.Now().UTC(),
-			Blocks: []model.Block{{Type: model.BlockInteraction, Interaction: &model.Interaction{
-				ID:    blockedPromptID,
-				Type:  model.InteractionApproval,
-				State: model.InteractionPending,
-				Title: "Codex is waiting in the terminal",
-				Detail: "Run Codex with `codex --remote unix://` (shared app-server) " +
-					"to answer approvals and questions here.",
-				Supported: false,
-			}}},
-		}}
-	}
 	return append(msgs, pending...)
 }
 
@@ -572,77 +404,7 @@ func (p *Provider) Send(ctx context.Context, nativeID string, live *providers.Li
 	if live == nil {
 		return providers.ErrNotLive
 	}
-	if live.Direct {
-		return p.directSend(ctx, nativeID, in)
-	}
-	if d := p.currentDaemon(); d != nil && d.loaded(nativeID) {
-		return p.sendStructured(ctx, d, nativeID, in)
-	}
-	// The Codex TUI attaches pasted image paths.
-	return p.term.Prompt(ctx, live.PaneID, providers.TextWithAttachments(in))
-}
-
-// CycleMode changes the collaboration mode without changing the selected
-// model or effort when the session is attached to the shared app-server.
-// Codex's TUI shortcut also applies each mode's configured defaults, which can
-// unexpectedly change max/medium effort. Standalone TUIs still use the native
-// shortcut because they have no structured settings channel.
-func (p *Provider) CycleMode(ctx context.Context, nativeID string, live *providers.Live) error {
-	defer p.actionVersion.Add(1)
-	if live == nil {
-		return providers.ErrNotLive
-	}
-	if live.Direct {
-		return p.DirectSetMode(ctx, nativeID, "")
-	}
-	if d := p.currentDaemon(); d != nil && d.loaded(nativeID) {
-		if current, ok := d.collaborationMode(nativeID); ok && current.Settings != nil && current.Settings.Model != "" {
-			next := "plan"
-			if current.Mode == "plan" {
-				next = "default"
-			}
-			params := map[string]any{
-				"threadId": nativeID,
-				"collaborationMode": map[string]any{
-					"mode": next,
-					"settings": map[string]any{
-						"model":            current.Settings.Model,
-						"reasoning_effort": current.Settings.ReasoningEffort,
-					},
-				},
-			}
-			cctx, cancel := context.WithTimeout(ctx, callTimeout)
-			err := d.c.call(cctx, "thread/settings/update", params, nil)
-			cancel()
-			if err == nil {
-				d.setCollaborationMode(nativeID, next, current.Settings)
-				return nil
-			}
-			return err
-		}
-	}
-	return p.term.SendKeys(ctx, live.PaneID, "shift+tab")
-}
-
-func (p *Provider) sendStructured(ctx context.Context, d *daemonConn, id string, in model.Input) error {
-	var input []map[string]any
-	// Only images have a structured form; other attachments ride along as paths.
-	if text := providers.TextWithFiles(in); text != "" {
-		input = append(input, map[string]any{"type": "text", "text": text})
-	}
-	for _, img := range in.Images {
-		input = append(input, map[string]any{"type": "localImage", "path": img})
-	}
-	th, err := p.readThread(ctx, id, true)
-	if err != nil {
-		return err
-	}
-	cctx, cancel := context.WithTimeout(ctx, callTimeout)
-	defer cancel()
-	if lt := lastTurn(th); lt != nil && lt.Status == "inProgress" {
-		return d.c.call(cctx, "turn/steer", map[string]any{"threadId": id, "input": input, "expectedTurnId": lt.ID}, nil)
-	}
-	return d.c.call(cctx, "turn/start", map[string]any{"threadId": id, "input": input}, nil)
+	return p.directSend(ctx, nativeID, in)
 }
 
 func (p *Provider) Respond(ctx context.Context, nativeID string, live *providers.Live, r model.InteractionResponse) error {
@@ -650,20 +412,7 @@ func (p *Provider) Respond(ctx context.Context, nativeID string, live *providers
 	if live == nil {
 		return providers.ErrNotLive
 	}
-	if live.Direct {
-		defer p.notifyDirect(nativeID)
-	} else if strings.HasPrefix(r.InteractionID, asyncInputPrefix) {
-		return p.respondAsync(ctx, nativeID, live, r)
-	}
-	if strings.HasPrefix(r.InteractionID, planPromptPrefix) && live.InPane() {
-		return p.respondPlan(ctx, nativeID, live, r)
-	}
-	if strings.HasPrefix(r.InteractionID, rateLimitPromptPrefix) && live.InPane() {
-		return p.respondRateLimit(ctx, nativeID, live, r)
-	}
-	if r.InteractionID == blockedPromptID {
-		return providers.ErrUnsupported
-	}
+	defer p.notifyDirect(nativeID)
 	d := p.connFor(nativeID, live)
 	if d == nil {
 		return providers.ErrInteractionGone
@@ -685,7 +434,7 @@ func (p *Provider) Respond(ctx context.Context, nativeID string, live *providers
 	return nil
 }
 
-// --- daemon state ---
+// --- app-server state ---
 
 type pendingRequest struct {
 	ID       json.RawMessage
@@ -694,24 +443,17 @@ type pendingRequest struct {
 	Received time.Time
 }
 
-type daemonConn struct {
+type serverConn struct {
 	c    *rpcClient
 	sink deadletter.Sink
-	// events and closed are set on the gateway's own app-server, which hosts
-	// direct sessions. They run on the connection's read loop and must not
-	// make calls on it.
+	// events and closed run on the connection's read loop and must not make
+	// calls on it.
 	events func(method string, params json.RawMessage)
 	closed func(error)
 
-	mu         sync.Mutex
-	subscribed map[string]bool
-	// released are threads handed over to the gateway's own app-server;
-	// sync does not subscribe to them again while the daemon has them.
-	released map[string]bool
-	// resumeFailed marks threads whose subscribe failure was logged. A TUI
-	// left open without a prompt keeps a thread loaded that cannot be
-	// resumed until its first turn, and sync retries it every few seconds.
-	resumeFailed     map[string]bool
+	mu sync.Mutex
+	// subscribed are the threads this connection has open.
+	subscribed       map[string]bool
 	status           map[string]ThreadStatus
 	pending          map[string]map[string]pendingRequest // thread -> request id -> request
 	settings         map[string]threadSettings
@@ -757,12 +499,10 @@ func (s threadSettings) label() string {
 	}
 }
 
-func newDaemonConn(sink deadletter.Sink) *daemonConn {
-	return &daemonConn{
+func newServerConn(sink deadletter.Sink) *serverConn {
+	return &serverConn{
 		sink:             sink,
 		subscribed:       map[string]bool{},
-		released:         map[string]bool{},
-		resumeFailed:     map[string]bool{},
 		status:           map[string]ThreadStatus{},
 		pending:          map[string]map[string]pendingRequest{},
 		settings:         map[string]threadSettings{},
@@ -774,87 +514,6 @@ func newDaemonConn(sink deadletter.Sink) *daemonConn {
 	}
 }
 
-// sync subscribes to threads loaded in the daemon. Resuming an already loaded
-// thread only subscribes this connection; the daemon then replays pending
-// server requests for it.
-func (d *daemonConn) sync(ctx context.Context) error {
-	cctx, cancel := context.WithTimeout(ctx, callTimeout)
-	defer cancel()
-	var loaded struct {
-		Data []string `json:"data"`
-	}
-	if err := d.c.call(cctx, "thread/loaded/list", map[string]any{}, &loaded); err != nil {
-		return err
-	}
-	current := map[string]bool{}
-	for _, id := range loaded.Data {
-		current[id] = true
-		d.mu.Lock()
-		done := d.subscribed[id] || d.released[id]
-		d.mu.Unlock()
-		if done {
-			continue
-		}
-		var r struct {
-			Thread         Thread          `json:"thread"`
-			ApprovalPolicy json.RawMessage `json:"approvalPolicy"`
-			Sandbox        *sandboxPolicy  `json:"sandbox"`
-		}
-		if err := d.c.call(cctx, "thread/resume", map[string]any{"threadId": id}, &r); err != nil {
-			d.mu.Lock()
-			logged := d.resumeFailed[id]
-			d.resumeFailed[id] = true
-			d.mu.Unlock()
-			level := slog.LevelWarn
-			if logged {
-				level = slog.LevelDebug
-			}
-			slog.Log(ctx, level, "codex thread subscribe failed", "provider", providerName, "session_id", gatewayID(id), "operation", "thread/resume", "error", err)
-			continue
-		}
-		d.mu.Lock()
-		d.subscribed[id] = true
-		delete(d.resumeFailed, id)
-		if r.Sandbox != nil {
-			if _, known := d.settings[id]; !known {
-				d.settings[id] = threadSettings{ApprovalPolicy: r.ApprovalPolicy, SandboxPolicy: r.Sandbox}
-			}
-		}
-		if r.Thread.Status.Type != "" {
-			d.status[id] = r.Thread.Status
-		}
-		d.mu.Unlock()
-	}
-	d.mu.Lock()
-	for id := range d.resumeFailed {
-		if !current[id] {
-			delete(d.resumeFailed, id)
-		}
-	}
-	for id := range d.released {
-		if !current[id] {
-			delete(d.released, id)
-		}
-	}
-	for id := range d.subscribed {
-		if !current[id] {
-			delete(d.subscribed, id)
-			delete(d.status, id)
-			delete(d.pending, id)
-			delete(d.settings, id)
-		}
-	}
-	d.mu.Unlock()
-	return nil
-}
-
-func (d *daemonConn) loaded(id string) bool {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	st, ok := d.status[id]
-	return ok && st.Type != "notLoaded"
-}
-
 // Requests that are for the owning client, not for a human.
 var ignoredRequests = map[string]bool{
 	"item/tool/call":                    true,
@@ -862,7 +521,7 @@ var ignoredRequests = map[string]bool{
 	"attestation/generate":              true,
 }
 
-func (d *daemonConn) Request(id json.RawMessage, method string, params json.RawMessage) {
+func (d *serverConn) Request(id json.RawMessage, method string, params json.RawMessage) {
 	if ignoredRequests[method] {
 		return
 	}
@@ -890,7 +549,7 @@ func (d *daemonConn) Request(id json.RawMessage, method string, params json.RawM
 	}
 }
 
-func (d *daemonConn) Notification(method string, params json.RawMessage) {
+func (d *serverConn) Notification(method string, params json.RawMessage) {
 	var p struct {
 		ThreadID  string          `json:"threadId"`
 		RequestID json.RawMessage `json:"requestId"`
@@ -954,7 +613,7 @@ func (d *daemonConn) Notification(method string, params json.RawMessage) {
 	}
 }
 
-func (d *daemonConn) Closed(err error) {
+func (d *serverConn) Closed(err error) {
 	if d.closed != nil {
 		d.closed(err)
 	}
@@ -964,7 +623,7 @@ func (d *daemonConn) Closed(err error) {
 // label summaryFromThread read from the rollout) when the daemon has no
 // settings for it. thread/resume leaves out the collaboration mode, so until a
 // settings notification arrives Plan mode comes from the rollout.
-func (d *daemonConn) mode(thread, rolloutLabel string) string {
+func (d *serverConn) mode(thread, rolloutLabel string) string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	s, ok := d.settings[thread]
@@ -977,37 +636,13 @@ func (d *daemonConn) mode(thread, rolloutLabel string) string {
 	return s.label()
 }
 
-func (d *daemonConn) collaborationMode(thread string) (*collaborationMode, bool) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	s, ok := d.settings[thread]
-	if !ok || s.CollaborationMode == nil {
-		return nil, false
-	}
-	mode := *s.CollaborationMode
-	if s.CollaborationMode.Settings != nil {
-		settings := *s.CollaborationMode.Settings
-		mode.Settings = &settings
-	}
-	return &mode, true
-}
-
-func (d *daemonConn) setCollaborationMode(thread, mode string, settings *collaborationSettings) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	s := d.settings[thread]
-	copySettings := *settings
-	s.CollaborationMode = &collaborationMode{Mode: mode, Settings: &copySettings}
-	d.settings[thread] = s
-}
-
-func (d *daemonConn) resolve(thread, reqID string) {
+func (d *serverConn) resolve(thread, reqID string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	delete(d.pending[thread], reqID)
 }
 
-func (d *daemonConn) sortedPending(thread string) []pendingRequest {
+func (d *serverConn) sortedPending(thread string) []pendingRequest {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	var out []pendingRequest
@@ -1018,7 +653,7 @@ func (d *daemonConn) sortedPending(thread string) []pendingRequest {
 	return out
 }
 
-func (d *daemonConn) lookup(thread, interactionID string) (pendingRequest, bool) {
+func (d *serverConn) lookup(thread, interactionID string) (pendingRequest, bool) {
 	reqID, ok := strings.CutPrefix(interactionID, requestIDPrefix)
 	if !ok {
 		return pendingRequest{}, false
@@ -1031,7 +666,7 @@ func (d *daemonConn) lookup(thread, interactionID string) (pendingRequest, bool)
 
 // state derives the pending interaction kind and, when the daemon knows the
 // thread, an authoritative status.
-func (d *daemonConn) state(thread string, live *providers.Live) (model.InteractionType, model.Status) {
+func (d *serverConn) state(thread string, live *providers.Live) (model.InteractionType, model.Status) {
 	var pending model.InteractionType
 	for _, r := range d.sortedPending(thread) {
 		ia := interactionFor(r, deadletter.Nop{})
@@ -1069,7 +704,7 @@ func (d *daemonConn) state(thread string, live *providers.Live) (model.Interacti
 	return pending, ""
 }
 
-func (d *daemonConn) interactions(thread string, sink deadletter.Sink) []model.Message {
+func (d *serverConn) interactions(thread string, sink deadletter.Sink) []model.Message {
 	var out []model.Message
 	for _, r := range d.sortedPending(thread) {
 		ia := interactionFor(r, sink)
@@ -1084,83 +719,6 @@ func (d *daemonConn) interactions(thread string, sink deadletter.Sink) []model.M
 		})
 	}
 	return out
-}
-
-// LaunchArgs attaches new Codex TUIs to the shared daemon when it runs, so
-// approvals and questions can be answered from the app. A remote TUI would
-// otherwise start its thread in the daemon's directory, so cwd is explicit.
-func (p *Provider) LaunchArgs(opts providers.LaunchOptions) []string {
-	args := append([]string{"-c", "check_for_update_on_startup=false"}, p.remoteArgs(opts.Cwd)...)
-	if opts.Model != "" {
-		args = append(args, "--model", opts.Model)
-	}
-	// Codex has no effort flag; the TUI forwards config overrides to the
-	// daemon, so the value is TOML-quoted.
-	if opts.Effort != "" {
-		args = append(args, "-c", `model_reasoning_effort="`+opts.Effort+`"`)
-	}
-	return args
-}
-
-func (p *Provider) remoteArgs(cwd string) []string {
-	if _, err := os.Stat(p.daemonSock); err == nil {
-		return []string{"--remote", "unix://" + p.daemonSock, "--cd", cwd}
-	}
-	return nil
-}
-
-// ResumeArgs reopens a thread with `codex resume <id>`.
-func (p *Provider) ResumeArgs(nativeID, cwd string) []string {
-	return append([]string{"resume", nativeID, "-c", "check_for_update_on_startup=false"}, p.remoteArgs(cwd)...)
-}
-
-// LocateLaunched finds the newest thread loaded on the shared daemon that
-// was created in cwd since the given time.
-func (p *Provider) LocateLaunched(ctx context.Context, cwd string, since time.Time) string {
-	d := p.currentDaemon()
-	if d == nil {
-		return ""
-	}
-	cctx, cancel := context.WithTimeout(ctx, callTimeout)
-	defer cancel()
-	var loaded struct {
-		Data []string `json:"data"`
-	}
-	if err := d.c.call(cctx, "thread/loaded/list", map[string]any{}, &loaded); err != nil {
-		return ""
-	}
-	best, bestAt := "", time.Time{}
-	for _, id := range loaded.Data {
-		th, err := p.readThread(ctx, id, false)
-		// Codex also runs short-lived ephemeral threads in the same cwd.
-		if err != nil || th.Ephemeral || th.Cwd != cwd {
-			continue
-		}
-		created := threadCreated(id, th.CreatedAt)
-		if created.Before(since) {
-			continue
-		}
-		if !created.Before(bestAt) {
-			best, bestAt = id, created
-		}
-	}
-	return best
-}
-
-var uuidV7Pattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
-
-// threadCreated is when a thread was created. A thread that has had no turn
-// yet has no rollout, and the daemon then reports the time of the read as its
-// createdAt, so a TUI left open without a prompt would look newer than the
-// session just launched. Codex thread ids are UUIDv7, whose first 48 bits are
-// the creation time in milliseconds; createdAt is only used for other ids.
-func threadCreated(id string, createdAt int64) time.Time {
-	if !uuidV7Pattern.MatchString(id) {
-		return time.Unix(createdAt, 0)
-	}
-	var ms int64
-	fmt.Sscanf(strings.ReplaceAll(id[:13], "-", ""), "%x", &ms)
-	return time.UnixMilli(ms)
 }
 
 type catalogModel struct {
@@ -1235,48 +793,6 @@ var modes = []providers.ModeOption{
 // is dropped, so the status line is read back and the shortcut repeated.
 // Codex applies its own plan-mode reasoning effort here, exactly as it does
 // when the user presses the shortcut.
-func (p *Provider) SetLaunchMode(ctx context.Context, paneID, mode string) error {
-	switch mode {
-	case "", "default":
-		return nil
-	case "plan":
-	default:
-		return fmt.Errorf("unknown mode %q", mode)
-	}
-	for range 3 {
-		if err := p.term.SendKeys(ctx, paneID, "shift+tab"); err != nil {
-			return err
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(modeKeyDelay):
-		}
-		result, err := p.term.ReadPane(ctx, paneID, 40)
-		if err != nil || result == nil {
-			// The key was delivered; a pane that cannot be read now must not
-			// turn a working launch into a failure.
-			return nil
-		}
-		if codexModeFromPane(result.Text) == planLabel {
-			return nil
-		}
-	}
-	return errors.New("the Codex TUI did not switch to Plan mode")
-}
-
-// codexModeFromPane reads the mode off Codex's status line, which names the
-// mode only outside the default one and always with its shortcut hint.
-func codexModeFromPane(text string) string {
-	for _, line := range strings.Split(text, "\n") {
-		line = strings.ToLower(line)
-		if strings.Contains(line, "shift+tab") && strings.Contains(line, "plan mode") {
-			return planLabel
-		}
-	}
-	return ""
-}
-
 func modelOptions(ms []catalogModel) []providers.ModelOption {
 	var out []providers.ModelOption
 	for _, m := range ms {
@@ -1313,14 +829,4 @@ func effortOptions(m catalogModel) []providers.EffortOption {
 		})
 	}
 	return out
-}
-
-// StartupKeys accepts Codex's folder trust screen, whose default choice is
-// to trust and continue.
-func (p *Provider) StartupKeys(screen string) []string {
-	s := strings.ToLower(screen)
-	if strings.Contains(s, "trust and continue") || strings.Contains(s, "do you trust") || strings.Contains(s, "trust this folder") {
-		return []string{"enter"}
-	}
-	return nil
 }

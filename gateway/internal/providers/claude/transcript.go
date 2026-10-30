@@ -446,7 +446,7 @@ func (c *conversion) update(t *Transcript, opt ParseOptions) []model.Message {
 		c.roots, c.seen, c.askedBy = map[string]string{}, map[string]toolState{}, map[string][]int{}
 	}
 	// Tool calls still waiting for a result: the newest ones are the ones the
-	// terminal is currently asking about.
+	// agent is currently asking about.
 	l := &toolLookup{t: t, pending: pendingToolUses(t.entries, t.results), c: c}
 	var redo []int
 	for id, was := range c.seen {

@@ -1,13 +1,12 @@
 // Package claude adapts Claude Code sessions. History comes from the session
-// transcript JSONL; input and dialogs go through the Herdr pane (PTY).
+// transcript JSONL; the gateway runs sessions through the Agent SDK sidecar
+// (direct.go).
 package claude
 
 import (
 	"context"
 	"encoding/base64"
 	"errors"
-	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -16,11 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf16"
-	"unicode/utf8"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
-	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 )
@@ -36,15 +32,8 @@ type Provider struct {
 	transcriptMu sync.Mutex
 	transcripts  map[string]*cachedTranscript
 	cacheBytes   int64
-	modeMu       sync.Mutex
-	modeOverride map[string]claudeModeOverride
 	configDir    string
-	term         providers.Terminal
 	sink         deadletter.Sink
-	// keyDelay separates dialog steps so the TUI can re-render.
-	keyDelay time.Duration
-	// attachWait is how long a pasted image may take to show in the composer.
-	attachWait time.Duration
 	// direct runs sessions through the Agent SDK sidecar (direct.go).
 	direct directState
 }
@@ -58,16 +47,15 @@ func DefaultConfigDir() string {
 	return filepath.Join(home, ".claude")
 }
 
-func New(configDir string, term providers.Terminal, sink deadletter.Sink) *Provider {
+func New(configDir string, sink deadletter.Sink) *Provider {
 	if configDir == "" {
 		configDir = DefaultConfigDir()
 	}
-	return &Provider{configDir: configDir, term: term, sink: sink, keyDelay: 250 * time.Millisecond, attachWait: 15 * time.Second}
+	return &Provider{configDir: configDir, sink: sink}
 }
 
 func (p *Provider) Name() string        { return providerName }
 func (p *Provider) DisplayName() string { return "Claude Code" }
-func (p *Provider) HerdrAgent() string  { return "claude" }
 
 var sessionIDPattern = regexp.MustCompile(`^[A-Za-z0-9-]{8,64}$`)
 
@@ -125,31 +113,18 @@ func root(t *Transcript, live *providers.Live) string {
 }
 
 func (p *Provider) Summary(ctx context.Context, nativeID string, live *providers.Live) (*providers.Summary, error) {
-	if live.IsDirect() {
+	if live != nil {
 		return p.directSummary(ctx, nativeID, live)
 	}
-	reported := live
-	live, screenPlan := p.dialogState(ctx, nativeID, live)
 	path, err := p.transcriptPath(nativeID)
 	if err != nil {
 		return nil, err
 	}
-	s, err := p.summaryPath(ctx, path, nativeID, live)
+	s, err := p.summaryPath(ctx, path, nativeID, nil)
 	if err != nil {
 		return nil, err
 	}
 	s.NativeID = nativeID
-	if s.Cwd == "" && live != nil {
-		s.Cwd = live.Cwd
-	}
-	p.applyModeOverride(nativeID, path, &s)
-	if screenPlan != nil {
-		s.Pending = model.InteractionApproval
-		s.Status = model.StatusWaitingApproval
-	}
-	if live.Blocked() && !reported.Blocked() {
-		dialogStatus(&s)
-	}
 	return &s, nil
 }
 
@@ -194,7 +169,6 @@ func (p *Provider) RecentExcluding(ctx context.Context, since time.Time, exclude
 		if s.LastMessage == "" {
 			continue // empty or metadata-only sessions
 		}
-		p.applyModeOverride(id, c.path, &s)
 		s.NativeID = id
 		out = append(out, s)
 	}
@@ -204,10 +178,9 @@ func (p *Provider) RecentExcluding(ctx context.Context, since time.Time, exclude
 // Messages returns messages that may be shared with other callers; they must
 // not be modified.
 func (p *Provider) Messages(ctx context.Context, nativeID string, live *providers.Live) ([]model.Message, error) {
-	if live.IsDirect() {
+	if live != nil {
 		return p.directMessages(nativeID, live)
 	}
-	live, screenPlan := p.dialogState(ctx, nativeID, live)
 	path, err := p.transcriptPath(nativeID)
 	if err != nil {
 		return nil, err
@@ -216,16 +189,14 @@ func (p *Provider) Messages(ctx context.Context, nativeID string, live *provider
 	if err != nil {
 		return nil, err
 	}
-	msgs := c.messages(ParseOptions{SessionID: gatewayID(nativeID), Root: root(c.t, live), Live: live, Sink: p.sink})
-	updated := c.info.ModTime()
+	msgs := c.messages(ParseOptions{SessionID: gatewayID(nativeID), Root: c.t.Cwd, Sink: p.sink})
 	c.mu.Unlock()
-	msgs = p.resolveSessionSenders(msgs)
-	return withScreenPlan(msgs, screenPlan, updated), nil
+	return p.resolveSessionSenders(msgs), nil
 }
 
 // SessionFileRoots returns the directories the session worked in, so file
 // links made from an earlier cwd (see fileRefs) can be opened. The session
-// could already read them through its terminal.
+// could already read them with its own tools.
 func (p *Provider) SessionFileRoots(ctx context.Context, nativeID string) []string {
 	path, err := p.transcriptPath(nativeID)
 	if err != nil {
@@ -255,565 +226,20 @@ func (p *Provider) Image(ctx context.Context, nativeID, messageID string, index 
 	return src.MediaType, data, nil
 }
 
-// Send types the prompt into the Claude Code TUI. Each image path is pasted
-// on its own (bracketed paste), which Claude Code turns into an [Image #N]
-// attachment, before the text is submitted. Ordinary text is typed without
-// bracketed-paste markers because Claude Code wraps sufficiently long pastes
-// in <pasted_content>, even when they are regular prompts; see typePrompt for
-// the long lines that are pasted anyway. Other attachments are named by path
-// in the prompt text for Claude Code to read with its own tools.
+// Send gives the message to the session's query in the sidecar.
 func (p *Provider) Send(ctx context.Context, nativeID string, live *providers.Live, in model.Input) error {
 	if live == nil {
 		return providers.ErrNotLive
 	}
-	if live.Direct {
-		return p.directSend(ctx, nativeID, in)
-	}
-	text := providers.TextWithFiles(in)
-	if text == "" && len(in.Images) == 0 {
-		return fmt.Errorf("empty message")
-	}
-	if p.dialogLive(ctx, nativeID, live).Blocked() {
-		// Keep all input out of an agent dialog. agent.prompt performs this
-		// check too, but ordinary prompts are sent through the PTY directly.
-		return &herdr.Error{Code: "agent_blocked", Message: "agent is waiting at a dialog"}
-	}
-	return p.enter(ctx, live.PaneID, text, in.Images)
+	return p.directSend(ctx, nativeID, in)
 }
 
-// SendLaunchPrompt uses the same raw TUI input path as a follow-up prompt.
-// The generic Herdr prompt endpoint can be rendered as bracketed paste by
-// Claude Code, which changes how an otherwise ordinary first prompt behaves.
-func (p *Provider) SendLaunchPrompt(ctx context.Context, paneID string, in model.Input) error {
-	return p.enter(ctx, paneID, providers.TextWithFiles(in), in.Images)
-}
-
-// ReportsSessionAtStartup marks that the Herdr SessionStart hook reports a
-// new session once Claude Code reads its input. Input sent before that is
-// dropped (verified with Claude Code 2.1.291).
-func (p *Provider) ReportsSessionAtStartup() {}
-
-// enter pastes each image path, then types and submits the text.
-func (p *Provider) enter(ctx context.Context, paneID, text string, images []string) error {
-	for _, img := range images {
-		if err := p.attachImage(ctx, paneID, img); err != nil {
-			return err
-		}
-	}
-	if text == "" {
-		return p.submit(ctx, paneID)
-	}
-	return p.typePrompt(ctx, paneID, text)
-}
-
-const (
-	// imageLabel starts the label Claude Code shows for an attached image
-	// ("[Image #1]"), in the composer and in the prompts already sent, as
-	// paneText returns it.
-	imageLabel = "[Image#"
-	// pasteAttempts is how often an image path is pasted to get it attached.
-	pasteAttempts = 3
-	// pastePoll paces the pane reads that follow a paste.
-	pastePoll = 50 * time.Millisecond
-)
-
-// attachImage pastes an image path and waits for what Claude Code makes of
-// it before anything else is typed. Claude Code reads the file asynchronously
-// and takes input that arrives meanwhile first: the text then precedes the
-// image and the Enter after it is lost, so the prompt stays in the composer.
-// Right after a start, or on a busy machine, reading takes seconds.
-//
-// A path pasted just as the SessionStart hook reports the session can be
-// inserted as text instead of being attached. It is erased and pasted again;
-// a path that stays text is left for Claude Code to read, like the other
-// attachments. (All verified with Claude Code 2.1.296.)
-func (p *Provider) attachImage(ctx context.Context, paneID, path string) error {
-	paste := "\x1b[200~" + path + "\x1b[201~"
-	before, ok := p.paneText(ctx, paneID)
-	if !ok {
-		if err := p.term.SendText(ctx, paneID, paste); err != nil {
-			return err
-		}
-		return p.wait(ctx)
-	}
-	labels := strings.Count(before, imageLabel)
-	for attempt := 1; ; attempt++ {
-		if err := p.term.SendText(ctx, paneID, paste); err != nil {
-			return err
-		}
-		asText, err := p.pastedAsText(ctx, paneID, path, labels)
-		if err != nil || !asText {
-			return err
-		}
-		if attempt == pasteAttempts {
-			slog.Warn("pasted image stayed text in the composer", "provider", providerName, "pane", paneID)
-			return p.term.SendText(ctx, paneID, " ")
-		}
-		slog.Debug("pasted image was inserted as text; pasting it again", "provider", providerName, "pane", paneID, "attempt", attempt)
-		// The cursor is behind the path; DEL is Backspace.
-		if err := p.term.SendText(ctx, paneID, strings.Repeat("\x7f", utf8.RuneCountInString(path))); err != nil {
-			return err
-		}
-		if err := p.waitPane(ctx, paneID, func(text string) bool { return !strings.Contains(text, squash(path)) }); err != nil {
-			return err
-		}
-	}
-}
-
-// pastedAsText waits until a pasted image path has its label in the composer
-// (false) or stands there as text (true). An outcome that does not show
-// within attachWait is not waited for any longer.
-func (p *Provider) pastedAsText(ctx context.Context, paneID, path string, labels int) (bool, error) {
-	// Before its TUI starts the terminal echoes the paste, markers included.
-	plain, echoed := squash(path), "200~"+squash(path)
-	var asText bool
-	var since time.Time
-	err := p.waitPane(ctx, paneID, func(text string) bool {
-		if strings.Count(text, imageLabel) > labels {
-			return true
-		}
-		if !strings.Contains(text, plain) || strings.Contains(text, echoed) {
-			since = time.Time{}
-			return false
-		}
-		// The path has to stay for a moment to count as text.
-		if since.IsZero() {
-			since = time.Now()
-			return false
-		}
-		asText = time.Since(since) >= p.keyDelay
-		return asText
-	})
-	return asText, err
-}
-
-// waitPane polls the pane until done accepts its text (see paneText). It
-// gives up without an error after attachWait or when the pane cannot be read.
-func (p *Provider) waitPane(ctx context.Context, paneID string, done func(text string) bool) error {
-	deadline := time.Now().Add(p.attachWait)
-	for {
-		text, ok := p.paneText(ctx, paneID)
-		if !ok {
-			return p.wait(ctx)
-		}
-		if done(text) {
-			return nil
-		}
-		if !time.Now().Before(deadline) {
-			slog.Warn("paste did not show in the composer", "provider", providerName, "pane", paneID, "waited", p.attachWait)
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(pastePoll):
-		}
-	}
-}
-
-// paneText is the recent pane text without whitespace: the composer wraps
-// and indents long input. ok is false when the pane cannot be read.
-func (p *Provider) paneText(ctx context.Context, paneID string) (text string, ok bool) {
-	res, err := p.term.ReadPane(ctx, paneID, 40)
-	if err != nil || res == nil {
-		return "", false
-	}
-	return squash(res.Text), true
-}
-
-func squash(s string) string { return strings.Join(strings.Fields(s), "") }
-
-const (
-	// maxTypedLine is the longest line typed key by key. Claude Code handles
-	// one terminal read longer than 800 UTF-16 units as an unbracketed paste,
-	// and a long line arrives in several such reads: all but the last are
-	// lost from the composer (verified with Claude Code 2.1.280).
-	maxTypedLine = 800
-	// submitKey is Enter in the kitty keyboard protocol (CSI 13 u). A plain
-	// CR that Claude Code reads together with the end of a long line becomes
-	// part of that paste, so the prompt gets a newline instead of being sent.
-	// The escape sequence always starts a key event of its own.
-	submitKey = "\x1b[13u"
-)
-
-// typePrompt enters text without bracketed-paste markers and submits it.
-// Claude Code accepts Shift+Enter as an in-composer newline, so multiline
-// prompts can use the same input path without turning into pasted content.
-// Text with a line Claude Code could not take as typed input is sent as one
-// bracketed paste; Claude Code records it in <pasted_content>, which the
-// transcript parser removes again. Terminal control characters are left to
-// agent.prompt, which can transport them safely as a single bracketed paste
-// instead of being interpreted as key presses by the TUI.
-func (p *Provider) typePrompt(ctx context.Context, paneID, text string) error {
-	if strings.IndexFunc(text, func(r rune) bool {
-		return (r < ' ' && r != '\n') || r == '\x7f'
-	}) >= 0 {
-		return p.term.Prompt(ctx, paneID, text)
-	}
-
-	lines := strings.Split(text, "\n")
-	if slices.ContainsFunc(lines, func(line string) bool {
-		return len(utf16.Encode([]rune(line))) > maxTypedLine
-	}) {
-		if err := p.term.SendText(ctx, paneID, "\x1b[200~"+text+"\x1b[201~"); err != nil {
-			return err
-		}
-		return p.submit(ctx, paneID)
-	}
-	for i, line := range lines {
-		if line != "" {
-			if err := p.term.SendText(ctx, paneID, line); err != nil {
-				return err
-			}
-		}
-		if i == len(lines)-1 {
-			break
-		}
-		if err := p.term.SendKeys(ctx, paneID, "shift+enter"); err != nil {
-			return err
-		}
-	}
-	return p.submit(ctx, paneID)
-}
-
-// submit presses Enter in the composer.
-func (p *Provider) submit(ctx context.Context, paneID string) error {
-	return p.term.SendText(ctx, paneID, submitKey)
-}
-
-// CycleMode uses Claude Code's built-in next-mode shortcut. Claude Code only
-// records permissionMode in the transcript when a later prompt is written, so
-// read the status line now and keep that label until the transcript catches
-// up. This avoids sending a dummy prompt just to refresh the display.
-func (p *Provider) CycleMode(ctx context.Context, nativeID string, live *providers.Live) error {
-	if live == nil {
-		return providers.ErrNotLive
-	}
-	if live.Direct {
-		return p.DirectSetMode(ctx, nativeID, "")
-	}
-	path, _ := p.transcriptPath(nativeID)
-	var before os.FileInfo
-	if path != "" {
-		before, _ = os.Stat(path)
-	}
-	if err := p.term.SendKeys(ctx, live.PaneID, "shift+tab"); err != nil {
-		return err
-	}
-	if err := p.wait(ctx); err != nil {
-		return err
-	}
-	result, err := p.term.ReadPane(ctx, live.PaneID, 40)
-	if err != nil || result == nil {
-		// The key was already delivered. A temporary inability to read the
-		// pane must not turn a successful mode change into an API failure.
-		return nil
-	}
-	label := claudeModeFromPane(result.Text)
-	if label == "" || before == nil {
-		return nil
-	}
-	p.modeMu.Lock()
-	if p.modeOverride == nil {
-		p.modeOverride = make(map[string]claudeModeOverride)
-	}
-	p.modeOverride[nativeID] = claudeModeOverride{label: label, transcript: before}
-	p.modeMu.Unlock()
-	return nil
-}
-
-func (p *Provider) wait(ctx context.Context) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(p.keyDelay):
-		return nil
-	}
-}
-
+// Respond answers a permission request or question the sidecar forwarded.
 func (p *Provider) Respond(ctx context.Context, nativeID string, live *providers.Live, r model.InteractionResponse) error {
 	if live == nil {
 		return providers.ErrNotLive
 	}
-	if live.Direct {
-		return p.directRespond(ctx, nativeID, r)
-	}
-	msgs, err := p.Messages(ctx, nativeID, live)
-	if err != nil {
-		return err
-	}
-	ia := findInteraction(msgs, r.InteractionID)
-	if ia == nil || ia.State != model.InteractionPending {
-		return providers.ErrInteractionGone
-	}
-	focusedRow := 0
-	if ia.Kind == model.KindPlan {
-		// Validate again immediately before answering. A stale lifecycle or
-		// card must never send approval keys into an ordinary composer.
-		screen, err := providers.Screen(ctx, p.term, live.PaneID)
-		if err != nil && !errors.Is(err, providers.ErrUnsupported) {
-			return err
-		}
-		if err == nil {
-			current := screenPlan(screen)
-			if current == nil || (strings.HasPrefix(ia.ID, screenPlanPrefix) && ia.ID != current.ID) {
-				return providers.ErrInteractionGone
-			}
-			ia.Questions[0].Options = current.Questions[0].Options
-			focusedRow = planFocusedRow(screen)
-		}
-	}
-	steps, err := dialogKeys(ia, r)
-	if err != nil {
-		return err
-	}
-	if focusedRow > 0 {
-		steps = append([]step{keys(repeat("up", focusedRow)...)}, steps...)
-	}
-	for i, st := range steps {
-		if i > 0 {
-			if err := p.wait(ctx); err != nil {
-				return err
-			}
-		}
-		switch {
-		case st.prompt != "":
-			if err := p.waitDialogClosed(ctx, live.PaneID); err != nil {
-				return err
-			}
-			err = p.typePrompt(ctx, live.PaneID, st.prompt)
-		case st.text != "":
-			err = p.term.SendText(ctx, live.PaneID, st.text)
-		default:
-			err = p.term.SendKeys(ctx, live.PaneID, st.keys...)
-		}
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func findInteraction(msgs []model.Message, id string) *model.Interaction {
-	for _, m := range msgs {
-		for _, b := range m.Blocks {
-			if b.Type == model.BlockInteraction && b.Interaction.ID == id {
-				return b.Interaction
-			}
-		}
-	}
-	return nil
-}
-
-// dialogFooter is the key hint line of Claude Code's question dialog.
-const dialogFooter = "Enter to select"
-
-// waitDialogClosed waits until the question dialog has left the screen, so a
-// prompt typed next reaches the composer instead of the dialog, where "n"
-// would open a notes field. A pane that cannot be read is not waited for.
-func (p *Provider) waitDialogClosed(ctx context.Context, paneID string) error {
-	for range 8 {
-		res, err := p.term.ReadPane(ctx, paneID, 40)
-		if err != nil || res == nil || !strings.Contains(res.Text, dialogFooter) {
-			return nil
-		}
-		if err := p.wait(ctx); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// step is a batch of keys, literal text, or a prompt typed and submitted in
-// the composer.
-type step struct {
-	keys   []string
-	text   string
-	prompt string
-}
-
-func keys(k ...string) step { return step{keys: k} }
-
-func repeat(k string, n int) []string {
-	out := make([]string, n)
-	for i := range out {
-		out[i] = k
-	}
-	return out
-}
-
-// dialogKeys translates an answer into key presses for Claude Code's dialogs.
-// Verified against Claude Code 2.1.x:
-//   - permission prompt: "1. Yes" is focused, Enter accepts, Esc cancels.
-//   - AskUserQuestion: one tab per question. Single select: arrows + Enter
-//     (advances). "Type something." row accepts typed text. Multi select:
-//     Space toggles, a "Submit" row follows "Type something".
-//     With more than one question a review tab asks "Submit answers" (focused).
-func dialogKeys(ia *model.Interaction, r model.InteractionResponse) ([]step, error) {
-	switch ia.Type {
-	case model.InteractionApproval:
-		switch r.Decision {
-		case model.DecisionApprove:
-			return []step{keys("enter")}, nil
-		case model.DecisionDeny:
-			return []step{keys("esc")}, nil
-		}
-		return nil, fmt.Errorf("unsupported decision %q", r.Decision)
-	case model.InteractionQuestions:
-		if ia.Kind == model.KindPlan {
-			return planKeys(ia, r)
-		}
-	default:
-		return nil, providers.ErrUnsupported
-	}
-	if typedPreviewAnswer(ia, r) {
-		// The dialog has no row to type this answer into. Cancel it and send
-		// every answer as the next prompt instead.
-		prompt, err := answersPrompt(ia, r)
-		if err != nil {
-			return nil, err
-		}
-		return []step{keys("esc"), {prompt: prompt}}, nil
-	}
-
-	var steps []step
-	for _, q := range ia.Questions {
-		a, ok := r.Answers[q.ID]
-		if !ok {
-			return nil, fmt.Errorf("missing answer for question %s", q.ID)
-		}
-		n := len(q.Options)
-		switch q.Type {
-		case model.QuestionSelect, model.QuestionText:
-			if len(a.Selected) > 0 {
-				idx := optionIndex(q, a.Selected[0])
-				if idx < 0 {
-					return nil, fmt.Errorf("unknown option %q", a.Selected[0])
-				}
-				steps = append(steps, keys(append(repeat("down", idx), "enter")...))
-			} else if strings.TrimSpace(a.Text) != "" {
-				if n > 0 {
-					steps = append(steps, keys(repeat("down", n)...))
-				}
-				steps = append(steps, step{text: singleLine(a.Text)}, keys("enter"))
-			} else {
-				return nil, fmt.Errorf("empty answer for question %s", q.ID)
-			}
-		case model.QuestionMultiSelect:
-			selected := map[int]bool{}
-			for _, s := range a.Selected {
-				idx := optionIndex(q, s)
-				if idx < 0 {
-					return nil, fmt.Errorf("unknown option %q", s)
-				}
-				selected[idx] = true
-			}
-			var ks []string
-			for i := 0; i < n; i++ {
-				if selected[i] {
-					ks = append(ks, "space")
-				}
-				ks = append(ks, "down")
-			}
-			steps = append(steps, keys(ks...))
-			// Focus is now on "Type something".
-			if t := strings.TrimSpace(a.Text); t != "" {
-				steps = append(steps, step{text: singleLine(t)})
-			}
-			steps = append(steps, keys("down", "enter"))
-		}
-	}
-	if len(ia.Questions) > 1 {
-		steps = append(steps, keys("enter")) // review tab: "Submit answers"
-	}
-	return steps, nil
-}
-
-// previewLayout reports whether Claude Code shows a question beside its
-// options' previews. That layout lists only the options: there is no
-// "Type something." row, and moving down from the last option focuses
-// "Chat about this", where typed text is ignored (verified with Claude Code
-// 2.1.286). Multi-select questions keep the ordinary layout.
-func previewLayout(q model.Question) bool {
-	if q.Type != model.QuestionSelect {
-		return false
-	}
-	for _, o := range q.Options {
-		if o.Preview != "" {
-			return true
-		}
-	}
-	return false
-}
-
-// typedPreviewAnswer reports whether a question shown beside previews is
-// answered with text rather than one of its options.
-func typedPreviewAnswer(ia *model.Interaction, r model.InteractionResponse) bool {
-	for _, q := range ia.Questions {
-		a := r.Answers[q.ID]
-		if previewLayout(q) && len(a.Selected) == 0 && strings.TrimSpace(a.Text) != "" {
-			return true
-		}
-	}
-	return false
-}
-
-// answersPrompt writes each question with its answer on a line of its own.
-func answersPrompt(ia *model.Interaction, r model.InteractionResponse) (string, error) {
-	var lines []string
-	for _, q := range ia.Questions {
-		a, ok := r.Answers[q.ID]
-		if !ok {
-			return "", fmt.Errorf("missing answer for question %s", q.ID)
-		}
-		var parts []string
-		for _, s := range a.Selected {
-			if optionIndex(q, s) < 0 {
-				return "", fmt.Errorf("unknown option %q", s)
-			}
-			parts = append(parts, s)
-		}
-		if t := strings.TrimSpace(a.Text); t != "" {
-			parts = append(parts, t)
-		}
-		if len(parts) == 0 {
-			return "", fmt.Errorf("empty answer for question %s", q.ID)
-		}
-		lines = append(lines, q.Question+" → "+strings.Join(parts, ", "))
-	}
-	return strings.Join(lines, "\n"), nil
-}
-
-func optionIndex(q model.Question, label string) int {
-	for i, o := range q.Options {
-		if o.Label == label {
-			return i
-		}
-	}
-	return -1
-}
-
-func singleLine(s string) string {
-	return strings.Join(strings.Fields(s), " ")
-}
-
-func (p *Provider) LaunchArgs(opts providers.LaunchOptions) []string {
-	var args []string
-	if opts.Model != "" {
-		args = append(args, "--model", opts.Model)
-	}
-	if opts.Effort != "" {
-		args = append(args, "--effort", opts.Effort)
-	}
-	if opts.Mode != "" {
-		args = append(args, "--permission-mode", opts.Mode)
-	}
-	return args
-}
-
-// ResumeArgs continues the transcript under the same session id.
-func (p *Provider) ResumeArgs(nativeID, cwd string) []string {
-	return []string{"--resume", nativeID}
+	return p.directRespond(ctx, nativeID, r)
 }
 
 // Claude Code has no model catalog API; these are its CLI aliases, which
@@ -825,7 +251,7 @@ var models = []providers.ModelOption{
 	{ID: "haiku", Name: "Haiku", Description: "Fastest"},
 }
 
-// Claude Code takes --effort for every model; the levels are the same ones
+// Claude Code offers an effort for every model; the levels are the same ones
 // its /effort command offers.
 var efforts = []providers.EffortOption{
 	{ID: "low", Name: providers.EffortName("low"), Description: "Quick answers"},
@@ -835,38 +261,23 @@ var efforts = []providers.EffortOption{
 	{ID: "max", Name: providers.EffortName("max"), Description: "Maximum thinking"},
 }
 
-// The permission modes Claude Code's --permission-mode accepts, named as its
-// status line names them so a session shows the mode it was started in.
+// The permission modes Claude Code accepts, named as its status line names
+// them so a session shows the mode it was started in.
 var modes = []providers.ModeOption{
 	{ID: "manual", Name: modeLabel("manual"), Description: "Asks before each change", Default: true},
 	{ID: "plan", Name: modeLabel("plan"), Description: "Researches and plans without editing"},
 	{ID: "acceptEdits", Name: modeLabel("acceptEdits"), Description: "Applies file edits without asking"},
 	{ID: "auto", Name: modeLabel("auto"), Description: "Works on its own, asking only when it matters"},
 	{ID: "dontAsk", Name: modeLabel("dontAsk"), Description: "Stops asking for the rest of the session"},
-	// Bypass permissions is left out: Claude Code opens it with a warning
-	// screen the launcher does not know how to answer, so the start would
-	// stall on an unknown dialog. It stays reachable in the TUI.
+	// Bypass permissions is never set by the gateway.
 }
 
 func (p *Provider) Models(ctx context.Context) (providers.ModelCatalog, error) {
 	return providers.ModelCatalog{Models: models, Efforts: efforts, Modes: modes}, nil
 }
 
-// StartupKeys accepts Claude Code's workspace trust dialog. Two variants exist:
-//   - "❯ No, exit" / "Yes, I trust this folder" (No is focused)
-//   - "Do you trust the files in this folder?" "❯ 1. Yes, proceed" (Yes is focused)
-func (p *Provider) StartupKeys(screen string) []string {
-	switch {
-	case strings.Contains(screen, "Yes, I trust this folder"):
-		return []string{"down", "enter"}
-	case strings.Contains(screen, "Do you trust the files in this folder") && strings.Contains(screen, "Yes, proceed"):
-		return []string{"enter"}
-	}
-	return nil
-}
-
-// directSummary summarizes a direct session: the transcript, with the
-// pending interaction kind from the runtime instead of a pane.
+// directSummary summarizes a live session: the transcript, with the pending
+// interaction kind from the runtime.
 func (p *Provider) directSummary(ctx context.Context, nativeID string, live *providers.Live) (*providers.Summary, error) {
 	path, err := p.transcriptPath(nativeID)
 	if err != nil {

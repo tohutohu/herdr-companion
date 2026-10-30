@@ -1,6 +1,6 @@
-// Package launcher starts new agent sessions — directly under the gateway's
-// own runtime by default, or in a Herdr pane when asked — and lets the app
-// pick or create their working directory under configured workspace roots.
+// Package launcher starts and resumes the sessions the gateway runs, and lets
+// the app pick or create their working directory under configured workspace
+// roots.
 package launcher
 
 import (
@@ -12,14 +12,11 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/files"
-	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/runtime"
@@ -33,74 +30,23 @@ var (
 	ErrInvalidEffort   = errors.New("invalid effort")
 	ErrInvalidMode     = errors.New("invalid mode")
 	ErrNoCwd           = errors.New("session has no known working directory")
-	ErrNoPendingTrust  = errors.New("no launch is waiting on a trust answer for this pane")
+	ErrNoPendingTrust  = errors.New("no launch is waiting on a trust answer under this id")
 	ErrCwdGone         = errors.New("the session's working directory no longer exists")
-	ErrInvalidBackend  = errors.New(`backend must be "direct" or "herdr", and "direct" is only available for Claude Code and Codex`)
 )
 
-// Herdr is the subset of the Herdr client used to launch agents.
-type Herdr interface {
-	CreateWorkspace(ctx context.Context, cwd, label string) (workspaceID, paneID string, err error)
-	CreateWorktree(ctx context.Context, cwd, label string) (workspaceID, paneID, path string, err error)
-	RemoveWorktree(ctx context.Context, workspaceID string) error
-	StartAgent(ctx context.Context, name, kind, paneID string, args []string, timeout time.Duration) error
-	ReadVisible(ctx context.Context, paneID string) (string, error)
-	SendKeys(ctx context.Context, paneID string, keys ...string) error
-	Prompt(ctx context.Context, paneID, text string) error
-	Pane(ctx context.Context, paneID string) (*herdr.Pane, error)
-	Snapshot(ctx context.Context) (*herdr.Snapshot, error)
-	ClosePane(ctx context.Context, paneID string) error
-	CloseWorkspace(ctx context.Context, workspaceID string) error
-	CreateTab(ctx context.Context, workspaceID string) error
-	ReportAgentSession(ctx context.Context, paneID, agent, sessionID, startSource string) error
-}
-
 type Launcher struct {
-	Herdr     Herdr
 	Roots     []string
 	Providers []providers.Provider
-	// Direct runs sessions without Herdr; nil starts every session in Herdr.
+	// Direct runs the sessions.
 	Direct *runtime.Manager
-	// WorktreeDir is where worktrees for direct sessions are made.
+	// WorktreeDir is where worktrees for new sessions are made.
 	WorktreeDir string
 
-	// Timings (overridable in tests).
-	StartTimeout time.Duration
-	// PollInterval paces identity polling, and is how long Herdr's status
-	// must hold before a starting agent counts as ready.
-	PollInterval time.Duration
-	IdentityWait time.Duration
-	// SessionReportWait is how long a StartupSessionReporter whose hook has
-	// not reported is given before Herdr's status alone counts, for a
-	// missing integration.
-	SessionReportWait time.Duration
-
 	mu sync.Mutex
-	// pending holds launches waiting on trust, readiness or identity, by pane
-	// id, until they finish or the gateway restarts. Entries are small, so unanswered
-	// ones are simply kept.
-	pending map[string]*pendingLaunch
-	panes   map[string]bool
-	// directPending holds direct starts waiting on the folder-trust answer,
-	// by launch id.
-	directPending map[string]*StartRequest
-}
-
-// pendingLaunch retains the context needed to finish a partial launch.
-type pendingLaunch struct {
-	p          providers.Provider
-	lp         providers.Launchable
-	ws, cwd    string
-	prompt     model.Input
-	promptSent bool
-	knownID    string
-	// mode is applied to the live TUI once, before the first prompt.
-	mode    string
-	started time.Time
-	// worktree is the checkout made for the session, removed again when the
-	// launch is cancelled.
-	worktree string
-	logKV    []any
+	// pending holds starts waiting on the folder-trust answer, by launch id,
+	// until they are answered or the gateway restarts. Entries are small, so
+	// unanswered ones are simply kept.
+	pending map[string]*StartRequest
 }
 
 // DefaultRoots returns ~/workspace when it exists, else the home directory.
@@ -230,14 +176,11 @@ type StartRequest struct {
 	Effort string `json:"effort,omitempty"`
 	// Mode is a mode id from Models; empty starts in the agent's own mode.
 	Mode string `json:"mode,omitempty"`
-	// Trust accepts the agent's folder-trust dialog on the user's behalf.
-	// Without it the launch stops at the dialog and reports TrustRequired.
+	// Trust starts in a folder the agent was never trusted in without
+	// asking. Without it such a start returns TrustRequired.
 	Trust bool `json:"trust"`
 	// Worktree starts the session in a new git worktree of Cwd's repository.
 	Worktree bool `json:"worktree,omitempty"`
-	// Backend is "direct" (the gateway's own runtime, the default where the
-	// agent supports it) or "herdr" (a new Herdr workspace).
-	Backend string `json:"backend,omitempty"`
 	// Images and Files are attachments of the first prompt, as local paths
 	// the API has already resolved from upload ids.
 	Images []string `json:"-"`
@@ -246,72 +189,48 @@ type StartRequest struct {
 
 type StartResult struct {
 	SessionID string `json:"sessionId,omitempty"`
-	// PaneID is the Herdr pane of a Herdr launch; a direct session has none.
-	PaneID string `json:"paneId,omitempty"`
-	// LaunchID names a direct start waiting on the folder-trust answer.
+	// LaunchID names a start waiting on the folder-trust answer.
 	LaunchID string `json:"launchId,omitempty"`
-	Backend  string `json:"backend,omitempty"`
-	// Warning explains a partial start (e.g. waiting on a dialog, no identity yet).
+	// Warning explains a partial start (the first message was not delivered).
 	Warning string `json:"warning,omitempty"`
-	// TrustRequired means the agent is showing its folder-trust dialog; the
-	// launch continues when the app answers with AnswerTrust.
+	// TrustRequired means the folder was never trusted in the agent; the
+	// start goes ahead when the app answers with AnswerTrust.
 	TrustRequired bool `json:"trustRequired,omitempty"`
 }
 
-func (l *Launcher) provider(name string) (providers.Provider, providers.Launchable, error) {
+func (l *Launcher) provider(name string) (providers.Provider, error) {
 	for _, p := range l.Providers {
-		if p.Name() == name {
-			if lp, ok := p.(providers.Launchable); ok {
-				return p, lp, nil
-			}
+		if p.Name() == name && l.Direct != nil && l.Direct.Supports(name) {
+			return p, nil
 		}
 	}
-	return nil, nil, ErrUnknownProvider
+	return nil, ErrUnknownProvider
 }
 
 // Models lists the models and efforts a provider offers for new sessions.
 func (l *Launcher) Models(ctx context.Context, provider string) (providers.ModelCatalog, error) {
-	_, lp, err := l.provider(provider)
+	p, err := l.provider(provider)
 	if err != nil {
 		return providers.ModelCatalog{}, err
 	}
-	return lp.Models(ctx)
+	ml, ok := p.(providers.ModelLister)
+	if !ok {
+		return providers.ModelCatalog{}, nil
+	}
+	return ml.Models(ctx)
 }
 
-func agentName(kind string) string {
+func launchID(kind string) string {
 	b := make([]byte, 3)
 	rand.Read(b)
-	return kind + "-" + hex.EncodeToString(b)
+	return "launch-" + kind + "-" + hex.EncodeToString(b)
 }
 
-// backend picks where a session runs.
-func (l *Launcher) backend(provider, asked string) (string, error) {
-	direct := l.Direct != nil && l.Direct.Supports(provider)
-	switch asked {
-	case "":
-		if direct {
-			return model.BackendDirect, nil
-		}
-		return model.BackendHerdr, nil
-	case model.BackendDirect:
-		if !direct {
-			return "", ErrInvalidBackend
-		}
-		return asked, nil
-	case model.BackendHerdr:
-		return asked, nil
-	}
-	return "", ErrInvalidBackend
-}
-
-// Start launches the agent: directly by default, or in a new Herdr
-// workspace in cwd.
+// Start starts a new session in cwd. The agent shows no folder-trust dialog
+// to the gateway, so a folder the agent was never trusted in is confirmed
+// with the user first (TrustRequired with a launch id).
 func (l *Launcher) Start(ctx context.Context, req StartRequest) (*StartResult, error) {
-	p, lp, err := l.provider(req.Provider)
-	if err != nil {
-		return nil, err
-	}
-	backend, err := l.backend(req.Provider, req.Backend)
+	p, err := l.provider(req.Provider)
 	if err != nil {
 		return nil, err
 	}
@@ -328,693 +247,43 @@ func (l *Launcher) Start(ctx context.Context, req StartRequest) (*StartResult, e
 	if err != nil {
 		return nil, err
 	}
-	if backend == model.BackendDirect {
-		return l.startDirect(ctx, p, req, cwd)
-	}
-	opts := providers.LaunchOptions{Model: req.Model, Effort: req.Effort, Mode: req.Mode, Cwd: cwd}
-	prompt := model.Input{Text: req.Prompt, Images: req.Images, Files: req.Files}
-	plan := launchPlan{p: p, lp: lp, cwd: cwd, trust: req.Trust, prompt: prompt, mode: req.Mode,
-		logKV: []any{"model", req.Model, "effort", req.Effort, "mode", req.Mode, "worktree", req.Worktree}}
-	if req.Worktree {
-		// Herdr makes the worktree and opens the workspace in it.
-		top, err := worktree.Toplevel(ctx, cwd)
-		if err != nil {
-			return nil, err
-		}
-		ws, pane, path, err := l.Herdr.CreateWorktree(ctx, cwd, filepath.Base(top))
-		if err != nil {
-			return nil, fmt.Errorf("create worktree: %w", err)
-		}
-		if err := worktree.Mark(ctx, path, p.Name()); err != nil {
-			slog.Warn("marking worktree failed", "provider", p.Name(), "path", path, "error", err)
-		}
-		plan.ws, plan.pane, plan.worktree = ws, pane, path
-		plan.cwd, opts.Cwd = path, path
-	}
-	plan.args = lp.LaunchArgs(opts)
-	if prep, ok := p.(providers.PreparedLauncher); ok {
-		plan.args, plan.knownID, err = prep.PrepareLaunch(ctx, opts)
-		if err != nil {
-			l.discard(ctx, plan.ws, plan.worktree, p)
-			return nil, err
-		}
-	}
-	return l.launch(ctx, plan)
-}
-
-// ErrPaneClosed wraps a failed resume after a migration closed the pane: the
-// session then runs nowhere and can be resumed again.
-var ErrPaneClosed = errors.New("the Herdr pane was closed, but resuming the session directly failed; resume it again")
-
-// ErrSharedWriter refuses to move a session its shared server holds open:
-// closing the pane would leave it resumable nowhere but there.
-var ErrSharedWriter = errors.New("the shared Codex app-server keeps this thread open until the daemon restarts, so it cannot be resumed elsewhere; keep it in Herdr")
-
-// Migrate moves a session from its Herdr pane to the direct runtime: the
-// directory is checked first, then the pane is closed (ending the agent),
-// and the session is resumed directly under the same id with the model,
-// effort and mode it ran with. The caller makes sure no turn is running.
-func (l *Launcher) Migrate(ctx context.Context, provider, nativeID, pane, cwd string) (*StartResult, error) {
-	p, _, err := l.provider(provider)
-	if err != nil {
-		return nil, err
-	}
-	if l.Direct == nil || !l.Direct.Supports(provider) {
-		return nil, ErrInvalidBackend
-	}
-	dir, err := l.resumeDir(ctx, cwd)
-	if err != nil {
-		return nil, err
-	}
-	opts := providers.DirectStart{Cwd: dir}
-	if rs, ok := p.(providers.ResumeSettingser); ok {
-		opts.Model, opts.Effort, opts.Mode = rs.ResumeSettings(ctx, nativeID)
-	}
-	sr, shared := p.(providers.SharedReleaser)
-	if shared && sr.HeldShared(ctx, nativeID) {
-		return nil, ErrSharedWriter
-	}
-	ctx = context.WithoutCancel(ctx)
-	if err := l.Stop(ctx, pane); err != nil {
-		return nil, fmt.Errorf("close the Herdr pane: %w", err)
-	}
-	l.waitPaneGone(ctx, pane)
-	if shared {
-		if err := sr.ReleaseShared(ctx, nativeID); err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrPaneClosed, err)
-		}
-	}
-	id := p.Name() + ":" + nativeID
-	if err := l.Direct.Resume(ctx, id, opts); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrPaneClosed, err)
-	}
-	slog.Info("session moved from herdr to the direct runtime", "provider", p.Name(), "session_id", id, "pane", pane, "cwd", dir,
-		"model", opts.Model, "effort", opts.Effort, "mode", opts.Mode)
-	return &StartResult{SessionID: id, Backend: model.BackendDirect}, nil
-}
-
-// waitPaneGone waits until Herdr no longer lists the pane, so its agent has
-// exited (and flushed its history) before the session is resumed.
-func (l *Launcher) waitPaneGone(ctx context.Context, pane string) {
-	deadline := time.Now().Add(l.startTimeout() / 4)
-	for time.Now().Before(deadline) {
-		if _, err := l.Herdr.Pane(ctx, pane); err != nil {
-			return
-		}
-		if !sleep(ctx, l.readyPoll()) {
-			return
-		}
-	}
-}
-
-// resumeDir checks a session's directory for resuming it.
-func (l *Launcher) resumeDir(ctx context.Context, cwd string) (string, error) {
-	if cwd == "" {
-		return "", ErrNoCwd
-	}
-	dir, err := l.resolveDir(cwd)
-	if errors.Is(err, files.ErrForbidden) {
-		dir, err = l.resolveWorktree(ctx, cwd)
-	}
-	if errors.Is(err, files.ErrNotFound) {
-		// e.g. the worktree it ran in was removed when it was archived
-		return "", ErrCwdGone
-	}
-	return dir, err
-}
-
-// Resume reopens an existing session that runs nowhere, under its own id:
-// directly by default, or in a new Herdr workspace in its working directory.
-func (l *Launcher) Resume(ctx context.Context, provider, nativeID, cwd string, trust bool, backend string) (*StartResult, error) {
-	p, lp, err := l.provider(provider)
-	if err != nil {
-		return nil, err
-	}
-	if backend, err = l.backend(provider, backend); err != nil {
-		return nil, err
-	}
-	dir, err := l.resumeDir(ctx, cwd)
-	if err != nil {
-		return nil, err
-	}
-	if backend == model.BackendDirect {
-		id := p.Name() + ":" + nativeID
-		if err := l.Direct.Resume(ctx, id, providers.DirectStart{Cwd: dir}); err != nil {
-			return nil, err
-		}
-		return &StartResult{SessionID: id, Backend: model.BackendDirect}, nil
-	}
-	return l.launch(ctx, launchPlan{p: p, lp: lp, cwd: dir, args: lp.ResumeArgs(nativeID, dir), trust: trust, knownID: nativeID, logKV: []any{"resume", nativeID}})
-}
-
-// resolveWorktree accepts a linked worktree outside the roots (agents and
-// Herdr keep them in their own directories) whose repository is inside them.
-func (l *Launcher) resolveWorktree(ctx context.Context, dir string) (string, error) {
-	real, err := filepath.EvalSymlinks(dir)
-	if err != nil {
-		return "", files.ErrForbidden
-	}
-	main, err := worktree.MainCheckout(ctx, real)
-	if err != nil {
-		return "", files.ErrForbidden
-	}
-	if _, err := l.resolveDir(main); err != nil {
-		return "", err
-	}
-	return real, nil
-}
-
-// launchPlan is what launch starts. knownID is the native id when resuming
-// a session; mode is set in the live TUI by providers that take no mode
-// argument.
-type launchPlan struct {
-	p       providers.Provider
-	lp      providers.Launchable
-	cwd     string
-	args    []string
-	trust   bool
-	prompt  model.Input
-	knownID string
-	mode    string
-	// ws and pane are the workspace Herdr opened in a worktree it created
-	// for the session (worktree); empty to open a new one in cwd.
-	ws, pane, worktree string
-	logKV              []any
-}
-
-// launch runs the agent in a new workspace.
-func (l *Launcher) launch(ctx context.Context, plan launchPlan) (*StartResult, error) {
-	started := time.Now()
-	p, lp, cwd := plan.p, plan.lp, plan.cwd
-	ws, pane := plan.ws, plan.pane
-	if ws == "" {
-		var err error
-		if ws, pane, err = l.Herdr.CreateWorkspace(ctx, cwd, filepath.Base(cwd)); err != nil {
-			return nil, fmt.Errorf("create workspace: %w", err)
-		}
-	}
-	res := &StartResult{PaneID: pane, Backend: model.BackendHerdr}
-	log := slog.With("provider", p.Name(), "operation", "launch", "pane", pane)
-
-	wt := plan.worktree
-	if err := l.startAgent(ctx, p, pane, plan.args); err != nil {
-		// Don't leave an empty shell workspace (or checkout) behind.
-		l.discard(ctx, ws, wt, p)
-		return nil, fmt.Errorf("start agent: %w", err)
-	}
-	l.mu.Lock()
-	if l.panes == nil {
-		l.panes = map[string]bool{}
-	}
-	l.panes[pane] = true
-	l.mu.Unlock()
-	pl := &pendingLaunch{p: p, lp: lp, ws: ws, cwd: cwd, prompt: plan.prompt, knownID: plan.knownID, mode: plan.mode, started: started, worktree: wt, logKV: plan.logKV}
-	switch l.passStartupDialog(ctx, p, lp, pane, plan.trust) {
-	case startupTrust:
-		l.putPending(pane, pl)
-		res.TrustRequired = true
-		log.Info("launch waiting on folder trust", "cwd", cwd)
-		return res, nil
-	case startupStuck:
-		l.putPending(pane, pl)
-		res.Warning = "The agent is waiting on a startup dialog. Open the terminal to continue."
-		return res, nil
-	}
-	return l.finishPending(ctx, pane, pl), nil
-}
-
-// discard closes a workspace opened for a launch that is not going ahead,
-// and has Herdr remove the worktree (wt) the workspace was opened in.
-func (l *Launcher) discard(ctx context.Context, ws, wt string, p providers.Provider) error {
-	ctx = context.WithoutCancel(ctx)
-	if ws == "" {
-		return nil
-	}
-	if wt != "" {
-		err := l.Herdr.RemoveWorktree(ctx, ws)
-		if err == nil {
-			return nil
-		}
-		slog.Warn("removing worktree of a cancelled launch failed", "provider", p.Name(), "path", wt, "error", err)
-	}
-	err := l.Herdr.CloseWorkspace(ctx, ws)
-	if err != nil {
-		slog.Warn("closing workspace of a cancelled launch failed", "provider", p.Name(), "workspace", ws, "error", err)
-	}
-	return err
-}
-
-// AnswerTrust resumes a launch stopped at the folder-trust dialog. Declining
-// closes the workspace that was opened for it.
-func (l *Launcher) AnswerTrust(ctx context.Context, pane string, accept bool) (*StartResult, error) {
-	if req := l.takeDirectPending(pane); req != nil {
-		if !accept {
-			slog.Info("folder trust declined", "provider", req.Provider, "launch", pane, "cwd", req.Cwd)
-			return &StartResult{LaunchID: pane, Backend: model.BackendDirect}, nil
-		}
-		p, _, err := l.provider(req.Provider)
-		if err != nil {
-			return nil, err
-		}
-		return l.runDirect(ctx, p, *req)
-	}
-	pl := l.takePending(pane)
-	if pl == nil {
-		return nil, ErrNoPendingTrust
-	}
-	if !accept {
-		l.mu.Lock()
-		delete(l.panes, pane)
-		l.mu.Unlock()
-		slog.Info("folder trust declined", "provider", pl.p.Name(), "pane", pane, "cwd", pl.cwd)
-		return &StartResult{PaneID: pane}, l.discard(ctx, pl.ws, pl.worktree, pl.p)
-	}
-	if l.passStartupDialog(ctx, pl.p, pl.lp, pane, true) != startupReady {
-		l.putPending(pane, pl)
-		return &StartResult{PaneID: pane, Warning: "The agent is waiting on a startup dialog. Open the terminal to continue."}, nil
-	}
-	return l.finishPending(ctx, pane, pl), nil
-}
-
-// trustDialogLines is how much of the bottom of a running session's screen
-// its folder-trust dialog must fit in. The whole screen could also show the
-// dialog's wording quoted in a conversation.
-const trustDialogLines = 20
-
-// PaneTrust reports whether a running session's agent shows its folder-trust
-// dialog. Herdr restores its workspaces after a restart by resuming their
-// agents in place, and those can stop at the dialog without a launch of this
-// gateway waiting on it.
-func (l *Launcher) PaneTrust(ctx context.Context, provider, pane string) bool {
-	keys, err := l.paneTrustKeys(ctx, provider, pane)
-	return err == nil && keys != nil
-}
-
-// AnswerPaneTrust accepts the dialog PaneTrust found or, declined, stops the
-// session in its pane as the dialog's own "No" would.
-func (l *Launcher) AnswerPaneTrust(ctx context.Context, provider, pane string, accept bool) error {
-	keys, err := l.paneTrustKeys(ctx, provider, pane)
-	if err != nil {
-		return err
-	}
-	if keys == nil {
-		return providers.ErrInteractionGone
-	}
-	if !accept {
-		slog.Info("folder trust declined", "provider", provider, "pane", pane)
-		return l.Stop(ctx, pane)
-	}
-	slog.Info("folder trust accepted", "provider", provider, "pane", pane)
-	return l.Herdr.SendKeys(ctx, pane, keys...)
-}
-
-func (l *Launcher) paneTrustKeys(ctx context.Context, provider, pane string) ([]string, error) {
-	_, lp, err := l.provider(provider)
-	if err != nil {
-		return nil, err
-	}
-	screen, err := l.Herdr.ReadVisible(ctx, pane)
-	if err != nil {
-		return nil, err
-	}
-	lines := strings.Split(strings.TrimRight(screen, " \n"), "\n")
-	return lp.StartupKeys(strings.Join(lines[max(0, len(lines)-trustDialogLines):], "\n")), nil
-}
-
-// TerminalPane allows fallback access only to panes launched by this gateway.
-func (l *Launcher) TerminalPane(ctx context.Context, pane string) (string, error) {
-	l.mu.Lock()
-	owned := l.panes[pane]
-	l.mu.Unlock()
-	if !owned {
-		return "", providers.ErrNotFound
-	}
-	if _, err := l.Herdr.Pane(ctx, pane); err != nil {
-		return "", err
-	}
-	return pane, nil
-}
-
-// Continue retries readiness after the user handles an unfamiliar dialog.
-// Taking the pending entry prevents concurrent requests from sending twice.
-func (l *Launcher) Continue(ctx context.Context, pane string) (*StartResult, error) {
-	pl := l.takePending(pane)
-	if pl == nil {
-		return nil, ErrNoPendingTrust
-	}
-	switch l.passStartupDialog(ctx, pl.p, pl.lp, pane, false) {
-	case startupTrust:
-		l.putPending(pane, pl)
-		return &StartResult{PaneID: pane, TrustRequired: true}, nil
-	case startupStuck:
-		l.putPending(pane, pl)
-		return &StartResult{PaneID: pane, Warning: "The agent is still waiting. Open the terminal to continue."}, nil
-	}
-	return l.finishPending(ctx, pane, pl), nil
-}
-
-func (l *Launcher) finishPending(ctx context.Context, pane string, pl *pendingLaunch) *StartResult {
-	res := l.finish(ctx, pane, pl)
-	if res.SessionID == "" {
-		l.putPending(pane, pl)
-	}
-	return res
-}
-
-func (l *Launcher) putPending(pane string, pl *pendingLaunch) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.pending == nil {
-		l.pending = map[string]*pendingLaunch{}
-	}
-	l.pending[pane] = pl
-}
-
-func (l *Launcher) takePending(pane string) *pendingLaunch {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	pl := l.pending[pane]
-	delete(l.pending, pane)
-	return pl
-}
-
-// finish sends the first prompt to a ready agent and waits for its identity.
-func (l *Launcher) finish(ctx context.Context, pane string, pl *pendingLaunch) *StartResult {
-	res := &StartResult{PaneID: pane}
-	if w := l.applyMode(ctx, pane, pl); w != "" {
-		res.Warning = w
-	}
-	if !pl.prompt.Empty() {
-		if err := l.waitReady(ctx, pane, pl.p); err != nil {
-			res.Warning = "The agent did not become ready; the prompt was not sent."
-			return res
-		}
-		var promptErr error
-		if sender, ok := pl.p.(providers.LaunchPromptSender); ok {
-			promptErr = sender.SendLaunchPrompt(ctx, pane, pl.prompt)
-		} else {
-			// Agents without their own way paste the attachments as paths,
-			// which their TUIs attach (images) or read.
-			promptErr = l.Herdr.Prompt(ctx, pane, providers.TextWithAttachments(pl.prompt))
-		}
-		if promptErr != nil {
-			res.Warning = "Prompt could not be sent: " + promptErr.Error()
-		}
-		// Never replay a prompt after an ambiguous send error.
-		pl.prompt = model.Input{}
-		pl.promptSent = true
-	} else if !pl.promptSent && pl.knownID == "" {
-		// Agents do not always create a native session until the first prompt
-		// is entered. Waiting for an identity here makes a valid, prompt-less
-		// launch look like a failure and needlessly blocks the response.
-		// The pane is already running; the session id is picked up by the
-		// normal session refresh after the first prompt creates the thread.
-		return res
-	}
-
-	res.SessionID = l.waitIdentity(ctx, pane, pl.p, pl.cwd, pl.started, pl.knownID)
-	if res.SessionID == "" && res.Warning == "" {
-		res.Warning = "Started, but Herdr has not reported the session id yet (is `herdr integration install " + pl.p.HerdrAgent() + "` done?)."
-	}
-	slog.Info("session launched", append([]any{"provider", pl.p.Name(), "operation", "launch", "pane", pane, "session_id", res.SessionID, "cwd", pl.cwd}, pl.logKV...)...)
-	return res
-}
-
-// applyMode sets the starting mode of agents that take no mode argument. It
-// runs once, before the first prompt, so the mode applies to that prompt; a
-// failure is reported but does not cancel the launch.
-func (l *Launcher) applyMode(ctx context.Context, pane string, pl *pendingLaunch) string {
-	if pl.mode == "" {
-		return ""
-	}
-	setter, ok := pl.p.(providers.LaunchModeSetter)
-	if !ok {
-		return ""
-	}
-	// Only one attempt: a retry through Continue must not toggle it again.
-	mode := pl.mode
-	pl.mode = ""
-	if err := l.waitReady(ctx, pane, pl.p); err != nil {
-		return "The agent did not become ready; it started in its usual mode."
-	}
-	if err := setter.SetLaunchMode(ctx, pane, mode); err != nil {
-		return "The mode could not be set: " + err.Error()
-	}
-	return ""
-}
-
-// startAgent runs agent.start. A new pane's shell may still be running its
-// startup files, which Herdr reports as agent_pane_busy; retry until it is
-// an idle shell. Herdr may report success or agent_not_ready while a startup
-// dialog (folder trust) is shown; both count as started.
-func (l *Launcher) startAgent(ctx context.Context, p providers.Provider, pane string, args []string) error {
-	deadline := time.Now().Add(l.startTimeout())
-	for {
-		sctx, cancel := context.WithTimeout(ctx, l.startTimeout()+5*time.Second)
-		err := l.Herdr.StartAgent(sctx, agentName(p.HerdrAgent()), p.HerdrAgent(), pane, args, l.startTimeout())
-		cancel()
-		var herr *herdr.Error
-		if err == nil || (errors.As(err, &herr) && herr.Code == "agent_not_ready") {
-			return nil
-		}
-		if !errors.As(err, &herr) || herr.Code != "agent_pane_busy" || time.Now().After(deadline) {
-			return err
-		}
-		if !sleep(ctx, l.readyPoll()) {
-			return ctx.Err()
-		}
-	}
-}
-
-// Stop closes the pane running a session, and its workspace when the pane
-// was the only one there. A parent workspace with linked worktrees keeps
-// a shell tab so the other workspaces in its group remain open.
-func (l *Launcher) Stop(ctx context.Context, paneID string) error {
-	snap, err := l.Herdr.Snapshot(ctx)
-	if err != nil {
-		return err
-	}
-	ws, others := "", 0
-	for _, pn := range snap.Panes {
-		if pn.PaneID == paneID {
-			ws = pn.WorkspaceID
-		}
-	}
-	if ws == "" {
-		return nil // already gone
-	}
-	for _, pn := range snap.Panes {
-		if pn.WorkspaceID == ws && pn.PaneID != paneID {
-			others++
-		}
-	}
-	if others == 0 {
-		err := l.Herdr.CloseWorkspace(ctx, ws)
-		var herr *herdr.Error
-		if !errors.As(err, &herr) || herr.Code != "workspace_group_close_required" {
-			return err
-		}
-		// A linked worktree group can contain unrelated sessions. Stop only
-		// the requested pane instead of opting into closing the whole group.
-		// Herdr also protects the last pane, so retain a shell in a new tab.
-		if err := l.Herdr.CreateTab(ctx, ws); err != nil {
-			return err
-		}
-	}
-	return l.Herdr.ClosePane(ctx, paneID)
-}
-
-type startupOutcome int
-
-const (
-	startupReady startupOutcome = iota
-	startupTrust                // a folder-trust dialog awaits the user's answer
-	startupStuck
-)
-
-// passStartupDialog answers a folder-trust dialog when allowed and waits
-// until the agent is ready. Dialogs can appear a moment after Herdr reports
-// the agent, so a status must hold for a poll interval to count.
-func (l *Launcher) passStartupDialog(ctx context.Context, p providers.Provider, lp providers.Launchable, pane string, trust bool) startupOutcome {
-	deadline := time.Now().Add(l.startTimeout())
-	r := readiness{p: p, statuses: []string{herdr.StatusIdle, herdr.StatusDone, herdr.StatusWorking}, hold: l.pollInterval(), reportWait: l.sessionReportWait()}
-	for time.Now().Before(deadline) {
-		if screen, err := l.Herdr.ReadVisible(ctx, pane); err == nil {
-			if keys := lp.StartupKeys(screen); keys != nil {
-				if !trust {
-					return startupTrust
-				}
-				if err := l.Herdr.SendKeys(ctx, pane, keys...); err != nil {
-					return startupStuck
-				}
-				r.reset()
-				if !sleep(ctx, l.readyPoll()) {
-					return startupStuck
-				}
-				continue
-			}
-		}
-		if r.ready(l.Herdr.Pane(ctx, pane)) {
-			return startupReady
-		}
-		if !sleep(ctx, l.readyPoll()) {
-			return startupStuck
-		}
-	}
-	return startupStuck
-}
-
-// waitReady waits until the agent takes input, before the launcher types.
-// passStartupDialog has already waited for a session report.
-func (l *Launcher) waitReady(ctx context.Context, pane string, p providers.Provider) error {
-	deadline := time.Now().Add(l.startTimeout())
-	r := readiness{p: p, statuses: []string{herdr.StatusIdle, herdr.StatusDone}}
-	for time.Now().Before(deadline) {
-		if r.ready(l.Herdr.Pane(ctx, pane)) {
-			return nil
-		}
-		if !sleep(ctx, l.readyPoll()) {
-			return ctx.Err()
-		}
-	}
-	return errors.New("agent not ready")
-}
-
-// readiness tells from successive pane polls whether a starting agent reads
-// its input. Herdr reports a new agent idle a fixed time after it sees the
-// process, even while the TUI is still starting and discards input, so the
-// session report of a StartupSessionReporter is what counts for it. Without
-// that report its status counts only after reportWait.
-type readiness struct {
-	p        providers.Provider
-	statuses []string
-	// hold is how long one of statuses must last.
-	hold       time.Duration
-	reportWait time.Duration
-	since      time.Time
-}
-
-func (r *readiness) reset() { r.since = time.Time{} }
-
-func (r *readiness) ready(pi *herdr.Pane, err error) bool {
-	if err != nil || pi.AgentName() == "" || pi.AgentStatus == herdr.StatusBlocked {
-		r.reset()
-		return false
-	}
-	hold := r.hold
-	if _, ok := r.p.(providers.StartupSessionReporter); ok {
-		if reportedSession(pi, r.p) != "" {
-			return true
-		}
-		hold = max(hold, r.reportWait)
-	}
-	if !slices.Contains(r.statuses, pi.AgentStatus) {
-		r.reset()
-		return false
-	}
-	if r.since.IsZero() {
-		r.since = time.Now()
-	}
-	return time.Since(r.since) >= hold
-}
-
-// reportedSession is the native id Herdr holds for the provider's agent in
-// the pane, or "".
-func reportedSession(pi *herdr.Pane, p providers.Provider) string {
-	if s := pi.AgentSession; s != nil && s.Agent == p.HerdrAgent() && s.Kind == "id" {
-		return s.Value
-	}
-	return ""
-}
-
-// waitIdentity waits for the integration hook to report the native session
-// id. Providers that can locate the session themselves report it to Herdr
-// when the hook does not.
-func (l *Launcher) waitIdentity(ctx context.Context, pane string, p providers.Provider, cwd string, started time.Time, knownID string) string {
-	locator, _ := p.(providers.SessionLocator)
-	deadline := time.Now().Add(l.identityWait())
-	polls := 0
-	for time.Now().Before(deadline) {
-		if pi, err := l.Herdr.Pane(ctx, pane); err == nil {
-			if id := reportedSession(pi, p); id != "" {
-				return p.Name() + ":" + id
-			}
-		}
-		// Give the hook a moment before reporting on its behalf.
-		if polls++; locator != nil && polls > 2 {
-			// An id known before the start is a session the agent opens.
-			id, source := knownID, herdr.SessionResume
-			if id == "" {
-				id, source = locator.LocateLaunched(ctx, cwd, started.Add(-2*time.Second)), herdr.SessionStartup
-			}
-			if id != "" {
-				if err := l.Herdr.ReportAgentSession(ctx, pane, p.HerdrAgent(), id, source); err != nil {
-					slog.Warn("reporting agent session failed", "provider", p.Name(), "pane", pane, "session_id", id, "error", err)
-				}
-			}
-		}
-		if !sleep(ctx, l.pollInterval()) {
-			return ""
-		}
-	}
-	return ""
-}
-
-func sleep(ctx context.Context, d time.Duration) bool {
-	select {
-	case <-ctx.Done():
-		return false
-	case <-time.After(d):
-		return true
-	}
-}
-
-func orDefault(d, def time.Duration) time.Duration {
-	if d == 0 {
-		return def
-	}
-	return d
-}
-
-func (l *Launcher) startTimeout() time.Duration { return orDefault(l.StartTimeout, 60*time.Second) }
-func (l *Launcher) pollInterval() time.Duration { return orDefault(l.PollInterval, time.Second) }
-func (l *Launcher) identityWait() time.Duration { return orDefault(l.IdentityWait, 20*time.Second) }
-func (l *Launcher) sessionReportWait() time.Duration {
-	return orDefault(l.SessionReportWait, 10*time.Second)
-}
-
-// readyPoll paces the polls of a starting agent, which hold up the response.
-func (l *Launcher) readyPoll() time.Duration { return min(l.pollInterval(), 200*time.Millisecond) }
-
-// startDirect runs a session under the gateway's own runtime. The agent shows
-// no folder-trust dialog there, so a folder the agent was never trusted in
-// is confirmed with the user first (TrustRequired with a launch id), as the
-// Herdr launch does with the agent's own dialog.
-func (l *Launcher) startDirect(ctx context.Context, p providers.Provider, req StartRequest, cwd string) (*StartResult, error) {
 	req.Cwd = cwd
 	if tc, ok := p.(providers.TrustChecker); ok && !req.Trust && !tc.FolderTrusted(cwd) {
-		id := "launch-" + agentName(p.Name())
+		id := launchID(p.Name())
 		l.mu.Lock()
-		if l.directPending == nil {
-			l.directPending = map[string]*StartRequest{}
+		if l.pending == nil {
+			l.pending = map[string]*StartRequest{}
 		}
-		l.directPending[id] = &req
+		l.pending[id] = &req
 		l.mu.Unlock()
-		slog.Info("direct launch waiting on folder trust", "provider", p.Name(), "launch", id, "cwd", cwd)
-		return &StartResult{LaunchID: id, Backend: model.BackendDirect, TrustRequired: true}, nil
+		slog.Info("launch waiting on folder trust", "provider", p.Name(), "launch", id, "cwd", cwd)
+		return &StartResult{LaunchID: id, TrustRequired: true}, nil
 	}
-	return l.runDirect(ctx, p, req)
+	return l.run(ctx, p, req)
 }
 
-func (l *Launcher) takeDirectPending(id string) *StartRequest {
+// AnswerTrust goes ahead with a start that waited on the folder-trust
+// answer, or drops it when declined.
+func (l *Launcher) AnswerTrust(ctx context.Context, id string, accept bool) (*StartResult, error) {
 	l.mu.Lock()
-	defer l.mu.Unlock()
-	req := l.directPending[id]
-	delete(l.directPending, id)
-	return req
+	req := l.pending[id]
+	delete(l.pending, id)
+	l.mu.Unlock()
+	if req == nil {
+		return nil, ErrNoPendingTrust
+	}
+	if !accept {
+		slog.Info("folder trust declined", "provider", req.Provider, "launch", id, "cwd", req.Cwd)
+		return &StartResult{LaunchID: id}, nil
+	}
+	p, err := l.provider(req.Provider)
+	if err != nil {
+		return nil, err
+	}
+	return l.run(ctx, p, *req)
 }
 
-func (l *Launcher) runDirect(ctx context.Context, p providers.Provider, req StartRequest) (*StartResult, error) {
+func (l *Launcher) run(ctx context.Context, p providers.Provider, req StartRequest) (*StartResult, error) {
 	cwd, wt := req.Cwd, ""
 	if req.Worktree {
 		path, err := worktree.Create(ctx, cwd, l.WorktreeDir, p.Name())
@@ -1034,12 +303,63 @@ func (l *Launcher) runDirect(ctx context.Context, p providers.Provider, req Star
 		}
 		return nil, err
 	}
-	res := &StartResult{SessionID: id, Backend: model.BackendDirect}
+	res := &StartResult{SessionID: id}
 	if err != nil {
 		// The session exists, but its first prompt did not go through.
 		res.Warning = "The session started, but its first message was not delivered: " + err.Error()
 	}
-	slog.Info("direct session started", "provider", p.Name(), "session_id", id, "operation", "launch", "cwd", cwd,
+	slog.Info("session started", "provider", p.Name(), "session_id", id, "operation", "launch", "cwd", cwd,
 		"model", req.Model, "effort", req.Effort, "mode", req.Mode, "worktree", req.Worktree)
 	return res, nil
+}
+
+// resumeDir checks a session's directory for resuming it.
+func (l *Launcher) resumeDir(ctx context.Context, cwd string) (string, error) {
+	if cwd == "" {
+		return "", ErrNoCwd
+	}
+	dir, err := l.resolveDir(cwd)
+	if errors.Is(err, files.ErrForbidden) {
+		dir, err = l.resolveWorktree(ctx, cwd)
+	}
+	if errors.Is(err, files.ErrNotFound) {
+		// e.g. the worktree it ran in was removed when it was archived
+		return "", ErrCwdGone
+	}
+	return dir, err
+}
+
+// Resume reopens an existing session that runs nowhere, under its own id,
+// in its working directory.
+func (l *Launcher) Resume(ctx context.Context, provider, nativeID, cwd string) (*StartResult, error) {
+	p, err := l.provider(provider)
+	if err != nil {
+		return nil, err
+	}
+	dir, err := l.resumeDir(ctx, cwd)
+	if err != nil {
+		return nil, err
+	}
+	id := p.Name() + ":" + nativeID
+	if err := l.Direct.Resume(ctx, id, providers.DirectStart{Cwd: dir}); err != nil {
+		return nil, err
+	}
+	return &StartResult{SessionID: id}, nil
+}
+
+// resolveWorktree accepts a linked worktree outside the roots (agents keep
+// them in their own directories) whose repository is inside them.
+func (l *Launcher) resolveWorktree(ctx context.Context, dir string) (string, error) {
+	real, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return "", files.ErrForbidden
+	}
+	main, err := worktree.MainCheckout(ctx, real)
+	if err != nil {
+		return "", files.ErrForbidden
+	}
+	if _, err := l.resolveDir(main); err != nil {
+		return "", err
+	}
+	return real, nil
 }

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -17,7 +16,6 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/archive"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/config"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
-	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/launcher"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
@@ -33,15 +31,41 @@ type directFake struct {
 	infos    map[string]*providers.DirectInfo
 	starts   []providers.DirectStart
 	models   []string
+	modes    []string
 	trusted  bool
 	listener func(string)
-	// heldShared: a shared server (Codex's daemon) has the session open.
-	heldShared bool
+	// m is the runtime manager the server uses.
+	m *runtime.Manager
 }
 
-func (d *directFake) ReleaseShared(context.Context, string) error { return nil }
+// run makes a session live in the runtime, working in cwd.
+func (d *directFake) run(t *testing.T, id, cwd string) {
+	t.Helper()
+	if err := d.m.Resume(context.Background(), "fake:"+id, providers.DirectStart{Cwd: cwd}); err != nil {
+		t.Fatal(err)
+	}
+}
 
-func (d *directFake) HeldShared(context.Context, string) bool { return d.heldShared }
+// finishTurn ends a turn of a live session, which leaves it unread.
+func (d *directFake) finishTurn(id string) {
+	d.mu.Lock()
+	d.infos[id].Turns++
+	d.mu.Unlock()
+	d.listener(id)
+}
+
+func (d *directFake) alive(id string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	in := d.infos[id]
+	return in != nil && in.Alive
+}
+
+func (d *directFake) setCwd(id, cwd string) {
+	d.mu.Lock()
+	d.infos[id].Cwd = cwd
+	d.mu.Unlock()
+}
 
 func (d *directFake) DirectStart(_ context.Context, opts providers.DirectStart) (string, error) {
 	d.mu.Lock()
@@ -74,10 +98,15 @@ func (d *directFake) DirectSetModel(_ context.Context, id, m string) error {
 	return nil
 }
 func (d *directFake) DirectSetEffort(context.Context, string, string) error { return nil }
-func (d *directFake) DirectSetMode(context.Context, string, string) error   { return nil }
-func (d *directFake) SettingsApply() string                                 { return providers.ApplyNextTurn }
-func (d *directFake) SetDirectListener(l func(string))                      { d.listener = l }
-func (d *directFake) FolderTrusted(string) bool                             { return d.trusted }
+func (d *directFake) DirectSetMode(_ context.Context, _, mode string) error {
+	d.mu.Lock()
+	d.modes = append(d.modes, mode)
+	d.mu.Unlock()
+	return nil
+}
+func (d *directFake) SettingsApply() string            { return providers.ApplyNextTurn }
+func (d *directFake) SetDirectListener(l func(string)) { d.listener = l }
+func (d *directFake) FolderTrusted(string) bool        { return d.trusted }
 func (d *directFake) DirectSessions() []providers.DirectInfo {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -88,24 +117,12 @@ func (d *directFake) DirectSessions() []providers.DirectInfo {
 	return out
 }
 
-// Send of a direct session goes to the runtime: only a live process takes it.
+// Send goes to the runtime: only a live process takes it.
 func (d *directFake) Send(ctx context.Context, id string, live *providers.Live, in model.Input) error {
-	if live.IsDirect() {
-		d.mu.Lock()
-		info := d.infos[id]
-		d.mu.Unlock()
-		if info == nil || !info.Alive {
-			return providers.ErrNotLive
-		}
+	if !d.alive(id) {
+		return providers.ErrNotLive
 	}
 	return d.fakeProvider.Send(ctx, id, live, in)
-}
-
-// herdrDown is a Herdr whose server is not running.
-type herdrDown struct{}
-
-func (herdrDown) Snapshot(context.Context) (*herdr.Snapshot, error) {
-	return nil, errors.New("herdr: connect: no such file or directory")
 }
 
 func newDirectServer(t *testing.T) (*httptest.Server, *directFake, string) {
@@ -118,7 +135,7 @@ func newDirectServer(t *testing.T) (*httptest.Server, *directFake, string) {
 	root, _ = filepath.EvalSymlinks(root) // the launcher resolves /var to /private/var
 	fp := &fakeProvider{root: root}
 	dp := &directFake{fakeProvider: fp, infos: map[string]*providers.DirectInfo{}, trusted: true}
-	svc := sessions.New(herdrDown{}, 72*time.Hour, dp)
+	svc := sessions.New(72*time.Hour, dp)
 	arch, err := archive.Open(filepath.Join(t.TempDir(), "archive.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -129,6 +146,7 @@ func newDirectServer(t *testing.T) (*httptest.Server, *directFake, string) {
 		t.Fatal(err)
 	}
 	svc.Direct = direct
+	dp.m = direct
 	delivery, err := OpenMessageDeliveryStore(filepath.Join(t.TempDir(), "delivery"))
 	if err != nil {
 		t.Fatal(err)
@@ -162,14 +180,16 @@ func call(t *testing.T, srv *httptest.Server, token, method, path string, body a
 	return resp.StatusCode, out
 }
 
-func TestHerdr停止中でも直接管理のセッションを開始して一覧に出す(t *testing.T) {
+func Testセッションを開始して一覧に出す(t *testing.T) {
 	srv, dp, token := newDirectServer(t)
 	code, res := call(t, srv, token, "POST", "/v1/sessions", map[string]any{"provider": "fake", "cwd": dp.root, "prompt": "hi", "model": "fake-large"})
-	if code != http.StatusCreated || res["sessionId"] != "fake:s1" || res["backend"] != "direct" {
+	if code != http.StatusCreated || res["sessionId"] != "fake:s1" {
 		t.Fatalf("start = %d %v", code, res)
 	}
-	if _, ok := res["paneId"]; ok {
-		t.Errorf("a direct session has no pane: %v", res)
+	for _, gone := range []string{"paneId", "backend"} {
+		if _, ok := res[gone]; ok {
+			t.Errorf("%s is no longer part of the result: %v", gone, res)
+		}
 	}
 	if len(dp.sent) != 1 || dp.starts[0].Model != "fake-large" || dp.starts[0].Cwd != dp.root {
 		t.Errorf("starts = %+v sent = %+v", dp.starts, dp.sent)
@@ -178,7 +198,7 @@ func TestHerdr停止中でも直接管理のセッションを開始して一覧
 	sessionsJSON, _ := json.Marshal(list["sessions"])
 	var got []model.Session
 	json.Unmarshal(sessionsJSON, &got)
-	if len(got) == 0 || got[0].ID != "fake:s1" || got[0].Backend != "direct" || !got[0].CanSend || got[0].Status == model.StatusOffline {
+	if len(got) == 0 || got[0].ID != "fake:s1" || !got[0].CanSend || got[0].Status == model.StatusOffline {
 		t.Fatalf("sessions = %+v", got)
 	}
 }
@@ -203,14 +223,6 @@ func Test利用できないモデルや推論強度は理由を付けて拒否�
 	}
 }
 
-func Test直接管理のセッションにはターミナルがない(t *testing.T) {
-	srv, dp, token := newDirectServer(t)
-	call(t, srv, token, "POST", "/v1/sessions", map[string]any{"provider": "fake", "cwd": dp.root})
-	if code, res := call(t, srv, token, "GET", "/v1/sessions/fake:s1/terminal", nil); code != http.StatusConflict || !strings.Contains(res["error"].(string), "no terminal") {
-		t.Errorf("terminal = %d %v", code, res)
-	}
-}
-
 func Test止まったセッションへの送信は同じIDで再開してから一度だけ届ける(t *testing.T) {
 	srv, dp, token := newDirectServer(t)
 	call(t, srv, token, "POST", "/v1/sessions", map[string]any{"provider": "fake", "cwd": dp.root})
@@ -230,7 +242,7 @@ func Test止まったセッションへの送信は同じIDで再開してから
 	}
 }
 
-func Test一度も信頼していないフォルダでの直接起動は確認してから始める(t *testing.T) {
+func Test一度も信頼していないフォルダでの起動は確認してから始める(t *testing.T) {
 	srv, dp, token := newDirectServer(t)
 	dp.trusted = false
 	code, res := call(t, srv, token, "POST", "/v1/sessions", map[string]any{"provider": "fake", "cwd": dp.root, "prompt": "hi"})
@@ -247,7 +259,7 @@ func Test一度も信頼していないフォルダでの直接起動は確認�
 	}
 }
 
-func Test直接管理のセッションをアーカイブするとプロセスを止め記録を消す(t *testing.T) {
+func TestセッションをアーカイブするとプロセスとRuntimeの記録を消す(t *testing.T) {
 	srv, dp, token := newDirectServer(t)
 	call(t, srv, token, "POST", "/v1/sessions", map[string]any{"provider": "fake", "cwd": dp.root})
 	code, res := call(t, srv, token, "POST", "/v1/sessions/fake:s1/archive", nil)
@@ -257,80 +269,19 @@ func Test直接管理のセッションをアーカイブするとプロセス�
 	if dp.infos["s1"].Alive {
 		t.Error("process still running")
 	}
-	_, list := call(t, srv, token, "GET", "/v1/sessions", nil)
-	if b, _ := json.Marshal(list); strings.Contains(string(b), `"backend":"direct"`) {
-		t.Errorf("archived session still direct: %s", b)
+	if dp.m.Owns("fake:s1") {
+		t.Error("the runtime still records the session")
 	}
 }
 
-func TestHerdrのセッションにはモデル変更を提供しない(t *testing.T) {
-	srv, _, _, token := newTestServer(t)
-	code, res := call(t, srv, token, "POST", "/v1/sessions/fake:s1/model", map[string]any{"model": "fake-large"})
-	if code != http.StatusConflict || !strings.Contains(res["error"].(string), "Herdr") {
-		t.Errorf("model = %d %v", code, res)
+func Test止まっているセッションのモードとモデルを変えられる(t *testing.T) {
+	srv, dp, token := newDirectServer(t)
+	call(t, srv, token, "POST", "/v1/sessions", map[string]any{"provider": "fake", "cwd": dp.root})
+	dp.DirectStop(context.Background(), "s1")
+	if code, res := call(t, srv, token, "POST", "/v1/sessions/fake:s1/mode", map[string]any{"mode": "plan"}); code != http.StatusAccepted {
+		t.Fatalf("mode = %d %v", code, res)
 	}
-}
-
-func newMigrationServer(t *testing.T, status string) (*httptest.Server, *directFake, *fakeHerdr, string) {
-	t.Helper()
-	srv, dp, _ := newDirectServer(t) // for its provider and scratch root
-	srv.Close()
-	fh := &fakeHerdr{snap: &herdr.Snapshot{
-		Workspaces: []herdr.Workspace{{WorkspaceID: "w1", Label: "app"}},
-		Panes: []herdr.Pane{{
-			PaneID: "w1:p1", WorkspaceID: "w1", Agent: str("fake"), AgentStatus: status, Cwd: str(dp.root),
-			AgentSession: &herdr.AgentSession{Agent: "fake", Kind: "id", Value: "s1"},
-		}},
-	}}
-	store, _ := config.Load(filepath.Join(t.TempDir(), "config.json"))
-	svc := sessions.New(fh, time.Hour, dp)
-	direct, _ := runtime.New(filepath.Join(t.TempDir(), "direct.json"), time.Hour, dp)
-	svc.Direct = direct
-	s := &Server{
-		Sessions: svc, Direct: direct, Config: store, Sink: deadletter.Nop{}, Uploads: uploads.New(t.TempDir(), time.Hour),
-		Launcher: &launcher.Launcher{Herdr: fh, Roots: []string{dp.root}, Providers: []providers.Provider{dp}, Direct: direct,
-			StartTimeout: time.Second, PollInterval: time.Millisecond},
-	}
-	ts := httptest.NewServer(s.Handler())
-	t.Cleanup(ts.Close)
-	return ts, dp, fh, store.Get().AuthToken
-}
-
-func TestHerdrで動いているセッションを同じIDのまま直接管理へ移す(t *testing.T) {
-	ts, dp, fh, token := newMigrationServer(t, herdr.StatusIdle)
-	code, res := call(t, ts, token, "POST", "/v1/sessions/fake:s1/migrate", nil)
-	if code != http.StatusOK || res["backend"] != "direct" || res["id"] != "fake:s1" {
-		t.Fatalf("migrate = %d %v", code, res)
-	}
-	if len(fh.snap.Panes) != 0 || !strings.Contains(strings.Join(fh.calls, ","), "close-workspace:w1") {
-		t.Errorf("pane not closed: %v", fh.calls)
-	}
-	if len(dp.starts) != 1 || dp.starts[0].Resume != "s1" || dp.starts[0].Cwd != dp.root || !dp.starts[0].Prompt.Empty() {
-		t.Errorf("starts = %+v", dp.starts)
-	}
-}
-
-func Test共有サーバーが開いているスレッドはペインを閉じる前に移行を断る(t *testing.T) {
-	ts, dp, fh, token := newMigrationServer(t, herdr.StatusIdle)
-	dp.heldShared = true
-	code, res := call(t, ts, token, "POST", "/v1/sessions/fake:s1/migrate", nil)
-	if code != http.StatusConflict || !strings.Contains(res["error"].(string), "keep it in Herdr") {
-		t.Fatalf("migrate = %d %v", code, res)
-	}
-	if len(fh.calls) != 0 || len(dp.starts) != 0 {
-		t.Errorf("acted: %v %v", fh.calls, dp.starts)
-	}
-}
-
-func Test作業中や回答待ちのセッションは移さない(t *testing.T) {
-	for _, st := range []string{herdr.StatusWorking, herdr.StatusBlocked} {
-		ts, dp, fh, token := newMigrationServer(t, st)
-		code, res := call(t, ts, token, "POST", "/v1/sessions/fake:s1/migrate", nil)
-		if code != http.StatusConflict || !strings.Contains(res["error"].(string), "turn has ended") {
-			t.Fatalf("%s: migrate = %d %v", st, code, res)
-		}
-		if len(fh.calls) != 0 || len(dp.starts) != 0 {
-			t.Errorf("%s: acted: %v %v", st, fh.calls, dp.starts)
-		}
+	if code, res := call(t, srv, token, "POST", "/v1/sessions/fake:s1/model", map[string]any{"model": "fake-large"}); code != http.StatusOK {
+		t.Fatalf("model = %d %v", code, res)
 	}
 }

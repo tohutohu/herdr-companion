@@ -1,7 +1,6 @@
 package codex
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -12,7 +11,6 @@ import (
 	"time"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
-	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 )
 
@@ -207,26 +205,6 @@ func Test圧縮後の要約は一度照合してから増分読み取りに戻�
 	}
 }
 
-func Test履歴不変の要約でも端末のPlan確認と質問キューを確認する(t *testing.T) {
-	th, _ := summaryTestThread(t)
-	p, f := cacheTestProvider(t, th)
-	ctx := context.Background()
-	appendRollout(t, th.Path, `{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"Plan","id":"plan-1","text":"plan"}}}`+"\n")
-	th.Turns[0].Items = append(th.Turns[0].Items, json.RawMessage(`{"type":"plan","id":"plan-1","text":"plan"}`))
-	setCacheThread(f, th)
-	term := &asyncTerminal{screen: planPromptScreen}
-	p.term = term
-	sum, err := p.Summary(ctx, th.ID, &providers.Live{PaneID: "pane"})
-	if err != nil || sum.Pending != model.InteractionApproval {
-		t.Fatalf("plan %+v %v", sum, err)
-	}
-	term.screen = "normal composer"
-	sum, err = p.Summary(ctx, th.ID, &providers.Live{PaneID: "pane"})
-	if err != nil || sum.Pending != "" || historyCalls(f) != 1 {
-		t.Fatalf("closed %+v %v %v", sum, err, f.callList())
-	}
-}
-
 func Test要約と詳細の並行取得でキャッシュを破壊しない(t *testing.T) {
 	th, _ := summaryTestThread(t)
 	p, _ := cacheTestProvider(t, th)
@@ -247,11 +225,11 @@ func Test要約と詳細の並行取得でキャッシュを破壊しない(t *t
 		}()
 	}
 	wg.Wait()
-	d := newDaemonConn(deadletter.Nop{})
+	d := newServerConn(deadletter.Nop{})
 	d.c = p.owned.c
-	p.daemon = d
+	p.owned = d
 	d.Notification("turn/started", json.RawMessage(`{"threadId":"`+th.ID+`","turn":{"id":"new-turn","status":"inProgress"}}`))
-	sum, err := p.Summary(ctx, th.ID, nil)
+	sum, err := p.Summary(ctx, th.ID, &providers.Live{})
 	if err != nil || sum.CompletionRevision != "" {
 		t.Fatalf("buffered turn start %+v %v", sum, err)
 	}
@@ -260,9 +238,9 @@ func Test要約と詳細の並行取得でキャッシュを破壊しない(t *t
 func Test巻き戻しイベントはファイル変更前でも要約を再照合する(t *testing.T) {
 	th, _ := summaryTestThread(t)
 	p, f := cacheTestProvider(t, th)
-	d := newDaemonConn(deadletter.Nop{})
+	d := newServerConn(deadletter.Nop{})
 	d.c = p.owned.c
-	p.daemon = d
+	p.owned = d
 	ctx := context.Background()
 	if _, err := p.Summary(ctx, th.ID, nil); err != nil {
 		t.Fatal(err)
@@ -277,41 +255,5 @@ func Test巻き戻しイベントはファイル変更前でも要約を再照�
 	sum, err = p.Summary(ctx, th.ID, nil)
 	if err != nil || sum.LastMessage != "巻き戻した結果" || historyCalls(f) != 2 {
 		t.Fatalf("revert cache %+v %v %v", sum, err, f.callList())
-	}
-}
-
-func Test質問キューの投影は回答と画面上の解消を反映する(t *testing.T) {
-	th, _ := loadThread(t, "async_reply.json")
-	path := filepath.Join(t.TempDir(), "rollout.jsonl")
-	th.Path = path
-	var records strings.Builder
-	records.WriteString(`{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1"}}` + "\n")
-	for _, it := range th.Turns[0].Items[:1] {
-		var compact bytes.Buffer
-		json.Compact(&compact, it)
-		records.WriteString(`{"type":"event_msg","payload":{"type":"item_completed","item":` + compact.String() + `}}` + "\n")
-	}
-	os.WriteFile(path, []byte(records.String()), 0600)
-	p, f := cacheTestProvider(t, th)
-	term := &asyncTerminal{screen: collapsedAsync}
-	p.term = term
-	live := &providers.Live{PaneID: "pane"}
-	ctx := context.Background()
-	sum, err := p.Summary(ctx, th.ID, live)
-	if err != nil || sum.Pending != model.InteractionQuestions || historyCalls(f) != 0 {
-		t.Fatalf("queued %+v %v %v", sum, err, f.callList())
-	}
-	term.screen = "normal composer"
-	sum, err = p.Summary(ctx, th.ID, live)
-	if err != nil || sum.Pending != "" || historyCalls(f) != 0 {
-		t.Fatalf("dismissed %+v %v", sum, err)
-	}
-	var compact bytes.Buffer
-	json.Compact(&compact, th.Turns[0].Items[1])
-	appendRollout(t, path, `{"type":"event_msg","payload":{"type":"item_completed","item":`+compact.String()+`}}`+"\n")
-	term.screen = collapsedAsync
-	sum, err = p.Summary(ctx, th.ID, live)
-	if err != nil || sum.Pending != "" || historyCalls(f) != 0 {
-		t.Fatalf("answered %+v %v", sum, err)
 	}
 }

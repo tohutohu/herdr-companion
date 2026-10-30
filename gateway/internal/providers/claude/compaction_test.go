@@ -4,14 +4,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 )
 
 func TestClaudeのコンパクション要約とサブエージェント報告は折りたたみ表示になる(t *testing.T) {
 	tr, rec, ws := loadFixture(t, "compaction.jsonl")
-	working := &providers.Live{PaneID: "w1:p1", HerdrStatus: herdr.StatusWorking}
+	working := &providers.Live{State: providers.StateWorking}
 	msgs := tr.Messages(ParseOptions{SessionID: "claude:test", Root: ws, Live: working, Sink: rec})
 	assertGolden(t, "compaction.golden.json", msgs)
 	if len(rec.Entries) != 0 {

@@ -132,7 +132,8 @@ func TestProviderエラー後の曖昧な再送を拒否する(t *testing.T) {
 	p := &uncertainSendProvider{fakeProvider: &fakeProvider{root: t.TempDir()}}
 	ts, _, _, token := newTestServer(t, func(s *Server) {
 		s.MessageDelivery, _ = OpenMessageDeliveryStore(t.TempDir())
-		s.Sessions = sessions.New(s.Terminal.(*fakeHerdr), time.Hour, p)
+		s.Sessions = sessions.New(time.Hour, p)
+		s.Sessions.Direct = s.Direct
 	})
 	for range 2 {
 		response, _ := do(t, ts, token, http.MethodPost, "/v1/sessions/fake:s1/messages", []byte(`{"text":"once","requestId":"r"}`), "application/json")

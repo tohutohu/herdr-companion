@@ -28,12 +28,6 @@ func (s Status) Notifiable() bool {
 	return false
 }
 
-// Backends a live session can run on.
-const (
-	BackendDirect = "direct"
-	BackendHerdr  = "herdr"
-)
-
 type Session struct {
 	ID           string    `json:"id"` // "<provider>:<native-id>"
 	Provider     string    `json:"provider"`
@@ -44,24 +38,20 @@ type Session struct {
 	Status       Status    `json:"status"`
 	UpdatedAt    time.Time `json:"updatedAt"`
 	LastMessage  string    `json:"lastMessage,omitempty"`
-	PaneID       string    `json:"paneId,omitempty"` // where it currently runs; not an identity
 	Model        string    `json:"model,omitempty"`  // last used model, provider naming
 	Effort       string    `json:"effort,omitempty"` // reasoning effort: low, medium, high, ...
 	Mode         string    `json:"mode,omitempty"`   // display label, e.g. "Plan", "Accept edits"
 	CanSend      bool      `json:"canSend"`
-	// Backend is where a live session runs: "direct" (the gateway's own
-	// runtime) or "herdr" (a Herdr pane). Empty while offline.
-	Backend string `json:"backend,omitempty"`
 	// PendingModel / PendingEffort are a requested change the agent has not
 	// used yet; SettingsApply says when it will ("next_request", "next_turn").
 	PendingModel  string `json:"pendingModel,omitempty"`
 	PendingEffort string `json:"pendingEffort,omitempty"`
 	SettingsApply string `json:"settingsApply,omitempty"`
-	// Error explains a failed direct session (e.g. its runtime exited).
+	// Error explains a failed session (e.g. its runtime exited).
 	Error    string `json:"error,omitempty"`
 	Archived bool   `json:"archived,omitempty"`
-	// Unread is Herdr's view: the agent finished (done) and its pane has not
-	// been focused since.
+	// Unread means the latest turn finished and nobody has looked at the
+	// session since (POST …/seen).
 	Unread bool `json:"unread,omitempty"`
 	// CompletionRevision is internal notification deduplication state, not an API field.
 	CompletionRevision string `json:"-"`
@@ -146,8 +136,7 @@ type Interaction struct {
 	Title     string           `json:"title,omitempty"`
 	Detail    string           `json:"detail,omitempty"`
 	Questions []Question       `json:"questions,omitempty"`
-	// Supported is false when the gateway can show but not answer it;
-	// Android then offers the terminal fallback.
+	// Supported is false when the gateway can show but not answer it.
 	Supported bool   `json:"supported"`
 	Answer    string `json:"answer,omitempty"`
 	// Decisions available for approvals (subset of approve, approve_session, deny).

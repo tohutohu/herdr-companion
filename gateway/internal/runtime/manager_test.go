@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 )
@@ -23,7 +22,6 @@ type fakeRuntime struct {
 
 func (f *fakeRuntime) Name() string        { return "claude" }
 func (f *fakeRuntime) DisplayName() string { return "Claude Code" }
-func (f *fakeRuntime) HerdrAgent() string  { return "claude" }
 func (f *fakeRuntime) Summary(context.Context, string, *providers.Live) (*providers.Summary, error) {
 	return nil, providers.ErrNotFound
 }
@@ -116,17 +114,17 @@ func Testターンが終わると未読の完了になり既読で待機に戻�
 		t.Fatalf("start = %q, %v", id, err)
 	}
 	rt.set("s1", func(in *providers.DirectInfo) { in.Running = true })
-	if s := m.Sessions()[id]; s.Live.HerdrStatus != herdr.StatusWorking || s.Live.Dormant {
+	if s := m.Sessions()[id]; s.Live.State != providers.StateWorking || s.Live.Dormant {
 		t.Fatalf("running = %+v", s.Live)
 	}
 	before := m.Sessions()[id].Live.Revision
 	rt.set("s1", func(in *providers.DirectInfo) { in.Running, in.Turns = false, 1 })
 	s := m.Sessions()[id]
-	if s.Live.HerdrStatus != herdr.StatusDone || s.Live.Revision == before {
+	if s.Live.State != providers.StateDone || s.Live.Revision == before {
 		t.Fatalf("finished = %+v", s.Live)
 	}
 	m.MarkSeen(id)
-	if s := m.Sessions()[id]; s.Live.HerdrStatus != herdr.StatusIdle {
+	if s := m.Sessions()[id]; s.Live.State != providers.StateIdle {
 		t.Errorf("seen = %+v", s.Live)
 	}
 }

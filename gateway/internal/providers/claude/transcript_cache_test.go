@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
-	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 )
@@ -34,7 +33,7 @@ func cacheProvider(t *testing.T) (*Provider, string, func([]byte)) {
 			t.Fatal(err)
 		}
 	}
-	return New(dir, nil, deadletter.Nop{}), path, write
+	return New(dir, deadletter.Nop{}), path, write
 }
 
 // uncachedMessages is what Messages returned before the cache.
@@ -94,10 +93,10 @@ func decodeFixture(lines [][]byte, sink deadletter.Sink) *Transcript {
 
 func Test差分変換は何行ずつ追記しても毎回すべて変換し直した結果と一致する(t *testing.T) {
 	fixtures, ws := fixtureLines(t)
-	working := &providers.Live{HerdrStatus: herdr.StatusWorking, Cwd: ws}
+	working := &providers.Live{State: providers.StateWorking, Cwd: ws}
 	// The cache never converts a blocked session incrementally, but blocked
 	// is where a call's pending state shows, so it checks that dependency.
-	blocked := &providers.Live{HerdrStatus: herdr.StatusBlocked, Cwd: ws}
+	blocked := &providers.Live{State: providers.StateBlocked, Cwd: ws}
 	for name, lines := range fixtures {
 		for _, root := range []string{"", ws} {
 			for _, live := range []*providers.Live{nil, working, blocked} {
@@ -165,7 +164,7 @@ func assertIncremental(t *testing.T, opt ParseOptions, lines ...string) {
 }
 
 func Test新しい指示で放棄された呼び出しは結果がなくても承認待ちでなくなる(t *testing.T) {
-	blocked := &providers.Live{HerdrStatus: herdr.StatusBlocked}
+	blocked := &providers.Live{State: providers.StateBlocked}
 	assertIncremental(t, ParseOptions{SessionID: gatewayID(cacheSession), Live: blocked},
 		`{"type":"user","uuid":"u1","timestamp":"2026-10-01T00:00:01Z","message":{"role":"user","content":"消して"}}`,
 		`{"type":"assistant","uuid":"a1","timestamp":"2026-10-01T00:00:02Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"call1","name":"Bash","input":{"command":"rm -rf build"}}]}}`,
@@ -214,7 +213,7 @@ func Testキャッシュしたメッセージは追記のたびに従来の解�
 		lines := raw
 		for n := 1; n <= len(lines); n++ {
 			write(bytes.Join(lines[:n], nil))
-			for _, live := range []*providers.Live{nil, {HerdrStatus: herdr.StatusWorking, Cwd: "/work"}, {HerdrStatus: herdr.StatusWorking, Cwd: ws}} {
+			for _, live := range []*providers.Live{nil, {State: providers.StateWorking, Cwd: "/work"}, {State: providers.StateWorking, Cwd: ws}} {
 				assertCachedMessages(t, p, path, live)
 			}
 		}
@@ -329,7 +328,7 @@ func Test実行中セッションの要約は追記分だけ読み直しても�
 func summariesMatch(t *testing.T, lines [][]byte) {
 	t.Helper()
 	p, path, write := cacheProvider(t)
-	live := &providers.Live{HerdrStatus: herdr.StatusWorking}
+	live := &providers.Live{State: providers.StateWorking}
 	for n := 1; n <= len(lines); n++ {
 		write(bytes.Join(lines[:n], nil))
 		got, err := p.summaryPath(context.Background(), path, cacheSession, live)
@@ -387,7 +386,7 @@ func cachedAfterReadingAnother(t *testing.T, budget func(size int64) int64) bool
 			t.Fatal(err)
 		}
 	}
-	p := New(dir, nil, deadletter.Nop{})
+	p := New(dir, deadletter.Nop{})
 	c, err := p.transcript(first, cacheSession)
 	if err != nil {
 		t.Fatal(err)

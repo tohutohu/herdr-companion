@@ -6,9 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"slices"
 	"strings"
-	"time"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
@@ -151,7 +149,7 @@ func (p *Provider) DirectStart(ctx context.Context, opts providers.DirectStart) 
 	return id, nil
 }
 
-func (p *Provider) directThread(id string) (*directThread, *daemonConn, error) {
+func (p *Provider) directThread(id string) (*directThread, *serverConn, error) {
 	d := p.currentOwned()
 	p.directMu.Lock()
 	defer p.directMu.Unlock()
@@ -325,7 +323,7 @@ func (p *Provider) hasDirect(id string) bool {
 
 // ownedClosed marks every thread of a dead app-server as gone. A turn that
 // was running is lost with it: it is reported as failed, never re-run.
-func (p *Provider) ownedClosed(d *daemonConn, err error) {
+func (p *Provider) ownedClosed(d *serverConn, err error) {
 	p.mu.Lock()
 	if p.owned == d {
 		p.owned = nil
@@ -487,7 +485,7 @@ func (p *Provider) DirectSessions() []providers.DirectInfo {
 			in.Mode = "Default"
 		}
 		if in.Alive {
-			pending, _ := d.state(s.id, &providers.Live{Direct: true})
+			pending, _ := d.state(s.id, &providers.Live{})
 			in.Waiting = pending != ""
 			d.mu.Lock()
 			if st, ok := d.status[s.id]; ok && st.Type == "active" {
@@ -499,67 +497,3 @@ func (p *Provider) DirectSessions() []providers.DirectInfo {
 	}
 	return out
 }
-
-// ReleaseShared hands a thread over from the shared app-server daemon: the
-// gateway stops (re)subscribing to it there and waits until the daemon has
-// unloaded it, since only one app-server may write a thread. It fails when
-// another client still holds the thread open.
-func (p *Provider) ReleaseShared(ctx context.Context, id string) error {
-	d := p.currentDaemon()
-	if d == nil {
-		return nil
-	}
-	d.mu.Lock()
-	d.released[id] = true
-	subscribed := d.subscribed[id]
-	d.mu.Unlock()
-	cctx, cancel := context.WithTimeout(ctx, releaseTimeout)
-	defer cancel()
-	if subscribed {
-		if err := d.c.call(cctx, "thread/unsubscribe", map[string]any{"threadId": id}, nil); err != nil {
-			return fmt.Errorf("unsubscribe from the shared Codex app-server: %w", err)
-		}
-	}
-	d.mu.Lock()
-	delete(d.subscribed, id)
-	delete(d.status, id)
-	delete(d.pending, id)
-	d.mu.Unlock()
-	for {
-		var loaded struct {
-			Data []string `json:"data"`
-		}
-		if err := d.c.call(cctx, "thread/loaded/list", map[string]any{}, &loaded); err != nil {
-			return fmt.Errorf("the shared Codex app-server still holds the thread: %w", err)
-		}
-		if !slices.Contains(loaded.Data, id) {
-			return nil
-		}
-		select {
-		case <-cctx.Done():
-			return errors.New("the shared Codex app-server still holds the thread open for another client (a Codex TUI or app); close it there and resume the session")
-		case <-time.After(250 * time.Millisecond):
-		}
-	}
-}
-
-// HeldShared reports whether the shared daemon has the thread loaded; when
-// the daemon cannot be asked, it is assumed to.
-func (p *Provider) HeldShared(ctx context.Context, id string) bool {
-	d := p.currentDaemon()
-	if d == nil {
-		return false
-	}
-	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	var loaded struct {
-		Data []string `json:"data"`
-	}
-	if err := d.c.call(cctx, "thread/loaded/list", map[string]any{}, &loaded); err != nil {
-		return true
-	}
-	return slices.Contains(loaded.Data, id)
-}
-
-// releaseTimeout bounds waiting for the shared daemon to unload a thread.
-const releaseTimeout = 15 * time.Second

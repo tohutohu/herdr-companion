@@ -88,8 +88,8 @@ func newDirectProvider(t *testing.T) (*Provider, *directServer, *[]string) {
 	pt := &pipeTransport{in: make(chan []byte, 16), out: make(chan []byte, 16), closed: make(chan struct{})}
 	srv := &directServer{pt: pt}
 	go srv.serve()
-	p := New("codex-not-used", "/nonexistent.sock", &fakeTerm{}, deadletter.Nop{})
-	d := newDaemonConn(deadletter.Nop{})
+	p := New("codex-not-used", deadletter.Nop{})
+	d := newServerConn(deadletter.Nop{})
 	d.events = p.directEvent
 	d.closed = func(err error) { p.ownedClosed(d, err) }
 	d.c = newRPCClient(pt, d)
@@ -155,7 +155,7 @@ func Test直接管理のスレッドは選んだモデルと推論強度を次�
 	if in := directInfo(p); in.RequestedModel != "gpt-5.6-luna" || in.RequestedEffort != "medium" || in.Model != "gpt-6-luna" {
 		t.Errorf("pending = %+v", in)
 	}
-	if err := p.Send(ctx, id, &providers.Live{Direct: true}, model.Input{Text: "again"}); err != nil {
+	if err := p.Send(ctx, id, &providers.Live{}, model.Input{Text: "again"}); err != nil {
 		t.Fatal(err)
 	}
 	if turn := srv.last("turn/start"); turn["model"] != "gpt-5.6-luna" || turn["effort"] != "medium" {
@@ -170,7 +170,7 @@ func Test実行中のターンへの追加指示はsteerで送る(t *testing.T) 
 	p, srv, _ := newDirectProvider(t)
 	ctx := context.Background()
 	id, _ := p.DirectStart(ctx, providers.DirectStart{Cwd: "/work", Prompt: model.Input{Text: "long task"}})
-	if err := p.Send(ctx, id, &providers.Live{Direct: true}, model.Input{Text: "also this"}); err != nil {
+	if err := p.Send(ctx, id, &providers.Live{}, model.Input{Text: "also this"}); err != nil {
 		t.Fatal(err)
 	}
 	steer := srv.last("turn/steer")
@@ -195,7 +195,7 @@ func TestPlanモードは次のターンのcollaborationModeとして渡す(t *t
 	if in := directInfo(p); in.Mode != planLabel {
 		t.Errorf("mode = %q", in.Mode)
 	}
-	p.Send(ctx, id, &providers.Live{Direct: true}, model.Input{Text: "plan it"})
+	p.Send(ctx, id, &providers.Live{}, model.Input{Text: "plan it"})
 	cm, _ := srv.last("turn/start")["collaborationMode"].(map[string]any)
 	settings, _ := cm["settings"].(map[string]any)
 	if cm["mode"] != "plan" || settings["model"] != "gpt-6-luna" {
@@ -210,7 +210,7 @@ func Test承認要求で待機状態になり回答すると解消する(t *test
 	srv.send(map[string]any{"id": 7, "method": "item/commandExecution/requestApproval",
 		"params": map[string]any{"threadId": id, "turnId": "t", "itemId": "i", "command": "make"}})
 	waitFor(t, "approval", func() bool { return directInfo(p).Waiting })
-	live := &providers.Live{Direct: true}
+	live := &providers.Live{}
 	// The gateway's own connection holds the request for the thread.
 	if d := p.connFor(id, live); d != p.currentOwned() {
 		t.Fatal("direct thread not read from the gateway's app-server")
@@ -241,110 +241,7 @@ func Testアプリサーバーが終了すると実行中のターンは失敗�
 	if !in.LastTurnFailed || in.Running || in.Error == "" {
 		t.Errorf("info = %+v", in)
 	}
-	if err := p.Send(ctx, id, &providers.Live{Direct: true}, model.Input{Text: "x"}); err == nil {
+	if err := p.Send(ctx, id, &providers.Live{}, model.Input{Text: "x"}); err == nil {
 		t.Error("send to a dead app-server succeeded")
-	}
-}
-
-func Test共有daemonのスレッドは手放されるまで待ってから引き継ぎ再購読しない(t *testing.T) {
-	pt := &pipeTransport{in: make(chan []byte, 16), out: make(chan []byte, 16), closed: make(chan struct{})}
-	t.Cleanup(func() { pt.close() })
-	var mu sync.Mutex
-	var calls []string
-	lists := 0
-	go func() {
-		for {
-			var b []byte
-			select {
-			case b = <-pt.out:
-			case <-pt.closed:
-				return
-			}
-			var m struct {
-				ID     json.RawMessage `json:"id"`
-				Method string          `json:"method"`
-			}
-			json.Unmarshal(b, &m)
-			mu.Lock()
-			calls = append(calls, m.Method)
-			var result any = map[string]any{}
-			if m.Method == "thread/loaded/list" {
-				lists++
-				data := []string{}
-				if lists < 3 { // the daemon unloads the thread a moment later
-					data = []string{directThreadID}
-				}
-				result = map[string]any{"data": data}
-			}
-			mu.Unlock()
-			b, _ = json.Marshal(map[string]any{"id": m.ID, "result": result})
-			pt.in <- b
-		}
-	}()
-	p := New("codex-not-used", "/nonexistent.sock", &fakeTerm{}, deadletter.Nop{})
-	d := newDaemonConn(deadletter.Nop{})
-	d.c = newRPCClient(pt, d)
-	d.subscribed[directThreadID] = true
-	p.daemon = d
-	if err := p.ReleaseShared(context.Background(), directThreadID); err != nil {
-		t.Fatal(err)
-	}
-	mu.Lock()
-	got := append([]string(nil), calls...)
-	mu.Unlock()
-	if got[0] != "thread/unsubscribe" || lists != 3 {
-		t.Errorf("calls = %v (lists %d)", got, lists)
-	}
-	// 手放す途中の同期でも再購読しない
-	d.mu.Lock()
-	d.released[directThreadID] = true
-	d.mu.Unlock()
-	mu.Lock()
-	lists = 0
-	mu.Unlock()
-	if err := d.sync(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	for _, c := range calls[len(got):] {
-		if c == "thread/resume" {
-			t.Errorf("resubscribed: %v", calls)
-		}
-	}
-}
-
-func Test共有daemonが読み込んでいるスレッドは保持中とみなす(t *testing.T) {
-	pt := &pipeTransport{in: make(chan []byte, 16), out: make(chan []byte, 16), closed: make(chan struct{})}
-	t.Cleanup(func() { pt.close() })
-	loaded := []string{directThreadID}
-	go func() {
-		for {
-			var b []byte
-			select {
-			case b = <-pt.out:
-			case <-pt.closed:
-				return
-			}
-			var m struct {
-				ID json.RawMessage `json:"id"`
-			}
-			json.Unmarshal(b, &m)
-			b, _ = json.Marshal(map[string]any{"id": m.ID, "result": map[string]any{"data": loaded}})
-			pt.in <- b
-		}
-	}()
-	p := New("codex-not-used", "/nonexistent.sock", &fakeTerm{}, deadletter.Nop{})
-	if p.HeldShared(context.Background(), directThreadID) {
-		t.Error("without a daemon nothing is held")
-	}
-	d := newDaemonConn(deadletter.Nop{})
-	d.c = newRPCClient(pt, d)
-	p.daemon = d
-	if !p.HeldShared(context.Background(), directThreadID) {
-		t.Error("a loaded thread is held")
-	}
-	if p.HeldShared(context.Background(), "other-thread") {
-		t.Error("a thread the daemon has not loaded is not held")
 	}
 }

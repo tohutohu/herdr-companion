@@ -67,7 +67,7 @@ func Test再読込はプロバイダーのキャッシュを捨てて全メッ�
 func Test再読込でアプリが表示していなかった質問を記録する(t *testing.T) {
 	got, _, rec := reload(t, func(fp *fakeProvider) {
 		fp.pending = question()
-		fp.daemonStatus = model.StatusWaitingInput
+		fp.status = model.StatusWaitingInput
 	})
 	if !slices.Equal(kinds(got.Findings), []string{findingNotShown}) {
 		t.Fatalf("findings = %+v", got.Findings)
@@ -80,7 +80,7 @@ func Test再読込でアプリが表示していなかった質問を記録す�
 	for _, body := range []string{`{"shown":["ask-1"]}`, ``} {
 		got, _, rec = reloadWith(t, body, func(fp *fakeProvider) {
 			fp.pending = question()
-			fp.daemonStatus = model.StatusWaitingInput
+			fp.status = model.StatusWaitingInput
 		})
 		if len(got.Findings) != 0 || len(rec.Entries) != 0 {
 			t.Errorf("body %q: findings = %+v", body, got.Findings)
@@ -92,7 +92,7 @@ func Test再読込でキャッシュした読み取りに無かった質問を�
 	got, _, rec := reloadWith(t, `{"shown":["ask-1"]}`, func(fp *fakeProvider) {
 		fp.pending = question()
 		fp.staleCache = true
-		fp.daemonStatus = model.StatusWaitingInput
+		fp.status = model.StatusWaitingInput
 	})
 	if !slices.Equal(kinds(got.Findings), []string{findingStaleCache}) || len(rec.Entries) != 1 {
 		t.Errorf("findings = %+v, entries = %+v", got.Findings, rec.Entries)
@@ -102,25 +102,24 @@ func Test再読込でキャッシュした読み取りに無かった質問を�
 	}
 }
 
-func Test回答待ちなのにアプリで答えられる質問がなければ画面と一緒に記録する(t *testing.T) {
+func Test回答待ちなのにアプリで答えられる質問がなければ記録する(t *testing.T) {
 	for name, pending := range map[string]*model.Interaction{
-		"質問なし":    nil,
-		"ターミナルのみ": {ID: "blocked", Type: model.InteractionApproval, State: model.InteractionPending},
+		"質問なし":       nil,
+		"答えられない質問のみ": {ID: "blocked", Type: model.InteractionApproval, State: model.InteractionPending},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got, _, rec := reloadWith(t, `{"shown":["blocked"]}`, func(fp *fakeProvider) {
 				fp.pending = pending
-				fp.daemonStatus = model.StatusWaitingApproval
+				fp.status = model.StatusWaitingApproval
 			})
 			if !slices.Equal(kinds(got.Findings), []string{findingUncaptured}) || len(rec.Entries) != 1 {
 				t.Fatalf("findings = %+v, entries = %+v", got.Findings, rec.Entries)
 			}
 			var raw struct {
-				PaneID string `json:"paneId"`
-				Screen string `json:"screen"`
+				LastMessageIDs []string `json:"lastMessageIds"`
 			}
 			json.Unmarshal(rec.Entries[0].Raw, &raw)
-			if raw.PaneID != "w1:p1" || raw.Screen != "$ hello" {
+			if len(raw.LastMessageIDs) == 0 {
 				t.Errorf("raw = %s", rec.Entries[0].Raw)
 			}
 		})

@@ -9,14 +9,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 )
 
 func Test別セッションのメッセージは送信元と本文を表示する(t *testing.T) {
 	tr, rec, _ := loadFixture(t, "cross_session.jsonl")
-	msgs := tr.Messages(ParseOptions{SessionID: "claude:test", Live: &providers.Live{HerdrStatus: herdr.StatusWorking}, Sink: rec})
+	msgs := tr.Messages(ParseOptions{SessionID: "claude:test", Live: &providers.Live{State: providers.StateWorking}, Sink: rec})
 	assertGolden(t, "cross_session.golden.json", msgs)
 	if len(rec.Entries) != 0 {
 		t.Fatalf("dead letters = %+v", rec.Entries)

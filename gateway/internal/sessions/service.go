@@ -1,6 +1,5 @@
-// Package sessions joins the live views (sessions the gateway runs directly,
-// and which Herdr pane runs which native session) with provider data. Herdr
-// is optional: without it only directly managed sessions are live.
+// Package sessions joins the sessions the gateway runs with provider data,
+// and lists recently updated sessions that run nowhere as offline.
 package sessions
 
 import (
@@ -12,16 +11,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/runtime"
 )
-
-// Snapshotter is the Herdr dependency.
-type Snapshotter interface {
-	Snapshot(ctx context.Context) (*herdr.Snapshot, error)
-}
 
 // Archive is the set of archived session ids.
 type Archive interface {
@@ -30,19 +23,17 @@ type Archive interface {
 }
 
 type Service struct {
-	herdr         Snapshotter
 	providers     []providers.Provider
 	offlineWindow time.Duration
 	// Archive hides archived offline sessions from List. Optional.
 	Archive Archive
-	// Direct is the runtime of sessions the gateway runs itself. Optional.
+	// Direct is the runtime of the sessions the gateway runs. Optional in
+	// tests; without it no session is live.
 	Direct *runtime.Manager
-
-	snapshotFailures atomicCounter
 }
 
-func New(h Snapshotter, offlineWindow time.Duration, ps ...providers.Provider) *Service {
-	return &Service{herdr: h, providers: ps, offlineWindow: offlineWindow}
+func New(offlineWindow time.Duration, ps ...providers.Provider) *Service {
+	return &Service{providers: ps, offlineWindow: offlineWindow}
 }
 
 // Resolved is a session with the handles needed to act on it.
@@ -50,8 +41,7 @@ type Resolved struct {
 	Provider providers.Provider
 	NativeID string
 	Live     *providers.Live
-	Label    string // Herdr workspace label
-	// Direct holds the runtime details of a directly managed session.
+	// Direct holds the runtime details of a live session.
 	Direct *runtime.Session
 }
 
@@ -71,33 +61,9 @@ func SplitID(id string) (provider, native string, ok bool) {
 	return provider, native, ok && provider != "" && native != ""
 }
 
-func (s *Service) snapshot(ctx context.Context) *herdr.Snapshot {
-	if s.herdr == nil {
-		return nil
-	}
-	snap, err := s.herdr.Snapshot(ctx)
-	if err != nil {
-		// Herdr is optional: without its server only direct sessions are
-		// live. Say so once per outage rather than on every poll.
-		if s.snapshotFailures.add() == 1 {
-			slog.Warn("herdr unavailable; only directly managed sessions are live", "operation", "session.snapshot", "error", err)
-		} else {
-			slog.Debug("herdr snapshot failed", "operation", "session.snapshot", "error", err)
-		}
-		return nil
-	}
-	if s.snapshotFailures.reset() > 0 {
-		slog.Info("herdr available again", "operation", "session.snapshot")
-	}
-	return snap
-}
-
-// liveAll returns every live session: Herdr's panes and the direct runtime.
-// A session both claim (resumed in a terminal while the gateway also holds
-// it) belongs to the runtime whose process is running; a dormant direct
-// record gives way to the Herdr pane.
+// liveAll returns every session the runtime holds, keyed by gateway id.
 func (s *Service) liveAll(ctx context.Context) map[string]*Resolved {
-	out := s.live(ctx, s.snapshot(ctx))
+	out := map[string]*Resolved{}
 	if s.Direct == nil {
 		return out
 	}
@@ -107,76 +73,8 @@ func (s *Service) liveAll(ctx context.Context) map[string]*Resolved {
 		if !ok || p == nil {
 			continue
 		}
-		if h, dup := out[id]; dup {
-			if d.Live.Dormant {
-				continue
-			}
-			slog.Warn("session runs both in herdr and directly; using the direct runtime", "session_id", id, "pane", h.Live.PaneID)
-		}
 		d := d
 		out[id] = &Resolved{Provider: p, NativeID: native, Live: d.Live, Direct: &d}
-	}
-	return out
-}
-
-// live returns sessions currently hosted by Herdr panes, keyed by gateway id.
-func (s *Service) live(ctx context.Context, snap *herdr.Snapshot) map[string]*Resolved {
-	out := map[string]*Resolved{}
-	if snap == nil {
-		return out
-	}
-	var candidates []*Resolved
-	for _, pane := range snap.Panes {
-		ref := pane.AgentSession
-		if ref == nil || ref.Kind != "id" || ref.Value == "" {
-			continue
-		}
-		for _, p := range s.providers {
-			// agent_session is a stored reference; only trust it while the
-			// same agent still occupies the pane.
-			if ref.Agent != p.HerdrAgent() || pane.AgentName() != p.HerdrAgent() {
-				continue
-			}
-			r := &Resolved{
-				Provider: p,
-				NativeID: ref.Value,
-				Live:     &providers.Live{PaneID: pane.PaneID, HerdrStatus: pane.AgentStatus, Cwd: pane.WorkingDir()},
-				Label:    snap.WorkspaceLabel(pane.WorkspaceID),
-			}
-			candidates = append(candidates, r)
-		}
-	}
-	// Validate concurrently and reuse the provider's metadata cache. Never
-	// select the first pane when multiple valid references remain: sending
-	// input or stopping that arbitrary pane would act on another session.
-	valid := make([]bool, len(candidates))
-	var wg sync.WaitGroup
-	for i, r := range candidates {
-		valid[i] = true
-		if p, ok := r.Provider.(providers.LiveSessionValidator); ok {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				match, err := p.ValidateLiveSession(ctx, r.NativeID, r.Live)
-				valid[i] = err == nil && match
-				if !valid[i] {
-					slog.Debug("ignoring unverified pane session reference", "session_id", r.ID(), "pane", r.Live.PaneID, "error", err)
-				}
-			}()
-		}
-	}
-	wg.Wait()
-	ambiguous := map[string]bool{}
-	for i, r := range candidates {
-		if !valid[i] || ambiguous[r.ID()] {
-			continue
-		}
-		if _, dup := out[r.ID()]; dup {
-			delete(out, r.ID())
-			ambiguous[r.ID()] = true
-			continue
-		}
-		out[r.ID()] = r
 	}
 	return out
 }
@@ -200,9 +98,8 @@ func (s *Service) Resolve(ctx context.Context, id string) (*Resolved, error) {
 func (s *Service) Session(ctx context.Context, r *Resolved) (model.Session, error) {
 	sum, err := r.Provider.Summary(ctx, r.NativeID, r.Live)
 	if errors.Is(err, providers.ErrNotFound) && r.Live != nil {
-		// The list shows a live session whose agent has saved nothing yet
-		// (e.g. Devin before the first prompt); opening or archiving it must
-		// work too.
+		// The list shows a live session whose agent has saved nothing yet;
+		// opening or archiving it must work too.
 		sum, err = liveFallback(r), nil
 	}
 	if err != nil {
@@ -265,8 +162,7 @@ func (s *Service) Forget(id string) {
 	}
 }
 
-// LiveSessions returns only live sessions: directly managed ones and those
-// in Herdr panes. Herdr being unavailable is not an error.
+// LiveSessions returns only the sessions the gateway runs.
 func (s *Service) LiveSessions(ctx context.Context) ([]model.Session, error) {
 	return s.liveSessions(ctx, s.liveAll(ctx)), nil
 }
@@ -284,8 +180,8 @@ func (s *Service) liveSessions(ctx context.Context, live map[string]*Resolved) [
 			defer wg.Done()
 			sum, err := r.Provider.Summary(ctx, r.NativeID, r.Live)
 			if err != nil {
-				// Herdr knows the session but the provider has no data yet
-				// (e.g. a brand new session): still list it.
+				// The runtime knows the session but the provider has no data
+				// yet (e.g. a brand new session): still list it.
 				slog.Debug("summary unavailable", "provider", r.Provider.Name(), "session_id", r.ID(), "error", err)
 				sum = liveFallback(r)
 			}
@@ -473,27 +369,19 @@ func toSession(r *Resolved, sum *providers.Summary) model.Session {
 		sess.CompletionRevision = r.Live.Revision
 	}
 	if r.Live != nil {
-		sess.Backend = model.BackendHerdr
-		if r.Live.Direct {
-			sess.Backend = model.BackendDirect
-		}
-		sess.PaneID = r.Live.PaneID
-		sess.Unread = r.Live.HerdrStatus == herdr.StatusDone
-		// Providers resolve file links against the pane cwd, so the file API
-		// must use the same root (the transcript cwd follows `cd`s).
+		sess.Unread = r.Live.State == providers.StateDone
+		// Providers resolve file links against the session's cwd, so the
+		// file API must use the same root (the transcript cwd follows `cd`s).
 		if r.Live.Cwd != "" && !sum.PinnedCwd {
 			sess.Cwd = r.Live.Cwd
 		}
 	}
 	sess.CanSend = r.Live != nil
-	sess.Project = r.Label
-	if sess.Project == "" {
-		sess.Project = providers.ProjectName(sess.Cwd)
-	}
+	sess.Project = providers.ProjectName(sess.Cwd)
 	return sess
 }
 
-// Normalize maps Herdr lifecycle + provider hints to the public status set.
+// Normalize maps the runtime state + provider hints to the public status set.
 func Normalize(live *providers.Live, sum *providers.Summary) model.Status {
 	if live == nil {
 		return model.StatusOffline
@@ -501,24 +389,24 @@ func Normalize(live *providers.Live, sum *providers.Summary) model.Status {
 	if sum.Status != "" {
 		return sum.Status
 	}
-	if live.Failed && live.HerdrStatus != herdr.StatusWorking && live.HerdrStatus != herdr.StatusBlocked {
-		// A direct session whose process died during a turn.
+	if live.Failed && live.State != providers.StateWorking && live.State != providers.StateBlocked {
+		// A session whose process died during a turn.
 		return model.StatusFailed
 	}
-	switch live.HerdrStatus {
-	case herdr.StatusWorking:
+	switch live.State {
+	case providers.StateWorking:
 		return model.StatusRunning
-	case herdr.StatusBlocked:
+	case providers.StateBlocked:
 		if sum.Pending == model.InteractionApproval {
 			return model.StatusWaitingApproval
 		}
 		return model.StatusWaitingInput
-	case herdr.StatusDone:
+	case providers.StateDone:
 		if sum.LastTurnFailed {
 			return model.StatusFailed
 		}
 		return model.StatusCompleted
-	default: // idle, unknown
+	default: // idle
 		if sum.LastTurnFailed {
 			return model.StatusFailed
 		}
@@ -526,35 +414,14 @@ func Normalize(live *providers.Live, sum *providers.Summary) model.Status {
 	}
 }
 
-// atomicCounter counts consecutive failures.
-type atomicCounter struct {
-	mu sync.Mutex
-	n  int
-}
-
-func (c *atomicCounter) add() int {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.n++
-	return c.n
-}
-
-func (c *atomicCounter) reset() int {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	n := c.n
-	c.n = 0
-	return n
-}
-
-// Send delivers input to a live session. A direct session without a process
-// is resumed first, under the same id, with nothing replayed.
+// Send delivers input to a live session. A session without a process is
+// resumed first, under the same id, with nothing replayed.
 func (s *Service) Send(ctx context.Context, r *Resolved, in model.Input) error {
 	if r.Live == nil {
 		return providers.ErrNotLive
 	}
 	live := r.Live
-	if live.Direct && live.Dormant {
+	if live.Dormant {
 		if s.Direct == nil {
 			return providers.ErrNotLive
 		}

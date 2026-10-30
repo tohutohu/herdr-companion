@@ -23,9 +23,6 @@ const (
 	findingUncaptured = "uncaptured"
 )
 
-// screenLines is how much of the pane an uncaptured finding keeps.
-const screenLines = 60
-
 type reloadRequest struct {
 	// Shown lists the pending interactions the app was showing. Omitted, the
 	// app's side is not checked.
@@ -63,7 +60,6 @@ func (s *Server) reloadSession(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, id, "reload", err)
 		return
 	}
-	msgs = s.withFolderTrust(r.Context(), sess, msgs)
 	if msgs == nil {
 		msgs = []model.Message{}
 	}
@@ -90,14 +86,7 @@ func (s *Server) reloadSession(w http.ResponseWriter, r *http.Request) {
 	}
 	waiting := sess.Status == model.StatusWaitingInput || sess.Status == model.StatusWaitingApproval
 	if waiting && !slices.ContainsFunc(pending, func(ia *model.Interaction) bool { return ia.Supported }) {
-		raw := map[string]any{"paneId": sess.PaneID, "lastMessageIds": lastIDs(msgs, 3)}
-		if sess.PaneID != "" {
-			if out, err := s.Terminal.ReadPane(r.Context(), sess.PaneID, screenLines); err == nil {
-				raw["screen"] = out.Text
-			} else {
-				raw["screenError"] = err.Error()
-			}
-		}
+		raw := map[string]any{"lastMessageIds": lastIDs(msgs, 3)}
 		add(findingUncaptured, "The agent is waiting for an answer the app cannot give", raw)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"session": sess, "messages": msgs, "findings": findings})

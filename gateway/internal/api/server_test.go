@@ -22,123 +22,15 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/config"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/files"
-	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/launcher"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/runtime"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/sessions"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/uploads"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/usage"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/worktree"
 )
-
-type fakeHerdr struct {
-	snap  *herdr.Snapshot
-	calls []string
-	// worktree is the checkout OpenWorktree opened a workspace in.
-	worktree string
-	// visible is what every pane shows.
-	visible string
-}
-
-func (f *fakeHerdr) Snapshot(context.Context) (*herdr.Snapshot, error) { return f.snap, nil }
-func (f *fakeHerdr) ReadPane(_ context.Context, pane string, lines int) (*herdr.ReadResult, error) {
-	return &herdr.ReadResult{PaneID: pane, Text: "$ hello"}, nil
-}
-func (f *fakeHerdr) SendKeys(_ context.Context, pane string, keys ...string) error {
-	f.calls = append(f.calls, "keys:"+strings.Join(keys, ","))
-	return nil
-}
-func (f *fakeHerdr) SendText(_ context.Context, pane, text string) error {
-	f.calls = append(f.calls, "text:"+text)
-	return nil
-}
-
-func (f *fakeHerdr) CreateWorkspace(_ context.Context, cwd, label string) (string, string, error) {
-	f.calls = append(f.calls, "create:"+label)
-	return "w2", "w2:p1", nil
-}
-func (f *fakeHerdr) CreateWorktree(_ context.Context, cwd, label string) (string, string, string, error) {
-	f.calls = append(f.calls, "worktree:"+label)
-	return "w2", "w2:p1", cwd, nil
-}
-func (f *fakeHerdr) StartAgent(_ context.Context, name, kind, pane string, args []string, _ time.Duration) error {
-	f.calls = append(f.calls, "start:"+kind+" "+strings.Join(args, " "))
-	// A resume keeps the id it was given; a new session gets one.
-	id := "new"
-	if len(args) > 0 {
-		id = args[len(args)-1]
-	}
-	f.snap.Panes = append(f.snap.Panes, herdr.Pane{
-		PaneID: pane, WorkspaceID: "w2", Agent: str(kind), AgentStatus: herdr.StatusIdle,
-		AgentSession: &herdr.AgentSession{Agent: kind, Kind: "id", Value: id},
-	})
-	return nil
-}
-func (f *fakeHerdr) ReadVisible(context.Context, string) (string, error) { return f.visible, nil }
-func (f *fakeHerdr) Prompt(_ context.Context, _ string, text string) error {
-	f.calls = append(f.calls, "prompt:"+text)
-	return nil
-}
-func (f *fakeHerdr) Pane(_ context.Context, pane string) (*herdr.Pane, error) {
-	for i := range f.snap.Panes {
-		if f.snap.Panes[i].PaneID == pane {
-			return &f.snap.Panes[i], nil
-		}
-	}
-	return nil, &herdr.Error{Code: "pane_not_found"}
-}
-func (f *fakeHerdr) FocusPane(_ context.Context, pane string) error {
-	f.calls = append(f.calls, "focus:"+pane)
-	for i := range f.snap.Panes {
-		if f.snap.Panes[i].PaneID == pane && f.snap.Panes[i].AgentStatus == herdr.StatusDone {
-			f.snap.Panes[i].AgentStatus = herdr.StatusIdle
-		}
-	}
-	return nil
-}
-func (f *fakeHerdr) ReportAgentSession(context.Context, string, string, string, string) error {
-	return nil
-}
-func (f *fakeHerdr) ClosePane(_ context.Context, pane string) error {
-	f.calls = append(f.calls, "close-pane:"+pane)
-	return nil
-}
-
-// OpenWorktree reports a worktree as open when a pane is in it, as Herdr
-// does for the workspace open there.
-func (f *fakeHerdr) OpenWorktree(_ context.Context, _, path string) (string, bool, error) {
-	f.calls = append(f.calls, "open-worktree")
-	for _, p := range f.snap.Panes {
-		if rel, err := filepath.Rel(path, p.WorkingDir()); err == nil && !strings.HasPrefix(rel, "..") {
-			return p.WorkspaceID, true, nil
-		}
-	}
-	f.worktree = path
-	return "w8", false, nil
-}
-func (f *fakeHerdr) RemoveWorktree(_ context.Context, ws string) error {
-	f.calls = append(f.calls, "remove-worktree:"+ws)
-	if out, err := exec.Command("git", "-C", f.worktree, "worktree", "remove", f.worktree).CombinedOutput(); err != nil {
-		return &herdr.Error{Code: herdr.ErrDirtyWorktree, Message: string(out)}
-	}
-	return nil
-}
-func (f *fakeHerdr) CreateTab(_ context.Context, ws string) error {
-	f.calls = append(f.calls, "create-tab:"+ws)
-	return nil
-}
-func (f *fakeHerdr) CloseWorkspace(_ context.Context, ws string) error {
-	f.calls = append(f.calls, "close-workspace:"+ws)
-	var keep []herdr.Pane
-	for _, p := range f.snap.Panes {
-		if p.WorkspaceID != ws {
-			keep = append(keep, p)
-		}
-	}
-	f.snap.Panes = keep
-	return nil
-}
 
 type fakeProvider struct {
 	root      string
@@ -148,9 +40,10 @@ type fakeProvider struct {
 	sent         []model.Input
 	resp         []model.InteractionResponse
 	modeChanges  int
-	// daemonStatus models a thread still loaded without a Herdr pane.
-	daemonStatus model.Status
-	sendError    error
+	// status overrides the runtime's status, as a pending request the
+	// provider knows of does.
+	status    model.Status
+	sendError error
 	// sendHook, when set, runs inside Send before the input is recorded.
 	sendHook func(ctx context.Context)
 	// pending is appended to s1's messages; cached reads leave it out while
@@ -173,12 +66,11 @@ func (p *fakeProvider) SessionFileRoots(_ context.Context, nativeID string) []st
 
 func (p *fakeProvider) Name() string        { return "fake" }
 func (p *fakeProvider) DisplayName() string { return "Fake Agent" }
-func (p *fakeProvider) HerdrAgent() string  { return "fake" }
 func (p *fakeProvider) Summary(_ context.Context, id string, live *providers.Live) (*providers.Summary, error) {
 	if id != "s1" && id != "old" {
 		return nil, providers.ErrNotFound
 	}
-	return &providers.Summary{NativeID: id, Cwd: p.root, UpdatedAt: time.Unix(100, 0), LastMessage: "done", Model: "fake-large", Status: p.daemonStatus}, nil
+	return &providers.Summary{NativeID: id, Cwd: p.root, UpdatedAt: time.Unix(100, 0), LastMessage: "done", Model: "fake-large", Status: p.status}, nil
 }
 func (p *fakeProvider) Recent(context.Context, time.Time) ([]providers.Summary, error) {
 	return []providers.Summary{
@@ -204,7 +96,7 @@ func (p *fakeProvider) Image(context.Context, string, string, int) (string, []by
 	return "image/png", []byte("PNG"), nil
 }
 func (p *fakeProvider) Send(ctx context.Context, id string, live *providers.Live, in model.Input) error {
-	if live == nil && p.daemonStatus == "" {
+	if live == nil {
 		return providers.ErrNotLive
 	}
 	if p.sendError != nil {
@@ -216,76 +108,59 @@ func (p *fakeProvider) Send(ctx context.Context, id string, live *providers.Live
 	p.sent = append(p.sent, in)
 	return nil
 }
-func (p *fakeProvider) LaunchArgs(providers.LaunchOptions) []string { return nil }
-func (p *fakeProvider) ResumeArgs(id, _ string) []string            { return []string{"resume", id} }
-func (p *fakeProvider) StartupKeys(screen string) []string {
-	if strings.Contains(screen, "Yes, I trust this folder") {
-		return []string{"down", "enter"}
-	}
-	return nil
-}
 func (p *fakeProvider) Models(context.Context) (providers.ModelCatalog, error) {
 	return providers.ModelCatalog{
 		Models:  []providers.ModelOption{{ID: "fake-large", Name: "Large", Default: true}},
 		Efforts: []providers.EffortOption{{ID: "high", Name: "High", Default: true}},
+		Modes:   []providers.ModeOption{{ID: "default", Name: "Default", Default: true}, {ID: "plan", Name: "Plan"}},
 	}, nil
 }
 func (p *fakeProvider) Respond(_ context.Context, id string, live *providers.Live, r model.InteractionResponse) error {
 	p.resp = append(p.resp, r)
 	return nil
 }
-func (p *fakeProvider) CycleMode(_ context.Context, _ string, live *providers.Live) error {
-	if live == nil {
-		return providers.ErrNotLive
-	}
-	p.modeChanges++
-	return nil
-}
 
-func str(s string) *string { return &s }
-
-func newTestServer(t *testing.T, opts ...func(*Server)) (*httptest.Server, *fakeProvider, *fakeHerdr, string) {
+// newTestServer serves fake:s1, which runs and finished a turn nobody has
+// seen yet, and fake:old, which runs nowhere.
+func newTestServer(t *testing.T, opts ...func(*Server)) (*httptest.Server, *fakeProvider, *directFake, string) {
 	t.Helper()
-	root := t.TempDir()
+	root, _ := filepath.EvalSymlinks(t.TempDir())
 	os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n"), 0o644)
 	store, err := config.Load(filepath.Join(t.TempDir(), "config.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	fh := &fakeHerdr{snap: &herdr.Snapshot{
-		Workspaces: []herdr.Workspace{{WorkspaceID: "w1", Label: "my-project"}},
-		Panes: []herdr.Pane{{
-			PaneID: "w1:p1", WorkspaceID: "w1", Agent: str("fake"), AgentStatus: herdr.StatusDone, Cwd: str(root),
-			AgentSession: &herdr.AgentSession{Source: "herdr:fake", Agent: "fake", Kind: "id", Value: "s1"},
-		}},
-	}}
 	fp := &fakeProvider{root: root}
+	dp := &directFake{fakeProvider: fp, infos: map[string]*providers.DirectInfo{}, trusted: true}
 	arch, err := archive.Open(filepath.Join(t.TempDir(), "archive.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := sessions.New(fh, time.Hour, fp)
+	svc := sessions.New(time.Hour, dp)
 	svc.Archive = arch
+	direct, err := runtime.New(filepath.Join(t.TempDir(), "direct.json"), time.Hour, dp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.Direct, dp.m = direct, direct
 	srv := &Server{
-		Launcher: &launcher.Launcher{
-			Herdr: fh, Roots: []string{root}, Providers: []providers.Provider{fp},
-			StartTimeout: time.Second, PollInterval: time.Millisecond, IdentityWait: 100 * time.Millisecond,
-		},
-		Worktrees: fh,
-		Archive:   arch,
-		Sessions:  svc,
-		Terminal:  fh,
-		Focus:     fh,
-		Uploads:   uploads.New(t.TempDir(), time.Hour),
-		Config:    store,
-		Sink:      deadletter.Nop{},
+		Launcher: &launcher.Launcher{Roots: []string{root}, Providers: []providers.Provider{dp}, Direct: direct, WorktreeDir: t.TempDir()},
+		Archive:  arch,
+		Sessions: svc,
+		Direct:   direct,
+		Uploads:  uploads.New(t.TempDir(), time.Hour),
+		Config:   store,
+		Sink:     deadletter.Nop{},
 	}
 	for _, opt := range opts {
 		opt(srv)
 	}
+	dp.run(t, "s1", root)
+	dp.finishTurn("s1")
+	dp.starts = nil
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
-	return ts, fp, fh, store.Get().AuthToken
+	return ts, fp, dp, store.Get().AuthToken
 }
 
 func do(t *testing.T, ts *httptest.Server, token, method, path string, body []byte, ctype string) (*http.Response, []byte) {
@@ -337,7 +212,7 @@ func Test実行時プロファイルは認証トークンが必要(t *testing.T)
 	}
 }
 
-func Testセッション一覧はHerdrの状態とオフラインセッションを返す(t *testing.T) {
+func Testセッション一覧は稼働中とオフラインのセッションを返す(t *testing.T) {
 	ts, _, _, tok := newTestServer(t)
 	resp, body := do(t, ts, tok, "GET", "/v1/sessions", nil, "")
 	if resp.StatusCode != 200 {
@@ -349,7 +224,7 @@ func Testセッション一覧はHerdrの状態とオフラインセッション
 		t.Fatalf("sessions = %+v", got.Sessions)
 	}
 	live, off := got.Sessions[0], got.Sessions[1]
-	if live.ID != "fake:s1" || live.Status != model.StatusCompleted || live.Project != "my-project" || live.PaneID != "w1:p1" || !live.CanSend {
+	if live.ID != "fake:s1" || live.Status != model.StatusCompleted || !live.Unread || live.Project == "" || !live.CanSend {
 		t.Errorf("live session = %+v", live)
 	}
 	if live.Model != "fake-large" {
@@ -471,136 +346,128 @@ func Test画像をアップロードしてメッセージに添付できる(t *t
 }
 
 func Testアーカイブ済みセッションへの送信成功でアーカイブが解除される(t *testing.T) {
-	for _, daemon := range []bool{false, true} {
-		name := "端末から再開したセッション"
-		if daemon {
-			name = "共有サーバーのセッションを端末から再開"
-		}
-		t.Run(name, func(t *testing.T) {
-			ts, fp, fh, tok := newTestServer(t)
-			pane := fh.snap.Panes[0]
-			resp, body := do(t, ts, tok, "POST", "/v1/sessions/fake:s1/archive", nil, "")
-			if resp.StatusCode != http.StatusOK {
-				t.Fatalf("archive status %d: %s", resp.StatusCode, body)
-			}
-			if daemon {
-				fp.daemonStatus = model.StatusIdle
-			}
-			fh.snap.Panes = append(fh.snap.Panes, pane)
-			_, body = do(t, ts, tok, "GET", "/v1/sessions/fake:s1", nil, "")
-			var before model.Session
-			if err := json.Unmarshal(body, &before); err != nil {
-				t.Fatal(err)
-			}
-			if !before.Archived || !before.CanSend || before.PaneID != pane.PaneID {
-				t.Fatalf("before send = %+v", before)
-			}
-			resp, body = do(t, ts, tok, "POST", "/v1/sessions/fake:s1/messages", []byte(`{"text":"続けて"}`), "application/json")
-			if resp.StatusCode != http.StatusAccepted || len(fp.sent) != 1 {
-				t.Fatalf("send status %d: %s, sent=%+v", resp.StatusCode, body, fp.sent)
-			}
-			_, body = do(t, ts, tok, "GET", "/v1/sessions/fake:s1", nil, "")
-			var after model.Session
-			if err := json.Unmarshal(body, &after); err != nil {
-				t.Fatal(err)
-			}
-			if after.Archived {
-				t.Errorf("still archived after send: %+v", after)
-			}
-			_, body = do(t, ts, tok, "GET", "/v1/sessions?archived=true", nil, "")
-			if ids := sessionIDs(t, body); len(ids) != 0 {
-				t.Errorf("archive after send = %v", ids)
-			}
-			_, body = do(t, ts, tok, "GET", "/v1/sessions", nil, "")
-			if ids := sessionIDs(t, body); !strings.Contains(strings.Join(ids, ","), "fake:s1") {
-				t.Errorf("sent session missing from main list = %v", ids)
-			}
-		})
+	ts, fp, dp, tok := newTestServer(t)
+	resp, body := do(t, ts, tok, "POST", "/v1/sessions/fake:s1/archive", nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("archive status %d: %s", resp.StatusCode, body)
+	}
+	// 別の経路でランタイムに戻ったセッション
+	dp.run(t, "s1", fp.root)
+	_, body = do(t, ts, tok, "GET", "/v1/sessions/fake:s1", nil, "")
+	var before model.Session
+	if err := json.Unmarshal(body, &before); err != nil {
+		t.Fatal(err)
+	}
+	if !before.Archived || !before.CanSend {
+		t.Fatalf("before send = %+v", before)
+	}
+	resp, body = do(t, ts, tok, "POST", "/v1/sessions/fake:s1/messages", []byte(`{"text":"続けて"}`), "application/json")
+	if resp.StatusCode != http.StatusAccepted || len(fp.sent) != 1 {
+		t.Fatalf("send status %d: %s, sent=%+v", resp.StatusCode, body, fp.sent)
+	}
+	_, body = do(t, ts, tok, "GET", "/v1/sessions/fake:s1", nil, "")
+	var after model.Session
+	if err := json.Unmarshal(body, &after); err != nil {
+		t.Fatal(err)
+	}
+	if after.Archived {
+		t.Errorf("still archived after send: %+v", after)
+	}
+	_, body = do(t, ts, tok, "GET", "/v1/sessions?archived=true", nil, "")
+	if ids := sessionIDs(t, body); len(ids) != 0 {
+		t.Errorf("archive after send = %v", ids)
+	}
+	_, body = do(t, ts, tok, "GET", "/v1/sessions", nil, "")
+	if ids := sessionIDs(t, body); !strings.Contains(strings.Join(ids, ","), "fake:s1") {
+		t.Errorf("sent session missing from main list = %v", ids)
 	}
 }
 
-func Test共有サーバーに残ってもアーカイブ後はペインが戻るまでオフライン(t *testing.T) {
-	for _, status := range []model.Status{model.StatusIdle, model.StatusRunning, model.StatusWaitingApproval, model.StatusWaitingInput, model.StatusFailed} {
-		for _, batch := range []bool{false, true} {
-			name := string(status) + "/単体"
+func Testアーカイブするとオフラインになり再開すると戻る(t *testing.T) {
+	for _, batch := range []bool{false, true} {
+		name := "単体"
+		if batch {
+			name = "一括"
+		}
+		t.Run(name, func(t *testing.T) {
+			ts, fp, dp, tok := newTestServer(t)
+			path, payload := "/v1/sessions/fake:s1/archive", []byte(nil)
 			if batch {
-				name = string(status) + "/一括"
+				path, payload = "/v1/sessions/archive", []byte(`{"ids":["fake:s1"]}`)
 			}
-			t.Run(name, func(t *testing.T) {
-				ts, fp, _, tok := newTestServer(t)
-				fp.daemonStatus = status
-				path, payload := "/v1/sessions/fake:s1/archive", []byte(nil)
-				if batch {
-					path, payload = "/v1/sessions/archive", []byte(`{"ids":["fake:s1"]}`)
+			resp, body := do(t, ts, tok, "POST", path, payload, "application/json")
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("archive status %d: %s", resp.StatusCode, body)
+			}
+			if dp.alive("s1") {
+				t.Fatal("the session's process still runs")
+			}
+			assertOffline := func(sess model.Session, archived bool) {
+				t.Helper()
+				if sess.ID != "fake:s1" || sess.Status != model.StatusOffline || sess.CanSend || sess.Unread || sess.Archived != archived {
+					t.Fatalf("offline session = %+v", sess)
 				}
-				resp, body := do(t, ts, tok, "POST", path, payload, "application/json")
+			}
+			for _, path := range []string{"/v1/sessions/fake:s1", "/v1/sessions/fake:s1/messages", "/v1/sessions?archived=true"} {
+				resp, body = do(t, ts, tok, "GET", path, nil, "")
 				if resp.StatusCode != http.StatusOK {
-					t.Fatalf("archive status %d: %s", resp.StatusCode, body)
+					t.Fatalf("GET %s status %d: %s", path, resp.StatusCode, body)
 				}
-				assertOffline := func(sess model.Session, archived bool) {
-					t.Helper()
-					if sess.ID != "fake:s1" || sess.Status != model.StatusOffline || sess.CanSend || sess.PaneID != "" || sess.Archived != archived {
-						t.Fatalf("offline session = %+v", sess)
-					}
+				var result struct {
+					model.Session
+					Detail   model.Session   `json:"session"`
+					Sessions []model.Session `json:"sessions"`
 				}
-				for _, path := range []string{"/v1/sessions/fake:s1", "/v1/sessions/fake:s1/messages", "/v1/sessions?archived=true"} {
-					resp, body = do(t, ts, tok, "GET", path, nil, "")
-					if resp.StatusCode != http.StatusOK {
-						t.Fatalf("GET %s status %d: %s", path, resp.StatusCode, body)
-					}
-					var result struct {
-						model.Session
-						Detail   model.Session   `json:"session"`
-						Sessions []model.Session `json:"sessions"`
-					}
-					if err := json.Unmarshal(body, &result); err != nil {
-						t.Fatal(err)
-					}
-					switch path {
-					case "/v1/sessions/fake:s1/messages":
-						assertOffline(result.Detail, true)
-					case "/v1/sessions?archived=true":
-						if len(result.Sessions) != 1 {
-							t.Fatalf("archive list = %s", body)
-						}
-						assertOffline(result.Sessions[0], true)
-					default:
-						assertOffline(result.Session, true)
-					}
-				}
-				_, body = do(t, ts, tok, "GET", "/v1/sessions", nil, "")
-				if strings.Contains(strings.Join(sessionIDs(t, body), ","), "fake:s1") {
-					t.Fatalf("archived session still listed: %s", body)
-				}
-				for _, action := range []struct{ path, payload string }{
-					{"messages", `{"text":"続けて"}`},
-					{"respond", `{"interactionId":"q1","decision":"deny"}`},
-				} {
-					resp, body = do(t, ts, tok, "POST", "/v1/sessions/fake:s1/"+action.path, []byte(action.payload), "application/json")
-					if resp.StatusCode != http.StatusConflict || len(fp.sent) != 0 || len(fp.resp) != 0 {
-						t.Fatalf("offline %s status %d: %s", action.path, resp.StatusCode, body)
-					}
-				}
-				resp, body = do(t, ts, tok, "DELETE", "/v1/sessions/fake:s1/archive", nil, "")
-				var restored model.Session
-				if err := json.Unmarshal(body, &restored); err != nil || resp.StatusCode != http.StatusOK {
-					t.Fatalf("unarchive status %d: %s, err=%v", resp.StatusCode, body, err)
-				}
-				assertOffline(restored, false)
-				resp, body = do(t, ts, tok, "POST", "/v1/sessions/fake:s1/resume", []byte(`{"trust":true}`), "application/json")
-				if resp.StatusCode != http.StatusCreated {
-					t.Fatalf("resume status %d: %s", resp.StatusCode, body)
-				}
-				_, body = do(t, ts, tok, "GET", "/v1/sessions/fake:s1", nil, "")
-				var resumed model.Session
-				if err := json.Unmarshal(body, &resumed); err != nil {
+				if err := json.Unmarshal(body, &result); err != nil {
 					t.Fatal(err)
 				}
-				if resumed.Status != status || !resumed.CanSend || resumed.PaneID == "" || resumed.Archived {
-					t.Fatalf("resumed session = %+v", resumed)
+				switch path {
+				case "/v1/sessions/fake:s1/messages":
+					assertOffline(result.Detail, true)
+				case "/v1/sessions?archived=true":
+					if len(result.Sessions) != 1 {
+						t.Fatalf("archive list = %s", body)
+					}
+					assertOffline(result.Sessions[0], true)
+				default:
+					assertOffline(result.Session, true)
 				}
-			})
-		}
+			}
+			_, body = do(t, ts, tok, "GET", "/v1/sessions", nil, "")
+			if strings.Contains(strings.Join(sessionIDs(t, body), ","), "fake:s1") {
+				t.Fatalf("archived session still listed: %s", body)
+			}
+			for _, action := range []struct{ path, payload string }{
+				{"messages", `{"text":"続けて"}`},
+				{"respond", `{"interactionId":"q1","decision":"deny"}`},
+				{"mode", `{"mode":"plan"}`},
+				{"model", `{"model":"fake-large"}`},
+				{"interrupt", ``},
+			} {
+				resp, body = do(t, ts, tok, "POST", "/v1/sessions/fake:s1/"+action.path, []byte(action.payload), "application/json")
+				if resp.StatusCode != http.StatusConflict || len(fp.sent) != 0 || len(fp.resp) != 0 {
+					t.Fatalf("offline %s status %d: %s", action.path, resp.StatusCode, body)
+				}
+			}
+			resp, body = do(t, ts, tok, "DELETE", "/v1/sessions/fake:s1/archive", nil, "")
+			var restored model.Session
+			if err := json.Unmarshal(body, &restored); err != nil || resp.StatusCode != http.StatusOK {
+				t.Fatalf("unarchive status %d: %s, err=%v", resp.StatusCode, body, err)
+			}
+			assertOffline(restored, false)
+			resp, body = do(t, ts, tok, "POST", "/v1/sessions/fake:s1/resume", nil, "")
+			if resp.StatusCode != http.StatusCreated {
+				t.Fatalf("resume status %d: %s", resp.StatusCode, body)
+			}
+			_, body = do(t, ts, tok, "GET", "/v1/sessions/fake:s1", nil, "")
+			var resumed model.Session
+			if err := json.Unmarshal(body, &resumed); err != nil {
+				t.Fatal(err)
+			}
+			if resumed.Status != model.StatusIdle || !resumed.CanSend || resumed.Archived {
+				t.Fatalf("resumed session = %+v", resumed)
+			}
+		})
 	}
 }
 
@@ -608,27 +475,23 @@ func Test送信失敗や不正なメッセージではアーカイブを解除�
 	for _, tc := range []struct {
 		name    string
 		payload string
-		daemon  bool
+		live    bool
 		err     error
 		status  int
 	}{
 		{"送信先がオフライン", `{"text":"続けて"}`, false, nil, http.StatusConflict},
-		{"共有サーバーへの送信失敗", `{"text":"続けて"}`, true, errors.New("send failed"), http.StatusInternalServerError},
+		{"エージェントへの送信失敗", `{"text":"続けて"}`, true, errors.New("send failed"), http.StatusInternalServerError},
 		{"空のメッセージ", `{"text":""}`, true, nil, http.StatusBadRequest},
 		{"添付が存在しない", `{"text":"続けて","uploads":["missing"]}`, true, nil, http.StatusNotFound},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ts, fp, fh, tok := newTestServer(t)
-			pane := fh.snap.Panes[0]
+			ts, fp, dp, tok := newTestServer(t)
 			resp, body := do(t, ts, tok, "POST", "/v1/sessions/fake:s1/archive", nil, "")
 			if resp.StatusCode != http.StatusOK {
 				t.Fatalf("archive status %d: %s", resp.StatusCode, body)
 			}
-			if tc.daemon {
-				fp.daemonStatus = model.StatusIdle
-			}
-			if tc.err != nil {
-				fh.snap.Panes = append(fh.snap.Panes, pane)
+			if tc.live {
+				dp.run(t, "s1", fp.root)
 			}
 			fp.sendError = tc.err
 			resp, body = do(t, ts, tok, "POST", "/v1/sessions/fake:s1/messages", []byte(tc.payload), "application/json")
@@ -644,34 +507,30 @@ func Test送信失敗や不正なメッセージではアーカイブを解除�
 }
 
 func Test新しいセッションの初回promptにアップロードを添付できる(t *testing.T) {
-	ts, _, fh, tok := newTestServer(t)
+	ts, fp, dp, tok := newTestServer(t)
 	_, img := upload(t, ts, tok, []byte("\x89PNG..."), "image/png", "")
 	_, doc := upload(t, ts, tok, []byte("memo"), "text/plain", "notes.txt")
 
-	payload, _ := json.Marshal(map[string]any{"provider": "fake", "cwd": fh.snap.Panes[0].Cwd, "prompt": "見て", "trust": true, "uploads": []string{img, doc}})
+	payload, _ := json.Marshal(map[string]any{"provider": "fake", "cwd": fp.root, "prompt": "見て", "trust": true, "uploads": []string{img, doc}})
 	resp, body := do(t, ts, tok, "POST", "/v1/sessions", payload, "application/json")
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("start status %d: %s", resp.StatusCode, body)
 	}
-	var prompt string
-	for _, c := range fh.calls {
-		if strings.HasPrefix(c, "prompt:") {
-			prompt = c
-		}
+	if len(dp.starts) != 1 {
+		t.Fatalf("starts = %+v", dp.starts)
 	}
-	lines := strings.Split(strings.TrimPrefix(prompt, "prompt:"), "\n")
-	if len(lines) != 3 || lines[0] != "見て" || !strings.HasSuffix(lines[1], "notes.txt") || !strings.HasSuffix(lines[2], img+".png") {
-		t.Errorf("prompt = %q", prompt)
+	in := dp.starts[0].Prompt
+	if in.Text != "見て" || len(in.Files) != 1 || !strings.HasSuffix(in.Files[0], "notes.txt") || len(in.Images) != 1 || !strings.HasSuffix(in.Images[0], img+".png") {
+		t.Errorf("prompt = %+v", in)
 	}
 
-	fh.calls = nil
-	payload, _ = json.Marshal(map[string]any{"provider": "fake", "cwd": fh.snap.Panes[0].Cwd, "prompt": "x", "uploads": []string{"missing"}})
+	payload, _ = json.Marshal(map[string]any{"provider": "fake", "cwd": fp.root, "prompt": "x", "uploads": []string{"missing"}})
 	resp, _ = do(t, ts, tok, "POST", "/v1/sessions", payload, "application/json")
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("bad upload id status = %d", resp.StatusCode)
 	}
-	if len(fh.calls) != 0 {
-		t.Errorf("started despite a missing upload: %v", fh.calls)
+	if len(dp.starts) != 1 {
+		t.Errorf("started despite a missing upload: %v", dp.starts)
 	}
 }
 
@@ -827,31 +686,22 @@ func Test大きなファイルはプレビュー不可でダウンロード指�
 	}
 }
 
-func Testターミナルの読み取りと許可されたキー入力ができる(t *testing.T) {
-	ts, _, fh, tok := newTestServer(t)
-	resp, body := do(t, ts, tok, "GET", "/v1/sessions/fake:s1/terminal", nil, "")
-	if resp.StatusCode != 200 || !strings.Contains(string(body), "$ hello") {
-		t.Errorf("read status %d body %s", resp.StatusCode, body)
-	}
-	resp, _ = do(t, ts, tok, "POST", "/v1/sessions/fake:s1/terminal", []byte(`{"text":"y","keys":["enter"]}`), "application/json")
-	if resp.StatusCode != http.StatusAccepted || strings.Join(fh.calls, "|") != "text:y|keys:enter" {
-		t.Errorf("status %d calls %v", resp.StatusCode, fh.calls)
-	}
-	resp, _ = do(t, ts, tok, "POST", "/v1/sessions/fake:s1/terminal", []byte(`{"keys":["ctrl+z"]}`), "application/json")
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("disallowed key status = %d", resp.StatusCode)
-	}
-	resp, _ = do(t, ts, tok, "GET", "/v1/sessions/fake:old/terminal", nil, "")
-	if resp.StatusCode != http.StatusConflict {
-		t.Errorf("offline terminal status = %d", resp.StatusCode)
-	}
-}
-
 func Testセッションのモードを変更できる(t *testing.T) {
-	ts, fp, _, tok := newTestServer(t)
+	ts, _, dp, tok := newTestServer(t)
 	resp, _ := do(t, ts, tok, "POST", "/v1/sessions/fake:s1/mode", nil, "")
-	if resp.StatusCode != http.StatusAccepted || fp.modeChanges != 1 {
-		t.Errorf("status = %d, mode changes = %d", resp.StatusCode, fp.modeChanges)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Errorf("next mode status = %d", resp.StatusCode)
+	}
+	resp, _ = do(t, ts, tok, "POST", "/v1/sessions/fake:s1/mode", []byte(`{"mode":"plan"}`), "application/json")
+	if resp.StatusCode != http.StatusAccepted {
+		t.Errorf("plan status = %d", resp.StatusCode)
+	}
+	resp, _ = do(t, ts, tok, "POST", "/v1/sessions/fake:s1/mode", []byte(`{"mode":"bypassPermissions"}`), "application/json")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("unknown mode status = %d", resp.StatusCode)
+	}
+	if strings.Join(dp.modes, ",") != ",plan" {
+		t.Errorf("modes = %q", dp.modes)
 	}
 	resp, _ = do(t, ts, tok, "POST", "/v1/sessions/fake:old/mode", nil, "")
 	if resp.StatusCode != http.StatusConflict {
@@ -859,36 +709,33 @@ func Testセッションのモードを変更できる(t *testing.T) {
 	}
 }
 
-func Test既読化はHerdrで完了したペインをフォーカスして未読を消す(t *testing.T) {
-	ts, _, fh, tok := newTestServer(t)
-	unread := func() bool {
+func Test既読化で完了したターンの未読を消す(t *testing.T) {
+	ts, _, _, tok := newTestServer(t)
+	read := func() model.Session {
 		t.Helper()
 		_, body := do(t, ts, tok, "GET", "/v1/sessions/fake:s1", nil, "")
 		var s model.Session
 		if err := json.Unmarshal(body, &s); err != nil {
 			t.Fatal(err)
 		}
-		return s.Unread
+		return s
 	}
-	if !unread() {
-		t.Fatal("done のセッションが未読になっていない")
+	if s := read(); !s.Unread || s.Status != model.StatusCompleted {
+		t.Fatalf("finished session = %+v", s)
 	}
 	resp, _ := do(t, ts, tok, "POST", "/v1/sessions/fake:s1/seen", nil, "")
-	if resp.StatusCode != http.StatusOK || strings.Join(fh.calls, "|") != "focus:w1:p1" {
-		t.Fatalf("status %d calls %v", resp.StatusCode, fh.calls)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", resp.StatusCode)
 	}
-	if unread() {
-		t.Error("既読化後も未読のまま")
+	if s := read(); s.Unread || s.Status != model.StatusIdle {
+		t.Errorf("seen session = %+v", s)
 	}
-	// Already seen or offline: nothing to mark, and the Mac view stays put.
+	// Already seen or offline: nothing to mark.
 	for _, id := range []string{"fake:s1", "fake:old"} {
 		resp, _ = do(t, ts, tok, "POST", "/v1/sessions/"+id+"/seen", nil, "")
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("%s status %d", id, resp.StatusCode)
 		}
-	}
-	if len(fh.calls) != 1 {
-		t.Errorf("余分なフォーカス: %v", fh.calls)
 	}
 }
 
@@ -907,7 +754,7 @@ func Test端末登録でFCMトークンが設定に保存される(t *testing.T)
 func Testプロバイダーごとのモデル一覧を返す(t *testing.T) {
 	ts, _, _, tok := newTestServer(t)
 	resp, body := do(t, ts, tok, "GET", "/v1/models?provider=fake", nil, "")
-	want := `{"models":[{"id":"fake-large","name":"Large","default":true}],"efforts":[{"id":"high","name":"High","default":true}]}`
+	want := `{"models":[{"id":"fake-large","name":"Large","default":true}],"efforts":[{"id":"high","name":"High","default":true}],"modes":[{"id":"default","name":"Default","default":true},{"id":"plan","name":"Plan"}]}`
 	if resp.StatusCode != 200 || string(bytes.TrimSpace(body)) != want {
 		t.Errorf("status %d: %s", resp.StatusCode, body)
 	}
@@ -935,7 +782,7 @@ func sessionIDs(t *testing.T, body []byte) []string {
 }
 
 func Test複数のセッションを一度のリクエストでアーカイブできる(t *testing.T) {
-	ts, _, fh, tok := newTestServer(t)
+	ts, _, dp, tok := newTestServer(t)
 	resp, body := do(
 		t, ts, tok, "POST", "/v1/sessions/archive",
 		[]byte(`{"ids":["fake:s1","fake:old"]}`), "application/json",
@@ -952,8 +799,8 @@ func Test複数のセッションを一度のリクエストでアーカイブ�
 	if len(result.Sessions) != 2 || !result.Sessions[0].Archived || !result.Sessions[1].Archived {
 		t.Errorf("archived sessions = %+v", result.Sessions)
 	}
-	if got := strings.Join(fh.calls, ","); got != "close-workspace:w1" {
-		t.Errorf("herdr calls = %v", fh.calls)
+	if dp.alive("s1") {
+		t.Error("the running session was not stopped")
 	}
 	_, body = do(t, ts, tok, "GET", "/v1/sessions", nil, "")
 	if ids := sessionIDs(t, body); len(ids) != 0 {
@@ -966,7 +813,7 @@ func Test複数のセッションを一度のリクエストでアーカイブ�
 }
 
 func Test一括アーカイブの途中で失敗してもそれまでのセッションはアーカイブされる(t *testing.T) {
-	ts, _, fh, tok := newTestServer(t)
+	ts, _, dp, tok := newTestServer(t)
 	resp, body := do(
 		t, ts, tok, "POST", "/v1/sessions/archive",
 		[]byte(`{"ids":["fake:s1","fake:missing","fake:old"]}`), "application/json",
@@ -974,8 +821,8 @@ func Test一括アーカイブの途中で失敗してもそれまでのセッ�
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status %d: %s", resp.StatusCode, body)
 	}
-	if got := strings.Join(fh.calls, ","); got != "close-workspace:w1" {
-		t.Errorf("herdr calls = %v", fh.calls)
+	if dp.alive("s1") {
+		t.Error("the running session was not stopped")
 	}
 	// fake:s1 は停止済みなのでアーカイブに残し、未処理の fake:old は触らない
 	_, body = do(t, ts, tok, "GET", "/v1/sessions?archived=true", nil, "")
@@ -1020,18 +867,18 @@ func Testアーカイブ一覧をページごとに取得できる(t *testing.T)
 }
 
 func Test実行中のセッションをアーカイブすると停止して一覧から外れ戻せる(t *testing.T) {
-	ts, _, fh, tok := newTestServer(t)
+	ts, _, dp, tok := newTestServer(t)
 	resp, body := do(t, ts, tok, "POST", "/v1/sessions/fake:s1/archive", nil, "")
 	if resp.StatusCode != 200 {
 		t.Fatalf("status %d: %s", resp.StatusCode, body)
 	}
 	var sess model.Session
 	json.Unmarshal(body, &sess)
-	if !sess.Archived || sess.Status != model.StatusOffline || sess.PaneID != "" {
+	if !sess.Archived || sess.Status != model.StatusOffline || sess.CanSend {
 		t.Errorf("archived session = %+v", sess)
 	}
-	if strings.Join(fh.calls, ",") != "close-workspace:w1" {
-		t.Errorf("herdr calls = %v", fh.calls)
+	if dp.alive("s1") {
+		t.Error("the running session was not stopped")
 	}
 
 	_, body = do(t, ts, tok, "GET", "/v1/sessions", nil, "")
@@ -1056,12 +903,8 @@ func Test実行中のセッションをアーカイブすると停止して一�
 }
 
 func Test履歴がまだない実行中のセッションも開いてアーカイブできる(t *testing.T) {
-	ts, _, fh, tok := newTestServer(t)
-	fh.snap.Workspaces = append(fh.snap.Workspaces, herdr.Workspace{WorkspaceID: "w3", Label: "fresh"})
-	fh.snap.Panes = append(fh.snap.Panes, herdr.Pane{
-		PaneID: "w3:p1", WorkspaceID: "w3", Agent: str("fake"), AgentStatus: herdr.StatusIdle,
-		AgentSession: &herdr.AgentSession{Source: "herdr:fake", Agent: "fake", Kind: "id", Value: "fresh"},
-	})
+	ts, fp, dp, tok := newTestServer(t)
+	dp.run(t, "fresh", fp.root)
 
 	resp, body := do(t, ts, tok, "GET", "/v1/sessions/fake:fresh/messages", nil, "")
 	if resp.StatusCode != http.StatusOK {
@@ -1072,7 +915,7 @@ func Test履歴がまだない実行中のセッションも開いてアーカ�
 		Messages []model.Message `json:"messages"`
 	}
 	json.Unmarshal(body, &page)
-	if page.Session.ID != "fake:fresh" || page.Session.PaneID != "w3:p1" || len(page.Messages) != 0 {
+	if page.Session.ID != "fake:fresh" || !page.Session.CanSend || page.Session.Cwd != fp.root || len(page.Messages) != 0 {
 		t.Errorf("messages = %s", body)
 	}
 
@@ -1080,8 +923,8 @@ func Test履歴がまだない実行中のセッションも開いてアーカ�
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("archive status %d: %s", resp.StatusCode, body)
 	}
-	if got := strings.Join(fh.calls, ","); got != "close-workspace:w3" {
-		t.Errorf("herdr calls = %v", fh.calls)
+	if dp.alive("fresh") {
+		t.Error("the running session was not stopped")
 	}
 }
 
@@ -1116,7 +959,7 @@ func Test会話APIは一括取得で差分とETagを返す(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := &combinedProvider{fakeProvider: &fakeProvider{root: t.TempDir()}}
-	srv := &Server{Config: cfg, Sessions: sessions.New(&fakeHerdr{snap: &herdr.Snapshot{}}, 0, p)}
+	srv := &Server{Config: cfg, Sessions: sessions.New(0, p)}
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	path := "/v1/sessions/fake:s1/messages?after=m2"
@@ -1149,7 +992,7 @@ func Test会話APIは一括取得で差分とETagを返す(t *testing.T) {
 }
 
 func Test停止中のセッションを再開しアーカイブからも外す(t *testing.T) {
-	ts, _, fh, tok := newTestServer(t)
+	ts, fp, dp, tok := newTestServer(t)
 	do(t, ts, tok, "POST", "/v1/sessions/fake:old/archive", nil, "")
 
 	resp, body := do(t, ts, tok, "POST", "/v1/sessions/fake:old/resume", []byte(`{"trust":true}`), "application/json")
@@ -1158,11 +1001,11 @@ func Test停止中のセッションを再開しアーカイブからも外す(t
 	}
 	var res launcher.StartResult
 	json.Unmarshal(body, &res)
-	if res.SessionID != "fake:old" || res.PaneID != "w2:p1" {
+	if res.SessionID != "fake:old" {
 		t.Errorf("result = %+v", res)
 	}
-	if got := strings.Join(fh.calls, ","); !strings.Contains(got, "start:fake resume old") {
-		t.Errorf("herdr calls = %s", got)
+	if len(dp.starts) != 1 || dp.starts[0].Resume != "old" || dp.starts[0].Cwd != fp.root || !dp.starts[0].Prompt.Empty() {
+		t.Errorf("starts = %+v", dp.starts)
 	}
 	_, body = do(t, ts, tok, "GET", "/v1/sessions?archived=true", nil, "")
 	if ids := sessionIDs(t, body); len(ids) != 0 {
@@ -1250,7 +1093,7 @@ func Test使用状況が無効なときも一覧は空で返る(t *testing.T) {
 }
 
 func Testディレクトリ判定は認証とパス制限を守り起動しない(t *testing.T) {
-	ts, p, h, token := newTestServer(t)
+	ts, p, dp, token := newTestServer(t)
 	defer ts.Close()
 	for _, tc := range []struct {
 		token, cwd string
@@ -1267,8 +1110,8 @@ func Testディレクトリ判定は認証とパス制限を守り起動しな�
 			t.Fatalf("%s", b)
 		}
 	}
-	if len(h.calls) != 0 {
-		t.Fatalf("check launched: %v", h.calls)
+	if len(dp.starts) != 0 {
+		t.Fatalf("check launched: %v", dp.starts)
 	}
 }
 
@@ -1296,10 +1139,10 @@ func Test遅いリクエストは成功してもinfoで記録される(t *testin
 func markedWorktree(t *testing.T) string {
 	t.Helper()
 	base, _ := filepath.EvalSymlinks(t.TempDir())
-	repo, wt := filepath.Join(base, "repo"), filepath.Join(base, "wt")
+	repo := filepath.Join(base, "repo")
 	os.Mkdir(repo, 0o755)
 	for _, args := range [][]string{
-		{"init", "-q", "-b", "main"}, {"commit", "-q", "--allow-empty", "-m", "init"}, {"worktree", "add", "-q", "-b", "worktree/a", wt},
+		{"init", "-q", "-b", "main"}, {"commit", "-q", "--allow-empty", "-m", "init"},
 	} {
 		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
 		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
@@ -1307,17 +1150,18 @@ func markedWorktree(t *testing.T) string {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
-	if err := worktree.Mark(context.Background(), wt, "fake"); err != nil {
+	wt, err := worktree.Create(context.Background(), repo, filepath.Join(base, "worktrees"), "fake")
+	if err != nil {
 		t.Fatal(err)
 	}
 	return wt
 }
 
 func Testアーカイブするとセッションのworktreeを削除し作業が残っていれば理由を返す(t *testing.T) {
-	ts, fp, fh, tok := newTestServer(t)
+	ts, fp, dp, tok := newTestServer(t)
 	wt := markedWorktree(t)
 	fp.root = wt
-	fh.snap.Panes[0].Cwd = str(wt)
+	dp.setCwd("s1", wt)
 
 	os.WriteFile(filepath.Join(wt, "draft.txt"), []byte("x"), 0o644)
 	resp, body := do(t, ts, tok, "POST", "/v1/sessions/fake:s1/archive", nil, "")
@@ -1340,14 +1184,14 @@ func Testアーカイブするとセッションのworktreeを削除し作業が
 	}
 }
 
-func Test別のペインが使っているworktreeはアーカイブしても残す(t *testing.T) {
-	ts, fp, fh, tok := newTestServer(t)
+func Test別のセッションが使っているworktreeはアーカイブしても残す(t *testing.T) {
+	ts, fp, dp, tok := newTestServer(t)
 	wt := markedWorktree(t)
 	fp.root = wt
-	fh.snap.Panes = append(fh.snap.Panes, herdr.Pane{PaneID: "w4:p1", WorkspaceID: "w4", Cwd: str(filepath.Join(wt))})
+	dp.run(t, "other", filepath.Join(wt))
 
 	resp, body := do(t, ts, tok, "POST", "/v1/sessions/fake:old/archive", nil, "")
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "another pane is still using it") {
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "another session is still using it") {
 		t.Fatalf("status %d: %s", resp.StatusCode, body)
 	}
 	if _, err := os.Stat(wt); err != nil {

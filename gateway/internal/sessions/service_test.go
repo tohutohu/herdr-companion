@@ -7,37 +7,32 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/runtime"
 )
 
-func str(s string) *string { return &s }
-
-func TestHerdrの状態を共通ステータスに正規化する(t *testing.T) {
-	live := func(s string) *providers.Live { return &providers.Live{PaneID: "w1:p1", HerdrStatus: s} }
+func Testランタイムの状態を共通ステータスに正規化する(t *testing.T) {
+	live := func(s string) *providers.Live { return &providers.Live{State: s} }
 	cases := []struct {
 		name string
 		live *providers.Live
 		sum  providers.Summary
 		want model.Status
 	}{
-		{"Herdrにいない", nil, providers.Summary{}, model.StatusOffline},
-		{"共有サーバーに待機中でもHerdrにいない", nil, providers.Summary{Status: model.StatusIdle}, model.StatusOffline},
-		{"共有サーバーで作業中でもHerdrにいない", nil, providers.Summary{Status: model.StatusRunning}, model.StatusOffline},
-		{"共有サーバーで承認待ちでもHerdrにいない", nil, providers.Summary{Status: model.StatusWaitingApproval}, model.StatusOffline},
-		{"共有サーバーで質問待ちでもHerdrにいない", nil, providers.Summary{Status: model.StatusWaitingInput}, model.StatusOffline},
-		{"共有サーバーで失敗してもHerdrにいない", nil, providers.Summary{Status: model.StatusFailed}, model.StatusOffline},
-		{"作業中", live(herdr.StatusWorking), providers.Summary{}, model.StatusRunning},
-		{"質問待ち", live(herdr.StatusBlocked), providers.Summary{Pending: model.InteractionQuestions}, model.StatusWaitingInput},
-		{"承認待ち", live(herdr.StatusBlocked), providers.Summary{Pending: model.InteractionApproval}, model.StatusWaitingApproval},
-		{"種別不明のブロック", live(herdr.StatusBlocked), providers.Summary{}, model.StatusWaitingInput},
-		{"完了", live(herdr.StatusDone), providers.Summary{}, model.StatusCompleted},
-		{"エラーで完了", live(herdr.StatusDone), providers.Summary{LastTurnFailed: true}, model.StatusFailed},
-		{"待機中", live(herdr.StatusIdle), providers.Summary{}, model.StatusIdle},
-		{"判定不能", live(herdr.StatusUnknown), providers.Summary{}, model.StatusIdle},
-		{"provider優先", live(herdr.StatusIdle), providers.Summary{Status: model.StatusWaitingApproval}, model.StatusWaitingApproval},
+		{"どこでも動いていない", nil, providers.Summary{}, model.StatusOffline},
+		{"履歴が作業中でも動いていない", nil, providers.Summary{Status: model.StatusRunning}, model.StatusOffline},
+		{"履歴が承認待ちでも動いていない", nil, providers.Summary{Status: model.StatusWaitingApproval}, model.StatusOffline},
+		{"作業中", live(providers.StateWorking), providers.Summary{}, model.StatusRunning},
+		{"質問待ち", live(providers.StateBlocked), providers.Summary{Pending: model.InteractionQuestions}, model.StatusWaitingInput},
+		{"承認待ち", live(providers.StateBlocked), providers.Summary{Pending: model.InteractionApproval}, model.StatusWaitingApproval},
+		{"種別不明のブロック", live(providers.StateBlocked), providers.Summary{}, model.StatusWaitingInput},
+		{"完了", live(providers.StateDone), providers.Summary{}, model.StatusCompleted},
+		{"エラーで完了", live(providers.StateDone), providers.Summary{LastTurnFailed: true}, model.StatusFailed},
+		{"待機中", live(providers.StateIdle), providers.Summary{}, model.StatusIdle},
+		{"判定不能", live("unknown"), providers.Summary{}, model.StatusIdle},
+		{"provider優先", live(providers.StateIdle), providers.Summary{Status: model.StatusWaitingApproval}, model.StatusWaitingApproval},
+		{"ターン中にプロセスが落ちた", &providers.Live{State: providers.StateIdle, Failed: true}, providers.Summary{}, model.StatusFailed},
 	}
 	for _, c := range cases {
 		if got := Normalize(c.live, &c.sum); got != c.want {
@@ -46,91 +41,39 @@ func TestHerdrの状態を共通ステータスに正規化する(t *testing.T) 
 	}
 }
 
-func Test別のエージェントに置き換わったペインのセッション参照は無視する(t *testing.T) {
-	shell := "zsh"
-	claude := "claude"
-	snap := &herdr.Snapshot{Panes: []herdr.Pane{
-		{PaneID: "w1:p1", Agent: &shell, AgentSession: &herdr.AgentSession{Agent: "claude", Kind: "id", Value: "old"}},
-		{PaneID: "w1:p2", Agent: &claude, AgentSession: &herdr.AgentSession{Agent: "claude", Kind: "id", Value: "new"}},
-	}}
-	s := New(nil, 0, stubProvider{})
-	live := s.live(context.Background(), snap)
-	if _, ok := live["claude:old"]; ok {
-		t.Error("stale session reference should be ignored")
-	}
-	if r, ok := live["claude:new"]; !ok || r.Live.PaneID != "w1:p2" {
-		t.Errorf("live = %+v", live)
-	}
-}
-
 type stubProvider struct{ providers.Provider }
 
-func (stubProvider) Name() string       { return "claude" }
-func (stubProvider) HerdrAgent() string { return "claude" }
-
-type validatedProvider struct {
-	stubProvider
-	err error
+func (stubProvider) Name() string        { return "claude" }
+func (stubProvider) DisplayName() string { return "Claude Code" }
+func (stubProvider) Summary(_ context.Context, id string, _ *providers.Live) (*providers.Summary, error) {
+	return &providers.Summary{NativeID: id, Cwd: "/w"}, nil
 }
 
-func (p validatedProvider) ValidateLiveSession(_ context.Context, _ string, live *providers.Live) (bool, error) {
-	return live.Cwd == "/work/app", p.err
-}
-
-type fixedSnapshot struct{ snap *herdr.Snapshot }
-
-func (s fixedSnapshot) Snapshot(context.Context) (*herdr.Snapshot, error) { return s.snap, nil }
-
-func Test履歴と異なるディレクトリの参照は除外して正しいペインへ紐づける(t *testing.T) {
-	agent, wrong, correct := "claude", "/work/other", "/work/app"
-	ref := &herdr.AgentSession{Agent: agent, Kind: "id", Value: "session"}
-	bad := herdr.Pane{PaneID: "wrong", Agent: &agent, AgentSession: ref, Cwd: &wrong}
-	good := herdr.Pane{PaneID: "correct", Agent: &agent, AgentSession: ref, Cwd: &wrong, ForegroundCwd: &correct}
-	for _, panes := range [][]herdr.Pane{{bad, good}, {good, bad}, {bad}} {
-		s := New(fixedSnapshot{&herdr.Snapshot{Panes: panes}}, 0, validatedProvider{})
-		r, err := s.Resolve(context.Background(), "claude:session")
-		if err != nil {
+// withLive returns a service over p whose runtime runs the given native ids.
+func withLive(t *testing.T, window time.Duration, p providers.Provider, ids ...string) *Service {
+	t.Helper()
+	rt := &directStub{Provider: p, infos: map[string]providers.DirectInfo{}}
+	m, err := runtime.New(filepath.Join(t.TempDir(), "d.json"), time.Hour, rt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range ids {
+		if err := m.Resume(context.Background(), "claude:"+id, providers.DirectStart{Cwd: "/w"}); err != nil {
 			t.Fatal(err)
 		}
-		if len(panes) == 1 {
-			if r.Live != nil {
-				t.Fatalf("wrong pane attached: %+v", r.Live)
-			}
-		} else if r.Live == nil || r.Live.PaneID != "correct" {
-			t.Fatalf("correct pane missing: %+v", r.Live)
-		}
 	}
+	s := New(window, p)
+	s.Direct = m
+	return s
 }
 
-func Test同じセッションの参照が曖昧なら任意のペインを操作対象にしない(t *testing.T) {
-	agent, cwd := "claude", "/work/app"
-	ref := &herdr.AgentSession{Agent: agent, Kind: "id", Value: "session"}
-	snap := &herdr.Snapshot{Panes: []herdr.Pane{
-		{PaneID: "first", Agent: &agent, AgentSession: ref, Cwd: &cwd},
-		{PaneID: "second", Agent: &agent, AgentSession: ref, Cwd: &cwd},
-		{PaneID: "third", Agent: &agent, AgentSession: ref, Cwd: &cwd},
-	}}
-	for _, p := range []providers.Provider{stubProvider{}, validatedProvider{}} {
-		s := New(fixedSnapshot{snap}, 0, p)
-		r, err := s.Resolve(context.Background(), "claude:session")
-		if err != nil || r.Live != nil {
-			t.Fatalf("ambiguous reference attached: %+v, err=%v", r, err)
-		}
-	}
-}
-
-func Test紐づけの検証に失敗したペインは操作対象にしない(t *testing.T) {
-	s := New(listSnapshot{}, 0, validatedProvider{err: context.DeadlineExceeded})
-	r, err := s.Resolve(context.Background(), "claude:live")
-	if err != nil || r.Live != nil {
-		t.Fatalf("unverified reference attached: %+v, err=%v", r, err)
-	}
-}
-
-func Test稼働中セッションのcwdはファイルリンクと同じペインのcwdを使う(t *testing.T) {
-	r := &Resolved{Provider: stubProvider{}, NativeID: "x", Live: &providers.Live{PaneID: "w1:p1", Cwd: "/work/app"}}
+func Test稼働中セッションのcwdはファイルリンクと同じランタイムのcwdを使う(t *testing.T) {
+	r := &Resolved{Provider: stubProvider{}, NativeID: "x", Live: &providers.Live{Cwd: "/work/app"}}
 	if got := toSession(r, &providers.Summary{Cwd: "/work/app/sub"}).Cwd; got != "/work/app" {
 		t.Errorf("live cwd = %q", got)
+	}
+	if got := toSession(r, &providers.Summary{Cwd: "/work/app/sub", PinnedCwd: true}).Cwd; got != "/work/app/sub" {
+		t.Errorf("pinned cwd = %q", got)
 	}
 	off := &Resolved{Provider: stubProvider{}, NativeID: "x"}
 	if got := toSession(off, &providers.Summary{Cwd: "/work/app/sub"}).Cwd; got != "/work/app/sub" {
@@ -143,15 +86,6 @@ func Test終了ターンの内容の版をセッションへ引き継ぐ(t *test
 	if got := toSession(r, &providers.Summary{CompletionRevision: "turn-1"}).CompletionRevision; got != "turn-1" {
 		t.Fatalf("completion revision = %q", got)
 	}
-}
-
-func (stubProvider) DisplayName() string { return "Claude Code" }
-
-type listSnapshot struct{}
-
-func (listSnapshot) Snapshot(context.Context) (*herdr.Snapshot, error) {
-	agent := "claude"
-	return &herdr.Snapshot{Panes: []herdr.Pane{{PaneID: "pane", Agent: &agent, AgentSession: &herdr.AgentSession{Agent: agent, Kind: "id", Value: "live"}}}}, nil
 }
 
 type conversationProvider struct {
@@ -175,12 +109,12 @@ func Test一括取得でも履歴未保存の稼働中セッションを開け�
 		{"稼働中の取得失敗", "claude:live", context.DeadlineExceeded, context.DeadlineExceeded},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s := New(listSnapshot{}, 0, conversationProvider{err: tc.err})
+			s := withLive(t, 0, conversationProvider{err: tc.err}, "live")
 			sess, msgs, err := s.Conversation(context.Background(), tc.id)
 			if !errors.Is(err, tc.wantErr) {
 				t.Fatalf("error = %v, want %v", err, tc.wantErr)
 			}
-			if tc.wantErr == nil && (sess.ID != tc.id || sess.PaneID != "pane" || len(msgs) != 0) {
+			if tc.wantErr == nil && (sess.ID != tc.id || !sess.CanSend || sess.Cwd != "/w" || len(msgs) != 0) {
 				t.Fatalf("session = %+v, messages = %+v", sess, msgs)
 			}
 		})
@@ -206,7 +140,7 @@ func (p *filteredListProvider) RecentExcluding(_ context.Context, _ time.Time, e
 }
 func Test一覧は稼働中とアーカイブ済みを解析前の除外対象にする(t *testing.T) {
 	p := &filteredListProvider{}
-	s := New(listSnapshot{}, time.Hour, p)
+	s := withLive(t, time.Hour, p, "live")
 	s.Archive = listArchive{}
 	got, err := s.List(context.Background())
 	if err != nil || len(got) != 2 {
@@ -215,16 +149,6 @@ func Test一覧は稼働中とアーカイブ済みを解析前の除外対象�
 	if len(p.excluded) != 2 || !p.excluded["live"] || !p.excluded["archived"] {
 		t.Fatalf("excluded=%v", p.excluded)
 	}
-}
-
-type twoLiveSnapshot struct{}
-
-func (twoLiveSnapshot) Snapshot(context.Context) (*herdr.Snapshot, error) {
-	agent := "claude"
-	return &herdr.Snapshot{Panes: []herdr.Pane{
-		{PaneID: "w1:p1", Agent: &agent, AgentSession: &herdr.AgentSession{Agent: agent, Kind: "id", Value: "a"}},
-		{PaneID: "w2:p1", Agent: &agent, AgentSession: &herdr.AgentSession{Agent: agent, Kind: "id", Value: "b"}},
-	}}, nil
 }
 
 // blockingProvider blocks every Summary and Recent call until release is
@@ -249,7 +173,7 @@ func (p *blockingProvider) Recent(context.Context, time.Time) ([]providers.Summa
 
 func Test一覧は稼働中セッションの要約と最近のセッション取得を並行して行う(t *testing.T) {
 	p := &blockingProvider{started: make(chan string, 3), release: make(chan struct{})}
-	s := New(twoLiveSnapshot{}, time.Hour, p)
+	s := withLive(t, time.Hour, p, "a", "b")
 	type result struct {
 		list []model.Session
 		err  error
@@ -274,64 +198,40 @@ func Test一覧は稼働中セッションの要約と最近のセッション�
 	}
 }
 
-func Test稼働中の直接管理と休眠中の記録が重なるときは動いている側を選ぶ(t *testing.T) {
-	snap := &herdr.Snapshot{Panes: []herdr.Pane{{
-		PaneID: "w1:p1", Agent: str("claude"), AgentStatus: herdr.StatusIdle,
-		AgentSession: &herdr.AgentSession{Agent: "claude", Kind: "id", Value: "s1"},
-	}}}
-	rt := &directStub{infos: map[string]providers.DirectInfo{}}
-	svc := New(fixedSnapshot{snap}, time.Hour, rt)
-	m, err := runtime.New(filepath.Join(t.TempDir(), "d.json"), time.Hour, rt)
-	if err != nil {
+func Test止まった直接管理のセッションも一覧に出て送信できる(t *testing.T) {
+	s := withLive(t, time.Hour, stubProvider{}, "s1")
+	ctx := context.Background()
+	if err := s.Direct.Stop(ctx, "claude:s1"); err != nil {
 		t.Fatal(err)
 	}
-	svc.Direct = m
-	ctx := context.Background()
-	m.Start(ctx, "claude", providers.DirectStart{Cwd: "/w"})
-
-	// 直接管理のプロセスが動いていればそちらを操作対象にする
-	r, _ := svc.Resolve(ctx, "claude:s1")
-	if !r.Live.IsDirect() || r.Live.Dormant {
-		t.Fatalf("live = %+v", r.Live)
+	r, err := s.Resolve(ctx, "claude:s1")
+	if err != nil || r.Live == nil || !r.Live.Dormant {
+		t.Fatalf("resolved = %+v, %v", r, err)
 	}
-	// 止まった記録よりHerdrのペインで動いている方を選ぶ
-	m.Stop(ctx, "claude:s1")
-	r, _ = svc.Resolve(ctx, "claude:s1")
-	if r.Live.IsDirect() || r.Live.PaneID != "w1:p1" {
-		t.Fatalf("live = %+v", r.Live)
-	}
-	// Herdrが止まっていても直接管理のセッションは一覧に出る
-	svc = New(failingSnapshot{}, time.Hour, rt)
-	svc.Direct = m
-	list, err := svc.LiveSessions(ctx)
-	if err != nil || len(list) != 1 || list[0].Backend != model.BackendDirect || !list[0].CanSend {
+	list, err := s.LiveSessions(ctx)
+	if err != nil || len(list) != 1 || !list[0].CanSend || list[0].Status != model.StatusIdle {
 		t.Fatalf("live sessions = %+v, %v", list, err)
 	}
 }
 
-type failingSnapshot struct{}
-
-func (failingSnapshot) Snapshot(context.Context) (*herdr.Snapshot, error) {
-	return nil, errors.New("herdr is not running")
-}
-
-// directStub is a claude provider with a direct runtime.
+// directStub adds a direct runtime to a provider.
 type directStub struct {
-	stubProvider
+	providers.Provider
 	infos map[string]providers.DirectInfo
 }
 
-func (d *directStub) Summary(_ context.Context, id string, live *providers.Live) (*providers.Summary, error) {
-	return &providers.Summary{NativeID: id, Cwd: "/w"}, nil
-}
 func (d *directStub) DirectStart(_ context.Context, o providers.DirectStart) (string, error) {
-	d.infos["s1"] = providers.DirectInfo{NativeID: "s1", Cwd: o.Cwd, Alive: true}
-	return "s1", nil
+	id := o.Resume
+	if id == "" {
+		id = "s1"
+	}
+	d.infos[id] = providers.DirectInfo{NativeID: id, Cwd: o.Cwd, Alive: true}
+	return id, nil
 }
-func (d *directStub) DirectStop(context.Context, string) error {
-	in := d.infos["s1"]
+func (d *directStub) DirectStop(_ context.Context, id string) error {
+	in := d.infos[id]
 	in.Alive = false
-	d.infos["s1"] = in
+	d.infos[id] = in
 	return nil
 }
 func (d *directStub) DirectInterrupt(context.Context, string) error         { return nil }

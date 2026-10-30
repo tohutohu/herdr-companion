@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestHerdrなしでworktreeを作り削除できる(t *testing.T) {
+func Test直接管理のworktreeを作り削除できる(t *testing.T) {
 	repo := newRepo(t)
 	base, _ := filepath.EvalSymlinks(t.TempDir())
 	ctx := context.Background()
@@ -22,7 +22,7 @@ func TestHerdrなしでworktreeを作り削除できる(t *testing.T) {
 	if branch := run(t, wt, "branch", "--show-current"); branch != "worktree/"+filepath.Base(wt) {
 		t.Errorf("branch = %s", branch)
 	}
-	out, err := Cleanup(ctx, nil, wt, nil)
+	out, err := Cleanup(ctx, wt, nil)
 	if err != nil || out == nil || !out.Removed || exists(wt) {
 		t.Fatalf("cleanup = %+v, %v", out, err)
 	}
@@ -45,7 +45,7 @@ func Test未コミットや未追跡の変更があるworktreeは削除しない
 			t.Fatal(err)
 		}
 		change(wt)
-		out, err := Cleanup(ctx, nil, wt, nil)
+		out, err := Cleanup(ctx, wt, nil)
 		if err != nil || out == nil || out.Removed || !strings.Contains(out.Reason, "uncommitted") || !exists(wt) {
 			t.Fatalf("cleanup = %+v, %v", out, err)
 		}
@@ -57,11 +57,11 @@ func Test他のセッションが使っているworktreeは削除しない(t *te
 	base, _ := filepath.EvalSymlinks(t.TempDir())
 	ctx := context.Background()
 	wt, _ := Create(ctx, repo, base, "claude")
-	out, err := Cleanup(ctx, nil, wt, func(path string) bool { return path == wt })
+	out, err := Cleanup(ctx, wt, func(path string) bool { return path == wt })
 	if err != nil || out == nil || out.Removed || !strings.Contains(out.Reason, "another session") {
 		t.Fatalf("cleanup = %+v, %v", out, err)
 	}
-	if out, _ := Cleanup(ctx, nil, repo, nil); out != nil {
+	if out, _ := Cleanup(ctx, repo, nil); out != nil {
 		t.Errorf("main checkout: %+v", out)
 	}
 }

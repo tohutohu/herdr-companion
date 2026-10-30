@@ -8,6 +8,13 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 )
 
+// asyncQuestion is a question of an async agent message (delivery "async"),
+// which Codex asks without waiting for the answer.
+type asyncQuestion struct {
+	Title   string   `json:"title"`
+	Options []string `json:"options"`
+}
+
 type asyncReply struct {
 	Answer         string `json:"answer"`
 	Question       string `json:"question"`

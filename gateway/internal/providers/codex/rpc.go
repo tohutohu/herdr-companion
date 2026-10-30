@@ -9,16 +9,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/coder/websocket"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 )
@@ -275,37 +271,3 @@ func (s *stdioTransport) close() error {
 	}
 	return nil
 }
-
-// --- unix socket transport: WebSocket over the shared daemon control socket ---
-
-type wsTransport struct {
-	c *websocket.Conn
-}
-
-func dialDaemon(ctx context.Context, socket string) (*wsTransport, error) {
-	httpClient := &http.Client{Transport: &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			var d net.Dialer
-			return d.DialContext(ctx, "unix", socket)
-		},
-	}}
-	dctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	c, _, err := websocket.Dial(dctx, "ws://localhost/rpc", &websocket.DialOptions{HTTPClient: httpClient})
-	if err != nil {
-		return nil, err
-	}
-	c.SetReadLimit(256 << 20)
-	return &wsTransport{c: c}, nil
-}
-
-func (w *wsTransport) write(ctx context.Context, b []byte) error {
-	return w.c.Write(ctx, websocket.MessageText, b)
-}
-
-func (w *wsTransport) read(ctx context.Context) ([]byte, error) {
-	_, b, err := w.c.Read(ctx)
-	return b, err
-}
-
-func (w *wsTransport) close() error { return w.c.Close(websocket.StatusNormalClosure, "") }

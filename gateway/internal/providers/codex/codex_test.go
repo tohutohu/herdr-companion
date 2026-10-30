@@ -12,14 +12,12 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"sort"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
-	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 )
@@ -72,7 +70,7 @@ func TestCodexの実スレッドを共通メッセージに変換できる(t *te
 }
 
 func Test要約は最後に終了したターンの内容の版を通知の重複判定用に返す(t *testing.T) {
-	p := New("unused", "/nonexistent.sock", &fakeTerm{}, deadletter.Nop{})
+	p := New("unused", deadletter.Nop{})
 	for _, status := range []string{"completed", "interrupted", "failed", "inProgress", ""} {
 		t.Run(status, func(t *testing.T) {
 			th := &Thread{ID: "thread", Turns: []Turn{
@@ -80,7 +78,7 @@ func Test要約は最後に終了したターンの内容の版を通知の重�
 				{ID: "latest-turn", Status: status},
 			}}
 			// A terminal redraw may make Herdr claim a finished turn is working.
-			sum := p.summaryFromText(context.Background(), th, &providers.Live{HerdrStatus: herdr.StatusWorking}, "same text")
+			sum := p.summaryFromText(context.Background(), th, &providers.Live{State: providers.StateWorking}, "same text")
 			finished := true
 			if status == "inProgress" || status == "" {
 				finished = false
@@ -109,7 +107,7 @@ func Test会話の要約とメッセージを一度のスレッド取得で返�
 				b, _ := json.Marshal(v)
 				pt.in <- b
 			})
-			p := New("codex-not-used", "/nonexistent.sock", &fakeTerm{}, deadletter.Nop{})
+			p := New("codex-not-used", deadletter.Nop{})
 			p.owned = testOwned(pt)
 			t.Cleanup(p.owned.c.close)
 			ctx := context.Background()
@@ -149,7 +147,7 @@ func (c *readWaitContext) Done() <-chan struct{} {
 
 func Test同じ履歴の並行取得を共有し一方の切断で他方を中断しない(t *testing.T) {
 	pt := &pipeTransport{in: make(chan []byte, 16), out: make(chan []byte, 16), closed: make(chan struct{})}
-	p := New("unused", "/nonexistent.sock", &fakeTerm{}, deadletter.Nop{})
+	p := New("unused", deadletter.Nop{})
 	p.owned = testOwned(pt)
 	t.Cleanup(p.owned.c.close)
 	base, cancel := context.WithCancel(context.Background())
@@ -352,7 +350,7 @@ func Test回答をapp_serverのレスポンス形式に変換できる(t *testin
 }
 
 func TestDaemonの保留リクエストと状態を追跡する(t *testing.T) {
-	d := newDaemonConn(deadletter.Nop{})
+	d := newServerConn(deadletter.Nop{})
 	thread := "01a0afc5-1515-7970-ae39-12bc2b518ce2"
 	for _, r := range loadRequests(t) {
 		d.Request(r.ID, r.Method, r.Params)
@@ -390,7 +388,7 @@ func TestDaemonの保留リクエストと状態を追跡する(t *testing.T) {
 		t.Errorf("state after completion = %s %s", pending, status)
 	}
 	// Herdr で動いているときは done/idle の判定を Herdr に任せる
-	live := &providers.Live{PaneID: "w1:p2", HerdrStatus: herdr.StatusDone}
+	live := &providers.Live{State: providers.StateDone}
 	if _, status = d.state(thread, live); status != "" {
 		t.Errorf("status with live pane = %s", status)
 	}
@@ -400,7 +398,7 @@ func Test呼び出し元が中断したスレッド読み込みはdeadletterに�
 	// 応答を返さない app-server
 	pt := &pipeTransport{in: make(chan []byte), out: make(chan []byte, 16), closed: make(chan struct{})}
 	rec := &deadletter.Recorder{}
-	p := New("codex-not-used", "/nonexistent.sock", &fakeTerm{}, rec)
+	p := New("codex-not-used", rec)
 	p.owned = testOwned(pt)
 	defer p.owned.c.close()
 
@@ -457,328 +455,10 @@ type fakeServer struct {
 	answered []string
 }
 
-func (f *fakeServer) serve(p *pipeTransport, send func(any)) {
-	for {
-		var b []byte
-		select {
-		case b = <-p.out:
-		case <-p.closed:
-			return
-		}
-		var m wireMessage
-		json.Unmarshal(b, &m)
-		f.mu.Lock()
-		if m.Method != "" {
-			f.calls = append(f.calls, m.Method+" "+string(m.Params))
-		} else {
-			f.answered = append(f.answered, string(m.ID)+" "+string(m.Result))
-		}
-		f.mu.Unlock()
-		if len(m.ID) == 0 || m.Method == "" {
-			continue
-		}
-		var result any = map[string]any{}
-		switch m.Method {
-		case "thread/loaded/list":
-			ids := []string{"thread-000001"}
-			f.mu.Lock()
-			if f.threads != nil {
-				ids = ids[:0]
-				for id := range f.threads {
-					ids = append(ids, id)
-				}
-				sort.Strings(ids)
-			}
-			f.mu.Unlock()
-			result = map[string]any{"data": ids}
-		case "thread/resume":
-			result = map[string]any{"approvalPolicy": "on-request", "sandbox": map[string]any{"type": "readOnly"},
-				"thread": map[string]any{"id": "thread-000001", "status": map[string]any{"type": "active", "activeFlags": []string{"waitingOnApproval"}}}}
-			send(map[string]any{"id": 0, "method": "item/commandExecution/requestApproval", "params": map[string]any{"threadId": "thread-000001", "turnId": "t1", "itemId": "i1", "startedAtMs": 1, "command": "rm -rf build"}})
-		case "thread/read":
-			var params struct{ ThreadID string }
-			json.Unmarshal(m.Params, &params)
-			f.mu.Lock()
-			if f.threads != nil {
-				result = map[string]any{"thread": f.threads[params.ThreadID]}
-			} else {
-				result = map[string]any{"thread": f.thread}
-			}
-			f.mu.Unlock()
-		case "model/list":
-			var params struct {
-				Cursor        string
-				IncludeHidden bool
-			}
-			json.Unmarshal(m.Params, &params)
-			if params.Cursor == "" {
-				result = map[string]any{"nextCursor": "p2", "data": []map[string]any{
-					{"id": "gpt-6-astra", "model": "gpt-6-astra", "displayName": "GPT-6 Astra", "description": "Frontier", "isDefault": true,
-						"defaultReasoningEffort": "medium", "supportedReasoningEfforts": []map[string]any{
-							{"reasoningEffort": "medium", "description": "Balanced"},
-							{"reasoningEffort": "xhigh", "description": "Deep"},
-							{"reasoningEffort": "--oops"},
-						}},
-					{"id": "hidden", "model": "gpt-internal", "displayName": "Internal", "hidden": true},
-				}}
-			} else {
-				result = map[string]any{"nextCursor": nil, "data": []map[string]any{
-					{"id": "mini", "model": "gpt-6-mini", "displayName": "", "description": "Fast"},
-					{"id": "bad", "model": "--oops", "displayName": "Bad"},
-				}}
-				if params.IncludeHidden {
-					page := result.(map[string]any)
-					page["data"] = append(page["data"].([]map[string]any), map[string]any{
-						"id": "gpt-reserve", "model": "gpt-reserve", "displayName": "GPT-Reserve", "hidden": true,
-						"defaultReasoningEffort": "medium", "supportedReasoningEfforts": []map[string]any{
-							{"reasoningEffort": "medium", "description": "Balanced"},
-						},
-					})
-				}
-			}
-		case "account/rateLimits/read":
-			result = map[string]any{
-				"rateLimitsByLimitId": map[string]any{
-					"base_model_inference": map[string]any{
-						"limitId":         "base_model_inference",
-						"limitName":       "gpt-reserve",
-						"normalModelSlug": "gpt-5.6-luna",
-						"primary": map[string]any{
-							"usedPercent":        6,
-							"windowDurationMins": 10080,
-							"resetsAt":           1789855214,
-						},
-					},
-				},
-			}
-		}
-		send(map[string]any{"id": m.ID, "result": result})
-	}
-}
-
 func (f *fakeServer) callList() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.calls...)
-}
-
-type fakeTerm struct {
-	prompts []string
-	keys    []string
-	// pane renders the screen after the given number of keys.
-	pane func(keys int) *herdr.ReadResult
-}
-
-func (f *fakeTerm) SendKeys(_ context.Context, _ string, keys ...string) error {
-	f.keys = append(f.keys, keys...)
-	return nil
-}
-func (f *fakeTerm) SendText(context.Context, string, string) error { return nil }
-func (f *fakeTerm) Prompt(_ context.Context, _ string, text string) error {
-	f.prompts = append(f.prompts, text)
-	return nil
-}
-func (f *fakeTerm) ReadPane(context.Context, string, int) (*herdr.ReadResult, error) {
-	if f.pane == nil {
-		return nil, nil
-	}
-	return f.pane(len(f.keys)), nil
-}
-
-func TestDaemon接続時は構造化APIで送信と承認を行う(t *testing.T) {
-	thread := json.RawMessage(`{"id":"thread-000001","cwd":"/tmp","status":{"type":"active"},"turns":[{"id":"t1","status":"inProgress","items":[{"type":"userMessage","id":"u1","content":[{"type":"text","text":"build"}]}]}]}`)
-	f := &fakeServer{t: t, thread: thread}
-	pt := &pipeTransport{in: make(chan []byte, 16), out: make(chan []byte, 16), closed: make(chan struct{})}
-	send := func(v any) {
-		b, _ := json.Marshal(v)
-		pt.in <- b
-	}
-	go f.serve(pt, send)
-
-	term := &fakeTerm{}
-	p := New("codex-not-used", "/nonexistent.sock", term, deadletter.Nop{})
-	d := newDaemonConn(deadletter.Nop{})
-	d.c = newRPCClient(pt, d)
-	defer d.c.close()
-	p.daemon = d
-
-	ctx := context.Background()
-	if err := d.c.initialize(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if err := d.sync(ctx); err != nil {
-		t.Fatal(err)
-	}
-	// wait for the replayed request to arrive
-	deadline := time.Now().Add(2 * time.Second)
-	for len(d.sortedPending("thread-000001")) == 0 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	live := &providers.Live{PaneID: "w1:p1", HerdrStatus: herdr.StatusBlocked}
-	before := len(f.callList())
-	sum, msgs, err := p.Conversation(ctx, "thread-000001", live)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if calls := f.callList()[before:]; len(calls) != 2 || !strings.Contains(calls[0], `"includeTurns":false`) || !strings.Contains(calls[1], `"includeTurns":true`) {
-		t.Fatalf("conversation requests = %v", calls)
-	}
-	// 購読時の approvalPolicy / sandbox からモードが分かる
-	if sum.Status != model.StatusWaitingApproval || sum.LastMessage != "build" || sum.Mode != "Read only" {
-		t.Errorf("summary = %+v", sum)
-	}
-	ia := msgs[len(msgs)-1].Blocks[0].Interaction
-	if ia == nil || ia.ID != "codex-request:0" || ia.Detail != "rm -rf build" {
-		t.Fatalf("interaction = %+v", msgs[len(msgs)-1])
-	}
-
-	// ペインが閉じてもスレッドは loaded のまま。履歴だけ読み、操作は拒否する。
-	_, offlineMsgs, err := p.Conversation(ctx, "thread-000001", nil)
-	if err != nil || len(offlineMsgs) == 0 {
-		t.Fatalf("offline history: %v, err=%v", offlineMsgs, err)
-	}
-	for _, msg := range offlineMsgs {
-		for _, block := range msg.Blocks {
-			if block.Interaction != nil {
-				t.Fatalf("offline interaction still visible: %+v", block.Interaction)
-			}
-		}
-	}
-	before = len(f.callList())
-	if err := p.Send(ctx, "thread-000001", nil, model.Input{Text: "続けて"}); !errors.Is(err, providers.ErrNotLive) {
-		t.Fatalf("offline send error = %v", err)
-	}
-	if err := p.Respond(ctx, "thread-000001", nil, model.InteractionResponse{InteractionID: ia.ID, Decision: "deny"}); !errors.Is(err, providers.ErrNotLive) {
-		t.Fatalf("offline respond error = %v", err)
-	}
-	if len(f.callList()) != before {
-		t.Fatal("offline operation reached the shared server")
-	}
-	if _, ok := d.lookup("thread-000001", ia.ID); !ok {
-		t.Fatal("offline response resolved the pending request")
-	}
-
-	if err := p.Respond(ctx, "thread-000001", live, model.InteractionResponse{InteractionID: ia.ID, Decision: "deny"}); err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(50 * time.Millisecond)
-	f.mu.Lock()
-	answered := strings.Join(f.answered, "|")
-	f.mu.Unlock()
-	if answered != `0 {"decision":"decline"}` {
-		t.Errorf("answered = %s", answered)
-	}
-	if err := p.Respond(ctx, "thread-000001", live, model.InteractionResponse{InteractionID: ia.ID, Decision: "deny"}); err != providers.ErrInteractionGone {
-		t.Errorf("second respond err = %v", err)
-	}
-
-	// 進行中のターンがあるので steer で送る
-	if err := p.Send(ctx, "thread-000001", live, model.Input{Text: "急いで", Images: []string{"/tmp/a.png"}}); err != nil {
-		t.Fatal(err)
-	}
-	calls := f.callList()
-	last := calls[len(calls)-1]
-	if !strings.HasPrefix(last, "turn/steer ") || !strings.Contains(last, `"expectedTurnId":"t1"`) || !strings.Contains(last, `{"path":"/tmp/a.png","type":"localImage"}`) {
-		t.Errorf("last call = %s", last)
-	}
-	if len(term.prompts) != 0 {
-		t.Errorf("should not use the terminal: %v", term.prompts)
-	}
-
-	// 画像以外の添付は構造化入力にできないので本文へパスを足す
-	if err := p.Send(ctx, "thread-000001", live, model.Input{Text: "読んで", Files: []string{"/tmp/up/notes.txt"}}); err != nil {
-		t.Fatal(err)
-	}
-	calls = f.callList()
-	if last := calls[len(calls)-1]; !strings.Contains(last, `{"text":"読んで\n/tmp/up/notes.txt","type":"text"}`) {
-		t.Errorf("last call = %s", last)
-	}
-}
-
-func Testモード変更は次のモードキーをペインへ送る(t *testing.T) {
-	term := &fakeTerm{}
-	p := New("codex", "/nonexistent.sock", term, deadletter.Nop{})
-	live := &providers.Live{PaneID: "w1:p1"}
-	if err := p.CycleMode(context.Background(), "thread-000001", live); err != nil {
-		t.Fatal(err)
-	}
-	if got := strings.Join(term.keys, ","); got != "shift+tab" {
-		t.Errorf("keys = %q", got)
-	}
-	if err := p.CycleMode(context.Background(), "thread-000001", nil); err != providers.ErrNotLive {
-		t.Errorf("offline err = %v", err)
-	}
-}
-
-func TestDaemon経由のモード変更はモデルとエフォートを維持する(t *testing.T) {
-	f := &fakeServer{t: t}
-	pt := &pipeTransport{in: make(chan []byte, 16), out: make(chan []byte, 16), closed: make(chan struct{})}
-	go f.serve(pt, func(v any) {
-		b, _ := json.Marshal(v)
-		pt.in <- b
-	})
-
-	term := &fakeTerm{}
-	p := New("codex-not-used", "/nonexistent.sock", term, deadletter.Nop{})
-	d := newDaemonConn(deadletter.Nop{})
-	d.c = newRPCClient(pt, d)
-	defer d.c.close()
-	p.daemon = d
-	thread := "thread-000001"
-	effort := "max"
-	d.status[thread] = ThreadStatus{Type: "idle"}
-	d.settings[thread] = threadSettings{CollaborationMode: &collaborationMode{
-		Mode:     "default",
-		Settings: &collaborationSettings{Model: "gpt-5.6-luna", ReasoningEffort: &effort},
-	}}
-
-	if err := p.CycleMode(context.Background(), thread, &providers.Live{PaneID: "w1:p1"}); err != nil {
-		t.Fatal(err)
-	}
-	var update string
-	for _, call := range f.callList() {
-		if strings.HasPrefix(call, "thread/settings/update ") {
-			update = call
-			break
-		}
-	}
-	if update == "" || !strings.Contains(update, `"mode":"plan"`) ||
-		!strings.Contains(update, `"model":"gpt-5.6-luna"`) ||
-		!strings.Contains(update, `"reasoning_effort":"max"`) {
-		t.Errorf("settings update = %q", update)
-	}
-	if len(term.keys) != 0 {
-		t.Errorf("should not use the TUI shortcut: %v", term.keys)
-	}
-	if got := d.mode(thread, ""); got != "Plan" {
-		t.Errorf("mode after update = %q", got)
-	}
-}
-
-func TestDaemonがなければペインへ入力しブロック中は端末フォールバックを出す(t *testing.T) {
-	term := &fakeTerm{}
-	p := New("codex", "/nonexistent.sock", term, deadletter.Nop{})
-	live := &providers.Live{PaneID: "w1:p2", HerdrStatus: herdr.StatusBlocked}
-	if err := p.Send(context.Background(), "thread-000001", live, model.Input{Text: "見て", Images: []string{"/tmp/a.png"}}); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Join(term.prompts, "|") != "見て\n/tmp/a.png" {
-		t.Errorf("prompts = %q", term.prompts)
-	}
-	in := model.Input{Text: "読んで", Files: []string{"/tmp/up/notes.txt"}}
-	if err := p.Send(context.Background(), "thread-000001", live, in); err != nil {
-		t.Fatal(err)
-	}
-	if term.prompts[len(term.prompts)-1] != "読んで\n/tmp/up/notes.txt" {
-		t.Errorf("prompts = %q", term.prompts)
-	}
-	if err := p.Send(context.Background(), "thread-000001", nil, model.Input{Text: "x"}); err != providers.ErrNotLive {
-		t.Errorf("offline err = %v", err)
-	}
-	if err := p.Respond(context.Background(), "thread-000001", live, model.InteractionResponse{InteractionID: blockedPromptID}); !errors.Is(err, providers.ErrUnsupported) {
-		t.Errorf("terminal prompt respond err = %v", err)
-	}
 }
 
 func Testスレッドのモデルをサマリーに含める(t *testing.T) {
@@ -795,7 +475,7 @@ func Testモデル一覧をページングしてReserve以外の非表示や不�
 		b, _ := json.Marshal(v)
 		pt.in <- b
 	})
-	p := New("codex-not-used", "/nonexistent.sock", &fakeTerm{}, deadletter.Nop{})
+	p := New("codex-not-used", deadletter.Nop{})
 	p.owned = testOwned(pt)
 	defer p.owned.c.close()
 
@@ -833,7 +513,7 @@ func TestReserveのレート制限を別ウィンドウとして取得する(t *
 		b, _ := json.Marshal(v)
 		pt.in <- b
 	})
-	p := New("codex-not-used", "/nonexistent.sock", &fakeTerm{}, deadletter.Nop{})
+	p := New("codex-not-used", deadletter.Nop{})
 	p.owned = testOwned(pt)
 	defer p.owned.c.close()
 
@@ -857,30 +537,6 @@ func TestReserveのレート制限を別ウィンドウとして取得する(t *
 	}
 }
 
-func Test起動引数にdaemon接続とモデルとエフォート指定を含める(t *testing.T) {
-	sock := filepath.Join(t.TempDir(), "cx.sock")
-	p := New("codex", sock, &fakeTerm{}, deadletter.Nop{})
-	args := func(model, effort, cwd string) string {
-		return strings.Join(p.LaunchArgs(providers.LaunchOptions{Model: model, Effort: effort, Cwd: cwd}), " ")
-	}
-	if got := args("gpt-6-mini", "", "/w/app"); got != "-c check_for_update_on_startup=false --model gpt-6-mini" {
-		t.Errorf("without daemon = %q", got)
-	}
-	os.WriteFile(sock, nil, 0o600)
-	// daemon に繋ぐときは作業ディレクトリを明示する
-	if got := args("", "", "/w/app"); got != "-c check_for_update_on_startup=false --remote unix://"+sock+" --cd /w/app" {
-		t.Errorf("default model = %q", got)
-	}
-	if got := args("gpt-6-mini", "", "/w/app"); got != "-c check_for_update_on_startup=false --remote unix://"+sock+" --cd /w/app --model gpt-6-mini" {
-		t.Errorf("with daemon = %q", got)
-	}
-	// エフォートは TUI が daemon に渡す設定上書きで指定する
-	want := "-c check_for_update_on_startup=false --remote unix://" + sock + ` --cd /w/app -c model_reasoning_effort="xhigh"`
-	if got := args("", "xhigh", "/w/app"); got != want {
-		t.Errorf("with effort = %q", got)
-	}
-}
-
 func TestCodexが作ったworktreeのスレッドはペインではなくスレッドの作業ディレクトリを使う(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", home)
@@ -894,36 +550,6 @@ func TestCodexが作ったworktreeのスレッドはペインではなくスレ�
 		if got := inManagedWorktree(cwd); got != want {
 			t.Errorf("%q = %v", cwd, got)
 		}
-	}
-}
-
-func TestCodexのペイン参照はスレッドのディレクトリと照合する(t *testing.T) {
-	home, root := t.TempDir(), t.TempDir()
-	t.Setenv("CODEX_HOME", home)
-	alias := filepath.Join(t.TempDir(), "alias")
-	if err := os.Symlink(root, alias); err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range []struct {
-		name, threadCwd, paneCwd string
-		want                     bool
-	}{
-		{"同じディレクトリ", root, root, true},
-		{"末尾スラッシュ", root + "/", root, true},
-		{"シンボリックリンク", root, alias, true},
-		{"他プロジェクト", root, t.TempDir(), false},
-		{"不明なペインcwd", root, "", true},
-		{"不明なスレッドcwd", "", root, true},
-		{"Codex管理worktree", filepath.Join(home, "worktrees", "branch", "repo"), root, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			p := New("", "", nil, deadletter.Nop{})
-			p.metadataEntries = map[string]*metadataEntry{"session": {thread: &Thread{ID: "session", Cwd: tc.threadCwd}, at: time.Now()}}
-			got, err := p.ValidateLiveSession(context.Background(), "session", &providers.Live{Cwd: tc.paneCwd})
-			if err != nil || got != tc.want {
-				t.Fatalf("match = %v, err = %v, want %v", got, err, tc.want)
-			}
-		})
 	}
 }
 
@@ -949,7 +575,7 @@ func Testスレッド設定からモードの表示名を決める(t *testing.T)
 }
 
 func Test設定変更通知でスレッドのモードを更新する(t *testing.T) {
-	d := newDaemonConn(deadletter.Nop{})
+	d := newServerConn(deadletter.Nop{})
 	if m := d.mode("th1", ""); m != "" {
 		t.Errorf("unknown thread mode = %q", m)
 	}
@@ -964,7 +590,7 @@ func Test設定変更通知でスレッドのモードを更新する(t *testing
 }
 
 func Test購読前にPlanモードで始まったスレッドはrolloutの記録でPlanと表示する(t *testing.T) {
-	d := newDaemonConn(deadletter.Nop{})
+	d := newServerConn(deadletter.Nop{})
 	// thread/resume gives only the permission preset.
 	d.settings["th1"] = threadSettings{ApprovalPolicy: json.RawMessage(`"on-request"`), SandboxPolicy: &sandboxPolicy{Type: "readOnly"}}
 	if m := d.mode("th1", "Plan"); m != "Plan" {
@@ -1001,78 +627,6 @@ func TestRolloutから最新のコラボレーションモードを読む(t *tes
 	}
 	if m := collaborationModeFrom(rolloutTailLines("")); m != "" {
 		t.Errorf("no rollout = %q", m)
-	}
-}
-
-func TestDaemon上で指定ディレクトリに新しく作られたスレッドを見つける(t *testing.T) {
-	thread := json.RawMessage(`{"id":"thread-000001","cwd":"/w/app","createdAt":1000,"status":{"type":"idle"},"turns":[]}`)
-	f := &fakeServer{t: t, thread: thread}
-	pt := &pipeTransport{in: make(chan []byte, 16), out: make(chan []byte, 16), closed: make(chan struct{})}
-	go f.serve(pt, func(v any) {
-		b, _ := json.Marshal(v)
-		pt.in <- b
-	})
-	p := New("codex-not-used", "/nonexistent.sock", &fakeTerm{}, deadletter.Nop{})
-	ctx := context.Background()
-	if id := p.LocateLaunched(ctx, "/w/app", time.Unix(0, 0)); id != "" {
-		t.Errorf("without daemon = %q", id)
-	}
-	d := newDaemonConn(deadletter.Nop{})
-	d.c = newRPCClient(pt, d)
-	defer d.c.close()
-	p.daemon = d
-
-	if id := p.LocateLaunched(ctx, "/w/app", time.Unix(999, 0)); id != "thread-000001" {
-		t.Errorf("located = %q", id)
-	}
-	if id := p.LocateLaunched(ctx, "/w/other", time.Unix(999, 0)); id != "" {
-		t.Errorf("other cwd = %q", id)
-	}
-	if id := p.LocateLaunched(ctx, "/w/app", time.Unix(1001, 0)); id != "" {
-		t.Errorf("older thread = %q", id)
-	}
-	f.mu.Lock()
-	f.thread = json.RawMessage(`{"id":"thread-000001","cwd":"/w/app","createdAt":1000,"ephemeral":true,"status":{"type":"idle"}}`)
-	f.mu.Unlock()
-	if id := p.LocateLaunched(ctx, "/w/app", time.Unix(999, 0)); id != "" {
-		t.Errorf("ephemeral thread = %q", id)
-	}
-}
-
-func Test起動前から開いていたプロンプトなしのスレッドを新しいセッションと取り違えない(t *testing.T) {
-	// A TUI opened at 21:48:33 and never prompted: with no rollout the daemon
-	// reports the time of the read as createdAt.
-	idle := "01a0e80f-5496-7461-8fe9-9e700a1d5305"
-	// The session launched at 21:56:57, already prompted.
-	launched := "01a0e817-04f9-7d61-90e1-acb6f8057514"
-	readAt := int64(1790600227)
-	f := &fakeServer{t: t, threads: map[string]json.RawMessage{
-		idle:     json.RawMessage(fmt.Sprintf(`{"id":%q,"cwd":"/w/app","createdAt":%d,"status":{"type":"idle"}}`, idle, readAt)),
-		launched: json.RawMessage(fmt.Sprintf(`{"id":%q,"cwd":"/w/app","createdAt":1790600217,"status":{"type":"idle"}}`, launched)),
-	}}
-	pt := &pipeTransport{in: make(chan []byte, 16), out: make(chan []byte, 16), closed: make(chan struct{})}
-	go f.serve(pt, func(v any) {
-		b, _ := json.Marshal(v)
-		pt.in <- b
-	})
-	p := New("codex-not-used", "/nonexistent.sock", &fakeTerm{}, deadletter.Nop{})
-	d := newDaemonConn(deadletter.Nop{})
-	d.c = newRPCClient(pt, d)
-	defer d.c.close()
-	p.daemon = d
-
-	ctx := context.Background()
-	since := time.Unix(1790600215, 0)
-	if id := p.LocateLaunched(ctx, "/w/app", since); id != launched {
-		t.Errorf("located = %q, want %q", id, launched)
-	}
-	// Before the launched thread exists only the idle one is loaded; it is
-	// still older than the launch.
-	f.mu.Lock()
-	delete(f.threads, launched)
-	f.mu.Unlock()
-	if id := p.LocateLaunched(ctx, "/w/app", since); id != "" {
-		t.Errorf("idle thread located = %q", id)
 	}
 }
 
@@ -1148,48 +702,6 @@ func TestCodexのコストはスレッドの累計トークンから見積もる
 	}
 }
 
-func Test新規と再開のどちらも起動時の更新確認を無効にする(t *testing.T) {
-	p := New("codex", filepath.Join(t.TempDir(), "absent.sock"), &fakeTerm{}, deadletter.Nop{})
-	for _, args := range [][]string{p.LaunchArgs(providers.LaunchOptions{}), p.ResumeArgs("thread", "/work")} {
-		if !strings.Contains(strings.Join(args, " "), "-c check_for_update_on_startup=false") {
-			t.Fatal(args)
-		}
-	}
-}
-
-func Test起動時のPlanモードはTUIのショートカットで設定する(t *testing.T) {
-	// 起動直後の一打目は取りこぼされることがあるので状態を読んで打ち直す
-	planned := func(keys int) *herdr.ReadResult {
-		if keys < 2 {
-			return &herdr.ReadResult{Text: "gpt-6-astra low · ~/workspace/app"}
-		}
-		return &herdr.ReadResult{Text: "› Ask Codex to do anything\nPlan mode (shift+tab to cycle)"}
-	}
-	term := &fakeTerm{pane: planned}
-	p := New("codex", filepath.Join(t.TempDir(), "cx.sock"), term, deadletter.Nop{})
-	// 既定モードのまま起動するときは何も送らない
-	for _, mode := range []string{"", "default"} {
-		if err := p.SetLaunchMode(context.Background(), "w1:p1", mode); err != nil || len(term.keys) != 0 {
-			t.Fatalf("mode %q sent %v (%v)", mode, term.keys, err)
-		}
-	}
-	if err := p.SetLaunchMode(context.Background(), "w1:p1", "plan"); err != nil {
-		t.Fatal(err)
-	}
-	if len(term.keys) != 2 || term.keys[0] != "shift+tab" || term.keys[1] != "shift+tab" {
-		t.Errorf("keys = %v", term.keys)
-	}
-	if err := p.SetLaunchMode(context.Background(), "w1:p1", "accept"); err == nil {
-		t.Error("unknown mode should fail")
-	}
-	// 切り替わらないままなら諦めて失敗を返す
-	stuck := &fakeTerm{pane: func(int) *herdr.ReadResult { return &herdr.ReadResult{Text: "gpt-6-astra low"} }}
-	p = New("codex", filepath.Join(t.TempDir(), "cx.sock"), stuck, deadletter.Nop{})
-	if err := p.SetLaunchMode(context.Background(), "w1:p1", "plan"); err == nil || len(stuck.keys) != 3 {
-		t.Errorf("err = %v keys = %v", err, stuck.keys)
-	}
-}
-
 // infoFromRollout returns the newest token accounting in the thread's rollout
 // file, or nil when the file is missing or has no usable count (an
 // interrupted turn records one without an info block).
@@ -1198,8 +710,95 @@ func infoFromRollout(path string) *tokenInfo {
 }
 
 // testOwned stands in for the gateway's own app-server with a fake transport.
-func testOwned(t transport) *daemonConn {
-	d := newDaemonConn(deadletter.Nop{})
+func testOwned(t transport) *serverConn {
+	d := newServerConn(deadletter.Nop{})
 	d.c = newRPCClient(t, nil)
 	return d
+}
+
+func (f *fakeServer) serve(p *pipeTransport, send func(any)) {
+	for {
+		var b []byte
+		select {
+		case b = <-p.out:
+		case <-p.closed:
+			return
+		}
+		var m wireMessage
+		json.Unmarshal(b, &m)
+		f.mu.Lock()
+		if m.Method != "" {
+			f.calls = append(f.calls, m.Method+" "+string(m.Params))
+		} else {
+			f.answered = append(f.answered, string(m.ID)+" "+string(m.Result))
+		}
+		f.mu.Unlock()
+		if len(m.ID) == 0 || m.Method == "" {
+			continue
+		}
+		var result any = map[string]any{}
+		switch m.Method {
+		case "thread/resume":
+			result = map[string]any{"approvalPolicy": "on-request", "sandbox": map[string]any{"type": "readOnly"},
+				"thread": map[string]any{"id": "thread-000001", "status": map[string]any{"type": "active", "activeFlags": []string{"waitingOnApproval"}}}}
+			send(map[string]any{"id": 0, "method": "item/commandExecution/requestApproval", "params": map[string]any{"threadId": "thread-000001", "turnId": "t1", "itemId": "i1", "startedAtMs": 1, "command": "rm -rf build"}})
+		case "thread/read":
+			var params struct{ ThreadID string }
+			json.Unmarshal(m.Params, &params)
+			f.mu.Lock()
+			if f.threads != nil {
+				result = map[string]any{"thread": f.threads[params.ThreadID]}
+			} else {
+				result = map[string]any{"thread": f.thread}
+			}
+			f.mu.Unlock()
+		case "model/list":
+			var params struct {
+				Cursor        string
+				IncludeHidden bool
+			}
+			json.Unmarshal(m.Params, &params)
+			if params.Cursor == "" {
+				result = map[string]any{"nextCursor": "p2", "data": []map[string]any{
+					{"id": "gpt-6-astra", "model": "gpt-6-astra", "displayName": "GPT-6 Astra", "description": "Frontier", "isDefault": true,
+						"defaultReasoningEffort": "medium", "supportedReasoningEfforts": []map[string]any{
+							{"reasoningEffort": "medium", "description": "Balanced"},
+							{"reasoningEffort": "xhigh", "description": "Deep"},
+							{"reasoningEffort": "--oops"},
+						}},
+					{"id": "hidden", "model": "gpt-internal", "displayName": "Internal", "hidden": true},
+				}}
+			} else {
+				result = map[string]any{"nextCursor": nil, "data": []map[string]any{
+					{"id": "mini", "model": "gpt-6-mini", "displayName": "", "description": "Fast"},
+					{"id": "bad", "model": "--oops", "displayName": "Bad"},
+				}}
+				if params.IncludeHidden {
+					page := result.(map[string]any)
+					page["data"] = append(page["data"].([]map[string]any), map[string]any{
+						"id": "gpt-reserve", "model": "gpt-reserve", "displayName": "GPT-Reserve", "hidden": true,
+						"defaultReasoningEffort": "medium", "supportedReasoningEfforts": []map[string]any{
+							{"reasoningEffort": "medium", "description": "Balanced"},
+						},
+					})
+				}
+			}
+		case "account/rateLimits/read":
+			result = map[string]any{
+				"rateLimitsByLimitId": map[string]any{
+					"base_model_inference": map[string]any{
+						"limitId":         "base_model_inference",
+						"limitName":       "gpt-reserve",
+						"normalModelSlug": "gpt-5.6-luna",
+						"primary": map[string]any{
+							"usedPercent":        6,
+							"windowDurationMins": 10080,
+							"resetsAt":           1789855214,
+						},
+					},
+				},
+			}
+		}
+		send(map[string]any{"id": m.ID, "result": result})
+	}
 }

@@ -14,7 +14,6 @@ import (
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/config"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
-	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 )
 
@@ -33,20 +32,12 @@ type Conversations interface {
 	Conversation(ctx context.Context, id string) (model.Session, []model.Message, error)
 }
 
-// Subscriber is the Herdr event stream.
-type Subscriber interface {
-	Snapshot(ctx context.Context) (*herdr.Snapshot, error)
-	Subscribe(ctx context.Context, subs []map[string]any) (<-chan herdr.Event, error)
-}
-
 // Watcher notices state transitions of live sessions and pushes them.
 // Statuses and finished turn revisions are kept in memory per session.
 //
-// It re-evaluates when Herdr reports a pane status change, when the direct
-// runtime calls Kick, and every Resync, which also catches anything missed.
-// Herdr is optional (nil, or its server stopped).
+// It re-evaluates when the runtime calls Kick, and every Resync, which also
+// catches anything missed.
 type Watcher struct {
-	Herdr    Subscriber
 	Sessions Sessions
 	// Conversations supplies the last report sent with a push; nil sends none.
 	Conversations Conversations
@@ -94,66 +85,9 @@ func (w *Watcher) Run(ctx context.Context) {
 	w.mu.Lock()
 	w.last = map[string]observation{}
 	w.mu.Unlock()
-	kick := w.Kick
 	go w.evaluator(ctx, w.triggers())
-	kick()
-	if w.Herdr == nil {
-		<-ctx.Done()
-		return
-	}
-	failures := 0
-	for ctx.Err() == nil {
-		if err := w.stream(ctx, kick); err != nil && ctx.Err() == nil {
-			// Herdr not running is normal now; say so once per outage.
-			failures++
-			if failures == 1 {
-				slog.Info("herdr event stream unavailable; watching direct sessions and polling", "operation", "watch", "error", err)
-			} else {
-				slog.Debug("herdr event stream ended", "operation", "watch", "error", err)
-			}
-		} else {
-			failures = 0
-		}
-		select {
-		case <-ctx.Done():
-		case <-time.After(3 * time.Second):
-		}
-	}
-}
-
-// stream subscribes to status changes of every agent pane. Pane topology
-// changes end the stream so the subscription list is rebuilt.
-func (w *Watcher) stream(ctx context.Context, kick func()) error {
-	snap, err := w.Herdr.Snapshot(ctx)
-	if err != nil {
-		return err
-	}
-	subs := []map[string]any{
-		{"type": "pane.created"},
-		{"type": "pane.closed"},
-		{"type": "pane.agent_detected"},
-	}
-	for _, p := range snap.Panes {
-		subs = append(subs, map[string]any{"type": "pane.agent_status_changed", "pane_id": p.PaneID})
-	}
-	sctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	events, err := w.Herdr.Subscribe(sctx, subs)
-	if err != nil {
-		return err
-	}
-	kick()
-	for ev := range events {
-		kick()
-		switch ev.Event {
-		// Topology events use the general event envelope (underscores),
-		// unlike the pane status subscription envelope (dots).
-		case "pane_created", "pane_closed", "pane_agent_detected",
-			"pane.created", "pane.closed", "pane.agent_detected":
-			return nil // resubscribe with the new pane set
-		}
-	}
-	return errors.New("subscription closed")
+	w.Kick()
+	<-ctx.Done()
 }
 
 func (w *Watcher) evaluator(ctx context.Context, trigger <-chan struct{}) {
@@ -191,9 +125,9 @@ func (w *Watcher) Evaluate(ctx context.Context) {
 		}
 		prev, known := w.last[s.ID]
 		next := observation{status: s.Status, completionRevision: prev.completionRevision}
-		// Seed from the first read, including an old finished turn in a pane
-		// Herdr temporarily calls running. Later running observations must not
-		// consume a new completion before Herdr reports its terminal state.
+		// Seed from the first read, including an old finished turn of a
+		// session that is running again. Later running observations must not
+		// consume a new completion before the runtime reports its end.
 		if s.CompletionRevision != "" && (!known || s.Status == model.StatusCompleted || s.Status == model.StatusIdle || s.Status == model.StatusFailed) {
 			next.completionRevision = s.CompletionRevision
 		}
@@ -236,9 +170,9 @@ func (w *Watcher) Evaluate(ctx context.Context) {
 	w.mu.Unlock()
 }
 
-// notificationKind decides whether a transition deserves a push. Herdr marks a
-// finished agent idle instead of done once someone looked at it, so
-// running -> idle also counts as completion.
+// notificationKind decides whether a transition deserves a push. A finished
+// turn is idle instead of done once someone looked at it, so running -> idle
+// also counts as completion.
 func notificationKind(prev, next model.Status) (model.Status, bool) {
 	switch next {
 	case model.StatusWaitingInput, model.StatusWaitingApproval, model.StatusFailed:

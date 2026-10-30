@@ -31,18 +31,11 @@ type Service struct {
 	run      func(context.Context, string, ...string) (string, error)
 }
 
-func New(ctx context.Context, codex, opencode string, devinArgs ...string) *Service {
+func New(ctx context.Context, codex string) *Service {
 	if codex == "" {
 		codex = "codex"
 	}
-	if opencode == "" {
-		opencode = "opencode"
-	}
-	devin := "devin"
-	if len(devinArgs) > 0 && devinArgs[0] != "" {
-		devin = devinArgs[0]
-	}
-	return &Service{ctx: ctx, commands: map[string]string{"codex": codex, "claude": "claude", "opencode": opencode, "devin": devin}, statuses: map[string]Status{}, run: runCommand}
+	return &Service{ctx: ctx, commands: map[string]string{"codex": codex, "claude": "claude"}, statuses: map[string]Status{}, run: runCommand}
 }
 
 // boundedOutput keeps verbose or broken installers from exhausting memory.
@@ -85,8 +78,8 @@ func runCommand(ctx context.Context, binary string, args ...string) (string, err
 }
 
 func (s *Service) List(ctx context.Context) []Status {
-	out := make([]Status, 0, 4)
-	for _, id := range []string{"claude", "codex", "opencode", "devin"} {
+	out := make([]Status, 0, 2)
+	for _, id := range []string{"claude", "codex"} {
 		s.mu.Lock()
 		st, ok := s.statuses[id]
 		s.mu.Unlock()
@@ -136,13 +129,7 @@ func (s *Service) Start(id string) (Status, error) {
 	go func() {
 		ctx, cancel := context.WithTimeout(s.ctx, 10*time.Minute)
 		defer cancel()
-		// Both OpenCode v1 and official v2 use upgrade; the CLI detects
-		// its own supported installation method (curl, npm, ...).
-		verb := "update"
-		if id == "opencode" {
-			verb = "upgrade"
-		}
-		output, err := s.run(ctx, command, verb)
+		output, err := s.run(ctx, command, "update")
 		next := Status{Provider: id, Version: st.Version, State: "succeeded", Output: output}
 		if err != nil {
 			next.State, next.Error = "failed", fmt.Sprintf("Update failed: %v", err)

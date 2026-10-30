@@ -49,12 +49,10 @@ type rolloutSummary struct {
 func (p *Provider) summaryVersion(id string) displayVersion {
 	v := p.displayVersion(id, false)
 	v.events = 0
-	for _, d := range []*daemonConn{p.currentDaemon(), p.currentOwned()} {
-		if d != nil {
-			d.mu.Lock()
-			v.events += d.summaryVersions[id]
-			d.mu.Unlock()
-		}
+	if d := p.currentOwned(); d != nil {
+		d.mu.Lock()
+		v.events += d.summaryVersions[id]
+		d.mu.Unlock()
 	}
 	return v
 }

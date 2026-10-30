@@ -5,12 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
-	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 )
 
 func run(t *testing.T, dir string, args ...string) string {
@@ -50,74 +46,27 @@ func exists(p string) bool {
 	return err == nil
 }
 
-// fakeHerdr removes worktrees the way Herdr does: `git worktree remove`
-// without --force, through the workspace open in the worktree. Like Herdr it
-// opens a worktree only from the repository's main checkout.
-type fakeHerdr struct {
-	open   map[string]bool // worktrees a workspace is open in
-	fail   error           // returned by RemoveWorktree instead of removing
-	paths  map[string]string
-	calls  []string
-	nextWS int
-}
-
-func (h *fakeHerdr) OpenWorktree(ctx context.Context, repo, path string) (string, bool, error) {
-	h.calls = append(h.calls, "open "+path)
-	if c, err := inspect(ctx, repo); err != nil || c.linked() {
-		return "", false, &herdr.Error{Code: "linked_worktree_source", Message: "New and open worktree actions start from the repo parent workspace."}
-	}
-	if h.open[path] {
-		return "w-open", true, nil
-	}
-	h.nextWS++
-	ws := "w" + strconv.Itoa(h.nextWS)
-	if h.paths == nil {
-		h.paths = map[string]string{}
-	}
-	h.paths[ws] = path
-	return ws, false, nil
-}
-
-func (h *fakeHerdr) RemoveWorktree(_ context.Context, ws string) error {
-	h.calls = append(h.calls, "remove "+ws)
-	if h.fail != nil {
-		return h.fail
-	}
-	path := h.paths[ws]
-	out, err := exec.Command("git", "-C", path, "worktree", "remove", path).CombinedOutput()
-	if err != nil {
-		return &herdr.Error{Code: herdr.ErrDirtyWorktree, Message: string(out)}
-	}
-	return nil
-}
-
-func (h *fakeHerdr) CloseWorkspace(_ context.Context, ws string) error {
-	h.calls = append(h.calls, "close "+ws)
-	return nil
-}
-
-func Testゲートウェイが作ったクリーンなworktreeはHerdrに削除させる(t *testing.T) {
+func Test1系がHerdr起動用に作ったworktreeもgitで削除する(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepo(t)
 	wt := addWorktree(t, repo, "a", "worktree/a")
-	if err := Mark(ctx, wt, "claude"); err != nil {
+	if err := mark(ctx, wt, "claude", "herdr"); err != nil {
 		t.Fatal(err)
 	}
 	os.MkdirAll(filepath.Join(wt, "sub"), 0o755)
-	h := &fakeHerdr{}
 
-	out, err := Cleanup(ctx, h, filepath.Join(wt, "sub"), nil)
+	out, err := Cleanup(ctx, filepath.Join(wt, "sub"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if out == nil || !out.Removed || out.Path != wt || out.Warning() != "" {
 		t.Fatalf("outcome = %+v", out)
 	}
-	if want := []string{"open " + wt, "remove w1"}; !slices.Equal(h.calls, want) {
-		t.Errorf("calls = %q, want %q", h.calls, want)
-	}
 	if exists(wt) {
 		t.Error("worktree directory is still there")
+	}
+	if got := run(t, repo, "branch", "--list", "worktree/a"); got == "" {
+		t.Error("the branch must be kept")
 	}
 }
 
@@ -125,73 +74,17 @@ func Testマーカーのないworktreeや通常のチェックアウトには触
 	ctx := context.Background()
 	repo := newRepo(t)
 	wt := addWorktree(t, repo, "mine", "mine")
-	h := &fakeHerdr{}
 	for _, dir := range []string{wt, repo, t.TempDir(), filepath.Join(repo, "missing"), ""} {
-		out, err := Cleanup(ctx, h, dir, nil)
+		out, err := Cleanup(ctx, dir, nil)
 		if err != nil || out != nil {
 			t.Errorf("%s: outcome = %+v, err = %v", dir, out, err)
 		}
 	}
-	if len(h.calls) != 0 {
-		t.Errorf("calls = %q", h.calls)
+	if !exists(wt) {
+		t.Error("an unmarked worktree was removed")
 	}
-	if err := Mark(ctx, repo, "claude"); err == nil {
+	if err := mark(ctx, repo, "claude", "direct"); err == nil {
 		t.Error("the main checkout must not be marked")
-	}
-}
-
-func Test作業中の変更があるworktreeは開いたワークスペースを閉じて理由を添えて残す(t *testing.T) {
-	ctx := context.Background()
-	repo := newRepo(t)
-	wt := addWorktree(t, repo, "a", "worktree/a")
-	Mark(ctx, wt, "claude")
-	os.WriteFile(filepath.Join(wt, "new.txt"), []byte("x"), 0o644)
-	h := &fakeHerdr{}
-
-	out, err := Cleanup(ctx, h, wt, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out == nil || out.Removed || out.Warning() != "Worktree kept because it has uncommitted changes: "+wt {
-		t.Fatalf("outcome = %+v", out)
-	}
-	if want := []string{"open " + wt, "remove w1", "close w1"}; !slices.Equal(h.calls, want) {
-		t.Errorf("calls = %q, want %q", h.calls, want)
-	}
-	if !exists(filepath.Join(wt, "new.txt")) {
-		t.Error("the uncommitted file is gone")
-	}
-}
-
-func TestHerdrのワークスペースが開いているworktreeは残す(t *testing.T) {
-	ctx := context.Background()
-	repo := newRepo(t)
-	wt := addWorktree(t, repo, "a", "worktree/a")
-	Mark(ctx, wt, "claude")
-	h := &fakeHerdr{open: map[string]bool{wt: true}}
-
-	out, err := Cleanup(ctx, h, wt, nil)
-	if err != nil || out == nil || out.Removed || out.Reason != "another pane is still using it" {
-		t.Fatalf("outcome = %+v, err = %v", out, err)
-	}
-	if want := []string{"open " + wt}; !slices.Equal(h.calls, want) {
-		t.Errorf("calls = %q, want %q", h.calls, want)
-	}
-}
-
-func Test削除できなかったときは開いたワークスペースを閉じてエラーを返す(t *testing.T) {
-	ctx := context.Background()
-	repo := newRepo(t)
-	wt := addWorktree(t, repo, "a", "worktree/a")
-	Mark(ctx, wt, "claude")
-	h := &fakeHerdr{fail: &herdr.Error{Code: "worktree_remove_failed", Message: "locked"}}
-
-	out, err := Cleanup(ctx, h, wt, nil)
-	if err == nil || out != nil {
-		t.Fatalf("outcome = %+v, err = %v", out, err)
-	}
-	if want := []string{"open " + wt, "remove w1", "close w1"}; !slices.Equal(h.calls, want) {
-		t.Errorf("calls = %q, want %q", h.calls, want)
 	}
 }
 

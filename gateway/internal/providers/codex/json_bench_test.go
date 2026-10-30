@@ -95,9 +95,6 @@ func BenchmarkCodexHistory(b *testing.B) {
 		if got := ConvertThread(&th, convertOptions{}); len(got) != 33 {
 			b.Fatal("lost messages")
 		}
-		if got := pendingAsyncQuestions(&th); len(got) != 0 {
-			b.Fatal("unexpected pending questions")
-		}
 		if got := lastThreadText(&th); got != "テストが完了しました。" {
 			b.Fatal("lost last text")
 		}

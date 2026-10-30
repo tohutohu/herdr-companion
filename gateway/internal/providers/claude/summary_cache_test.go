@@ -11,15 +11,14 @@ import (
 	"time"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
-	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 )
 
 func Test要約キャッシュは状態別に従来の解析結果と一致する(t *testing.T) {
-	p := New(t.TempDir(), nil, deadletter.Nop{})
+	p := New(t.TempDir(), deadletter.Nop{})
 	for _, fixture := range []string{"normal.jsonl", "pending_approval.jsonl", "queued_message.jsonl", "compaction.jsonl"} {
 		path := filepath.Join(testdata, fixture)
-		for _, live := range []*providers.Live{nil, {HerdrStatus: herdr.StatusWorking}, {HerdrStatus: herdr.StatusBlocked}} {
+		for _, live := range []*providers.Live{nil, {State: providers.StateWorking}, {State: providers.StateBlocked}} {
 			tr, err := p.loadPath(path, "test-session")
 			if err != nil {
 				t.Fatal(err)
@@ -50,7 +49,7 @@ func Test要約キャッシュは追記と切り詰めと置換を反映する(t
 		}
 	}
 	write(raw)
-	p := New(dir, nil, deadletter.Nop{})
+	p := New(dir, deadletter.Nop{})
 	check := func() {
 		t.Helper()
 		got, err := p.summaryPath(context.Background(), path, "test-session", nil)
@@ -98,7 +97,7 @@ func Test除外された履歴は解析しない(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := &deadletter.Recorder{}
-	p := New(dir, nil, rec)
+	p := New(dir, rec)
 	got, err := p.RecentExcluding(context.Background(), time.Now().Add(-time.Hour), map[string]bool{"excluded-session": true})
 	if err != nil || len(got) != 0 || len(rec.Entries) != 0 {
 		t.Fatalf("got=%v err=%v deadletters=%d", got, err, len(rec.Entries))
@@ -106,7 +105,7 @@ func Test除外された履歴は解析しない(t *testing.T) {
 }
 
 func Test要約キャッシュは並行アクセスと上限に対応する(t *testing.T) {
-	p := New(t.TempDir(), nil, deadletter.Nop{})
+	p := New(t.TempDir(), deadletter.Nop{})
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
@@ -151,7 +150,7 @@ func Test未更新の要約は再解析せず返却値から変更されない(t
 		t.Fatal(err)
 	}
 	rec := &deadletter.Recorder{}
-	p := New(dir, nil, rec)
+	p := New(dir, rec)
 	first, err := p.summaryPath(context.Background(), path, "test-session", nil)
 	if err != nil {
 		t.Fatal(err)

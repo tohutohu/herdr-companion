@@ -34,3 +34,18 @@ func completionRevision(turn *Turn) string {
 	}
 	return turn.ID + ":" + hex.EncodeToString(digest.Sum(nil))
 }
+
+// latestPlanItem is the plan item of a finished last turn.
+func latestPlanItem(th *Thread) string {
+	lt := lastTurn(th)
+	if lt == nil || lt.Status != "completed" {
+		return ""
+	}
+	for i := len(lt.Items) - 1; i >= 0; i-- {
+		var it itemHead
+		if jsonv2.Unmarshal(lt.Items[i], &it) == nil && it.Type == "plan" && it.ID != "" {
+			return it.ID
+		}
+	}
+	return ""
+}

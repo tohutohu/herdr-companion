@@ -10,16 +10,12 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/claude"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/codex"
-	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/devin"
-	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/opencode"
 )
 
 // replayers re-run a provider parser over a stored raw payload.
 var replayers = map[string]func(raw []byte) ([]model.Message, []deadletter.Entry){
-	"claude":   claude.Replay,
-	"codex":    codex.Replay,
-	"devin":    devin.Replay,
-	"opencode": opencode.Replay,
+	"claude": claude.Replay,
+	"codex":  codex.Replay,
 }
 
 func debugCmd(args []string) error {

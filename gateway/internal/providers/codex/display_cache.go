@@ -69,15 +69,9 @@ func (p *Provider) displayVersion(id string, history bool) displayVersion {
 	v := displayVersion{actions: p.actionVersion.Load()}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	// Events of either connection change the version: a direct thread is
-	// hosted on the gateway's app-server even while reads use the daemon.
-	for _, d := range []*daemonConn{p.daemon, p.owned} {
-		if d == nil || !d.c.alive() {
-			continue
-		}
-		if v.client == nil {
-			v.client = d.c
-		}
+	// Events of the app-server change the version.
+	if d := p.owned; d != nil && d.c.alive() {
+		v.client = d.c
 		d.mu.Lock()
 		if history {
 			v.events += d.historyVersions[id]

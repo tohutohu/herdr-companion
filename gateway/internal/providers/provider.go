@@ -1,5 +1,5 @@
 // Package providers defines the adapter boundary between coding agents
-// (Claude Code, Codex, OpenCode, Devin) and the provider-neutral model.
+// (Claude Code, Codex) and the provider-neutral model.
 package providers
 
 import (
@@ -10,21 +10,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 )
 
 var (
 	ErrNotFound        = errors.New("session not found")
-	ErrNotLive         = errors.New("session is not running in herdr")
+	ErrNotLive         = errors.New("session is not running; resume it first")
 	ErrUnsupported     = errors.New("not supported for this session")
 	ErrInteractionGone = errors.New("interaction is no longer pending")
-	// ErrNoTerminal is returned for terminal operations on a directly managed
-	// session, which has no TUI.
-	ErrNoTerminal = errors.New("this session is managed directly by the gateway and has no terminal")
-	// ErrNotDirect is returned for runtime operations (model, effort,
-	// interrupt) on a session that is not managed directly.
-	ErrNotDirect = errors.New("only sessions managed directly by the gateway support this; this one runs in Herdr")
 	// ErrRuntimeUnavailable means the agent's runtime (Claude sidecar, Codex
 	// app-server) could not be started.
 	ErrRuntimeUnavailable = errors.New("agent runtime unavailable")
@@ -71,8 +64,7 @@ const (
 	ApplyNextTurn    = "next_turn"    // the next turn (Codex)
 )
 
-// DirectRuntime is implemented by providers the gateway can run without Herdr.
-// Send and Respond of the Provider handle a Live with Direct set.
+// DirectRuntime is implemented by providers whose sessions the gateway runs.
 type DirectRuntime interface {
 	// DirectStart starts (or resumes) a session and returns its native id.
 	DirectStart(ctx context.Context, opts DirectStart) (string, error)
@@ -91,60 +83,30 @@ type DirectRuntime interface {
 	SetDirectListener(func(nativeID string))
 }
 
-// Live describes where a session currently runs. Nil means it runs nowhere:
-// neither in a Herdr pane nor under the gateway's own runtime.
+// Runtime states of a live session.
+const (
+	StateIdle    = "idle"    // no turn yet, or the finished turn was seen
+	StateWorking = "working" // a turn is running
+	StateBlocked = "blocked" // waiting on an approval or a question
+	StateDone    = "done"    // the turn finished and was not seen yet
+)
+
+// Live describes a session the gateway runs. Nil means it runs nowhere.
 type Live struct {
-	// PaneID is the Herdr pane; empty for a directly managed session.
-	PaneID string
-	// HerdrStatus is Herdr's agent status. For a directly managed session the
-	// runtime fills in the equivalent value (working, blocked, done, idle), so
-	// status normalization is the same for both backends.
-	HerdrStatus string
-	Cwd         string
-	// Direct marks a session the gateway runs itself (Claude Agent SDK or its
-	// own Codex app-server) rather than in a Herdr pane.
-	Direct bool
-	// Dormant marks a direct session with no process: the gateway restarted
-	// or the runtime exited. The next message resumes it in a new process.
+	// State is one of StateIdle, StateWorking, StateBlocked, StateDone.
+	State string
+	Cwd   string
+	// Dormant marks a session with no process: the gateway restarted or the
+	// runtime exited. The next message resumes it in a new process.
 	Dormant bool
-	// Failed marks a direct session whose process died during a turn.
+	// Failed marks a session whose process died during a turn.
 	Failed bool
-	// Revision changes each time a direct session finishes a turn, for
-	// providers whose history has no completion revision of its own.
+	// Revision changes each time the session finishes a turn, for providers
+	// whose history has no completion revision of its own.
 	Revision string
 }
 
-func (l *Live) Blocked() bool { return l != nil && l.HerdrStatus == herdr.StatusBlocked }
-
-// IsDirect reports whether l is a directly managed session.
-func (l *Live) IsDirect() bool { return l != nil && l.Direct }
-
-// InPane reports whether l is a session in a Herdr pane, whose screen and
-// keys may be used.
-func (l *Live) InPane() bool { return l != nil && !l.Direct && l.PaneID != "" }
-
-// visibleTerminal reads what a pane shows right now. Herdr's client has it;
-// test terminals may not, so it is not part of Terminal.
-type visibleTerminal interface {
-	ReadVisiblePane(context.Context, string) (*herdr.ReadResult, error)
-}
-
-// Screen returns the text a pane currently shows, for dialogs that are only
-// on screen and never in a transcript.
-func Screen(ctx context.Context, term Terminal, pane string) (string, error) {
-	t, ok := term.(visibleTerminal)
-	if !ok {
-		return "", ErrUnsupported
-	}
-	r, err := t.ReadVisiblePane(ctx, pane)
-	if err != nil {
-		return "", err
-	}
-	if r == nil {
-		return "", ErrInteractionGone
-	}
-	return r.Text, nil
-}
+func (l *Live) Blocked() bool { return l != nil && l.State == StateBlocked }
 
 // FileRooter is implemented by providers that keep files a session links to
 // outside its workspace, such as Claude's saved plans. The app may read them.
@@ -157,14 +119,6 @@ type FileRooter interface {
 // directories recorded in a Claude transcript. The app may read files there.
 type SessionFileRooter interface {
 	SessionFileRoots(ctx context.Context, nativeID string) []string
-}
-
-// Terminal is the Herdr subset adapters may use for PTY fallbacks.
-type Terminal interface {
-	SendKeys(ctx context.Context, paneID string, keys ...string) error
-	SendText(ctx context.Context, paneID, text string) error
-	Prompt(ctx context.Context, paneID, text string) error
-	ReadPane(ctx context.Context, paneID string, lines int) (*herdr.ReadResult, error)
 }
 
 // Summary is what the session list needs; cheaper than full messages.
@@ -182,7 +136,7 @@ type Summary struct {
 	CompletionRevision string
 	// Pending is the kind of interaction waiting for the user, if any.
 	Pending model.InteractionType
-	// Status, when set, overrides Herdr's status while the session has a live pane.
+	// Status, when set, overrides the runtime's status while the session is live.
 	Status model.Status
 	// Model is the model the session last used, as the provider names it.
 	Model string
@@ -196,7 +150,7 @@ type Summary struct {
 	// Cost is what the session spent, priced from its token counts.
 	Cost *model.Cost
 	// PinnedCwd keeps Cwd as the session's directory while it runs, where
-	// the pane's directory would otherwise win: the agent works in a
+	// the runtime's directory would otherwise win: the agent works in a
 	// worktree it created without moving its process there.
 	PinnedCwd bool
 }
@@ -205,12 +159,6 @@ type Summary struct {
 // Filtering does not backfill beyond the provider's normal candidate limit.
 type FilteredRecentProvider interface {
 	RecentExcluding(ctx context.Context, since time.Time, exclude map[string]bool) ([]Summary, error)
-}
-
-// LiveSessionValidator checks stored pane references against provider data.
-// Shared servers can run hooks with another pane's inherited environment.
-type LiveSessionValidator interface {
-	ValidateLiveSession(ctx context.Context, nativeID string, live *Live) (bool, error)
 }
 
 // ConversationProvider builds the summary and messages from one history read.
@@ -222,8 +170,6 @@ type ConversationProvider interface {
 type Provider interface {
 	Name() string        // id prefix, e.g. "claude"
 	DisplayName() string // e.g. "Claude Code"
-	// HerdrAgent is the agent label Herdr reports in agent_session.agent.
-	HerdrAgent() string
 
 	Summary(ctx context.Context, nativeID string, live *Live) (*Summary, error)
 	// Recent lists sessions updated since the given time (for offline entries).
@@ -242,20 +188,6 @@ type Forgetter interface {
 	Forget(nativeID string)
 }
 
-// ModeChanger is an optional capability for providers whose live TUI can move
-// to its next session mode. Keeping this outside Provider lets providers that
-// do not expose a safe mode switch remain unchanged.
-type ModeChanger interface {
-	CycleMode(ctx context.Context, nativeID string, live *Live) error
-}
-
-// LaunchModeSetter is implemented by providers whose starting mode cannot be
-// passed on the command line. The launcher calls it on the ready TUI, before
-// the first prompt, so the mode already applies to that prompt.
-type LaunchModeSetter interface {
-	SetLaunchMode(ctx context.Context, paneID, mode string) error
-}
-
 // ImageURL builds the gateway URL for an inline image of a message.
 func ImageURL(sessionID, messageID string, index int) string {
 	return "/v1/sessions/" + sessionID + "/messages/" + messageID + "/images/" + itoa(index)
@@ -268,7 +200,7 @@ func FileImageURL(sessionID, path string) string {
 
 // ModelOption is a model the user can pick when starting a session.
 type ModelOption struct {
-	ID          string `json:"id"` // value passed to the CLI's --model
+	ID          string `json:"id"` // the agent's model id
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	// Default marks the model used when none is given.
@@ -308,18 +240,18 @@ type ModelCatalog struct {
 
 var modelIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/\[\]-]{0,99}$`)
 
-// ValidModelID reports whether id is safe to pass as a CLI argument.
+// ValidModelID reports whether id looks like a model id.
 func ValidModelID(id string) bool { return modelIDPattern.MatchString(id) }
 
 var effortIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
 
-// ValidEffortID reports whether id is safe to pass as a CLI argument.
+// ValidEffortID reports whether id looks like an effort id.
 func ValidEffortID(id string) bool { return effortIDPattern.MatchString(id) }
 
 // Claude Code names its permission modes in camelCase (acceptEdits).
 var modeIDPattern = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9-]{0,31}$`)
 
-// ValidModeID reports whether id is safe to pass as a CLI argument.
+// ValidModeID reports whether id looks like a mode id.
 func ValidModeID(id string) bool { return modeIDPattern.MatchString(id) }
 
 // effortNames are the labels for the efforts both agents share.
@@ -343,65 +275,15 @@ func EffortName(id string) string {
 	return strings.ToUpper(id[:1]) + id[1:]
 }
 
-// SessionLocator is implemented by providers whose integration hook cannot
-// always report the session to Herdr (Codex TUIs on the shared daemon run
-// hooks in the daemon, outside the pane).
-type SessionLocator interface {
-	// LocateLaunched returns the native id of a session started in cwd at or
-	// after since, or "" when none is known.
-	LocateLaunched(ctx context.Context, cwd string, since time.Time) string
-}
-
-// LaunchOptions are the user's choices for a new session. Model, Effort and
-// Mode are empty for the provider's own defaults; Cwd is the pane's working
-// directory.
-type LaunchOptions struct {
-	Model  string
-	Effort string
-	// Mode is a mode id from the provider's catalog.
-	Mode string
-	Cwd  string
-}
-
-// Launchable providers can be started in a new Herdr pane.
-type Launchable interface {
-	// LaunchArgs are native CLI arguments passed after Herdr's agent kind.
-	LaunchArgs(opts LaunchOptions) []string
-	// ResumeArgs are native CLI arguments that reopen an existing session.
-	ResumeArgs(nativeID, cwd string) []string
-	// Models lists the models and efforts offered when starting a session.
+// ModelLister lists the models, efforts and modes a provider offers.
+type ModelLister interface {
 	Models(ctx context.Context) (ModelCatalog, error)
-	// StartupKeys returns the keys that accept a folder-trust dialog shown on
-	// screen, or nil when the screen is not a known trust dialog.
-	StartupKeys(screen string) []string
-}
-
-// LaunchPromptSender lets a provider choose how its first prompt is entered
-// after the TUI has started. Some TUIs treat Herdr's generic agent.prompt
-// transport as pasted content, so providers that need real typing can opt in.
-type LaunchPromptSender interface {
-	SendLaunchPrompt(ctx context.Context, paneID string, in model.Input) error
-}
-
-// StartupSessionReporter is implemented by providers whose integration hook
-// reports the session to Herdr as the TUI starts reading input (Claude Code's
-// SessionStart). Herdr marks a new agent idle a fixed time after it sees the
-// process, whether or not the TUI reads input yet, and a TUI discards what
-// arrives before that. The launcher sends their first prompt on the report.
-type StartupSessionReporter interface {
-	ReportsSessionAtStartup()
-}
-
-// PreparedLauncher can create a native session before starting its TUI when
-// model selection is an API operation rather than a command-line option.
-type PreparedLauncher interface {
-	PrepareLaunch(context.Context, LaunchOptions) (args []string, nativeID string, err error)
 }
 
 // TrustChecker reports whether the user already trusted a folder in the
-// agent itself. A session the gateway runs directly gets no folder-trust
-// dialog from the agent, so the gateway asks before starting in a folder the
-// agent has never been trusted in (project hooks and MCP servers run code).
+// agent itself. A session the gateway runs gets no folder-trust dialog from
+// the agent, so the gateway asks before starting in a folder the agent has
+// never been trusted in (project hooks and MCP servers run code).
 type TrustChecker interface {
 	FolderTrusted(cwd string) bool
 }
@@ -415,25 +297,4 @@ func ParentDirs(dir string) []string {
 			return out
 		}
 	}
-}
-
-// ResumeSettingser is implemented by providers whose resumed process would
-// otherwise fall back to the user's defaults: it returns the model, effort
-// and mode id the session ran with, for moving it from Herdr to the direct
-// runtime unchanged. Empty values keep the defaults.
-type ResumeSettingser interface {
-	ResumeSettings(ctx context.Context, nativeID string) (model, effort, mode string)
-}
-
-// SharedReleaser is implemented by providers that subscribe to sessions on a
-// shared server (Codex's app-server daemon), so a session moving to the
-// direct runtime is no longer held there.
-type SharedReleaser interface {
-	ReleaseShared(ctx context.Context, nativeID string) error
-	// HeldShared reports whether the shared server has the session open.
-	// Such a session cannot move: Codex's app-server daemon (0.166) keeps a
-	// thread's writer lock after the last client leaves and even after it
-	// unloads the thread, so no other app-server can resume it until the
-	// daemon exits.
-	HeldShared(ctx context.Context, nativeID string) bool
 }

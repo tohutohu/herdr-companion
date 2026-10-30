@@ -1,5 +1,5 @@
-// Package runtime keeps track of the sessions the gateway runs itself, without
-// Herdr: Claude Code through the Agent SDK sidecar and Codex through the
+// Package runtime keeps track of the sessions the gateway runs:
+// Claude Code through the Agent SDK sidecar and Codex through the
 // gateway's own app-server. The providers own the processes; the manager owns
 // what outlives them.
 //
@@ -24,13 +24,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 )
 
 // ErrNotManaged is returned for a session the manager has no record of.
-var ErrNotManaged = errors.New("session is not managed directly by the gateway")
+var ErrNotManaged = errors.New("the gateway does not run this session")
 
 // Record is what the manager persists about one session.
 type Record struct {
@@ -199,7 +198,7 @@ func (m *Manager) runtime(id string) (providers.DirectRuntime, string, error) {
 	name, native := split(id)
 	rt, ok := m.runtimes[name]
 	if !ok || native == "" {
-		return nil, "", providers.ErrNotDirect
+		return nil, "", providers.ErrNotFound
 	}
 	return rt, native, nil
 }
@@ -290,7 +289,7 @@ func (m *Manager) notify() {
 func (m *Manager) Start(ctx context.Context, provider string, opts providers.DirectStart) (string, error) {
 	rt, ok := m.runtimes[provider]
 	if !ok {
-		return "", providers.ErrNotDirect
+		return "", providers.ErrNotFound
 	}
 	opts.Resume = ""
 	native, err := rt.DirectStart(ctx, opts)
@@ -552,7 +551,7 @@ func (m *Manager) Sessions() map[string]Session {
 		}
 		name, _ := split(id)
 		in, ok := infos[id]
-		live := &providers.Live{Direct: true, Cwd: r.Cwd}
+		live := &providers.Live{Cwd: r.Cwd}
 		s := Session{ID: id, Live: live, Error: st.err}
 		// Set from the start, so the first finished turn changes it even
 		// when the running state was never observed.
@@ -560,9 +559,9 @@ func (m *Manager) Sessions() map[string]Session {
 		live.Failed = st.failed
 		if !ok || !in.Alive {
 			live.Dormant = true
-			live.HerdrStatus = herdr.StatusIdle
+			live.State = providers.StateIdle
 			if st.unread {
-				live.HerdrStatus = herdr.StatusDone
+				live.State = providers.StateDone
 			}
 			out[id] = s
 			continue
@@ -572,13 +571,13 @@ func (m *Manager) Sessions() map[string]Session {
 		}
 		switch {
 		case in.Waiting:
-			live.HerdrStatus = herdr.StatusBlocked
+			live.State = providers.StateBlocked
 		case in.Running:
-			live.HerdrStatus = herdr.StatusWorking
+			live.State = providers.StateWorking
 		case st.unread:
-			live.HerdrStatus = herdr.StatusDone
+			live.State = providers.StateDone
 		default:
-			live.HerdrStatus = herdr.StatusIdle
+			live.State = providers.StateIdle
 		}
 		s.Mode = in.Mode
 		s.PendingModel, s.PendingEffort = in.RequestedModel, in.RequestedEffort

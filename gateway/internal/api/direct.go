@@ -10,15 +10,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
-	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 )
 
-var (
-	errInvalidSetting = errors.New("invalid setting")
-	errBusy           = errors.New("the session is working or waiting for an answer; move it once its turn has ended")
-)
+var errInvalidSetting = errors.New("invalid setting")
 
 // validSetting checks a model, effort or mode against what the agent offers,
 // so an unknown choice is refused with the reason instead of the agent
@@ -75,22 +70,17 @@ type settingRequest struct {
 	Effort string `json:"effort"`
 }
 
-// directSession resolves a session for a runtime operation; only directly
-// managed sessions have one.
-func (s *Server) directSession(w http.ResponseWriter, r *http.Request, op string) (string, string, bool) {
+// liveSession resolves a session for a runtime operation; only a session the
+// gateway runs has one (a stopped one is resumed by the runtime).
+func (s *Server) liveSession(w http.ResponseWriter, r *http.Request, op string) (string, string, bool) {
 	id := r.PathValue("id")
 	res, err := s.Sessions.Resolve(r.Context(), id)
 	if err != nil {
 		s.fail(w, r, id, op, err)
 		return "", "", false
 	}
-	if !res.Live.IsDirect() {
-		if res.Live == nil {
-			err = providers.ErrNotLive
-		} else {
-			err = providers.ErrNotDirect
-		}
-		s.fail(w, r, id, op, err)
+	if res.Live == nil {
+		s.fail(w, r, id, op, providers.ErrNotLive)
 		return "", "", false
 	}
 	return id, res.Provider.Name(), true
@@ -105,11 +95,11 @@ func (s *Server) readSetting(w http.ResponseWriter, r *http.Request, id, op stri
 	return req, true
 }
 
-// setModel changes the model of a direct session, keeping its id and
+// setModel changes the model of a session, keeping its id and
 // history. Claude applies it from the next model request, Codex from the
 // next turn; the session reports it as pendingModel until then.
 func (s *Server) setModel(w http.ResponseWriter, r *http.Request) {
-	id, provider, ok := s.directSession(w, r, "set_model")
+	id, provider, ok := s.liveSession(w, r, "set_model")
 	if !ok {
 		return
 	}
@@ -133,7 +123,7 @@ func (s *Server) setModel(w http.ResponseWriter, r *http.Request) {
 // does not offer is refused. The body may name the model the effort is for
 // when both change together.
 func (s *Server) setEffort(w http.ResponseWriter, r *http.Request) {
-	id, provider, ok := s.directSession(w, r, "set_effort")
+	id, provider, ok := s.liveSession(w, r, "set_effort")
 	if !ok {
 		return
 	}
@@ -162,9 +152,9 @@ func (s *Server) setEffort(w http.ResponseWriter, r *http.Request) {
 	s.writeSession(w, r, id)
 }
 
-// interrupt stops the running turn of a direct session; the session stays.
+// interrupt stops the running turn of a session; the session stays.
 func (s *Server) interrupt(w http.ResponseWriter, r *http.Request) {
-	id, _, ok := s.directSession(w, r, "interrupt")
+	id, _, ok := s.liveSession(w, r, "interrupt")
 	if !ok {
 		return
 	}
@@ -200,37 +190,4 @@ func (s *Server) worktreeInUse(ctx context.Context, id, path string) bool {
 		}
 	}
 	return false
-}
-
-// migrateSession moves a session running in a Herdr pane to the direct
-// runtime, keeping its id and history. Only a session between turns moves:
-// closing the pane ends the agent, which would cut off a running turn or
-// lose a pending question.
-func (s *Server) migrateSession(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	sess, res, err := s.Sessions.Get(r.Context(), id)
-	if err != nil {
-		s.fail(w, r, id, "migrate_session", err)
-		return
-	}
-	switch {
-	case res.Live.IsDirect():
-		writeJSON(w, http.StatusOK, sess) // already direct
-		return
-	case !res.Live.InPane():
-		s.fail(w, r, id, "migrate_session", providers.ErrNotLive)
-		return
-	}
-	switch sess.Status {
-	case model.StatusRunning, model.StatusWaitingInput, model.StatusWaitingApproval:
-		s.fail(w, r, id, "migrate_session", errBusy)
-		return
-	}
-	if _, err := s.Launcher.Migrate(r.Context(), res.Provider.Name(), res.NativeID, res.Live.PaneID, sess.Cwd); err != nil {
-		s.Sink.Record(res.Provider.Name(), id, deadletter.SendError, "migrate session: "+err.Error(), nil)
-		s.fail(w, r, id, "migrate_session", err)
-		return
-	}
-	s.Sessions.Forget(id)
-	s.writeSession(w, r, id)
 }

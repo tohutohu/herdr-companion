@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 )
@@ -15,7 +14,7 @@ func TestClaudeの通知を先に取り出してもキューの対応がずれ�
 	// Anonymized queue/user records from Claude Code 2.1.300. The second
 	// contentless dequeue delivered the newer notification, not the queue head.
 	tr, rec, _ := loadFixture(t, "queued_notifications.jsonl")
-	msgs := tr.Messages(ParseOptions{SessionID: "claude:test", Live: &providers.Live{HerdrStatus: herdr.StatusWorking}, Sink: rec})
+	msgs := tr.Messages(ParseOptions{SessionID: "claude:test", Live: &providers.Live{State: providers.StateWorking}, Sink: rec})
 	assertGolden(t, "queued_notifications.golden.json", msgs)
 	if len(rec.Entries) != 0 {
 		t.Fatalf("dead letters = %+v", rec.Entries)

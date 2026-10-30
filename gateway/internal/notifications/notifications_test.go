@@ -20,7 +20,6 @@ import (
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/config"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
-	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 )
 
@@ -257,7 +256,7 @@ func Test新しいターンの完了は同じ本文でも通知する(t *testing
 			}{
 				{model.StatusCompleted, "old-turn"},
 				{model.StatusRunning, ""},
-				// Transcript can finish before Herdr notices completion.
+				// Transcript can finish before the runtime reports completion.
 				{model.StatusRunning, "new-turn"},
 				{terminal, "new-turn"},
 				{model.StatusRunning, "new-turn"},
@@ -356,44 +355,6 @@ func Test完了状態の後に履歴が更新されても通知する(t *testing
 	}
 }
 
-type fakeSubscriber struct {
-	events chan herdr.Event
-	subs   []map[string]any
-}
-
-func (f *fakeSubscriber) Snapshot(context.Context) (*herdr.Snapshot, error) {
-	return &herdr.Snapshot{Panes: []herdr.Pane{{PaneID: "w1:p1"}}}, nil
-}
-
-func (f *fakeSubscriber) Subscribe(_ context.Context, subs []map[string]any) (<-chan herdr.Event, error) {
-	f.subs = subs
-	return f.events, nil
-}
-
-func Testペイントポロジーの実際のイベント名で再購読する(t *testing.T) {
-	for _, event := range []string{"pane_created", "pane_closed", "pane_agent_detected", "pane.created", "pane.closed", "pane.agent_detected"} {
-		t.Run(event, func(t *testing.T) {
-			f := &fakeSubscriber{events: make(chan herdr.Event, 2)}
-			f.events <- herdr.Event{Event: "pane.agent_status_changed", Data: json.RawMessage(`{"pane_id":"w1:p1","agent_status":"working"}`)}
-			f.events <- herdr.Event{Event: event}
-			// An unrecognized topology event drains the channel and returns
-			// a subscription error instead of rebuilding the pane set.
-			close(f.events)
-			w := &Watcher{Herdr: f}
-			kicks := 0
-			if err := w.stream(context.Background(), func() { kicks++ }); err != nil {
-				t.Fatalf("topology did not trigger resubscription: %v", err)
-			}
-			if kicks != 3 {
-				t.Fatalf("snapshot, status and topology should trigger evaluation: %d", kicks)
-			}
-			if len(f.subs) != 4 || f.subs[3]["type"] != "pane.agent_status_changed" || f.subs[3]["pane_id"] != "w1:p1" {
-				t.Fatalf("subscriptions = %+v", f.subs)
-			}
-		})
-	}
-}
-
 func Test同一ターンでもバックグラウンド結果が更新されて再完了したら通知する(t *testing.T) {
 	for _, terminal := range []model.Status{model.StatusCompleted, model.StatusIdle, model.StatusFailed} {
 		t.Run(string(terminal), func(t *testing.T) {
@@ -408,7 +369,7 @@ func Test同一ターンでもバックグラウンド結果が更新されて�
 				// Main work is done while a background task is still running.
 				{terminal, "same-turn:initial-result"},
 				{model.StatusRunning, "same-turn:initial-result"},
-				// Tool output changes before Herdr observes done again.
+				// Tool output changes before the runtime reports done again.
 				{model.StatusRunning, "same-turn:background-result"},
 				{terminal, "same-turn:background-result"},
 				// Subsequent lifecycle fluctuations with no new output are noise.
@@ -553,7 +514,7 @@ func (f *lockedSessions) set(s model.Session) {
 	f.mu.Unlock()
 }
 
-func TestHerdrがなくても直接管理の変化で再評価し完了を一度だけ通知する(t *testing.T) {
+func Testランタイムの変化で再評価し完了を一度だけ通知する(t *testing.T) {
 	ls := &lockedSessions{}
 	sender := &fakeSender{}
 	store, _ := config.Load(filepath.Join(t.TempDir(), "config.json"))
@@ -564,7 +525,7 @@ func TestHerdrがなくても直接管理の変化で再評価し完了を一度
 	defer cancel()
 	direct := func(st model.Status, rev string) model.Session {
 		s := sess(st)
-		s.Backend, s.CompletionRevision = model.BackendDirect, rev
+		s.CompletionRevision = rev
 		return s
 	}
 	ls.set(direct(model.StatusIdle, "r#0"))
