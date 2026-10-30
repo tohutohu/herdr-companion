@@ -443,6 +443,8 @@ USE WHEN
   pane is closed, which ends the agent and its terminal; the session continues under the
   same id with the model, effort and mode it had. Only sessions between turns move; one
   that is running or waiting for an answer is refused. Refuses your own session.
+  A Codex thread open on the shared app-server daemon (every Codex pane) is refused too:
+  the daemon keeps the thread locked until it restarts, so nothing else could resume it.
 
 USAGE
   hc migrate ID...

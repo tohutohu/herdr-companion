@@ -516,6 +516,9 @@ Herdr のペインで動く Claude Code / Codex のセッションを、同じ I
 → Codex は共有 daemon がスレッドを手放すのを待つ → 直接管理で再開。Claude は transcript のモデル ID（`[1m]` 込み）・
 推論強度・Permission Mode を引き継ぐ（Bypass permissions は引き継がない）。ペインを閉じた後の再開に失敗した場合は
 `502`（セッションはどこでも動いていない状態になり、`resume` でやり直せる）。既に直接管理なら `200` でそのまま返す。
+共有 Codex app-server daemon が読み込んでいるスレッド（`codex --remote` のペインは常にこれ）は、ペインを閉じる前に `409`
+で断る。daemon（Codex 0.166 で確認）は最後のクライアントが離れてスレッドをアンロードした後も
+`~/.codex/thread-writer-locks/<id>.lock` を保持し続け、daemon が再起動するまで他の app-server から再開できないため。
 `200` で更新後の Session。
 
 ### `POST /v1/sessions/{id}/seen`

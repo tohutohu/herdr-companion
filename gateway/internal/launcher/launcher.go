@@ -366,6 +366,10 @@ func (l *Launcher) Start(ctx context.Context, req StartRequest) (*StartResult, e
 // session then runs nowhere and can be resumed again.
 var ErrPaneClosed = errors.New("the Herdr pane was closed, but resuming the session directly failed; resume it again")
 
+// ErrSharedWriter refuses to move a session its shared server holds open:
+// closing the pane would leave it resumable nowhere but there.
+var ErrSharedWriter = errors.New("the shared Codex app-server keeps this thread open until the daemon restarts, so it cannot be resumed elsewhere; keep it in Herdr")
+
 // Migrate moves a session from its Herdr pane to the direct runtime: the
 // directory is checked first, then the pane is closed (ending the agent),
 // and the session is resumed directly under the same id with the model,
@@ -386,12 +390,16 @@ func (l *Launcher) Migrate(ctx context.Context, provider, nativeID, pane, cwd st
 	if rs, ok := p.(providers.ResumeSettingser); ok {
 		opts.Model, opts.Effort, opts.Mode = rs.ResumeSettings(ctx, nativeID)
 	}
+	sr, shared := p.(providers.SharedReleaser)
+	if shared && sr.HeldShared(ctx, nativeID) {
+		return nil, ErrSharedWriter
+	}
 	ctx = context.WithoutCancel(ctx)
 	if err := l.Stop(ctx, pane); err != nil {
 		return nil, fmt.Errorf("close the Herdr pane: %w", err)
 	}
 	l.waitPaneGone(ctx, pane)
-	if sr, ok := p.(providers.SharedReleaser); ok {
+	if shared {
 		if err := sr.ReleaseShared(ctx, nativeID); err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrPaneClosed, err)
 		}

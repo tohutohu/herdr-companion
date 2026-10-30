@@ -229,7 +229,7 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, sessionID, op stri
 		status = http.StatusServiceUnavailable
 	case errors.Is(err, providers.ErrNoTerminal), errors.Is(err, providers.ErrNotDirect), errors.Is(err, runtime.ErrNotManaged):
 		status = http.StatusConflict
-	case errors.Is(err, errBusy):
+	case errors.Is(err, errBusy), errors.Is(err, launcher.ErrSharedWriter):
 		status = http.StatusConflict
 	case errors.Is(err, launcher.ErrPaneClosed):
 		status = http.StatusBadGateway

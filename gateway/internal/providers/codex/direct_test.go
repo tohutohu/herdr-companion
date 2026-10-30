@@ -313,3 +313,38 @@ func Test共有daemonのスレッドは手放されるまで待ってから引�
 		}
 	}
 }
+
+func Test共有daemonが読み込んでいるスレッドは保持中とみなす(t *testing.T) {
+	pt := &pipeTransport{in: make(chan []byte, 16), out: make(chan []byte, 16), closed: make(chan struct{})}
+	t.Cleanup(func() { pt.close() })
+	loaded := []string{directThreadID}
+	go func() {
+		for {
+			var b []byte
+			select {
+			case b = <-pt.out:
+			case <-pt.closed:
+				return
+			}
+			var m struct {
+				ID json.RawMessage `json:"id"`
+			}
+			json.Unmarshal(b, &m)
+			b, _ = json.Marshal(map[string]any{"id": m.ID, "result": map[string]any{"data": loaded}})
+			pt.in <- b
+		}
+	}()
+	p := New("codex-not-used", "/nonexistent.sock", &fakeTerm{}, deadletter.Nop{})
+	if p.HeldShared(context.Background(), directThreadID) {
+		t.Error("without a daemon nothing is held")
+	}
+	d := newDaemonConn(deadletter.Nop{})
+	d.c = newRPCClient(pt, d)
+	p.daemon = d
+	if !p.HeldShared(context.Background(), directThreadID) {
+		t.Error("a loaded thread is held")
+	}
+	if p.HeldShared(context.Background(), "other-thread") {
+		t.Error("a thread the daemon has not loaded is not held")
+	}
+}

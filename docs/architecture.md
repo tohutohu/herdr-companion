@@ -96,6 +96,9 @@ only, the gateway checks the directory, closes the pane (ending the agent), wait
 longer lists it, for Codex hands the thread over from the shared daemon (stops re-subscribing,
 unsubscribes, waits for the daemon to unload it, since only one app-server may write a thread),
 and resumes it directly with the model, effort and permission mode from the transcript.
+A Codex thread the shared daemon has loaded is refused before the pane is closed: the daemon
+(Codex 0.166) keeps the thread's writer lock (`~/.codex/thread-writer-locks/<id>.lock`) even
+after the last client leaves and the thread is unloaded, until the daemon exits.
 
 **Restart and crashes.** The records survive gateway restarts. A turn that was running when the
 gateway stopped is shown as `failed` ("the turn was cut off"); its tool calls are never re-run

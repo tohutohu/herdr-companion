@@ -430,4 +430,10 @@ type ResumeSettingser interface {
 // direct runtime is no longer held there.
 type SharedReleaser interface {
 	ReleaseShared(ctx context.Context, nativeID string) error
+	// HeldShared reports whether the shared server has the session open.
+	// Such a session cannot move: Codex's app-server daemon (0.166) keeps a
+	// thread's writer lock after the last client leaves and even after it
+	// unloads the thread, so no other app-server can resume it until the
+	// daemon exits.
+	HeldShared(ctx context.Context, nativeID string) bool
 }

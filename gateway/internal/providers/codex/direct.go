@@ -543,5 +543,23 @@ func (p *Provider) ReleaseShared(ctx context.Context, id string) error {
 	}
 }
 
+// HeldShared reports whether the shared daemon has the thread loaded; when
+// the daemon cannot be asked, it is assumed to.
+func (p *Provider) HeldShared(ctx context.Context, id string) bool {
+	d := p.currentDaemon()
+	if d == nil {
+		return false
+	}
+	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	var loaded struct {
+		Data []string `json:"data"`
+	}
+	if err := d.c.call(cctx, "thread/loaded/list", map[string]any{}, &loaded); err != nil {
+		return true
+	}
+	return slices.Contains(loaded.Data, id)
+}
+
 // releaseTimeout bounds waiting for the shared daemon to unload a thread.
 const releaseTimeout = 15 * time.Second

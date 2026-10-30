@@ -35,7 +35,13 @@ type directFake struct {
 	models   []string
 	trusted  bool
 	listener func(string)
+	// heldShared: a shared server (Codex's daemon) has the session open.
+	heldShared bool
 }
+
+func (d *directFake) ReleaseShared(context.Context, string) error { return nil }
+
+func (d *directFake) HeldShared(context.Context, string) bool { return d.heldShared }
 
 func (d *directFake) DirectStart(_ context.Context, opts providers.DirectStart) (string, error) {
 	d.mu.Lock()
@@ -301,6 +307,18 @@ func TestHerdrで動いているセッションを同じIDのまま直接管理�
 	}
 	if len(dp.starts) != 1 || dp.starts[0].Resume != "s1" || dp.starts[0].Cwd != dp.root || !dp.starts[0].Prompt.Empty() {
 		t.Errorf("starts = %+v", dp.starts)
+	}
+}
+
+func Test共有サーバーが開いているスレッドはペインを閉じる前に移行を断る(t *testing.T) {
+	ts, dp, fh, token := newMigrationServer(t, herdr.StatusIdle)
+	dp.heldShared = true
+	code, res := call(t, ts, token, "POST", "/v1/sessions/fake:s1/migrate", nil)
+	if code != http.StatusConflict || !strings.Contains(res["error"].(string), "keep it in Herdr") {
+		t.Fatalf("migrate = %d %v", code, res)
+	}
+	if len(fh.calls) != 0 || len(dp.starts) != 0 {
+		t.Errorf("acted: %v %v", fh.calls, dp.starts)
 	}
 }
 
