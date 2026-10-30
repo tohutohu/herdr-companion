@@ -1,6 +1,8 @@
 # AGENTS.md
 
 Herdr Companion: Go gateway on the Mac (`gateway/`) + native Android app (`android/`).
+The gateway runs Claude Code (Agent SDK sidecar, `gateway/claude-sidecar/`) and Codex (its own
+`codex app-server`) directly; Herdr is optional and only needed for its panes, OpenCode and Devin.
 Design: `docs/architecture.md`. Setup for humans: `README.md`.
 
 用語: 「Mac UI」はCompose Desktop版の`Herdr Companion.app`
@@ -19,6 +21,10 @@ env -u GOROOT go test ./...                    # avoid inherited GOROOT/toolchai
 # Production updates: rebuild the Mac Gateway app, replace /Applications/Herdr Companion Gateway.app, reopen it.
 herdr-mobile-gateway token | devices | usage | notify-test | debug replay FILE
 env -u GOROOT go build -o ~/.local/bin/hc ./cmd/hc  # agent-facing client CLI (docs/cli.md); `hc guide`
+
+# Claude sidecar (Bun + Claude Agent SDK; bundled next to the gateway in the Mac app)
+cd gateway/claude-sidecar
+bun install && bun run typecheck && bun run build    # → dist/herdr-claude-sidecar
 
 # Android (JDK 17 required; the default `java` is 24)
 cd android
@@ -89,6 +95,16 @@ open "/Applications/Herdr Companion Gateway.app"
 
 ## Testing against real agents safely
 
+- Direct sessions need no Herdr: run a throwaway gateway with its own config/state
+  (`HERDR_MOBILE_CONFIG=…`, `HERDR_MOBILE_STATE_DIR=…`, `serve --listen 127.0.0.1:18799 --log-file …`),
+  `HERDR_CLAUDE_SIDECAR=gateway/claude-sidecar/dist/herdr-claude-sidecar`, and
+  `HERDR_SOCKET_PATH=<a path that does not exist>` to check behavior with Herdr stopped. Put
+  `workspaceRoots` on a scratch git repo. Remove the Claude Code env vars (list below) from the
+  gateway's environment; it also strips them for the agents it starts. Direct Claude sessions write
+  real transcripts under `~/.claude/projects/` for the scratch path, and Codex threads go to
+  `~/.codex/sessions`; use `claude` model `haiku` and a small Codex model with tiny prompts.
+- A direct start in a folder the agent never trusted returns `trustRequired`; pass `trust: true`.
+  It does not write any trust entry.
 - Use a separate Herdr session. Never experiment on the user's default session.
 - Start it with the Claude Code env vars removed. Otherwise the spawned Claude inherits `CLAUDE_CODE_CHILD_SESSION` and doesn't save transcripts.
   ```bash

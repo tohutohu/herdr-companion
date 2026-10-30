@@ -442,7 +442,7 @@ func (l *Launcher) launch(ctx context.Context, plan launchPlan) (*StartResult, e
 			return nil, fmt.Errorf("create workspace: %w", err)
 		}
 	}
-	res := &StartResult{PaneID: pane}
+	res := &StartResult{PaneID: pane, Backend: model.BackendHerdr}
 	log := slog.With("provider", p.Name(), "operation", "launch", "pane", pane)
 
 	wt := plan.worktree

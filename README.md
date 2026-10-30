@@ -2,7 +2,9 @@
 
 Japanese version: [README.ja.md](README.ja.md)
 
-Herdr Companion lets you inspect and control Claude Code, Codex, OpenCode, and Devin sessions running inside [Herdr](https://herdr.dev) on your Mac from Android. Keep an AI agent running on the Mac while checking its progress, answering questions, and sending the next instruction from your phone.
+Herdr Companion lets you start, inspect and control Claude Code, Codex, OpenCode, and Devin sessions on your Mac from Android (and from a Compose Desktop UI and the `hc` CLI for other agents). Keep an AI agent running on the Mac while checking its progress, answering questions, switching its model, and sending the next instruction from your phone.
+
+The Gateway runs Claude Code (through the official Claude Agent SDK) and Codex (through its official app-server) itself, so **Herdr is not required** for them. [Herdr](https://herdr.dev) stays fully usable on its own: sessions running in Herdr panes are listed and driven as before, you can still start sessions in Herdr (`backend: "herdr"`), and OpenCode and Devin run in Herdr.
 
 ## Why this app is useful
 
@@ -15,12 +17,13 @@ The main benefit is that you can follow a session without keeping the app open o
 - Answer AskUserQuestion, Codex's requestUserInput, and approvals in native UI
 - Send images and files, view images inline, and open file references from messages
 - Upload attachments up to 500 MiB with streaming on Android, Desktop, and the updated Gateway
-- Start new sessions from the app and choose the working directory and model
+- Start new sessions from the app and choose the working directory, model, reasoning effort and mode
+- Change a running session's model and reasoning effort without losing its history
 
 The notification-to-screen flow looks like this:
 
 ```text
-Gateway on the Mac watches Herdr
+Gateway on the Mac watches its own sessions (and Herdr's)
         │ FCM notification
         ▼
 Android fetches the conversation in the background → saves it to Room → shows it when tapped
@@ -28,17 +31,20 @@ Android fetches the conversation in the background → saves it to Room → show
 
 Firebase project and service-account setup is, honestly, the most cumbersome part of this project. The rest of the app still works without notifications: you can browse, send messages, answer interactions, and start sessions. When notifications are enabled, the recommended menu-bar app only requires a one-time setup, and shared APKs do not need to be rebuilt.
 
-The Gateway runs on the Mac and does not keep a separate cloud conversation database. It reads Herdr and each agent's own data, and caches only what Android needs locally.
+The Gateway runs on the Mac and does not keep a separate cloud conversation database. It reads each agent's own data (Claude Code's transcripts, Codex's threads) and caches only what Android needs locally.
 
 ```text
-Android ──(Tailscale recommended / trusted LAN / HTTPS tunnel, HTTP(S) + Bearer)──▶ Herdr Companion Gateway (Mac) ──▶ Herdr / Claude Code / Codex / OpenCode / Devin
+Android / Desktop / hc ──(Tailscale recommended / trusted LAN / HTTPS tunnel, HTTP(S) + Bearer)──▶ Herdr Companion Gateway (Mac)
+    ├─▶ Claude Agent SDK sidecar ──▶ Claude Code      (direct, default)
+    ├─▶ Codex app-server        ──▶ Codex             (direct, default)
+    └─▶ Herdr (optional)        ──▶ Claude Code / Codex / OpenCode / Devin in panes
 ```
 
 See [docs/architecture.md](docs/architecture.md) for the detailed design.
 
 ## Quick start
 
-1. Set up Herdr and the required Herdr integrations for Claude Code, Codex, OpenCode, and/or Devin on the Mac.
+1. Install and log in to Claude Code (`claude`, then `/login` with your subscription) and/or Codex on the Mac. Herdr is optional (needed for OpenCode, Devin, and sessions you run in Herdr panes).
 2. Install and launch Herdr Companion Gateway.app on the Mac, then start the Gateway.
 3. In the Android app, use **Scan Mac QR** to scan the pairing QR shown by the menu-bar app.
 4. If you want notifications, configure Firebase and pair again with a newly generated QR code.
@@ -60,15 +66,18 @@ docs/      architecture and macOS release documentation
 
 | Target | Requirements |
 |---|---|
-| Mac | Go 1.27+, Herdr 0.9+, Claude Code, Codex CLI, OpenCode and/or Devin CLI, and network connectivity (Tailscale recommended) |
+| Mac | Claude Code and/or Codex CLI (logged in), optionally Herdr 0.9+ (for OpenCode / Devin and Herdr panes), and network connectivity (Tailscale recommended) |
+| Building the Gateway | Go 1.27+, Bun 1.3+ (for the Claude sidecar) |
 | Usage limits | CodexBar (brew install --cask codexbar, optional) |
 | Android | Android 10 (API 29) or newer, with a network route to the Mac (Tailscale recommended) |
 | Building | JDK 17 and Android SDK (compileSdk 37) |
 | Notifications | A Firebase project (the free tier is sufficient) |
 
-## 1. Set up Herdr
+## 1. Agents and Herdr
 
-The Gateway gets the mapping between panes and running sessions from Herdr's official integrations. This is required.
+Claude Code and Codex need nothing besides being installed and logged in: the Gateway runs them itself. Claude Code sessions use your existing login and subscription (the Gateway never switches to per-token API billing: `ANTHROPIC_API_KEY` is not passed to Claude Code unless you set `claudeAllowApiKey`, and a session that would bill an API key is refused with the reason), and load the same settings as the CLI: CLAUDE.md, `.claude/`, skills, hooks, MCP servers, agents and permission rules. Their history stays in Claude Code's and Codex's own local storage.
+
+**Herdr is optional.** Set it up if you use OpenCode or Devin, or want to start or keep sessions in Herdr panes with a terminal. The Gateway gets the mapping between panes and running sessions from Herdr's official integrations:
 
 ```bash
 herdr integration install claude
@@ -82,9 +91,9 @@ herdr integration status   # the integrations you use should be installed
 
 Sessions started after the integration is installed are recognized. Restart existing sessions once.
 
-### Structured Codex operations (recommended)
+### Structured Codex operations in Herdr panes
 
-For structured approval, requestUserInput, and message operations in Codex, connect the Codex TUI to the shared app-server daemon:
+Sessions the Gateway runs itself always have structured approvals and questions. For Codex TUIs you run in Herdr panes, connect them to the shared app-server daemon to get the same:
 
 ```bash
 codex app-server daemon start     # shared daemon (~/.codex/app-server-control/app-server-control.sock)
@@ -132,7 +141,7 @@ The generated ~/.config/herdr-mobile/config.json has mode 600:
 }
 ```
 
-Optional fields include fcmCredentialsFile, herdrSocket, claudeConfigDir, opencode, devin, codexBinary, codexDaemonSocket, uploadDir, workspaceRoots, usageCommand, usageRefreshMinutes, and historyCacheMB (memory each agent may keep for decoded conversation histories, default 2048 MiB). The Gateway automatically reads Devin's `~/.local/share/devin/cli/sessions.db`; set `devin.database` or `devin.binary` only when using a custom location or executable.
+Optional fields include fcmCredentialsFile, herdrSocket, claudeConfigDir, claudeBinary (the Claude Code CLI direct sessions run; default `claude` on PATH, then `~/.local/bin/claude`), claudeSidecar (default: `herdr-claude-sidecar` next to the gateway, then PATH), claudeAllowApiKey, opencode, devin, codexBinary, codexDaemonSocket, uploadDir, workspaceRoots, usageCommand, usageRefreshMinutes, and historyCacheMB (memory each agent may keep for decoded conversation histories, default 2048 MiB). The Gateway automatically reads Devin's `~/.local/share/devin/cli/sessions.db`; set `devin.database` or `devin.binary` only when using a custom location or executable.
 
 workspaceRoots (default: ~/workspace, or the home directory if it does not exist) limits the directories where the app can browse, create folders, and start sessions.
 
@@ -151,9 +160,13 @@ The Gateway refreshes and caches usage every five minutes by default, and the ap
 
 From **New session**, choose Claude Code, Codex, OpenCode, or Devin, a working directory under workspaceRoots (browse or create one), and the first prompt.
 
-The Gateway creates a Herdr workspace and starts the agent with agent.start. If the agent shows a folder-trust dialog, the app asks whether to trust it. **Trust** answers the dialog and continues; **Cancel** closes the workspace that was created. If the Codex shared daemon is running, the Gateway starts Codex with codex --remote unix://….
+Claude Code and Codex are started by the Gateway itself, without Herdr, and the session id is known immediately. If the agent was never trusted in that folder, the app asks first (project hooks and MCP servers run code); **Trust** starts it, **Cancel** does not. With **worktree**, the Gateway creates a git worktree on a new `worktree/<name>` branch; archiving the session removes it unless it has uncommitted or untracked changes (the branch is kept).
 
-Codex requires the Herdr integration hook to be trusted once. Press t on the Hooks confirmation screen shown when Codex starts.
+On a running Claude Code or Codex session you can change the model and reasoning effort, switch the mode and interrupt the current turn from the session screen or `hc`. Claude Code applies a model or effort change from its next model request (it may be within the running turn); Codex applies it from the next turn. The app shows the change as pending until then. Choices the agent does not offer are refused with the reason, never replaced.
+
+OpenCode and Devin (and Claude Code / Codex when started with the Herdr backend) start in a new Herdr workspace with agent.start. If the agent shows a folder-trust dialog, the app asks whether to trust it. **Trust** answers the dialog and continues; **Cancel** closes the workspace that was created. If the Codex shared daemon is running, the Gateway starts Codex with codex --remote unix://…. Codex in Herdr requires the Herdr integration hook to be trusted once. Press t on the Hooks confirmation screen shown when Codex starts.
+
+If the Gateway stops while a session is working, that turn is cut off (the agent process ends with the Gateway) and the session shows as failed after the restart; nothing is re-run. History stays readable, and the next message resumes the session under the same id in a new process.
 
 ### Pre-flight folder check (Jev, optional)
 
@@ -319,9 +332,14 @@ Android 13 and newer ask for notification permission.
 ## Development
 
 ```bash
+# Claude sidecar (Bun): the Gateway finds it next to its executable, on PATH, or via HERDR_CLAUDE_SIDECAR
+cd gateway/claude-sidecar
+bun install && bun run typecheck && bun run build   # → dist/herdr-claude-sidecar
+
 # Gateway
 cd gateway
-go run ./cmd/herdr-mobile-gateway --debug --log-file ""   # development server (:8765)
+HERDR_CLAUDE_SIDECAR=$PWD/claude-sidecar/dist/herdr-claude-sidecar \
+  go run ./cmd/herdr-mobile-gateway --debug --log-file ""   # development server (:8765)
 go test ./...
 go test ./internal/providers/claude ./internal/providers/codex -update  # update fixture goldens
 go vet ./...
@@ -348,9 +366,11 @@ gateway/testdata/{claude,codex,opencode}/ contains anonymized real-data fixtures
 
 ## Limitations and known behavior
 
-- Claude Code AskUserQuestion and approval answers are translated into pane key presses because there is no structured API (verified with Claude Code 2.1.x). If the UI changes, use the app's **Terminal** screen.
-- Structured Codex answers work only for sessions running through the shared daemon (codex --remote unix://).
-- Session identity is the session ID reported by the Herdr integration. Panes without an integration do not appear in the list.
+- Sessions the Gateway runs have no terminal; the **Terminal** screen and `hc term` / `hc keys` are for Herdr panes. TUI-only dialogs (Codex's "Implement this plan?" prompt, its async question queue) do not exist there: send the next instruction instead.
+- For Claude Code sessions in Herdr panes, AskUserQuestion and approval answers are translated into pane key presses (verified with Claude Code 2.1.x). If the UI changes, use the app's **Terminal** screen.
+- Structured Codex answers in Herdr panes work only for sessions running through the shared daemon (codex --remote unix://).
+- Herdr sessions are identified by the session ID reported by the Herdr integration. Panes without an integration do not appear in the list.
+- Do not resume a session the Gateway is running in a separate terminal (`claude --resume`); two processes would write the same transcript.
 - Notification de-duplication is in memory only, so the Gateway does not notify for the initial observation immediately after a restart.
 - Background fetching requires the Gateway to be running and reachable from Android. FCM notifications are not delivered while the Android app is force-stopped.
 

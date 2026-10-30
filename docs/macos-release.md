@@ -32,7 +32,7 @@ build=1
 
 ## ローカルビルド
 
-必要なものはJDK 17、Xcode Command Line Tools、Go 1.27以上、arm64 macOSです。アイコンを再生成するときだけ`librsvg`（`brew install librsvg`）も必要です。
+必要なものはJDK 17、Xcode Command Line Tools、Go 1.27以上、Bun 1.3以上（Claudeサイドカーのビルド）、arm64 macOSです。アイコンを再生成するときだけ`librsvg`（`brew install librsvg`）も必要です。
 
 通常のrelease成果物は次の1コマンドで生成します。
 
@@ -94,7 +94,7 @@ export MACOS_SIGNING_KEYCHAIN="$HOME/Library/Keychains/herdr-build.keychain-db"
 ./scripts/build-macos-release.sh
 ```
 
-Compose側は公式のmacOS signing DSLを使い、同梱JREとnested codeを含めてjpackage/codesignが処理します。Gateway側はGo helperを先に署名し、その後SwiftUI appを署名します。App Sandbox用のentitlementは追加していません。Compose 1.12.1がJVM runtime用に生成する標準entitlement（JIT、unsigned executable memory、library validation無効化）だけを利用します。
+Compose側は公式のmacOS signing DSLを使い、同梱JREとnested codeを含めてjpackage/codesignが処理します。Gateway側はGo helperと`herdr-claude-sidecar`を先に署名し、その後SwiftUI appを署名します。サイドカーはBunの単一実行ファイル（JavaScriptエンジンを含む）なので、Hardened Runtimeで実行時コンパイルが動くよう[`macos/assets/claude-sidecar.entitlements`](../macos/assets/claude-sidecar.entitlements)（JIT、unsigned executable memory、executable page protection無効化）を付けて署名します。Claude Code本体は同梱せず、ユーザーがインストールした`claude` CLIを使います。App Sandbox用のentitlementは追加していません。Compose 1.12.1がJVM runtime用に生成する標準entitlement（JIT、unsigned executable memory、library validation無効化）だけを利用します。
 
 Composeタスクを直接実行する場合は公式Gradle propertyも使用できます。
 
@@ -168,7 +168,7 @@ Gatewayも使う場合は、別途`Herdr-Companion-Gateway-x.y.z.dmg`を開い�
 
 ## GitHub Actions / GitHub Release
 
-[`.github/workflows/macos-release.yml`](../.github/workflows/macos-release.yml)は`v*` tag pushまたはmanual dispatchで動きます。`macos-14` arm64 runner上で、JDK 17、Gradle cache、Go 1.27、Android/shared regression、Gateway test/vet、release APK生成、temporary keychain、2つのrelease DMG生成、verification、artifact uploadを順に実行します。Linux .debとエージェント向けCLI `hc`（[cli.md](cli.md)）は別jobで作ります。tag push時は次のファイルをGitHub Releaseへ添付します（それぞれ`.sha256`付き）。
+[`.github/workflows/macos-release.yml`](../.github/workflows/macos-release.yml)は`v*` tag pushまたはmanual dispatchで動きます。`macos-14` arm64 runner上で、JDK 17、Gradle cache、Go 1.27、Bun、Android/shared regression、Gateway test/vet、Claudeサイドカーのtypecheck、release APK生成、temporary keychain、2つのrelease DMG生成、verification、artifact uploadを順に実行します。Linux .debとエージェント向けCLI `hc`（[cli.md](cli.md)）は別jobで作ります。tag push時は次のファイルをGitHub Releaseへ添付します（それぞれ`.sha256`付き）。
 
 ```text
 Herdr-Companion-x.y.z.dmg

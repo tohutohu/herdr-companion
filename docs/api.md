@@ -113,16 +113,28 @@ curl -s -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
 | 401 | トークン不一致（`/pair` では招待コードが無効・期限切れ） |
 | 403 | 許可されたルート外のファイルへのアクセス |
 | 404 | セッション・ファイル・アップロード・保留中の起動が見つからない |
-| 409 | セッションが Herdr で動いていない／既に動いている、質問が既に閉じた、作業ディレクトリが無い、同名フォルダが既にある、エージェントがブロック中、送信結果不明・送信 ID の内容不一致 |
+| 409 | セッションが動いていない／既に動いている、直接管理のセッションへのターミナル操作、Herdr のセッションへのモデル・推論強度・中断、質問が既に閉じた、作業ディレクトリが無い、同名フォルダが既にある、エージェントがブロック中、送信結果不明・送信 ID の内容不一致 |
 | 413 | ファイル・アップロードが大きすぎる |
 | 422 | そのプロバイダーが対応していない操作 |
 | 502 | Herdr ソケット API のエラー |
-| 503 | エージェント更新・セッション起動機能が無効、送信 receipt の永続保存が利用不能 |
+| 503 | エージェント更新・セッション起動機能が無効、送信 receipt の永続保存が利用不能、Claude サイドカーや Codex app-server を起動できない |
 
 ### セッション ID
 
 `<provider>:<native-id>` 形式。`provider` は `claude` / `codex` / `opencode` / `devin`。
-`native-id` は各エージェント自身のセッション（スレッド）ID。`paneId` は「今どこで動いているか」で、識別子ではない。
+`native-id` は各エージェント自身のセッション（スレッド）ID。Gateway が直接起動するセッションも、
+Herdr で動くセッションも同じ ID を使う。`paneId` は Herdr で動いているときのペインで、識別子ではない
+（直接管理のセッションには無い）。
+
+### 実行場所（`backend`）
+
+| 値 | 意味 |
+|---|---|
+| `direct` | Gateway 自身が動かしている。Claude Code は Agent SDK のサイドカー、Codex は Gateway の app-server。Herdr は不要 |
+| `herdr` | Herdr のペインで動いている（ターミナル操作が使える） |
+| （なし） | どこでも動いていない（`offline`） |
+
+新規起動と再開の既定は、対応するエージェント（Claude Code・Codex）なら `direct`。
 
 ### セッションの状態（`status`）
 
@@ -134,7 +146,12 @@ curl -s -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
 | `completed` | 最後のターンが完了 |
 | `idle` | 待機中 |
 | `failed` | 最後のターンが失敗 |
-| `offline` | Herdr 上で動いていない（直近 `offlineSessionDays` 日、既定 3 日以内に更新されたもの） |
+| `offline` | どこでも動いていない（直近 `offlineSessionDays` 日、既定 3 日以内に更新されたもの） |
+
+直接管理のセッションは、プロセスが無い間（Gateway の再起動後など）も `offline` にならず `idle` で、
+`canSend: true` のまま一覧に残る。次のメッセージで同じ ID のまま新しいプロセスで再開する。
+ターンの途中でプロセス（または Gateway）が止まったセッションは `failed` になり、`error` に理由が入る。
+途中だったターンや操作は自動で再実行しない。
 
 ## エンドポイント一覧
 
@@ -150,7 +167,10 @@ curl -s -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
 | POST | `/v1/sessions/{id}/messages` | 要 | メッセージ送信 |
 | GET | `/v1/message-delivery` | 要 | 永続 receipt による重複送信防止の対応状況 |
 | POST | `/v1/sessions/{id}/respond` | 要 | 質問・承認への回答 |
-| POST | `/v1/sessions/{id}/mode` | 要 | TUI のモードを次へ切り替え |
+| POST | `/v1/sessions/{id}/mode` | 要 | モードを次へ切り替え、または指定（直接管理のみ） |
+| POST | `/v1/sessions/{id}/model` | 要 | 実行中セッションのモデルを変更（直接管理のみ） |
+| POST | `/v1/sessions/{id}/effort` | 要 | 実行中セッションの推論強度を変更（直接管理のみ） |
+| POST | `/v1/sessions/{id}/interrupt` | 要 | 実行中のターンを中断（直接管理のみ） |
 | POST | `/v1/sessions/{id}/seen` | 要 | 既読にする |
 | POST | `/v1/sessions/{id}/reload` | 要 | キャッシュを捨てて読み直し、質問の取りこぼしを診断 |
 | POST / DELETE | `/v1/sessions/{id}/archive` | 要 | アーカイブ／解除 |
@@ -160,8 +180,8 @@ curl -s -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
 | GET | `/v1/sessions/{id}/files` | 要 | ディレクトリ一覧 |
 | GET | `/v1/sessions/{id}/files/content` | 要 | ファイル本体 |
 | GET | `/v1/sessions/{id}/files/stat` | 要 | ファイル情報 |
-| GET / POST | `/v1/sessions/{id}/terminal` | 要 | ペインのテキスト読み取り／キー入力 |
-| POST | `/v1/launches/{pane}/trust` | 要 | 起動時のフォルダ信頼ダイアログに回答 |
+| GET / POST | `/v1/sessions/{id}/terminal` | 要 | ペインのテキスト読み取り／キー入力（Herdr のみ） |
+| POST | `/v1/launches/{pane or launchId}/trust` | 要 | 起動時のフォルダ信頼の確認に回答 |
 | POST | `/v1/launches/{pane}/continue` | 要 | 手動操作後に起動を再開 |
 | GET / POST | `/v1/launches/{pane}/terminal` | 要 | セッション ID 確定前のターミナル |
 | GET | `/v1/models` | 要 | 起動時に選べるモデル・effort・モード |
@@ -222,9 +242,11 @@ curl -s -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   "status": "running",
   "updatedAt": "2026-10-01T12:00:00Z",
   "lastMessage": "…",
-  "paneId": "<Herdr のペイン ID>",
+  "backend": "direct",
   "model": "claude-opus-5-5",
   "effort": "high",
+  "pendingModel": "sonnet",
+  "settingsApply": "next_request",
   "mode": "Plan",
   "canSend": true,
   "archived": false,
@@ -236,8 +258,14 @@ curl -s -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
 
 | フィールド | 説明 |
 |---|---|
-| `canSend` | 今メッセージを送れるか（Herdr 上で動いているか） |
-| `unread` | エージェントが完了し、そのペインがまだフォーカスされていない |
+| `backend` | `direct` / `herdr`。どこでも動いていなければ省略 |
+| `paneId` | Herdr のペイン。`backend: "herdr"` のときだけ |
+| `canSend` | 今メッセージを送れるか（Herdr で動いている、または直接管理） |
+| `unread` | エージェントが完了し、まだ見ていない（Herdr: ペイン未フォーカス、直接管理: `seen` 未送信） |
+| `model` / `effort` | 最後の応答が使ったモデルと推論強度 |
+| `pendingModel` / `pendingEffort` | 変更を要求したがまだ使われていない値。適用されると消える |
+| `settingsApply` | 保留中の変更が効く時点。`next_request`（Claude: 次のモデル呼び出し。実行中のターン内でも）／`next_turn`（Codex: 次のターン） |
+| `error` | `failed` の直接管理セッションの理由（プロセスの終了など） |
 | `context` | コンテキストウィンドウの使用量。未報告なら省略 |
 | `cost` | API 定価換算の金額。`estimated: true` はトークン数から Gateway が算出した値 |
 
@@ -258,7 +286,8 @@ curl -s -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
 
 ### `POST /v1/sessions`
 
-新しい Herdr ワークスペースでエージェントを起動する。`cwd` は `workspaceRoots`（未設定ならホーム）配下に限る。
+エージェントを起動する。既定では Gateway が直接動かし（Claude Code・Codex）、`backend: "herdr"` なら新しい
+Herdr ワークスペースで起動する。`cwd` は `workspaceRoots`（未設定ならホーム）配下に限る。
 
 ```json
 {
@@ -270,7 +299,8 @@ curl -s -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   "effort": "high",
   "mode": "plan",
   "trust": true,
-  "worktree": false
+  "worktree": false,
+  "backend": "direct"
 }
 ```
 
@@ -279,22 +309,26 @@ curl -s -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
 | `provider`, `cwd` | ○ | |
 | `prompt` | | 最初のプロンプト。`uploads` は最初のプロンプトに添付される |
 | `model` / `effort` / `mode` | | `GET /v1/models` の `id`。空ならエージェントの既定 |
-| `trust` | | フォルダ信頼ダイアログを代わりに承認する。`false` だとダイアログで止まり `trustRequired` を返す |
-| `worktree` | | `cwd` のリポジトリに Herdr が新しい git worktree を作り、そこで起動する |
+| `trust` | | フォルダ信頼を代わりに承認する。`false` のとき、Herdr ではダイアログで止まり、直接管理ではエージェントが一度も信頼していないフォルダ（Claude: `~/.claude.json`、Codex: `config.toml` の記録を読むだけ）なら起動せずに `trustRequired` を返す |
+| `worktree` | | `cwd` のリポジトリに新しい git worktree（`worktree/<名前>` ブランチ）を作り、そこで起動する。直接管理では Gateway が git で作り（状態ディレクトリの `worktrees/` 配下）、Herdr では Herdr が作る |
+| `backend` | | `direct` / `herdr`。省略時は対応エージェントなら `direct`。`direct` 非対応のエージェント（OpenCode・Devin）は Herdr |
 
 `201`（StartResult）:
 
 ```json
-{ "sessionId": "claude:…", "paneId": "<Herdr のペイン ID>", "warning": "…", "trustRequired": false }
+{ "sessionId": "claude:…", "backend": "direct", "warning": "…" }
+{ "sessionId": "claude:…", "paneId": "<Herdr のペイン ID>", "backend": "herdr", "trustRequired": false }
+{ "launchId": "launch-claude-1a2b3c", "backend": "direct", "trustRequired": true }
 ```
 
-`sessionId` はエージェントが ID を報告するまで省略されることがある。その間は
-`/v1/launches/{pane}/terminal` でペインを操作できる。
+直接管理では `sessionId` を起動前に決めるので必ず返る（`paneId` は無い）。最初のプロンプトだけ失敗した場合は
+`sessionId` と `warning` を返す。Herdr ではエージェントが ID を報告するまで `sessionId` が省略されることがあり、
+その間は `/v1/launches/{pane}/terminal` でペインを操作できる。
 
-### `POST /v1/launches/{pane}/trust`
+### `POST /v1/launches/{pane or launchId}/trust`
 
-`trustRequired` で止まった起動に回答する。`{"trust": true}` で続行、`false` でワークスペースを閉じる。
-`200` で StartResult。保留中の起動がなければ `404`。
+`trustRequired` で止まった起動に回答する。`{"trust": true}` で続行、`false` で取りやめ（Herdr はワークスペースを閉じる）。
+直接管理の起動は `launchId` で答える。`200` で StartResult。保留中の起動がなければ `404`。
 
 ### `POST /v1/launches/{pane}/continue`
 
@@ -306,7 +340,8 @@ Session を 1 件返す。
 
 ### `POST /v1/sessions/{id}/archive` / `DELETE /v1/sessions/{id}/archive`
 
-POST: 動作中なら停止（Herdr のペインを閉じる）し、失うものがなければ起動時の worktree を削除してアーカイブする。
+POST: 動作中なら停止（直接管理はプロセスを終了、Herdr はペインを閉じる）し、失うものがなければ起動時の worktree を削除してアーカイブする。
+worktree は、他のセッションが使っている、または未コミット・未追跡の変更がある場合は残し、`warning` で理由を返す。ブランチは常に残す。
 レスポンスは Session に `warning`（worktree を残した理由など）を加えたもの。
 DELETE: アーカイブを解除し Session を返す。
 
@@ -320,7 +355,9 @@ DELETE: アーカイブを解除し Session を返す。
 
 ### `POST /v1/sessions/{id}/resume`
 
-停止中のセッションを新しい Herdr ワークスペースで再開し、アーカイブから外す。ボディは省略可（`{"trust": true}`）。
+停止中のセッションを同じ ID で再開し、アーカイブから外す。ボディは省略可（`{"trust": true, "backend": "direct"}`）。
+既定は直接管理（Claude Code・Codex。ターミナルで始めたセッションも再開できる）。`backend: "herdr"` なら新しい Herdr
+ワークスペースで再開し、Gateway 側の休眠中の記録は捨てる（同じセッションを 2 か所で動かさない）。
 `201` で StartResult。既に動いていれば `409`。
 
 ## メッセージ
@@ -444,11 +481,35 @@ receipt は `HERDR_MOBILE_STATE_DIR/message-delivery/`（Mac メニューバー�
 
 ### `POST /v1/sessions/{id}/mode`
 
-動作中の TUI のモード（Plan、Accept edits など）を次に進める。キー操作の選択はプロバイダーごとに Gateway が行う。`202`。非対応は `422`。
+モード（Plan、Accept edits など）を次に進める。Herdr ではプロバイダーごとに TUI のキー操作で、直接管理では
+SDK / app-server で切り替える。直接管理ではボディ `{"mode": "<GET /v1/models の modes の id>"}` で直接指定もできる
+（Codex は次のターンから）。`202`。非対応は `422`、Herdr のセッションへの `mode` 指定は `409`。
+
+### `POST /v1/sessions/{id}/model` / `POST /v1/sessions/{id}/effort`
+
+```json
+{ "model": "sonnet" }
+{ "effort": "high", "model": "sonnet" }
+```
+
+直接管理のセッションのモデル／推論強度を、セッション ID と履歴を保ったまま変える。値は `GET /v1/models` の
+カタログで検証し、無いもの（モデルが対応しない推論強度を含む）は `400 {"error": "invalid setting: … choose one of: …"}`
+で拒否する。別の値に置き換えることはしない。`effort` の `model` は省略時、保留中のモデル、なければ現在のモデル。
+`200` で更新後の Session（`pendingModel` / `pendingEffort` / `settingsApply`）。
+
+- Claude Code: `Query.setModel()` と `applyFlagSettings({effortLevel})`。次のモデル呼び出しから（実行中のターン内でも）。セッション限りで、ユーザーの既定（`settings.json`）は変えない。
+- Codex: 値を保持し、次の `turn/start` に `model` / `effort` を付ける。実行中のターンは変えない。
+
+Herdr のセッションは `409`。プロセスが無い直接管理のセッションでは、値を記録して再開時に使う。
+
+### `POST /v1/sessions/{id}/interrupt`
+
+直接管理のセッションの実行中ターンを中断する（Claude: `Query.interrupt()`、Codex: `turn/interrupt`）。セッションは残る。`202`。
+Herdr のセッションは `409`。
 
 ### `POST /v1/sessions/{id}/seen`
 
-Herdr で `done` のセッションならペインをフォーカスして既読にする（それ以外は何もしない）。`200 {"ok": true}`。
+既読にする。Herdr で `done` のセッションならペインをフォーカスし、直接管理なら `unread` を消す（それ以外は何もしない）。`200 {"ok": true}`。
 
 ### `POST /v1/sessions/{id}/reload`
 
@@ -483,7 +544,8 @@ Herdr で `done` のセッションならペインをフォーカスして既読
 
 ## ターミナル
 
-構造化 API で扱えない画面（未対応の質問など）を操作するためのフォールバック。
+構造化 API で扱えない画面（未対応の質問など）を操作するためのフォールバック。Herdr のペインで動くセッションだけが対象で、
+直接管理のセッションは `409`（"has no terminal"）。
 
 ### `GET /v1/sessions/{id}/terminal?lines=200`
 

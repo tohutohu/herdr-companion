@@ -2,7 +2,9 @@
 
 英語版: [README.md](README.md)
 
-Mac 上の [Herdr](https://herdr.dev) で動いている Claude Code / Codex / OpenCode / Devin のセッションを、Android から確認・操作するためのアプリです。Mac で AI エージェントを走らせたまま、スマホから進捗を確認したり、質問に答えたり、次の指示を送ったりできます。
+Mac 上の Claude Code / Codex / OpenCode / Devin のセッションを、Android（と Compose Desktop UI、他のエージェント向けの `hc` CLI）から起動・確認・操作するためのアプリです。Mac で AI エージェントを走らせたまま、スマホから進捗を確認したり、質問に答えたり、モデルを切り替えたり、次の指示を送ったりできます。
+
+Claude Code（公式 Claude Agent SDK 経由）と Codex（公式 app-server 経由）は Gateway が直接動かすので、**Herdr は必須ではありません**。[Herdr](https://herdr.dev) は独立したツールとしてそのまま使えます。Herdr のペインで動くセッションは従来どおり一覧・操作でき、Herdr で起動すること（`backend: "herdr"`）もできます。OpenCode と Devin は Herdr で動かします。
 
 ## このアプリの良さ
 
@@ -28,17 +30,20 @@ Androidがバックグラウンドで会話を取得 → Roomに保存 → 通�
 
 Firebase のプロジェクト作成とサービスアカウント設定は、正直に言うとこのプロジェクトで一番面倒な部分です。ただし通知を使わない場合でも、閲覧・送信・承認・セッション起動は利用できます。通知を使う場合も、推奨のメニューバーアプリなら設定は一度だけで、共通 APK の再ビルドは必要ありません。
 
-Gateway は Mac 上で動き、会話データをクラウドへ保存する独自 DB は持ちません。Herdr と各エージェントのデータを読み、Android 側に必要な範囲だけキャッシュします。
+Gateway は Mac 上で動き、会話データをクラウドへ保存する独自 DB は持ちません。各エージェント自身のデータ（Claude Code の transcript、Codex のスレッド）を読み、Android 側に必要な範囲だけキャッシュします。
 
 ```text
-Android ──(Tailscale推奨 / trusted LAN / HTTPS tunnel, HTTP(S) + Bearer)──▶ Herdr Companion Gateway (Mac) ──▶ Herdr / Claude Code / Codex / OpenCode / Devin
+Android / Desktop / hc ──(Tailscale推奨 / trusted LAN / HTTPS tunnel, HTTP(S) + Bearer)──▶ Herdr Companion Gateway (Mac)
+    ├─▶ Claude Agent SDK サイドカー ──▶ Claude Code      （直接管理、既定）
+    ├─▶ Codex app-server           ──▶ Codex            （直接管理、既定）
+    └─▶ Herdr（任意）              ──▶ ペイン内の Claude Code / Codex / OpenCode / Devin
 ```
 
 設計の詳細は [docs/architecture.md](docs/architecture.md) を参照してください。
 
 ## 最短の導入手順
 
-1. Mac に Herdr と Claude Code / Codex / OpenCode / Devin を用意し、必要な Herdr integration を入れる。
+1. Mac に Claude Code（`claude` を起動し、サブスクで `/login`）と Codex を用意してログインする。Herdr は任意（OpenCode / Devin、Herdr のペインで動かすセッションに必要）。
 2. Mac で `Herdr Companion Gateway.app` を起動し、Gateway を起動する。
 3. Android アプリの **Scan Mac QR** でメニューバーアプリのペアリング QR を読み取る。
 4. 通知が必要なら、Firebase を設定してから QR を発行し直してペアリングする。
@@ -60,15 +65,18 @@ docs/      設計・macOS releaseドキュメント
 
 | 対象 | 必要なもの |
 |---|---|
-| Mac | Go 1.24+、Herdr 0.9+、Claude Code / Codex CLI / OpenCode / Devin CLI、ネットワーク接続（Tailscale推奨） |
+| Mac | ログイン済みの Claude Code / Codex CLI、任意で Herdr 0.9+（OpenCode / Devin、Herdr のペイン用）、ネットワーク接続（Tailscale推奨） |
+| Gateway のビルド | Go 1.27+、Bun 1.3+（Claude サイドカー用） |
 | 残量表示 | CodexBar（`brew install --cask codexbar`、任意） |
 | Android | Android 10 (API 29) 以上、Macへ到達できるネットワーク（Tailscale推奨） |
 | ビルド | JDK 17、Android SDK（compileSdk 37）|
 | 通知 | Firebase プロジェクト（無料枠で可） |
 
-## 1. Herdr のセットアップ
+## 1. エージェントと Herdr
 
-Gateway はペインごとの「どのセッションが動いているか」を Herdr の公式インテグレーションから取得します。**必須**です。
+Claude Code と Codex はインストールしてログインしておくだけで使えます。Gateway が直接起動します。Claude Code のセッションは既存のログインとサブスク枠を使い、従量課金の API には切り替えません（`claudeAllowApiKey` を設定しない限り `ANTHROPIC_API_KEY` を Claude Code に渡さず、API キー課金になるセッションは理由を示して開始しません）。CLI と同じ設定（CLAUDE.md、`.claude/`、Skills、Hooks、MCP サーバー、カスタムエージェント、Permission Rules）を読み込みます。履歴は Claude Code・Codex 自身のローカル保存のままです。
+
+**Herdr は任意です。** OpenCode・Devin を使う場合や、ターミナル付きの Herdr のペインでセッションを動かしたい場合にセットアップします。Gateway はペインごとの「どのセッションが動いているか」を Herdr の公式インテグレーションから取得します。
 
 ```bash
 herdr integration install claude
@@ -82,9 +90,9 @@ herdr integration status   # 利用する integration が installed になって
 
 インストール後に起動した Claude Code / Codex / OpenCode / Devin から認識されます（既存セッションは一度再起動してください）。
 
-### Codex の構造化操作（推奨）
+### Herdr のペインでの Codex の構造化操作
 
-Codex の承認・requestUserInput・メッセージ送信を構造化 API で行うには、Codex TUI を共有 app-server daemon に接続して起動します。
+Gateway が直接動かすセッションは常に承認・質問を構造化して扱えます。Herdr のペインで動かす Codex TUI で同じことをするには、共有 app-server daemon に接続して起動します。
 
 ```bash
 codex app-server daemon start     # 共有 daemon（~/.codex/app-server-control/app-server-control.sock）
@@ -132,7 +140,7 @@ go build -o ~/.local/bin/herdr-mobile-gateway ./cmd/herdr-mobile-gateway
 }
 ```
 
-任意項目: `fcmCredentialsFile`, `herdrSocket`, `claudeConfigDir`, `opencode`, `devin`, `codexBinary`, `codexDaemonSocket`, `uploadDir`, `workspaceRoots`, `usageCommand`, `usageRefreshMinutes`, `historyCacheMB`（エージェントごとに会話履歴のデコード結果を保持するメモリ上限。既定 2048 MiB）。Devin の DB は既定で `~/.local/share/devin/cli/sessions.db` を読み取ります。保存先や実行ファイルを変える場合だけ `devin.database` / `devin.binary` を指定します。
+任意項目: `fcmCredentialsFile`, `herdrSocket`, `claudeConfigDir`, `claudeBinary`（直接管理で使う Claude Code CLI。既定は PATH の `claude`、なければ `~/.local/bin/claude`）, `claudeSidecar`（既定は Gateway と同じ場所の `herdr-claude-sidecar`、なければ PATH）, `claudeAllowApiKey`, `opencode`, `devin`, `codexBinary`, `codexDaemonSocket`, `uploadDir`, `workspaceRoots`, `usageCommand`, `usageRefreshMinutes`, `historyCacheMB`（エージェントごとに会話履歴のデコード結果を保持するメモリ上限。既定 2048 MiB）。Devin の DB は既定で `~/.local/share/devin/cli/sessions.db` を読み取ります。保存先や実行ファイルを変える場合だけ `devin.database` / `devin.binary` を指定します。
 
 `workspaceRoots`（既定: `~/workspace`、なければホーム）は、アプリからフォルダを選択・作成してセッションを起動できる範囲です。
 
@@ -150,7 +158,14 @@ Gateway は既定で 5 分ごとに読み直してキャッシュし、アプリ
 ### アプリからのセッション起動
 
 一覧画面の「New session」で、Claude Code / Codex / OpenCode / Devin、作業フォルダ（`workspaceRoots` 配下で選択または新規作成）、最初のプロンプトを指定して起動します。
-Gateway は Herdr に新しいワークスペースを作り、`agent.start` でエージェントを起動します。
+
+Claude Code と Codex は Herdr を使わず Gateway が直接起動し、セッション ID はすぐに決まります。そのエージェントが一度も信頼していないフォルダでは、起動前にアプリが確認します（プロジェクトの Hooks や MCP サーバーがコードを実行するため）。worktree を指定すると Gateway が git で `worktree/<名前>` ブランチの worktree を作り、アーカイブ時に未コミット・未追跡の変更がなければ削除します（ブランチは残します）。
+
+動作中の Claude Code / Codex のセッションは、詳細画面や `hc` からモデル・推論強度・モードの変更と、実行中ターンの中断ができます。Claude Code は次のモデル呼び出しから（実行中のターン内のこともある）、Codex は次のターンから反映され、それまでアプリは「適用待ち」と表示します。エージェントが提供しない値は理由を示して拒否し、別の値に置き換えません。
+
+Gateway の停止中に作業していたターンはそこで途切れ（エージェントのプロセスは Gateway と一緒に終了）、再起動後はそのセッションを failed と表示します。何も再実行しません。履歴はそのまま読め、次のメッセージで同じ ID のまま新しいプロセスで再開します。
+
+OpenCode / Devin（と Herdr バックエンドを指定した Claude Code / Codex）は、Gateway が Herdr に新しいワークスペースを作り、`agent.start` でエージェントを起動します。
 エージェントがフォルダ信頼確認ダイアログを出したときだけ、アプリが信頼するか確認します。「Trust」を選ぶと Gateway がダイアログに回答して起動を続け、「Cancel」を選ぶと作成したワークスペースを閉じます。
 Codex の共有 daemon が動いていれば `codex --remote unix://…` で起動します。
 
@@ -331,9 +346,14 @@ Android 13 以降は通知の許可を求められます。
 ## 開発
 
 ```bash
+# Claude サイドカー（Bun）。Gateway は実行ファイルと同じ場所、PATH、HERDR_CLAUDE_SIDECAR の順に探す
+cd gateway/claude-sidecar
+bun install && bun run typecheck && bun run build   # → dist/herdr-claude-sidecar
+
 # Gateway
 cd gateway
-go run ./cmd/herdr-mobile-gateway --debug --log-file ""   # 開発起動（:8765）
+HERDR_CLAUDE_SIDECAR=$PWD/claude-sidecar/dist/herdr-claude-sidecar \
+  go run ./cmd/herdr-mobile-gateway --debug --log-file ""   # 開発起動（:8765）
 go test ./...
 go test ./internal/providers/claude ./internal/providers/codex -update  # fixture の golden を更新
 go vet ./...
@@ -361,9 +381,11 @@ Claude / Codex の仕様変更で dead-letter に記録されたデータは、r
 
 ## 制約・既知の事項
 
-- Claude Code の AskUserQuestion / 承認への回答は、構造化 API がないためペインへのキー入力に変換しています（Claude Code 2.1 系で確認）。UI が変わった場合はアプリの「Terminal」から操作できます。
-- Codex の構造化回答は共有 daemon（`codex --remote unix://`）で動くセッションのみです。
-- セッションの identity は Herdr インテグレーションが報告する session id です。インテグレーション未導入のペインは一覧に出ません。
+- Gateway が直接動かすセッションにはターミナルがありません。アプリの「Terminal」と `hc term` / `hc keys` は Herdr のペイン用です。TUI だけのダイアログ（Codex の「Implement this plan?」や非同期の質問キュー）もないので、次の指示を送ってください。
+- Herdr のペインで動く Claude Code の AskUserQuestion / 承認への回答は、ペインへのキー入力に変換しています（Claude Code 2.1 系で確認）。UI が変わった場合はアプリの「Terminal」から操作できます。
+- Herdr のペインでの Codex の構造化回答は共有 daemon（`codex --remote unix://`）で動くセッションのみです。
+- Herdr のセッションの identity は Herdr インテグレーションが報告する session id です。インテグレーション未導入のペインは一覧に出ません。
+- Gateway が動かしているセッションを、別のターミナルで `claude --resume` しないでください（同じ transcript に 2 つのプロセスが書き込みます）。
 - 通知の重複防止はメモリ上のみで、Gateway 再起動直後の状態は通知しません。
 - バックグラウンド取得には Gateway が起動していて Android から到達できる必要があります。Android でアプリを「強制停止」している間は FCM 通知が届きません。
 

@@ -7,7 +7,7 @@ macOS 13以降のメニューバーアプリです。Herdr Companion Gatewayを�
 ## 使い方
 
 1. Tailscale（推奨）をMacとAndroidに用意して同じtailnetへ接続するか、同じ信頼できるローカルネットワークを使います。外部からはCloudflare TunnelなどのHTTPSトンネルも利用できます。
-2. MacのHerdrと使うエージェント（Claude Code／Codex／OpenCode／Devin CLI）をセットアップします。Herdrのintegration設定は[ルートREADME](../README.md#1-herdr-のセットアップ)を参照してください。
+2. 使うエージェント（Claude Code／Codex）をインストールしてログインします。Claude Code・CodexはGatewayが直接起動するのでHerdrは不要です。OpenCode・Devinを使う場合やHerdrのペインで動かす場合だけHerdrをセットアップします（[ルートREADME](../README.md#1-agents-and-herdr)）。
 3. Gateway DMGを開き、`Herdr Companion Gateway.app`をApplicationsへドラッグして起動します。Compose UIを使う場合はUI DMGの`Herdr Companion.app`も別途Applicationsへ入れます。
 4. メニューバーのターミナルアイコンを開き、Tailscale IPv4またはローカルネットワークのIPv4とポートを確認して「Gatewayを起動」。UI側がオフラインの場合は、UIの接続エラー画面からGateway managerを起動できます。
 5. 「ペアリングQRを表示」→ Androidの設定で「Scan Mac QR」→ 接続先を確認して「Pair」。
@@ -44,7 +44,8 @@ Gatewayは詳細画面がポーリングする会話をデコード済みのま�
 - 設定: `~/.config/herdr-mobile/desktop/config.json`
 - ログ・状態: `~/.local/state/herdr-mobile/desktop/`
 - 既定ポート: **8766**（CLI版の8765と共存可能）
-- Herdr本体は同梱・自動起動・停止しません。稼働中のHerdrサーバーを利用します。
+- Claude Codeのセッションは同梱の`herdr-claude-sidecar`（Claude Agent SDKをBunで単一実行ファイルにしたもの。Node.js不要）がユーザーの`claude` CLI（`~/.local/bin/claude`など）で動かし、CodexはGatewayが起動する`codex app-server`で動かします。どちらもGatewayの子プロセスで、Gatewayの終了とともに終わります。実行中だったターンは再起動後にfailedと表示され、次のメッセージで同じセッションIDのまま再開します。
+- Herdr本体は同梱・自動起動・停止しません。Herdrが動いていればそのペインのセッションも一覧・操作します。
 - アプリ自身が起動したGatewayだけを管理します。既存LaunchAgentは変更しません。
 - アプリを終了すると同梱Gatewayも終了します。ログイン時起動は設定で有効にできます。
 - managerとCompose UIは同一ユーザー内で複数起動しません。2つ目の起動は既存プロセスを前面化します。
@@ -57,7 +58,7 @@ Gatewayは詳細画面がポーリングする会話をデコード済みのま�
 
 ## ビルド・DMG
 
-Xcode Command Line Tools（Swift）、Go、JDK 17、arm64 macOSが必要です。UIとGatewayを別々に含むrelease成果物はルートのwrapperで作成します。
+Xcode Command Line Tools（Swift）、Go、Bun（Claudeサイドカー）、JDK 17、arm64 macOSが必要です。UIとGatewayを別々に含むrelease成果物はルートのwrapperで作成します。
 
 ```bash
 ./scripts/build-macos-release.sh

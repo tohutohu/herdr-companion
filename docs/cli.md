@@ -1,8 +1,9 @@
 # hc — エージェント向け CLI
 
-`hc`（`gateway/cmd/hc`）は、Herdr 上の Claude Code / Codex / OpenCode / Devin セッションを
+`hc`（`gateway/cmd/hc`）は、Mac 上の Claude Code / Codex / OpenCode / Devin セッションを
 別の AI エージェントが見張り、答え、指示するための CLI。Gateway の HTTP API
-（[api.md](api.md)）のクライアントで、Gateway 側の変更は要らない。
+（[api.md](api.md)）のクライアント。Gateway が直接動かすセッション（Claude Code・Codex。Herdr 不要）と、
+Herdr のペインで動くセッションを同じコマンドで扱う。
 
 ヘルプはエージェントスキルと同じく段階的に開示する。エージェントには「まず `hc guide` を読んで」と伝えれば足りる。
 
@@ -11,7 +12,24 @@
 | 1 | `hc help`（引数なしの `hc`） | 用途（使う場面・使わない場面）、クイックスタート、用途別のコマンド索引とトピック一覧 |
 | 2 | `hc help COMMAND`（`hc COMMAND --help`） | 1 コマンドの USE WHEN / USAGE / FLAGS / OUTPUT / EXAMPLES / SEE ALSO |
 | 2 | `hc help TOPIC` | `states` `ids` `cursors` `timeouts` `connect` `output` の概念説明 |
-| 3 | `hc guide` | 常駐して見張るエージェント向けの手順書（委任・起動・並列・監視・回答・端末操作） |
+| 3 | `hc guide` | 常駐して見張るエージェント向けの手順書（委任・起動・並列・監視・回答・モデル変更・端末操作） |
+
+## コマンド
+
+| 分類 | コマンド |
+|---|---|
+| 見る | `ls` `show` `read` `export` |
+| 待つ | `until` `wait` `changes` |
+| 操作 | `send` `answer` `start` `archive` `resume` |
+| 設定 | `model` `effort` `mode` `interrupt`（直接管理のセッション。`mode` の巡回は Herdr でも可） |
+| ターミナル | `term` `keys`（Herdr のペインのセッションだけ） |
+| その他 | `usage` `guide` `version` |
+
+- `hc start` は既定で Gateway が直接起動し、すぐにセッション ID を返す（`started claude:<id>`）。`--backend herdr` で従来どおり Herdr のワークスペースで起動する。
+- `hc model ID MODEL` / `hc effort ID LEVEL` はセッション ID と履歴を保ったまま変える。カタログに無い値は理由付きで拒否され、別の値には置き換わらない。Claude Code は次のモデル呼び出しから、Codex は次のターンから効き、それまで `hc show` に「switching to …」と出る。
+- `hc mode ID [MODE]` は巡回、または直接指定（直接管理のみ）。`hc interrupt ID` は実行中のターンだけを止める。
+- `hc term` / `hc keys` は直接管理のセッションには使えない（理由を表示して終了コード 1）。
+- `hc resume ID [--backend herdr]` はどこで始めたセッションでも同じ ID で再開する。直接管理のセッションは `hc send` だけで再開する。
 
 ヘルプの表示には接続設定が要らない。コマンドラインの誤りは該当コマンドのヘルプページ名を添えて終了コード 2 で返す。
 
@@ -63,8 +81,10 @@ env -u GOROOT go build -o ~/.local/bin/hc ./cmd/hc
 
 - 状態は `~/.local/state/herdr-mobile/hc/<カーソル名>/` に置く（`HC_STATE_DIR` で変更）。
   `sessions.json` がセッション一覧のスナップショット、`reads/<セッション>.json` がセッションごとの既読位置。
-- カーソル名は既定で Herdr のペイン（`HERDR_PANE_ID`）ごと。`HC_CURSOR` か `--cursor` で共有・分離できる。
-- `HERDR_PANE_ID` のペインで動いているセッションは呼び出し元自身とみなし、変化として報告しない（一覧では `(you)`）。
+- カーソル名は既定でセッションごと、なければ Herdr のペイン（`HERDR_PANE_ID`）ごと。`HC_CURSOR` か `--cursor` で共有・分離できる。
+- 呼び出し元自身のセッションは、Gateway が直接管理のエージェントに渡す `HC_SESSION_ID`、エージェント自身が
+  ツールに渡す `CLAUDE_CODE_SESSION_ID`（Claude Code）・`CODEX_THREAD_ID`（Codex）、または `HERDR_PANE_ID` の
+  ペインで判定する。自分自身は変化として報告せず（一覧では `(you)`）、送信・アーカイブ・中断・待機を拒否する。
 
 ### 変化の判定
 
@@ -126,6 +146,15 @@ reached after 1m12s:
   5b27a61d idle               now  claude proj · テスト実行
     last: テストは 42 件すべて通りました。
 next: hc read 5b27a61d
+
+$ hc start --cwd ~/workspace/app --provider codex "テストを直して"
+started codex:01a18a22-1465-7690-8177-db1bb2d0f68f
+
+$ hc model 9bd45e93 sonnet
+model: claude-haiku-5-5 → sonnet from the next model request
+
+$ hc term 9bd45e93
+error: 9bd45e93 is run by the gateway itself and has no terminal; use hc read / hc send / hc answer
 
 $ hc answer a9b7 approve --wait
 answered a9b7: approve
