@@ -27,7 +27,9 @@ func (f *fakeRuntime) HerdrAgent() string  { return "claude" }
 func (f *fakeRuntime) Summary(context.Context, string, *providers.Live) (*providers.Summary, error) {
 	return nil, providers.ErrNotFound
 }
-func (f *fakeRuntime) Recent(context.Context, time.Time) ([]providers.Summary, error) { return nil, nil }
+func (f *fakeRuntime) Recent(context.Context, time.Time) ([]providers.Summary, error) {
+	return nil, nil
+}
 func (f *fakeRuntime) Messages(context.Context, string, *providers.Live) ([]model.Message, error) {
 	return nil, nil
 }
