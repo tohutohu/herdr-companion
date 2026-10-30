@@ -626,7 +626,7 @@ func parseLive(live *providers.Live) *providers.Live {
 // --- interactions ---
 
 // The plan dialog's approvals. Where auto mode is available, Claude Code
-// 2.1.300 offers it in place of accepting edits (plan_screen_2_1_300_40cols.txt).
+// 2.1.300 offers it in place of accepting edits.
 const (
 	planAutoMode   = "Yes, and use auto mode"
 	planAutoAccept = "Yes, auto-accept edits"

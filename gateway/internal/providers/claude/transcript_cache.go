@@ -30,7 +30,8 @@ const (
 )
 
 // messagesKey is what Messages depends on besides the transcript. Blocked
-// sessions are never cached: their plan rows come from the screen.
+// sessions are never cached: which tool calls are pending depends on the
+// runtime, not only on the transcript.
 type messagesKey struct {
 	root string
 	live bool
@@ -48,11 +49,7 @@ type cachedTranscript struct {
 	t            *Transcript
 	// conversions convert the decoded part of the file as it grows.
 	conversions map[messagesKey]*conversion
-	// dialogs depends only on transcript content; the visible screen is read
-	// separately on every request while one of these calls is unanswered.
-	dialogs      []contentBlock
-	dialogsKnown bool
-	used         time.Time
+	used        time.Time
 }
 
 // transcript returns the path's decoded transcript, updated to the current
@@ -142,7 +139,6 @@ func (c *cachedTranscript) update(path, sessionID string, sink deadletter.Sink) 
 	}
 	if c.t == nil || !os.SameFile(c.info, info) || info.Size() < c.offset {
 		c.t, c.offset, c.kept, c.mtimeUpdated, c.conversions = newTranscript(), 0, 0, false, nil
-		c.dialogs, c.dialogsKnown = nil, false
 	}
 	c.info = info
 	// Like loadPath, fall back to the file time until an entry has one.
@@ -157,7 +153,6 @@ func (c *cachedTranscript) update(path, sessionID string, sink deadletter.Sink) 
 		}
 		if used := c.decode(data[:n], sessionID, sink); used > 0 {
 			c.offset += int64(used)
-			c.dialogs, c.dialogsKnown = nil, false
 		}
 	}
 	c.mtimeUpdated = c.t.Updated.IsZero()

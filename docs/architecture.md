@@ -93,7 +93,8 @@ the session with `resume` / `thread/resume` under the same id. The sidecar and t
 are children of the gateway: they exit with it (closed stdin), and Claude Code processes are
 closed by the sidecar. A runtime that exits on its own marks its sessions dormant (and a running
 turn failed); the next operation starts a new one. Records idle longer than
-`offlineSessionDays` are dropped; the session then shows offline like any other.
+`offlineSessionDays` are dropped; like any session not updated within that window, it then
+leaves the list (an archived one stays in the archive and can be resumed).
 
 Model, effort and mode changes, interrupt and `seen` work on every session the gateway runs. A
 model, effort or mode id sent to a dormant session is recorded for the process that resumes it;

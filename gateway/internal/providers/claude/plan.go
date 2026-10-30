@@ -22,8 +22,8 @@ import (
 // Rows are chosen with arrows + Enter. The last row is a text field: typing
 // replaces its label and Enter rejects the plan with that feedback. Esc
 // rejects it without feedback and Claude stays in plan mode. Claude Code adds
-// rows in some states (e.g. clearing a full context first), so the rows on
-// screen replace the defaults below whenever the dialog is visible.
+// rows in some states (e.g. clearing a full context first); the gateway
+// offers the rows below.
 const toolExitPlanMode = "ExitPlanMode"
 
 const (
