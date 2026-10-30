@@ -157,9 +157,12 @@ class DesktopResidentState(
     }
 }
 
-/** The 常駐 view: the task list beside the selected task or the form. */
+/**
+ * The 常駐 view: the task list beside the selected task or the form. A run
+ * continued as a session is handed to [onOpenSession].
+ */
 @Composable
-fun DesktopResidentView(state: DesktopResidentState, modifier: Modifier = Modifier) {
+fun DesktopResidentView(state: DesktopResidentState, onOpenSession: (String) -> Unit, modifier: Modifier = Modifier) {
     val backend = state.backend()
     val tz = (state.home.support as? ResidentSupport.Supported)?.defaultTimezone ?: "Asia/Tokyo"
     Row(modifier.fillMaxSize()) {
@@ -185,6 +188,7 @@ fun DesktopResidentView(state: DesktopResidentState, modifier: Modifier = Modifi
                         onBack = null,
                         onEdit = { state.pane = ResidentPane.Edit(it) },
                         onDeleted = { state.pane = ResidentPane.None },
+                        onOpenSession = onOpenSession,
                     )
                 }
                 is ResidentPane.Edit -> key(backend.connectionKey, pane.id) {

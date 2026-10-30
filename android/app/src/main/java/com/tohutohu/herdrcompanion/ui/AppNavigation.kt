@@ -157,6 +157,12 @@ fun AppNavigation(
                     onBack = { lifecycle.ifResumed { resident.back() } },
                     onEdit = { id -> lifecycle.ifResumed { resident.push(ResidentFormRoute(id)) } },
                     onDeleted = { resident.replaceAbove(ResidentHomeRoute, null) },
+                    // A run continued as a session opens in the Sessions tab;
+                    // the 常駐 tab keeps the task.
+                    onOpenSession = { id ->
+                        residentTab = false
+                        nav.openFromNotification(DetailRoute(id, focusLatest = true))
+                    },
                 )
             }
             entry<ResidentFormRoute> { route ->

@@ -395,7 +395,13 @@ private fun FrameWindowScope.DesktopShell(
             // Both views keep their saveable state while the other is shown;
             // the session panes themselves live in DesktopAppState.
             if (resident.topTab == DesktopTopTab.RESIDENT) {
-                stateHolder.SaveableStateProvider("resident") { DesktopResidentView(resident) }
+                stateHolder.SaveableStateProvider("resident") {
+                    DesktopResidentView(resident, onOpenSession = { id ->
+                        resident.topTab = DesktopTopTab.SESSIONS
+                        state.refreshSessions()
+                        state.openSession(id)
+                    })
+                }
             } else stateHolder.SaveableStateProvider("sessions") {
             BoxWithConstraints(Modifier.fillMaxSize()) {
             var sidebarWidth by remember { mutableStateOf(DesktopPreferences.loadSidebarWidth().dp) }

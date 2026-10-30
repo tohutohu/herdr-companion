@@ -42,6 +42,8 @@ interface ResidentBackend {
     suspend fun run(runId: String): ResidentRunDto
     suspend fun cancelRun(runId: String): ResidentRunDto
     suspend fun dismissRun(runId: String): ResidentRunDto
+    /** Continues a run's conversation as a session (resumed); returns its id. */
+    suspend fun promoteRun(runId: String): String
     suspend fun answer(questionId: String, text: String, requestId: String): ResidentPostResultDto
     suspend fun memory(id: String): MemoryDto
     suspend fun putMemory(id: String, update: MemoryUpdateRequest): MemoryDto

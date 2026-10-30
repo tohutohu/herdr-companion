@@ -26,7 +26,14 @@ fun ResidentHomeEntry(onOpenTask: (String) -> Unit, onCreate: () -> Unit) {
 
 /** Android route of one task. Opening it clears the task's notification. */
 @Composable
-fun ResidentTaskEntry(taskId: String, fromNotification: Boolean, onBack: () -> Unit, onEdit: (String) -> Unit, onDeleted: () -> Unit) {
+fun ResidentTaskEntry(
+    taskId: String,
+    fromNotification: Boolean,
+    onBack: () -> Unit,
+    onEdit: (String) -> Unit,
+    onDeleted: () -> Unit,
+    onOpenSession: (String) -> Unit,
+) {
     val context = LocalContext.current
     val backend = remember(context.container.settings.current.connectionId) { context.container.residentBackend() }
     LaunchedEffect(taskId) { Notifications.cancelResident(context, taskId) }
@@ -36,6 +43,7 @@ fun ResidentTaskEntry(taskId: String, fromNotification: Boolean, onBack: () -> U
         onBack = onBack,
         onEdit = onEdit,
         onDeleted = onDeleted,
+        onOpenSession = onOpenSession,
     )
 }
 

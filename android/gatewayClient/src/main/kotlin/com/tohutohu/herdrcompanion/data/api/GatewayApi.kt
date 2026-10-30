@@ -445,6 +445,14 @@ class GatewayApi(
         slow.newCall(req).awaitBody { resp -> json.decodeFromString(bodyOrThrow(resp)) }
     }
 
+    /** Makes a run's conversation a session and resumes it; returns the session id. */
+    suspend fun promoteResidentRun(runId: String): String = withContext(Dispatchers.IO) {
+        // Resuming starts the agent; allow for it.
+        val req = request(url("v1", "resident", "runs", runId, "promote")).post(jsonBody("{}")).build()
+        val slow = http.newBuilder().readTimeout(100, TimeUnit.SECONDS).callTimeout(110, TimeUnit.SECONDS).build()
+        slow.newCall(req).awaitBody { resp -> json.decodeFromString<ResidentPromotionDto>(bodyOrThrow(resp)).sessionId }
+    }
+
     suspend fun answerResidentQuestion(questionId: String, text: String, requestId: String): ResidentPostResultDto =
         json.decodeFromString(post(url("v1", "resident", "questions", questionId, "answers"), jsonBody(json.encodeToString(ResidentTextRequest(text, requestId)))))
 

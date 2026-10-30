@@ -64,7 +64,7 @@ class DesktopResidentFlowTest {
         assumeTrue("set HERDR_RESIDENT_E2E_URL to run", url.isNotEmpty())
         val state = DesktopResidentState({ Settings(url, token) }, OkHttpClient())
         val name = "desktop e2e ${System.currentTimeMillis() % 100000}"
-        rule.setContent { SharedTheme { DesktopResidentView(state, Modifier.size(1280.dp, 900.dp)) } }
+        rule.setContent { SharedTheme { DesktopResidentView(state, onOpenSession = {}, modifier = Modifier.size(1280.dp, 900.dp)) } }
         rule.waitUntil(60_000) { rule.onAllNodes(androidx.compose.ui.test.hasContentDescription("新しいタスク")).fetchSemanticsNodes().isNotEmpty() }
         shot("1-home")
         rule.onNode(androidx.compose.ui.test.hasContentDescription("新しいタスク")).performClick()

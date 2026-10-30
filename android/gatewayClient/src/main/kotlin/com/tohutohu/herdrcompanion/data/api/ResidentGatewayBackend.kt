@@ -49,6 +49,7 @@ class ResidentGatewayBackend(
     override suspend fun run(runId: String) = call { residentRun(runId) }
     override suspend fun cancelRun(runId: String) = call { residentRunAction(runId, "cancel") }
     override suspend fun dismissRun(runId: String) = call { residentRunAction(runId, "dismiss") }
+    override suspend fun promoteRun(runId: String) = call { promoteResidentRun(runId) }
     override suspend fun answer(questionId: String, text: String, requestId: String) = call { answerResidentQuestion(questionId, text, requestId) }
     override suspend fun memory(id: String) = call { residentMemory(id) }
     override suspend fun putMemory(id: String, update: MemoryUpdateRequest) = call { putResidentMemory(id, update) }

@@ -91,6 +91,38 @@ class ResidentApiTest {
     }
 
     @Test
+    fun `実行の会話をセッションに昇格するとセッションIDを返す`() = runBlocking {
+        MockWebServer().use { server ->
+            server.start()
+            server.enqueue(json(200, """{"sessionId":"claude:0b6c7a43-1f5e-4a3c-9d0e-2b8f4c1a7e55"}"""))
+            val id = backend(server).promoteRun("run_1")
+            val req = server.takeRequest()
+            assertEquals("POST", req.method)
+            assertEquals("/v1/resident/runs/run_1/promote", req.target)
+            assertEquals("claude:0b6c7a43-1f5e-4a3c-9d0e-2b8f4c1a7e55", id)
+        }
+    }
+
+    @Test
+    fun `会話を残していない実行の昇格は理由付きで失敗する`() = runBlocking {
+        MockWebServer().use { server ->
+            server.start()
+            server.enqueue(json(400, """{"error":"invalid request: this run kept no conversation to continue","code":"invalid"}"""))
+            val e = assertFailsWith<ResidentApiException> { backend(server).promoteRun("run_1") }
+            assertEquals(400, e.status)
+            assertEquals("invalid", e.code)
+        }
+    }
+
+    @Test
+    fun `会話を続けられるのは残っているか昇格済みの実行だけ`() {
+        assertTrue(canContinueAsSession("kept"))
+        assertTrue(canContinueAsSession("promoted"))
+        assertFalse(canContinueAsSession("discarded"))
+        assertFalse(canContinueAsSession(null))
+    }
+
+    @Test
     fun `既定値と同じ設定も省略せずに送る`() = runBlocking {
         MockWebServer().use { server ->
             server.start()

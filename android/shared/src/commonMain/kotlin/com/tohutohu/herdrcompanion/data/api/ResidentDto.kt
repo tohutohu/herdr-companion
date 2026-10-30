@@ -207,6 +207,9 @@ data class ResidentRunDto(
     val notifyDecision: String? = null,
     val nextWakeAt: String? = null,
     val interactive: Boolean = false,
+    /** kept (can become a session), promoted ([sessionId]), discarded, or absent. */
+    val conversation: String? = null,
+    val sessionId: String? = null,
     val attempts: List<AttemptDto> = emptyList(),
     val artifacts: List<ArtifactDto> = emptyList(),
     val question: ResidentQuestionDto? = null,
@@ -241,7 +244,16 @@ data class ResidentMessageDto(
     val createdAt: String = "",
     val outcome: String? = null,
     val questionId: String? = null,
+    /** The run's conversation, as on [ResidentRunDto]. */
+    val conversation: String? = null,
+    val sessionId: String? = null,
 )
+
+/** Whether a run's conversation can be continued as a session. */
+fun canContinueAsSession(conversation: String?) = conversation == "kept" || conversation == "promoted"
+
+@Serializable
+data class ResidentPromotionDto(val sessionId: String)
 
 @Serializable
 data class ResidentMessagesResponse(val messages: List<ResidentMessageDto> = emptyList(), val more: Boolean = false)

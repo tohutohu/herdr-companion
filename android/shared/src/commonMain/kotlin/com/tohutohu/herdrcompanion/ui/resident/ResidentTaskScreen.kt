@@ -63,6 +63,7 @@ import com.tohutohu.herdrcompanion.data.api.ResidentMessageDto
 import com.tohutohu.herdrcompanion.data.api.ResidentRunDto
 import com.tohutohu.herdrcompanion.data.api.ResidentTaskDetailDto
 import com.tohutohu.herdrcompanion.data.api.RunStatus
+import com.tohutohu.herdrcompanion.data.api.canContinueAsSession
 import com.tohutohu.herdrcompanion.ui.markdown.MarkdownText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -109,6 +110,8 @@ fun ResidentTaskScreen(
     modifier: Modifier = Modifier,
     /** Opened from a notification: show the conversation first. */
     initialTab: Int = 0,
+    /** Shows a session; null hides "continue in a session". */
+    onOpenSession: ((String) -> Unit)? = null,
 ) {
     var state by remember(backend.connectionKey, taskId) { mutableStateOf(ResidentTaskState()) }
     var reload by remember { mutableIntStateOf(0) }
@@ -149,6 +152,13 @@ fun ResidentTaskScreen(
         }
     }
 
+    // Promoting resumes the agent, which can take a few seconds.
+    val continueInSession: ((String) -> Unit)? = onOpenSession?.let { open ->
+        { runId ->
+            var sessionId: String? = null
+            act("セッションで続ける", onSuccess = { sessionId?.let(open) }) { sessionId = backend.promoteRun(runId) }
+        }
+    }
     var menu by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     val task = state.detail?.task
@@ -206,12 +216,14 @@ fun ResidentTaskScreen(
                         }
                     }
                     when (tab) {
-                        0 -> Conversation(state.messages, backend, Modifier.weight(1f), sending = busy == "追加指示") { text, requestId, sent ->
+                        0 -> Conversation(state.messages, backend, Modifier.weight(1f), sending = busy == "追加指示",
+                            continuing = busy == "セッションで続ける", continueEnabled = busy == null, onContinue = continueInSession) { text, requestId, sent ->
                             act("追加指示", onSuccess = sent) { backend.postMessage(taskId, text, requestId) }
                         }
                         1 -> RunHistory(state.runs, backend, Modifier.weight(1f), busy != null,
                             onCancel = { act("実行停止") { backend.cancelRun(it) } },
-                            onDismiss = { act("確認済みにする") { backend.dismissRun(it) } })
+                            onDismiss = { act("確認済みにする") { backend.dismissRun(it) } },
+                            onContinue = continueInSession)
                         2 -> MemoryEditor(detail, Modifier.weight(1f), busy != null) { summary, stateText, version ->
                             act("記憶の保存") {
                                 val obj = if (stateText.isBlank()) JsonObject(emptyMap()) else Json.parseToJsonElement(stateText) as? JsonObject
@@ -326,6 +338,9 @@ private fun Conversation(
     backend: ResidentBackend,
     modifier: Modifier,
     sending: Boolean,
+    continuing: Boolean,
+    continueEnabled: Boolean,
+    onContinue: ((runId: String) -> Unit)?,
     onSend: (text: String, requestId: String, sent: () -> Unit) -> Unit,
 ) {
     val list = rememberLazyListState()
@@ -342,7 +357,10 @@ private fun Conversation(
             }
         } else {
             LazyColumn(Modifier.weight(1f), state = list, contentPadding = PaddingValues(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(messages, key = { it.id }) { m -> MessageBubble(m, backend) }
+                items(messages, key = { it.id }) { m ->
+                    val runId = m.runId?.takeIf { m.role == "assistant" && canContinueAsSession(m.conversation) }
+                    MessageBubble(m, backend, continuing, continueEnabled, onContinue = if (runId != null && onContinue != null) { { onContinue(runId) } } else null)
+                }
             }
         }
         HorizontalDivider()
@@ -368,7 +386,7 @@ private fun Conversation(
 }
 
 @Composable
-private fun MessageBubble(m: ResidentMessageDto, backend: ResidentBackend) {
+private fun MessageBubble(m: ResidentMessageDto, backend: ResidentBackend, continuing: Boolean, continueEnabled: Boolean, onContinue: (() -> Unit)?) {
     val user = m.role == "user"
     val color = when {
         user -> MaterialTheme.colorScheme.primaryContainer
@@ -388,6 +406,7 @@ private fun MessageBubble(m: ResidentMessageDto, backend: ResidentBackend) {
             Column(Modifier.padding(10.dp)) {
                 Text("$label · ${backend.formatInstant(m.createdAt)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 SelectionContainer { MarkdownText(m.text) }
+                onContinue?.let { ContinueInSessionButton(m.conversation, continuing, enabled = continueEnabled, onClick = it) }
             }
         }
     }
@@ -401,6 +420,7 @@ private fun RunHistory(
     busy: Boolean,
     onCancel: (String) -> Unit,
     onDismiss: (String) -> Unit,
+    onContinue: ((String) -> Unit)?,
 ) {
     val expanded = remember { mutableStateMapOf<String, ResidentRunDto?>() }
     val scope = rememberCoroutineScope()
@@ -438,9 +458,29 @@ private fun RunHistory(
                     OutlinedButton(onClick = { onDismiss(r.id) }, enabled = !busy) { Text("確認済みにする") }
                 }
                 if (expanded.containsKey(r.id)) RunDetail(expanded[r.id] ?: r, backend)
+                if (onContinue != null && canContinueAsSession(r.conversation)) {
+                    ContinueInSessionButton(r.conversation, false, enabled = !busy) { onContinue(r.id) }
+                }
             }
             HorizontalDivider()
         }
+    }
+}
+
+/**
+ * Opens the run's conversation as a session: the agent's own conversation,
+ * so the user can ask about what the run found where it found it.
+ */
+@Composable
+private fun ContinueInSessionButton(conversation: String?, continuing: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    OutlinedButton(onClick = onClick, enabled = enabled, modifier = Modifier.padding(top = 6.dp)) {
+        Text(
+            when {
+                continuing -> "セッションを開いています…"
+                conversation == "promoted" -> "セッションを開く"
+                else -> "セッションで続ける"
+            },
+        )
     }
 }
 
