@@ -173,9 +173,7 @@ CREATE TABLE requests (
 	// 2: runs keep their agent conversation, so one can become a session.
 	`
 ALTER TABLE runs ADD COLUMN conversation TEXT NOT NULL DEFAULT '';
-ALTER TABLE runs ADD COLUMN keep_until INTEGER;
 ALTER TABLE runs ADD COLUMN session_id TEXT NOT NULL DEFAULT '';
-CREATE INDEX runs_conversation ON runs(conversation, keep_until);
 `,
 }
 

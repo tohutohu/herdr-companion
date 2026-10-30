@@ -41,7 +41,7 @@ SQLite（`modernc.org/sqlite`、純 Go で cgo 不要）、WAL、`synchronous=FU
 | `tasks` | 設定（JSON）、有効/一時停止、版、信頼確認日時、削除日時、既読位置 |
 | `memory` | 要約（≤8KiB）と構造化状態（JSON オブジェクト ≤64KiB, ≤256 キー）、版、更新者 |
 | `messages` | タスクの会話（追加指示・回答・報告・質問・お知らせ）、処理した Run |
-| `runs` | 状態、起動理由、開始時に固定した設定と Memory のスナップショット、結果、エラー種別、使用量、通知判断、会話の保持（`conversation`, `keep_until`, `session_id`） |
+| `runs` | 状態、起動理由、開始時に固定した設定と Memory のスナップショット、結果、エラー種別、使用量、通知判断、会話の昇格状態（`conversation`, `session_id`） |
 | `attempts` | Provider 呼び出し（段階、native id、保存済みの生の結果） |
 | `wakeups` | 予定と自己予約（pending/fired/skipped/cancelled/merged） |
 | `questions` / `artifacts` | 判断待ちの質問（期限付き）と成果物 |
@@ -176,17 +176,16 @@ SQLite（`modernc.org/sqlite`、純 Go で cgo 不要）、WAL、`synchronous=FU
 「毎時調べて、変化があったらその場で相談する」ための仕組み。Run は調査したときの会話をそのまま残し、
 ユーザーが選んだ Run を通常のセッションにできる。
 
-- プロンプトを送る直前に Run の `conversation` を `kept` にする（`keep_until` = 14 日後、`Config.KeepConversations`）。
-  変化のない定期実行（会話に出さない Run）は確定時に `keep_until` を現在にし、タスクを削除すると昇格していない会話も同様にする。
-- スケジューラの Tick が期限の来た会話を消す: Claude は transcript（`<id>.jsonl` とサブエージェントの `<id>/`）を削除、
-  Codex は Gateway の app-server で `thread/delete`。消す前に `discarding` にして昇格と競合しないようにし、失敗したら 1 時間後に再試行する。
+- Run の会話は通常セッションと同じく Claude Code / Codex の履歴として残り、Gateway は消さない（変化のない定期実行も、
+  タスクを削除しても残る）。プロンプトを送る直前に Run の `conversation` を `kept` にする。
 - `POST /v1/resident/runs/{id}/promote` が昇格する: 終わった Run で `kept` のときだけ。題名「タスク名（常駐 MM/DD HH:MM）」を付け
   （Claude は transcript に `custom-title`、Codex は `thread/name/set`）、`promoted` にしてセッション一覧に出し、
   通常セッションとして再開する（`Launcher.Resume`）。以後は普通のセッションで、承認はアプリに来る。2 回目以降は同じセッションを返す
   （止まっていれば再開する）。
 - 昇格したセッションの先頭は常駐のプロンプト、最後の応答は結果契約の JSON（Claude は StructuredOutput ツール）になる。
   続けて話しかけると通常の文章で答える。
-- 残している会話は Claude Code の `claude --resume` 一覧や `~/.codex/sessions` にも現れる（変化のない定期実行の分はすぐ消える）。
+- 残した会話は Gateway のセッション一覧には昇格するまで出ないが、Claude Code の `claude --resume` 一覧や
+  `~/.codex/sessions` には通常のセッションと同じように現れる。
 
 ## 画面
 

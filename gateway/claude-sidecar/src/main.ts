@@ -272,7 +272,7 @@ async function start(p: Json) {
       // Sessions keep their transcript, the history the gateway reads.
       // A resident run keeps one only when the gateway asks (persist), so
       // that the user can continue it as a session; the gateway hides it
-      // from the session list until then and removes it when not needed.
+      // from the session list until then.
       persistSession: resident ? p.persist === true : true,
       includePartialMessages: !resident,
       pathToClaudeCodeExecutable: String(p.claudePath),

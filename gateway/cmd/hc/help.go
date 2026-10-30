@@ -103,9 +103,8 @@ NOTES
   - The agent can only use integrations the user configured (CLIs, MCP servers). hc itself
     gives no mail or web access.
   - A run cut off by a Gateway restart is never re-sent: it shows needs_reconciliation.
-  - A run that reported something keeps its conversation for 14 days (an unchanged
-    scheduled check keeps none). promote turns it into an ordinary session, resumed and
-    listed by hc ls, so hc send can ask about what the run found.
+  - Every run keeps its agent conversation, as a session does. promote turns it into an
+    ordinary session, resumed and listed by hc ls, so hc send can ask about what the run found.
 
 EXIT STATUS
   0 ok · 1 refused or failed (stderr says why) · 2 wrong command line

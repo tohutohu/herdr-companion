@@ -519,9 +519,9 @@ instruction, conversation, memory, wake-ups and run history. Full description (J
   WAL, mode 600, schema version in `PRAGMA user_version`). It is independent of
   `internal/runtime`: runs are identified by run id and never appear in `direct-sessions.json`,
   the session list (offline entries of resident attempts are filtered out too), the watcher or
-  its pushes. A run that reported something keeps its agent conversation for 14 days; the user
-  can promote it (`POST /v1/resident/runs/{id}/promote`) to an ordinary session, which is then
-  listed and resumed. Conversations not promoted are removed (`docs/resident.md`).
+  its pushes. Each run keeps its agent conversation as a session would, hidden from the list;
+  the user can promote it (`POST /v1/resident/runs/{id}/promote`) to an ordinary session,
+  which is then listed and resumed (`docs/resident.md`).
 - Each run is a fresh agent conversation built from the instruction, the task's memory, the
   recent conversation, pending follow-ups and the reason it started, and must end with a JSON
   result (`resident.ResultSchema`: outcome, summary, report, notification request and key,

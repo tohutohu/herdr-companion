@@ -118,7 +118,6 @@ class ResidentApiTest {
     fun `会話を続けられるのは残っているか昇格済みの実行だけ`() {
         assertTrue(canContinueAsSession("kept"))
         assertTrue(canContinueAsSession("promoted"))
-        assertFalse(canContinueAsSession("discarded"))
         assertFalse(canContinueAsSession(null))
     }
 

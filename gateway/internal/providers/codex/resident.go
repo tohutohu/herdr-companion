@@ -24,12 +24,12 @@ import (
 // Each run is one thread with approvals off (approvalPolicy "never") and
 // the sandbox the task's profile chooses; one turn/start carries the result
 // contract as outputSchema. The run's events are collected here, not read
-// back from thread history. The thread is saved (not ephemeral) so the user
-// can continue it as a session; the gateway hides it from the session list
-// until then, and removes it (Discard) when it is not needed.
+// back from thread history. The thread is saved (not ephemeral), as a
+// session's is, so the user can continue it as one; the gateway hides it
+// from the session list until then.
 type ResidentRunner struct {
 	bin string
-	// p names and deletes saved threads through the gateway's app-server.
+	// p names saved threads through the gateway's app-server.
 	p *Provider
 	// dial starts an app-server and returns its pid (0: none to reap);
 	// tests replace it.
@@ -52,11 +52,6 @@ func (r *ResidentRunner) Close() {}
 // Rename names a run's thread, as the session list shows it.
 func (r *ResidentRunner) Rename(ctx context.Context, nativeID, title string) error {
 	return r.threadCall(ctx, "thread/name/set", map[string]any{"threadId": nativeID, "name": title})
-}
-
-// Discard deletes a run's thread and its rollout.
-func (r *ResidentRunner) Discard(ctx context.Context, nativeID string) error {
-	return r.threadCall(ctx, "thread/delete", map[string]any{"threadId": nativeID})
 }
 
 func (r *ResidentRunner) threadCall(ctx context.Context, method string, params map[string]any) error {

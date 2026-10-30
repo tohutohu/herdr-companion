@@ -214,11 +214,11 @@ func toStrings(v any) []string {
 	return out
 }
 
-func Test常駐実行のtranscriptに題名を付けると一覧の題名になり削除するとサブエージェントごと消える(t *testing.T) {
+func Test常駐実行のtranscriptに題名を付けると一覧の題名になる(t *testing.T) {
 	dir := t.TempDir()
 	project := filepath.Join(dir, "projects", "-work")
 	id := "0b6c7a43-1f5e-4a3c-9d0e-2b8f4c1a7e55"
-	if err := os.MkdirAll(filepath.Join(project, id, "subagents"), 0o755); err != nil {
+	if err := os.MkdirAll(project, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	transcript := filepath.Join(project, id+".jsonl")
@@ -238,16 +238,7 @@ func Test常駐実行のtranscriptに題名を付けると一覧の題名にな�
 	if sum.Title != "CI監視（常駐 10/30 07:00）" {
 		t.Errorf("title = %q", sum.Title)
 	}
-	if err := r.Discard(context.Background(), id); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(transcript); !os.IsNotExist(err) {
-		t.Errorf("transcript remains: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(project, id)); !os.IsNotExist(err) {
-		t.Errorf("subagent directory remains: %v", err)
-	}
-	if err := r.Discard(context.Background(), id); !errors.Is(err, providers.ErrNotFound) {
-		t.Errorf("second discard = %v", err)
+	if err := r.Rename(context.Background(), "0b6c7a43-0000-0000-0000-000000000000", "x"); !errors.Is(err, providers.ErrNotFound) {
+		t.Errorf("rename of a missing transcript = %v", err)
 	}
 }

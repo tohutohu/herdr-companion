@@ -463,9 +463,9 @@ func (s *Service) execute(ctx context.Context, a *activeRun, run *Run, task *Tas
 				}
 				_, err := s.store.db.Exec(`UPDATE attempts SET phase = 'sending', native_id = ?, model = ? WHERE id = ? AND phase = 'preparing'`, nativeID, model, attemptID)
 				if err == nil {
-					// The agent saves the conversation from here on; it is
-					// kept for a while so it can become a session.
-					_, err = s.store.db.Exec(`UPDATE runs SET conversation = 'kept', keep_until = ? WHERE id = ?`, ms(s.clock().Add(s.cfg.KeepConversations)), run.ID)
+					// The agent saves the conversation from here on, as it
+					// does for a session; it can become one.
+					_, err = s.store.db.Exec(`UPDATE runs SET conversation = 'kept' WHERE id = ?`, run.ID)
 				}
 				if err == nil {
 					s.mu.Lock()
@@ -716,12 +716,6 @@ func (s *Service) finalize(ctx context.Context, runID, attemptID string, out *Ru
 			report = res.Summary
 		}
 		show := r.Interactive || res.Outcome != OutcomeUnchanged || status != RunCompleted
-		if !show {
-			// Nothing to talk about: an unchanged check leaves no conversation.
-			if _, err := tx.Exec(`UPDATE runs SET keep_until = ? WHERE id = ? AND conversation = 'kept'`, ms(now), runID); err != nil {
-				return err
-			}
-		}
 		if show {
 			kind := MsgReport
 			if status == RunFailed {

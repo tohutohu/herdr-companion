@@ -207,7 +207,7 @@ data class ResidentRunDto(
     val notifyDecision: String? = null,
     val nextWakeAt: String? = null,
     val interactive: Boolean = false,
-    /** kept (can become a session), promoted ([sessionId]), discarded, or absent. */
+    /** kept (can become a session), promoted ([sessionId]), or absent for runs from before they were kept. */
     val conversation: String? = null,
     val sessionId: String? = null,
     val attempts: List<AttemptDto> = emptyList(),

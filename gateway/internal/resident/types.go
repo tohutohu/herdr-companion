@@ -269,8 +269,8 @@ type Run struct {
 	// answer): their reply goes to the conversation even when unchanged.
 	Interactive bool `json:"interactive"`
 	// Conversation says whether the agent's conversation of the run is
-	// kept and can become a session ("kept"), already is one ("promoted",
-	// SessionID), or is gone ("discarded"; "" for runs that never kept one).
+	// kept and can become a session ("kept") or already is one ("promoted",
+	// SessionID); "" for runs from before conversations were kept.
 	Conversation string     `json:"conversation,omitempty"`
 	SessionID    string     `json:"sessionId,omitempty"`
 	Attempts     []Attempt  `json:"attempts,omitempty"`
@@ -280,11 +280,8 @@ type Run struct {
 
 // Conversation states of a run.
 const (
-	ConversationKept      = "kept"
-	ConversationPromoted  = "promoted"
-	ConversationDiscarded = "discarded"
-	// conversationDiscarding: being removed, no longer promotable.
-	conversationDiscarding = "discarding"
+	ConversationKept     = "kept"
+	ConversationPromoted = "promoted"
 )
 
 // Usage is what a run consumed, as the provider reported it.

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -903,70 +902,38 @@ func TestConversations(t *testing.T) {
 		if got.Conversation != ConversationPromoted || got.SessionID != want {
 			t.Errorf("run = %q %q", got.Conversation, got.SessionID)
 		}
-		h.clock.Add(30 * 24 * time.Hour)
-		h.svc.Tick(bg)
-		if d := h.runner.discardedIDs(); len(d) != 0 {
-			t.Errorf("a promoted conversation was removed: %v", d)
-		}
 	})
 
-	t.Run("変化のない定期実行の会話はすぐ削除され、昇格できない", func(t *testing.T) {
+	t.Run("変化のない定期実行の会話も消さずに残り、昇格できる", func(t *testing.T) {
 		h := newHarness(t)
 		task := h.create(nil)
 		h.clock.Set(mustTime(t, "2026-10-30T07:00:10+09:00"))
 		h.settle()
 		run := h.runs(task.ID)[0]
-		if run.Conversation != ConversationDiscarded {
-			t.Fatalf("conversation = %q", run.Conversation)
+		if run.Outcome != OutcomeUnchanged || run.Conversation != ConversationKept {
+			t.Fatalf("run = %q %q", run.Outcome, run.Conversation)
 		}
-		if d := h.runner.discardedIDs(); len(d) != 1 || d[0] != "native-"+run.ID {
-			t.Errorf("discarded = %v", d)
+		h.clock.Add(60 * 24 * time.Hour)
+		h.svc.Tick(bg)
+		if got, _ := h.svc.GetRun(bg, run.ID); got.Conversation != ConversationKept {
+			t.Errorf("conversation after 60 days = %q", got.Conversation)
 		}
-		if _, err := h.svc.Promote(bg, run.ID); !errors.Is(err, ErrInvalid) {
-			t.Errorf("err = %v", err)
+		if !h.svc.HiddenSessionIDs(bg)["claude:native-"+run.ID] {
+			t.Error("a kept run is listed as a session before it is promoted")
+		}
+		if _, err := h.svc.Promote(bg, run.ID); err != nil {
+			t.Errorf("promote: %v", err)
 		}
 	})
 
-	t.Run("保持期間を過ぎた会話は削除される。失敗したら1時間後にやり直す", func(t *testing.T) {
+	t.Run("会話を残す前のRunは昇格できない", func(t *testing.T) {
 		h := newHarness(t)
 		task := h.create(nil)
 		r, _ := h.svc.RunNow(bg, task.ID, "")
 		h.settle()
-		if d := h.runner.discardedIDs(); len(d) != 0 {
-			t.Fatalf("discarded too early: %v", d)
-		}
-		h.runner.discardErr = errors.New("app-server down")
-		h.clock.Add(14*24*time.Hour + time.Minute)
-		h.svc.Tick(bg)
-		if got, _ := h.svc.GetRun(bg, r.Run.ID); got.Conversation != ConversationKept {
-			t.Fatalf("after a failed removal: %q", got.Conversation)
-		}
-		h.runner.discardErr = nil
-		h.svc.Tick(bg)
-		// Moving the clock also made the daily schedule run (unchanged,
-		// removed at once); only this run's conversation is looked at.
-		native := "native-" + r.Run.ID
-		if slices.Contains(h.runner.discardedIDs(), native) {
-			t.Fatal("retried before an hour")
-		}
-		h.clock.Add(time.Hour)
-		h.svc.Tick(bg)
-		if got, _ := h.svc.GetRun(bg, r.Run.ID); got.Conversation != ConversationDiscarded || !slices.Contains(h.runner.discardedIDs(), native) {
-			t.Errorf("conversation = %q, discarded = %v", got.Conversation, h.runner.discardedIDs())
-		}
-	})
-
-	t.Run("タスクを削除すると昇格していない会話も削除される", func(t *testing.T) {
-		h := newHarness(t)
-		task := h.create(nil)
-		h.svc.RunNow(bg, task.ID, "")
-		h.settle()
-		if err := h.svc.DeleteTask(bg, task.ID); err != nil {
-			t.Fatal(err)
-		}
-		h.svc.Tick(bg)
-		if d := h.runner.discardedIDs(); len(d) != 1 {
-			t.Errorf("discarded = %v", d)
+		h.store.db.Exec(`UPDATE runs SET conversation = '' WHERE id = ?`, r.Run.ID)
+		if _, err := h.svc.Promote(bg, r.Run.ID); !errors.Is(err, ErrInvalid) {
+			t.Errorf("err = %v", err)
 		}
 	})
 

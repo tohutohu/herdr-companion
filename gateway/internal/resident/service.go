@@ -61,10 +61,6 @@ type Config struct {
 	QuestionTTL time.Duration
 	// Tick is how often the scheduler looks at the clock (default 30 s).
 	Tick time.Duration
-	// KeepConversations is how long a run's agent conversation is kept so
-	// it can become a session (default 14 days). Runs not shown in the task
-	// conversation (an unchanged scheduled check) are not kept.
-	KeepConversations time.Duration
 }
 
 func (c Config) withDefaults() Config {
@@ -85,9 +81,6 @@ func (c Config) withDefaults() Config {
 	}
 	if c.Tick <= 0 {
 		c.Tick = 30 * time.Second
-	}
-	if c.KeepConversations <= 0 {
-		c.KeepConversations = 14 * 24 * time.Hour
 	}
 	return c
 }
@@ -547,11 +540,7 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 		if _, err := tx.Exec(`UPDATE runs SET status = 'cancelled', ended_at = ?, error = 'task deleted' WHERE task_id = ? AND status = 'queued'`, ms(now), id); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`UPDATE questions SET status = 'superseded' WHERE task_id = ? AND status = 'open'`, id); err != nil {
-			return err
-		}
-		// Conversations not made sessions go with the task.
-		_, err = tx.Exec(`UPDATE runs SET keep_until = ? WHERE task_id = ? AND conversation = 'kept'`, ms(now), id)
+		_, err = tx.Exec(`UPDATE questions SET status = 'superseded' WHERE task_id = ? AND status = 'open'`, id)
 		return err
 	})
 	if err != nil {

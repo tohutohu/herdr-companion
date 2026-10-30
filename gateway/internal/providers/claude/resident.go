@@ -26,9 +26,9 @@ import (
 // Each run is one query() with outputFormat set to the result contract and
 // a permission mode chosen by the task's profile. Permission requests the
 // rules did not already allow are denied and reported, never approved. The
-// run's transcript is kept (persistSession) so the user can continue it as
-// a session; the gateway hides it from the session list until then, and
-// removes it (Discard) when it is not needed.
+// run's transcript is kept (persistSession), as a session's is, so the user
+// can continue it as one; the gateway hides it from the session list until
+// then.
 type ResidentRunner struct {
 	p *Provider
 }
@@ -61,19 +61,6 @@ func (r *ResidentRunner) Rename(ctx context.Context, nativeID, title string) err
 		return err
 	}
 	return f.Close()
-}
-
-// Discard removes a run's transcript and its subagent transcripts, as the
-// Agent SDK's deleteSession does.
-func (r *ResidentRunner) Discard(ctx context.Context, nativeID string) error {
-	path, err := r.p.transcriptPath(nativeID)
-	if err != nil {
-		return err
-	}
-	if err := os.RemoveAll(strings.TrimSuffix(path, ".jsonl")); err != nil {
-		return err
-	}
-	return os.Remove(path)
 }
 
 // open starts the run's sidecar. Events go to the returned channel; end

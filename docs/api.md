@@ -684,8 +684,8 @@ UUID のみを渡す。長文を Data の10KB制限で失わず、同じセッ�
 
 継続して任せるタスク（常駐）の API。動作の詳細（予定、実行、復旧、権限、通知）は [resident.md](resident.md)。
 すべて Bearer 認証。`/v1/sessions` とは独立していて、常駐の実行はセッション一覧に現れない（昇格した Run を除く）。
-Run と会話のメッセージには `conversation`（`kept`: 昇格できる、`promoted`: `sessionId` のセッションになった、`discarded`、
-または省略）が付く。
+Run と会話のメッセージには `conversation`（`kept`: 昇格できる、`promoted`: `sessionId` のセッションになった、
+会話を残す前の Run では省略）が付く。
 
 ### 対応の判別: `GET /v1/capabilities`
 

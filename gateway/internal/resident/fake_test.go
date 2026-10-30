@@ -73,9 +73,7 @@ type fakeRunner struct {
 	fallback fakeStep
 	started  chan string
 
-	titles     map[string]string
-	discarded  []string
-	discardErr error
+	titles map[string]string
 }
 
 type fakeStep struct {
@@ -134,7 +132,7 @@ func (f *fakeRunner) Run(ctx context.Context, req RunRequest, hooks RunHooks) (*
 	return out, nil
 }
 
-// Rename and Discard make the fake a ConversationKeeper.
+// Rename makes the fake a ConversationKeeper.
 func (f *fakeRunner) Rename(ctx context.Context, nativeID, title string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -143,22 +141,6 @@ func (f *fakeRunner) Rename(ctx context.Context, nativeID, title string) error {
 	}
 	f.titles[nativeID] = title
 	return nil
-}
-
-func (f *fakeRunner) Discard(ctx context.Context, nativeID string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.discardErr != nil {
-		return f.discardErr
-	}
-	f.discarded = append(f.discarded, nativeID)
-	return nil
-}
-
-func (f *fakeRunner) discardedIDs() []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]string(nil), f.discarded...)
 }
 
 func (f *fakeRunner) callCount() int {
