@@ -321,7 +321,9 @@ func optionLabel(opts []model.Option, v string) (string, bool) {
 
 type startResult struct {
 	SessionID     string `json:"sessionId,omitempty"`
-	PaneID        string `json:"paneId"`
+	PaneID        string `json:"paneId,omitempty"`
+	LaunchID      string `json:"launchId,omitempty"`
+	Backend       string `json:"backend,omitempty"`
 	Warning       string `json:"warning,omitempty"`
 	TrustRequired bool   `json:"trustRequired,omitempty"`
 }
@@ -335,6 +337,7 @@ func (a *app) cmdStart(args []string) error {
 	mode := fs.String("mode", "", "start mode id, e.g. plan")
 	worktree := fs.Bool("worktree", false, "start in a new git worktree of cwd")
 	noTrust := fs.Bool("no-trust", false, "do not accept the folder-trust dialog")
+	backend := fs.String("backend", "", `"direct" (default: the Gateway runs the agent) or "herdr" (a new Herdr workspace)`)
 	var files stringList
 	fs.Var(&files, "file", "attach a local file to the first prompt (repeatable)")
 	wf := addWaitFlags(fs)
@@ -362,7 +365,7 @@ func (a *app) cmdStart(args []string) error {
 	}
 	body := map[string]any{
 		"provider": *provider, "cwd": dir, "prompt": prompt, "model": *modelID, "effort": *effort,
-		"mode": *mode, "trust": !*noTrust, "worktree": *worktree,
+		"mode": *mode, "trust": !*noTrust, "worktree": *worktree, "backend": *backend,
 	}
 	if len(uploads) > 0 {
 		body["uploads"] = uploads
@@ -371,7 +374,7 @@ func (a *app) cmdStart(args []string) error {
 	if err := a.client.do(ctx, http.MethodPost, "/v1/sessions", body, &res); err != nil {
 		return err
 	}
-	if res.SessionID == "" && *wf.wait {
+	if res.SessionID == "" && res.PaneID != "" && *wf.wait {
 		res.SessionID = a.awaitIdentity(ctx, res.PaneID, *wf.timeout)
 	}
 	if a.json && !*wf.wait {
@@ -379,17 +382,23 @@ func (a *app) cmdStart(args []string) error {
 	}
 	short := nativeID(res.SessionID)
 	if !a.json {
-		if res.SessionID != "" {
+		switch {
+		case res.SessionID != "" && res.PaneID != "":
 			short = clipID(short, 8)
 			fmt.Fprintf(a.out, "started %s (pane %s)\n", res.SessionID, res.PaneID)
-		} else {
+		case res.SessionID != "":
+			short = clipID(short, 8)
+			fmt.Fprintf(a.out, "started %s\n", res.SessionID)
+		case res.PaneID != "":
 			fmt.Fprintf(a.out, "started in pane %s; the agent has not reported its session id yet (find it with hc ls)\n", res.PaneID)
 		}
 		if res.Warning != "" {
 			fmt.Fprintf(a.out, "warning: %s\n", res.Warning)
 		}
-		if res.TrustRequired {
+		if res.TrustRequired && res.PaneID != "" {
 			fmt.Fprintf(a.out, "stopped at the folder-trust dialog; see: hc term %s\n", res.PaneID)
+		} else if res.TrustRequired {
+			fmt.Fprintln(a.out, "not started: the agent was never trusted in this folder; run again without --no-trust to trust it")
 		}
 	}
 	if res.SessionID == "" {
@@ -419,6 +428,9 @@ func (a *app) awaitIdentity(ctx context.Context, pane string, timeout time.Durat
 func (a *app) terminalPath(ctx context.Context, ref string) (string, error) {
 	s, err := a.resolve(ctx, ref)
 	if err == nil {
+		if s.Backend == model.BackendDirect {
+			return "", fmt.Errorf("%s is run by the gateway itself and has no terminal; use hc read / hc send / hc answer", ref)
+		}
 		return "/v1/sessions/" + url.PathEscape(s.ID) + "/terminal", nil
 	}
 	var probe json.RawMessage
@@ -502,15 +514,19 @@ func (a *app) cmdMode(args []string) error {
 	if err != nil {
 		return err
 	}
-	if len(pos) != 1 {
-		return usagef("mode takes one session ID")
+	if len(pos) != 1 && len(pos) != 2 {
+		return usagef("mode takes a session ID and optionally a mode id")
+	}
+	body := map[string]any{}
+	if len(pos) == 2 {
+		body["mode"] = pos[1]
 	}
 	ctx := context.Background()
 	s, err := a.resolve(ctx, pos[0])
 	if err != nil {
 		return err
 	}
-	if err := a.client.do(ctx, http.MethodPost, "/v1/sessions/"+url.PathEscape(s.ID)+"/mode", map[string]any{}, nil); err != nil {
+	if err := a.client.do(ctx, http.MethodPost, "/v1/sessions/"+url.PathEscape(s.ID)+"/mode", body, nil); err != nil {
 		return err
 	}
 	time.Sleep(700 * time.Millisecond)
@@ -521,7 +537,11 @@ func (a *app) cmdMode(args []string) error {
 	if a.json {
 		return a.printJSON(map[string]string{"from": s.Mode, "mode": after.Mode})
 	}
-	fmt.Fprintf(a.out, "mode: %s → %s (run again to cycle further)\n", firstNonEmpty(s.Mode, "default"), firstNonEmpty(after.Mode, "default"))
+	hint := " (run again to cycle further)"
+	if len(pos) == 2 {
+		hint = ""
+	}
+	fmt.Fprintf(a.out, "mode: %s → %s%s\n", firstNonEmpty(s.Mode, "default"), firstNonEmpty(after.Mode, "default"), hint)
 	return nil
 }
 
@@ -568,7 +588,9 @@ func (a *app) cmdArchive(args []string) error {
 }
 
 func (a *app) cmdResume(args []string) error {
-	pos, err := parseFlags(flag.NewFlagSet("resume", flag.ContinueOnError), args)
+	fs := flag.NewFlagSet("resume", flag.ContinueOnError)
+	backend := fs.String("backend", "", `"direct" (default) or "herdr"`)
+	pos, err := parseFlags(fs, args)
 	if err != nil {
 		return err
 	}
@@ -581,13 +603,17 @@ func (a *app) cmdResume(args []string) error {
 		return err
 	}
 	var res startResult
-	if err := a.client.do(ctx, http.MethodPost, "/v1/sessions/"+url.PathEscape(s.ID)+"/resume", map[string]bool{"trust": true}, &res); err != nil {
+	if err := a.client.do(ctx, http.MethodPost, "/v1/sessions/"+url.PathEscape(s.ID)+"/resume", map[string]any{"trust": true, "backend": *backend}, &res); err != nil {
 		return err
 	}
 	if a.json {
 		return a.printJSON(res)
 	}
-	fmt.Fprintf(a.out, "resumed %s in pane %s\n", s.ID, res.PaneID)
+	if res.PaneID != "" {
+		fmt.Fprintf(a.out, "resumed %s in pane %s\n", s.ID, res.PaneID)
+	} else {
+		fmt.Fprintf(a.out, "resumed %s\n", s.ID)
+	}
 	if res.Warning != "" {
 		fmt.Fprintf(a.out, "warning: %s\n", res.Warning)
 	}
@@ -627,5 +653,73 @@ func (a *app) cmdUsage(args []string) error {
 	if u.Error != "" {
 		fmt.Fprintln(a.out, "last refresh failed:", u.Error)
 	}
+	return nil
+}
+
+// cmdModel and cmdEffort change a running session's model or reasoning
+// effort; the session keeps its id and history.
+func (a *app) cmdModel(args []string) error { return a.changeSetting("model", args) }
+
+func (a *app) cmdEffort(args []string) error { return a.changeSetting("effort", args) }
+
+func (a *app) changeSetting(kind string, args []string) error {
+	pos, err := parseFlags(flag.NewFlagSet(kind, flag.ContinueOnError), args)
+	if err != nil {
+		return err
+	}
+	if len(pos) != 2 {
+		return usagef("%s takes a session ID and the new %s", kind, kind)
+	}
+	ctx := context.Background()
+	s, err := a.resolve(ctx, pos[0])
+	if err != nil {
+		return err
+	}
+	var after model.Session
+	if err := a.client.do(ctx, http.MethodPost, "/v1/sessions/"+url.PathEscape(s.ID)+"/"+kind, map[string]string{kind: pos[1]}, &after); err != nil {
+		return err
+	}
+	if a.json {
+		return a.printJSON(after)
+	}
+	current, pending := after.Model, after.PendingModel
+	if kind == "effort" {
+		current, pending = after.Effort, after.PendingEffort
+	}
+	switch {
+	case pending == "":
+		fmt.Fprintf(a.out, "%s: %s\n", kind, firstNonEmpty(current, pos[1]))
+	case after.SettingsApply == "next_turn":
+		fmt.Fprintf(a.out, "%s: %s → %s from the next turn (the running turn keeps %s)\n", kind, firstNonEmpty(current, "default"), pending, firstNonEmpty(current, "its setting"))
+	default:
+		fmt.Fprintf(a.out, "%s: %s → %s from the next model request\n", kind, firstNonEmpty(current, "default"), pending)
+	}
+	return nil
+}
+
+// cmdInterrupt stops the running turn of a session the gateway runs.
+func (a *app) cmdInterrupt(args []string) error {
+	pos, err := parseFlags(flag.NewFlagSet("interrupt", flag.ContinueOnError), args)
+	if err != nil {
+		return err
+	}
+	if len(pos) != 1 {
+		return usagef("interrupt takes one session ID")
+	}
+	ctx := context.Background()
+	s, err := a.resolve(ctx, pos[0])
+	if err != nil {
+		return err
+	}
+	if a.isSelf(s) {
+		return fmt.Errorf("%s is this session itself; refusing to interrupt yourself", pos[0])
+	}
+	if err := a.client.do(ctx, http.MethodPost, "/v1/sessions/"+url.PathEscape(s.ID)+"/interrupt", map[string]any{}, nil); err != nil {
+		return err
+	}
+	if a.json {
+		return a.printJSON(map[string]bool{"ok": true})
+	}
+	fmt.Fprintf(a.out, "interrupted %s\n", s.ID)
 	return nil
 }

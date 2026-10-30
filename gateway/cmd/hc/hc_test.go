@@ -22,6 +22,8 @@ type fakeGateway struct {
 	posted   []postedRequest
 	// onPost lets a test change state when a command posts.
 	onPost func(path string, body map[string]any)
+	// replies are bodies for POSTs to a path, instead of {"ok": true}.
+	replies map[string]any
 }
 
 type postedRequest struct {
@@ -48,6 +50,10 @@ func (g *fakeGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		g.posted = append(g.posted, postedRequest{path, body})
 		if g.onPost != nil {
 			g.onPost(path, body)
+		}
+		if reply, ok := g.replies[path]; ok {
+			writeJSON(reply)
+			return
 		}
 		w.WriteHeader(http.StatusAccepted)
 		writeJSON(map[string]bool{"ok": true})

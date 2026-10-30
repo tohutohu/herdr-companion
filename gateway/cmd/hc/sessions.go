@@ -95,6 +95,9 @@ func (a *app) resolve(ctx context.Context, ref string) (model.Session, error) {
 }
 
 func (a *app) isSelf(s model.Session) bool {
+	if a.selfID != "" && s.ID == a.selfID {
+		return true
+	}
 	return a.selfPane != "" && s.PaneID == a.selfPane && s.Status != model.StatusOffline
 }
 
@@ -249,11 +252,21 @@ func (a *app) cmdShow(args []string) error {
 	}
 	var facts []string
 	facts = append(facts, "updated "+age(s.UpdatedAt)+" ago")
+	if s.Backend == model.BackendDirect {
+		facts = append(facts, "run by the gateway (no terminal)")
+	}
 	if s.PaneID != "" {
 		facts = append(facts, "pane "+s.PaneID)
 	}
 	if s.Model != "" {
 		facts = append(facts, strings.TrimSpace(s.Model+" "+s.Effort))
+	}
+	if s.PendingModel != "" || s.PendingEffort != "" {
+		when := "next request"
+		if s.SettingsApply == "next_turn" {
+			when = "next turn"
+		}
+		facts = append(facts, "switching to "+strings.TrimSpace(s.PendingModel+" "+s.PendingEffort)+" from the "+when)
 	}
 	if s.Mode != "" {
 		facts = append(facts, "mode "+s.Mode)
@@ -266,6 +279,9 @@ func (a *app) cmdShow(args []string) error {
 	}
 	if !s.CanSend {
 		facts = append(facts, "not running (hc resume to restart)")
+	}
+	if s.Error != "" {
+		facts = append(facts, "error: "+s.Error)
 	}
 	fmt.Fprintln(w, strings.Join(facts, " · "))
 	o := renderOpts{short: short, maxChars: max}

@@ -46,9 +46,13 @@ type app struct {
 	client *client
 	state  *stateStore
 	cursor string
-	// selfPane is the Herdr pane this process runs in. The session in it is
-	// the caller itself and never reported as a change.
+	// selfPane is the Herdr pane this process runs in, and selfID the
+	// session that runs this process when the agent itself reports it
+	// (HC_SESSION_ID from the Gateway, CLAUDE_CODE_SESSION_ID, or
+	// CODEX_THREAD_ID). That session is the caller itself: never reported as
+	// a change, never sent to, archived or waited for.
 	selfPane string
+	selfID   string
 }
 
 func main() {
@@ -175,22 +179,25 @@ func (a *app) dispatch(cmd string, args []string, g globalFlags) error {
 // commands are the commands that talk to the Gateway.
 func (a *app) commands() map[string]func([]string) error {
 	return map[string]func([]string) error{
-		"ls":      a.cmdList,
-		"show":    a.cmdShow,
-		"read":    a.cmdRead,
-		"export":  a.cmdExport,
-		"changes": a.cmdChanges,
-		"wait":    a.cmdWait,
-		"until":   a.cmdUntil,
-		"send":    a.cmdSend,
-		"answer":  a.cmdAnswer,
-		"start":   a.cmdStart,
-		"term":    a.cmdTerm,
-		"keys":    a.cmdKeys,
-		"mode":    a.cmdMode,
-		"archive": a.cmdArchive,
-		"resume":  a.cmdResume,
-		"usage":   a.cmdUsage,
+		"ls":        a.cmdList,
+		"show":      a.cmdShow,
+		"read":      a.cmdRead,
+		"export":    a.cmdExport,
+		"changes":   a.cmdChanges,
+		"wait":      a.cmdWait,
+		"until":     a.cmdUntil,
+		"send":      a.cmdSend,
+		"answer":    a.cmdAnswer,
+		"start":     a.cmdStart,
+		"term":      a.cmdTerm,
+		"keys":      a.cmdKeys,
+		"mode":      a.cmdMode,
+		"model":     a.cmdModel,
+		"effort":    a.cmdEffort,
+		"interrupt": a.cmdInterrupt,
+		"archive":   a.cmdArchive,
+		"resume":    a.cmdResume,
+		"usage":     a.cmdUsage,
 	}
 }
 
@@ -209,23 +216,46 @@ func (a *app) setup(g globalFlags) error {
 	if a.selfPane == "" {
 		a.selfPane = os.Getenv("HERDR_PANE_ID")
 	}
+	if a.selfID == "" {
+		a.selfID = selfSession(os.Getenv)
+	}
 	a.cursor = g.cursor
 	if a.cursor == "" {
 		a.cursor = os.Getenv("HC_CURSOR")
 	}
 	if a.cursor == "" {
-		a.cursor = defaultCursor(a.selfPane)
+		a.cursor = defaultCursor(a.selfID, a.selfPane)
 	}
 	return nil
 }
 
-// defaultCursor keeps agents in different panes from taking each other's
-// changes: each pane reads with its own cursor unless told otherwise.
-func defaultCursor(pane string) string {
-	if pane == "" {
-		return "default"
+// selfSession is the gateway id of the session this process runs in, as
+// far as its environment says: the Gateway sets HC_SESSION_ID for the
+// sessions it runs; Claude Code and Codex export their own ids to the
+// commands they run.
+func selfSession(getenv func(string) string) string {
+	if id := getenv("HC_SESSION_ID"); strings.Contains(id, ":") {
+		return id
 	}
-	return "pane-" + pane
+	if id := getenv("CLAUDE_CODE_SESSION_ID"); id != "" {
+		return "claude:" + id
+	}
+	if id := getenv("CODEX_THREAD_ID"); id != "" {
+		return "codex:" + id
+	}
+	return ""
+}
+
+// defaultCursor keeps agents in different sessions or panes from taking
+// each other's changes: each reads with its own cursor unless told otherwise.
+func defaultCursor(session, pane string) string {
+	switch {
+	case session != "":
+		return "session-" + session
+	case pane != "":
+		return "pane-" + pane
+	}
+	return "default"
 }
 
 // parseFlags parses fs from args that may mix flags and positional
