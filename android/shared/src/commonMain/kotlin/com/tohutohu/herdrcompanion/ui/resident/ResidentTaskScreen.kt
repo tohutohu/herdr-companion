@@ -161,6 +161,7 @@ fun ResidentTaskScreen(
     }
     var menu by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var choosePause by remember { mutableStateOf(false) }
     val task = state.detail?.task
     Scaffold(
         modifier = modifier,
@@ -176,10 +177,10 @@ fun ResidentTaskScreen(
                         IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "その他") }
                         DropdownMenu(menu, onDismissRequest = { menu = false }) {
                             DropdownMenuItem(
-                                text = { Text(if (task.enabled) "一時停止" else "再開") },
+                                text = { Text(if (task.enabled) "一時停止…" else "再開") },
                                 onClick = {
                                     menu = false
-                                    act(if (task.enabled) "一時停止" else "再開") { backend.setEnabled(taskId, !task.enabled) }
+                                    if (task.enabled) choosePause = true else act("再開") { backend.setEnabled(taskId, true) }
                                 },
                             )
                             DropdownMenuItem(text = { Text("削除") }, onClick = { menu = false; confirmDelete = true })
@@ -237,6 +238,18 @@ fun ResidentTaskScreen(
             }
         }
     }
+    if (choosePause) {
+        PauseDialog(onDismiss = { choosePause = false }) { length ->
+            choosePause = false
+            act("一時停止") {
+                val until = backend.pauseEnd(length)
+                val paused = backend.setEnabled(taskId, false, until)
+                if (until != null && paused.pausedUntil == null) {
+                    actionError = "この Gateway は期限付きの一時停止に対応していないため、再開するまで止めました。再開は手動で行ってください。"
+                }
+            }
+        }
+    }
     if (confirmDelete) {
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
@@ -287,7 +300,7 @@ private fun TaskHeader(
         val self = detail.wakeups.firstOrNull { it.kind == "self" }
         Text(
             buildString {
-                append(if (!task.enabled) "一時停止中（自動実行しません）" else if (next.isEmpty()) "予定された自動実行はありません" else "次回: ${next.joinToString(", ")}")
+                append(if (!task.enabled) task.pausedUntil?.let { "一時停止中（${backend.formatInstant(it)} に再開）" } ?: "一時停止中（自動実行しません）" else if (next.isEmpty()) "予定された自動実行はありません" else "次回: ${next.joinToString(", ")}")
                 self?.let { append("\n再確認の予約: ${backend.formatInstant(it.dueAt)}${it.reason?.let { r -> "（$r）" }.orEmpty()}") }
                 task.lastSuccessAt?.let { append("\n最終成功: ${backend.formatInstant(it)}") }
                 append("\n今日の起動: ${task.runsToday} / ${task.limits.maxRunsPerDay} 回")
@@ -306,6 +319,30 @@ private fun TaskHeader(
         }
     }
     HorizontalDivider()
+}
+
+/** Asks how long to pause: automatic runs stop, manual runs and instructions still run. */
+@Composable
+private fun PauseDialog(onDismiss: () -> Unit, onPause: (PauseLength) -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("一時停止") },
+        text = {
+            Column {
+                Text("止めている間は予定の実行をしません（手動実行・追加指示は動きます）。止めていた間の予定は後から実行しません。",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                PauseLength.entries.forEach { length ->
+                    Text(
+                        length.label,
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.fillMaxWidth().clickable { onPause(length) }.padding(vertical = 12.dp),
+                    )
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("キャンセル") } },
+    )
 }
 
 @OptIn(ExperimentalLayoutApi::class)

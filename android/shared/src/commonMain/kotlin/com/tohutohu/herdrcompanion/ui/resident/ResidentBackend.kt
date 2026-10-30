@@ -33,7 +33,8 @@ interface ResidentBackend {
     suspend fun create(request: ResidentTaskRequest): ResidentTaskDto
     suspend fun update(id: String, request: ResidentTaskRequest): ResidentTaskDto
     suspend fun delete(id: String)
-    suspend fun setEnabled(id: String, enabled: Boolean): ResidentTaskDto
+    /** Resumes, or pauses until [until] (RFC 3339; null: until resumed). */
+    suspend fun setEnabled(id: String, enabled: Boolean, until: String? = null): ResidentTaskDto
     suspend fun runNow(id: String, requestId: String): ResidentPostResultDto
     suspend fun messages(id: String, limit: Int = 100): ResidentMessagesResponse
     suspend fun postMessage(id: String, text: String, requestId: String): ResidentPostResultDto
@@ -61,6 +62,18 @@ interface ResidentBackend {
 
     /** An instant relative to now, e.g. "3分前", "2時間後". */
     fun relative(iso: String): String
+
+    /** When a pause of [length] chosen now ends (RFC 3339), null for one until resumed. */
+    fun pauseEnd(length: PauseLength): String?
+}
+
+/** The pause lengths the task screen offers. */
+enum class PauseLength(val label: String) {
+    ONE_HOUR("1時間"),
+    THREE_HOURS("3時間"),
+    TOMORROW_MORNING("明日の朝 7:00 まで"),
+    ONE_WEEK("1週間"),
+    UNTIL_RESUMED("再開するまで"),
 }
 
 /**

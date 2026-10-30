@@ -212,7 +212,7 @@ private fun ResidentTaskRow(task: ResidentTaskDto, backend: ResidentBackend, sel
                 Text(style.label, color = style.color, style = MaterialTheme.typography.labelMedium)
             }
             val facts = buildList {
-                if (!task.enabled) add("一時停止中")
+                if (!task.enabled) add(task.pausedUntil?.let { "${backend.formatInstant(it)} まで一時停止" } ?: "一時停止中")
                 else task.nextRunAt?.let { add("次回 ${backend.formatInstant(it)}") } ?: add("自動実行なし")
                 task.lastSuccessAt?.let { add("最終成功 ${backend.relative(it)}") }
                 add(providerLabel(task.provider))

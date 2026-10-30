@@ -1,6 +1,7 @@
 package com.tohutohu.herdrcompanion.data.api
 
 import com.tohutohu.herdrcompanion.ui.resident.ResidentApiException
+import com.tohutohu.herdrcompanion.ui.resident.PauseLength
 import com.tohutohu.herdrcompanion.ui.resident.ResidentBackend
 import kotlinx.coroutines.CancellationException
 import java.io.IOException
@@ -8,6 +9,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 import java.util.Locale
 import java.util.UUID
 
@@ -40,7 +42,7 @@ class ResidentGatewayBackend(
     override suspend fun create(request: ResidentTaskRequest) = call { createResidentTask(request) }
     override suspend fun update(id: String, request: ResidentTaskRequest) = call { updateResidentTask(id, request) }
     override suspend fun delete(id: String) = call { deleteResidentTask(id) }
-    override suspend fun setEnabled(id: String, enabled: Boolean) = call { setResidentEnabled(id, enabled) }
+    override suspend fun setEnabled(id: String, enabled: Boolean, until: String?) = call { setResidentEnabled(id, enabled, until) }
     override suspend fun runNow(id: String, requestId: String) = call { runResidentNow(id, requestId) }
     override suspend fun messages(id: String, limit: Int) = call { residentMessages(id, limit) }
     override suspend fun postMessage(id: String, text: String, requestId: String) = call { postResidentMessage(id, text, requestId) }
@@ -71,6 +73,18 @@ class ResidentGatewayBackend(
         }
         t.format(DateTimeFormatter.ofPattern(pattern, Locale.JAPANESE))
     }.getOrDefault(iso)
+
+    override fun pauseEnd(length: PauseLength): String? {
+        val t = now().atZone(zone())
+        val end = when (length) {
+            PauseLength.ONE_HOUR -> t.plusHours(1)
+            PauseLength.THREE_HOURS -> t.plusHours(3)
+            PauseLength.TOMORROW_MORNING -> t.toLocalDate().plusDays(1).atTime(7, 0).atZone(zone())
+            PauseLength.ONE_WEEK -> t.plusWeeks(1)
+            PauseLength.UNTIL_RESUMED -> return null
+        }
+        return end.toInstant().truncatedTo(ChronoUnit.SECONDS).toString()
+    }
 
     override fun relative(iso: String): String = runCatching { relativeText(Duration.between(now(), Instant.parse(iso))) }.getOrDefault(iso)
 

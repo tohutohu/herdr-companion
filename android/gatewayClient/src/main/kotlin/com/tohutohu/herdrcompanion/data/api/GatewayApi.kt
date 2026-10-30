@@ -416,8 +416,11 @@ class GatewayApi(
         execute(request(url("v1", "resident", "tasks", id)).delete().build())
     }
 
-    suspend fun setResidentEnabled(id: String, enabled: Boolean): ResidentTaskDto =
-        json.decodeFromString(post(url("v1", "resident", "tasks", id, if (enabled) "resume" else "pause"), jsonBody("{}")))
+    suspend fun setResidentEnabled(id: String, enabled: Boolean, until: String? = null): ResidentTaskDto =
+        json.decodeFromString(
+            if (enabled) post(url("v1", "resident", "tasks", id, "resume"), jsonBody("{}"))
+            else post(url("v1", "resident", "tasks", id, "pause"), jsonBody(json.encodeToString(ResidentPauseRequest(until)))),
+        )
 
     suspend fun runResidentNow(id: String, requestId: String): ResidentPostResultDto =
         json.decodeFromString(post(url("v1", "resident", "tasks", id, "runs"), jsonBody(json.encodeToString(ResidentRequestId(requestId)))))

@@ -1,6 +1,7 @@
 package com.tohutohu.herdrcompanion.data.api
 
 import com.tohutohu.herdrcompanion.data.Settings
+import com.tohutohu.herdrcompanion.ui.resident.PauseLength
 import com.tohutohu.herdrcompanion.ui.resident.ResidentApiException
 import com.tohutohu.herdrcompanion.ui.resident.ResidentDraft
 import com.tohutohu.herdrcompanion.ui.resident.ResidentHomeState
@@ -112,6 +113,37 @@ class ResidentApiTest {
             assertEquals(400, e.status)
             assertEquals("invalid", e.code)
         }
+    }
+
+    @Test
+    fun `期限付きの一時停止は終了時刻を送り無期限なら送らない`() = runBlocking {
+        MockWebServer().use { server ->
+            server.start()
+            server.enqueue(json(200, """{"id":"task_1","name":"CI","provider":"claude","enabled":false,"pausedUntil":"2026-11-01T22:00:00Z","state":"paused"}"""))
+            server.enqueue(json(200, """{"id":"task_1","name":"CI","provider":"claude","enabled":false,"state":"paused"}"""))
+            server.enqueue(json(200, """{"id":"task_1","name":"CI","provider":"claude","enabled":true,"state":"idle"}"""))
+            val b = backend(server)
+            assertEquals("2026-11-01T22:00:00Z", b.setEnabled("task_1", false, "2026-11-01T22:00:00Z").pausedUntil)
+            val timed = server.takeRequest()
+            assertEquals("/v1/resident/tasks/task_1/pause", timed.target)
+            assertEquals("""{"until":"2026-11-01T22:00:00Z"}""", timed.body!!.utf8())
+            assertNull(b.setEnabled("task_1", false).pausedUntil)
+            assertEquals("{}", server.takeRequest().body!!.utf8())
+            b.setEnabled("task_1", true)
+            assertEquals("/v1/resident/tasks/task_1/resume", server.takeRequest().target)
+        }
+    }
+
+    @Test
+    fun `一時停止の終了時刻は端末の時刻帯で数え明日の朝は翌日7時`() {
+        val tokyo = ZoneId.of("Asia/Tokyo")
+        val b = ResidentGatewayBackend(GatewayApi(OkHttpClient()) { Settings("http://x/", "t") }, "conn",
+            zone = { tokyo }, now = { Instant.parse("2026-10-30T14:30:15.250Z") }) // 23:30 JST
+        assertEquals("2026-10-30T15:30:15Z", b.pauseEnd(PauseLength.ONE_HOUR))
+        assertEquals("2026-10-30T17:30:15Z", b.pauseEnd(PauseLength.THREE_HOURS))
+        assertEquals("2026-10-30T22:00:00Z", b.pauseEnd(PauseLength.TOMORROW_MORNING))
+        assertEquals("2026-11-06T14:30:15Z", b.pauseEnd(PauseLength.ONE_WEEK))
+        assertNull(b.pauseEnd(PauseLength.UNTIL_RESUMED))
     }
 
     @Test

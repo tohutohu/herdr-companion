@@ -119,6 +119,8 @@ data class ResidentTaskDto(
     val notify: NotifyDto = NotifyDto(),
     val limits: LimitsDto = LimitsDto(),
     val enabled: Boolean = true,
+    /** When a paused task resumes on its own; null while enabled or paused until resumed. */
+    val pausedUntil: String? = null,
     val version: Long = 0,
     val createdAt: String = "",
     val updatedAt: String = "",
@@ -325,6 +327,10 @@ data class ResidentTextRequest(val text: String, val requestId: String? = null)
 
 @Serializable
 data class ResidentRequestId(val requestId: String? = null)
+
+/** Pausing a task; [until] (RFC 3339) resumes it then, null keeps it paused. */
+@Serializable
+data class ResidentPauseRequest(val until: String? = null)
 
 @Serializable
 data class ResidentReadRequest(val messageId: String? = null)
