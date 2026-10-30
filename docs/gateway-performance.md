@@ -1,5 +1,7 @@
 # Gateway performance investigation
 
+> 以下は1.x（2026-10）の調査記録で、当時の構成で測った値と説明をそのまま残している。2.0ではHerdr連携、Codexの共有app-server daemon（WebSocket接続）と端末ダイアログの読み取りがなくなり、CodexはGateway自身が起動する`codex app-server`（stdio）だけで動く。履歴の再利用、rolloutの増分要約、同じ履歴取得の共有、goccyの限定採用は2.0にも残っている。
+
 ## 2026-10-05: 履歴再利用と一覧の増分要約
 
 稼働中のメニューバーGatewayへ、Codex履歴と変換済みメッセージの再利用、rolloutの増分要約を反映した。Herdr serverとCompose Mac UIは再起動していない。

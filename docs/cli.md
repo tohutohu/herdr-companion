@@ -1,9 +1,8 @@
 # hc — エージェント向け CLI
 
-`hc`（`gateway/cmd/hc`）は、Mac 上の Claude Code / Codex / OpenCode / Devin セッションを
+`hc`（`gateway/cmd/hc`）は、Mac 上の Claude Code / Codex セッションを
 別の AI エージェントが見張り、答え、指示するための CLI。Gateway の HTTP API
-（[api.md](api.md)）のクライアント。Gateway が直接動かすセッション（Claude Code・Codex。Herdr 不要）と、
-Herdr のペインで動くセッションを同じコマンドで扱う。
+（[api.md](api.md)）のクライアント。セッションはすべて Gateway 自身が動かす（Herdr 不要）。
 
 ヘルプはエージェントスキルと同じく段階的に開示する。エージェントには「まず `hc guide` を読んで」と伝えれば足りる。
 
@@ -12,7 +11,7 @@ Herdr のペインで動くセッションを同じコマンドで扱う。
 | 1 | `hc help`（引数なしの `hc`） | 用途（使う場面・使わない場面）、クイックスタート、用途別のコマンド索引とトピック一覧 |
 | 2 | `hc help COMMAND`（`hc COMMAND --help`） | 1 コマンドの USE WHEN / USAGE / FLAGS / OUTPUT / EXAMPLES / SEE ALSO |
 | 2 | `hc help TOPIC` | `states` `ids` `cursors` `timeouts` `connect` `output` の概念説明 |
-| 3 | `hc guide` | 常駐して見張るエージェント向けの手順書（委任・起動・並列・監視・回答・モデル変更・端末操作） |
+| 3 | `hc guide` | 常駐して見張るエージェント向けの手順書（委任・起動・並列・監視・回答・モデル変更・中断） |
 
 ## コマンド
 
@@ -21,16 +20,16 @@ Herdr のペインで動くセッションを同じコマンドで扱う。
 | 見る | `ls` `show` `read` `export` |
 | 待つ | `until` `wait` `changes` |
 | 操作 | `send` `answer` `start` `archive` `resume` |
-| 設定 | `model` `effort` `mode` `interrupt`（直接管理のセッション。`mode` の巡回は Herdr でも可）、`migrate`（Herdr → 直接管理） |
-| ターミナル | `term` `keys`（Herdr のペインのセッションだけ） |
+| 設定 | `model` `effort` `mode` `interrupt` |
 | その他 | `usage` `guide` `version` |
 
-- `hc start` は既定で Gateway が直接起動し、すぐにセッション ID を返す（`started claude:<id>`）。`--backend herdr` で従来どおり Herdr のワークスペースで起動する。
+- `hc start` は Gateway が起動し、すぐにセッション ID を返す（`started claude:<id>`）。`--provider` は `claude`（既定）か `codex`。
 - `hc model ID MODEL` / `hc effort ID LEVEL` はセッション ID と履歴を保ったまま変える。カタログに無い値は理由付きで拒否され、別の値には置き換わらない。Claude Code は次のモデル呼び出しから、Codex は次のターンから効き、それまで `hc show` に「switching to …」と出る。
-- `hc mode ID [MODE]` は巡回、または直接指定（直接管理のみ）。`hc interrupt ID` は実行中のターンだけを止める。
-- `hc term` / `hc keys` は直接管理のセッションには使えない（理由を表示して終了コード 1）。
-- `hc migrate ID...` は Herdr のペインで動くセッションを同じ ID のまま直接管理へ移す（ペインを閉じてエージェントを終了させる。ターンの合間だけ。自分自身は拒否）。共有 daemon 上の Codex スレッドは、daemon が再起動までロックを放さないため移せない（ペインを閉じる前に拒否）。
-- `hc resume ID [--backend herdr]` はどこで始めたセッションでも同じ ID で再開する。直接管理のセッションは `hc send` だけで再開する。
+- `hc mode ID [MODE]` は巡回、または直接指定。`hc interrupt ID` は実行中のターンだけを止める。
+- `hc resume ID` は停止中（offline）・アーカイブ済みのセッションを、どこで始めたものでも同じ ID のまま新しいプロセスで再開する。Gateway が一覧で動作中と出すセッションはプロセスが止まっていても `hc send` だけで再開する。
+- `hc answer` で答えられない要求（`not supported here`）は、`hc interrupt` でターンを止めて次の指示を送る。
+
+2.0 で `term` / `keys`（Herdr のペインの画面とキー入力）、`migrate`（Herdr → Gateway）、`--backend` とペイン ID での指定はなくなった。
 
 ヘルプの表示には接続設定が要らない。コマンドラインの誤りは該当コマンドのヘルプページ名を添えて終了コード 2 で返す。
 
@@ -82,10 +81,9 @@ env -u GOROOT go build -o ~/.local/bin/hc ./cmd/hc
 
 - 状態は `~/.local/state/herdr-mobile/hc/<カーソル名>/` に置く（`HC_STATE_DIR` で変更）。
   `sessions.json` がセッション一覧のスナップショット、`reads/<セッション>.json` がセッションごとの既読位置。
-- カーソル名は既定でセッションごと、なければ Herdr のペイン（`HERDR_PANE_ID`）ごと。`HC_CURSOR` か `--cursor` で共有・分離できる。
-- 呼び出し元自身のセッションは、Gateway が直接管理のエージェントに渡す `HC_SESSION_ID`、エージェント自身が
-  ツールに渡す `CLAUDE_CODE_SESSION_ID`（Claude Code）・`CODEX_THREAD_ID`（Codex）、または `HERDR_PANE_ID` の
-  ペインで判定する。自分自身は変化として報告せず（一覧では `(you)`）、送信・アーカイブ・中断・待機を拒否する。
+- カーソル名は既定でセッションごと。`HC_CURSOR` か `--cursor` で共有・分離できる。
+- 呼び出し元自身のセッションは、Gateway が動かすエージェントに渡す `HC_SESSION_ID`、またはエージェント自身が
+  ツールに渡す `CLAUDE_CODE_SESSION_ID`（Claude Code）・`CODEX_THREAD_ID`（Codex）で判定する。自分自身は変化として報告せず（一覧では `(you)`）、送信・アーカイブ・中断・待機を拒否する。
 
 ### 変化の判定
 
@@ -95,7 +93,7 @@ env -u GOROOT go build -o ~/.local/bin/hc ./cmd/hc
 - 停止中（offline）のセッションが一覧に出入りするのは変化として扱わない。
 - `wait ID…` は指定セッションだけを待ち、ほかのセッションの変化はカーソルに残す。指定セッションが既に回答待ちなら即座に返る。
 - `send` / `answer` / `start` の `--wait` は、そのターンの終わりまで待って新着を表示する。
-  短いターンは `running` が見えないまま `idle` に戻ることがある（Herdr はフォーカス中のペインを `completed` にしない）ため、
+  短いターンは `running` が見えないまま `idle` に戻ることがある（終わったターンは誰かが見ると `completed` ではなく `idle` になる）ため、
   操作後にエージェントの発言が増えたことでも終わりとみなす。
 
 ### 状態を待つ（`until`）
@@ -153,9 +151,6 @@ started codex:01a18a22-1465-7690-8177-db1bb2d0f68f
 
 $ hc model 9bd45e93 sonnet
 model: claude-haiku-5-5 → sonnet from the next model request
-
-$ hc term 9bd45e93
-error: 9bd45e93 is run by the gateway itself and has no terminal; use hc read / hc send / hc answer
 
 $ hc answer a9b7 approve --wait
 answered a9b7: approve

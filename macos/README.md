@@ -7,7 +7,7 @@ macOS 13以降のメニューバーアプリです。Herdr Companion Gatewayを�
 ## 使い方
 
 1. Tailscale（推奨）をMacとAndroidに用意して同じtailnetへ接続するか、同じ信頼できるローカルネットワークを使います。外部からはCloudflare TunnelなどのHTTPSトンネルも利用できます。
-2. 使うエージェント（Claude Code／Codex）をインストールしてログインします。Claude Code・CodexはGatewayが直接起動するのでHerdrは不要です。OpenCode・Devinを使う場合やHerdrのペインで動かす場合だけHerdrをセットアップします（[ルートREADME](../README.md#1-agents-and-herdr)）。
+2. 使うエージェント（Claude Code／Codex）をインストールしてログインします。どちらもGatewayが直接起動するので、Herdrのセットアップは不要です（[ルートREADME](../README.md#1-agents)）。
 3. Gateway DMGを開き、`Herdr Companion Gateway.app`をApplicationsへドラッグして起動します。Compose UIを使う場合はUI DMGの`Herdr Companion.app`も別途Applicationsへ入れます。
 4. メニューバーのターミナルアイコンを開き、Tailscale IPv4またはローカルネットワークのIPv4とポートを確認して「Gatewayを起動」。UI側がオフラインの場合は、UIの接続エラー画面からGateway managerを起動できます。
 5. 「ペアリングQRを表示」→ Androidの設定で「Scan Mac QR」→ 接続先を確認して「Pair」。
@@ -33,7 +33,7 @@ Firebase APIキーをAndroidアプリに制限する場合、配布APKのパッ�
 
 ## Jev（任意）
 
-メニューバーの「フォルダ確認」にTypeSafe APIキーを入力して保存します。「キーを削除」で無効化できます。指示・フォルダ情報・READMEなど・最近の会話の抜粋をTypeSafeへ送る機能です。詳しい対象は[ルートREADME](../README.md#開始前のフォルダ確認jev任意)を参照してください。キーなし・判定失敗でもセッションを開始できます。
+メニューバーの「フォルダ確認」にTypeSafe APIキーを入力して保存します。「キーを削除」で無効化できます。指示・フォルダ情報・READMEなど・最近の会話の抜粋をTypeSafeへ送る機能です。詳しい対象は[ルートREADME](../README.ja.md#開始前のフォルダ確認jev任意)を参照してください。キーなし・判定失敗でもセッションを開始できます。
 
 ## 会話履歴のキャッシュ
 
@@ -45,7 +45,7 @@ Gatewayは詳細画面がポーリングする会話をデコード済みのま�
 - ログ・状態: `~/.local/state/herdr-mobile/desktop/`
 - 既定ポート: **8766**（CLI版の8765と共存可能）
 - Claude Codeのセッションは同梱の`herdr-claude-sidecar`（Claude Agent SDKをBunで単一実行ファイルにしたもの。Node.js不要）がユーザーの`claude` CLI（`~/.local/bin/claude`など）で動かし、CodexはGatewayが起動する`codex app-server`で動かします。どちらもGatewayの子プロセスで、Gatewayの終了とともに終わります。実行中だったターンは再起動後にfailedと表示され、次のメッセージで同じセッションIDのまま再開します。
-- Herdr本体は同梱・自動起動・停止しません。Herdrが動いていればそのペインのセッションも一覧・操作します。
+- Herdrとは連携しません（2.0から）。Herdrを別途使うのは自由ですが、そのペインや別のターミナルで動くClaude Code・CodexのセッションはGatewayが動かしていないため、一覧には停止中（offline）として出ます。
 - アプリ自身が起動したGatewayだけを管理します。既存LaunchAgentは変更しません。
 - アプリを終了すると同梱Gatewayも終了します。ログイン時起動は設定で有効にできます。
 - managerとCompose UIは同一ユーザー内で複数起動しません。2つ目の起動は既存プロセスを前面化します。
@@ -98,7 +98,7 @@ Goのペアリング有効期限・一度限り・並行交換・認証・鍵な
 このMacはLaunchAgent版Gatewayからメニューバー版へ移行済みです。
 `/Applications/Herdr Companion Gateway.app`をログイン時に開き、同梱Gatewayを自動起動します。
 接続先は移行前の設定（このMacではTailscaleの`100.99.15.34:8765`）を引き継ぎ、認証トークン・登録端末・Firebase秘密鍵・Jevキーをdesktop設定へ移します。別の環境では、メニューバーの接続先アドレス設定に合わせます。
-HerdrサーバーのLaunchAgentは引き続き必要です。
+2.0のGatewayはHerdrサーバーもそのLaunchAgentも使いません。Herdrを自分で使い続ける場合だけ残します。
 
 Gatewayを更新するときは、メニューバーアプリを終了し、ビルドと置き換え後に開き直します。
 
