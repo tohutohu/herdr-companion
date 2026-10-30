@@ -44,6 +44,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.tohutohu.herdrcompanion.container
+import com.tohutohu.herdrcompanion.data.api.GatewayException
 import com.tohutohu.herdrcompanion.data.api.TerminalInput
 import com.tohutohu.herdrcompanion.ui.ExpandingContent
 import kotlinx.coroutines.CancellationException
@@ -70,6 +71,9 @@ fun TerminalScreen(sessionId: String, onBack: () -> Unit, paneId: String? = null
     var text by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var input by remember { mutableStateOf("") }
+    // A session the gateway runs directly has no terminal (409); polling
+    // again would only repeat that.
+    var unavailable by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val vScroll = rememberScrollState()
@@ -80,6 +84,9 @@ fun TerminalScreen(sessionId: String, onBack: () -> Unit, paneId: String? = null
             error = null
         } catch (e: CancellationException) {
             throw e
+        } catch (e: GatewayException) {
+            error = e.message
+            if (e.code == 409) unavailable = true
         } catch (e: Exception) {
             error = e.message
         }
@@ -101,9 +108,9 @@ fun TerminalScreen(sessionId: String, onBack: () -> Unit, paneId: String? = null
 
     LaunchedEffect(lifecycle) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            while (true) {
+            while (!unavailable) {
                 refresh()
-                delay(TERMINAL_POLL_MS)
+                if (!unavailable) delay(TERMINAL_POLL_MS)
             }
         }
     }
@@ -126,7 +133,7 @@ fun TerminalScreen(sessionId: String, onBack: () -> Unit, paneId: String? = null
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         KEYS.forEach { (label, key) ->
-                            FilledTonalButton(onClick = { send(TerminalInput(keys = listOf(key))) }) { Text(label) }
+                            FilledTonalButton(enabled = !unavailable, onClick = { send(TerminalInput(keys = listOf(key))) }) { Text(label) }
                         }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -135,9 +142,10 @@ fun TerminalScreen(sessionId: String, onBack: () -> Unit, paneId: String? = null
                             onValueChange = { input = it },
                             placeholder = { Text("Type text (sent with Enter)") },
                             singleLine = true,
+                            enabled = !unavailable,
                             modifier = Modifier.weight(1f),
                         )
-                        IconButton(enabled = input.isNotEmpty(), onClick = {
+                        IconButton(enabled = input.isNotEmpty() && !unavailable, onClick = {
                             send(TerminalInput(text = input, keys = listOf("enter")))
                             input = ""
                         }) { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send") }
