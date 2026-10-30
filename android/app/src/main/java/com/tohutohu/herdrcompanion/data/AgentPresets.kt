@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.tohutohu.herdrcompanion.ui.newsession.PROVIDERS
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
@@ -52,5 +53,6 @@ class AgentPresetsStore(private val context: Context) {
 
     // Unreadable content (an older format, a partial write) starts over empty.
     private fun Preferences.presets(): AgentPresets =
-        this[key]?.let { runCatching { json.decodeFromString<AgentPresets>(it) }.getOrNull() } ?: AgentPresets()
+        (this[key]?.let { runCatching { json.decodeFromString<AgentPresets>(it) }.getOrNull() } ?: AgentPresets())
+            .forAgents(PROVIDERS.map { it.id }.toSet())
 }

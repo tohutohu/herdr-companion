@@ -66,4 +66,16 @@ class DesktopPreferencesTest {
         assertEquals(value, decodeAgentPresets(encodeAgentPresets(value)))
         assertEquals(AgentPresets(), decodeAgentPresets("not json"))
     }
+
+    @Test
+    fun `廃止したエージェントのプリセットは読み込み時に除く`() {
+        val saved = AgentPresets(
+            presets = listOf(AgentPreset("opencode"), AgentPreset("codex", "gpt-6-astra"), AgentPreset("devin")),
+            lastUsed = AgentPreset("opencode"),
+        )
+
+        val loaded = decodeAgentPresets(encodeAgentPresets(saved))
+        assertEquals(listOf("codex"), loaded.presets.map { it.provider })
+        assertEquals(null, loaded.lastUsed)
+    }
 }

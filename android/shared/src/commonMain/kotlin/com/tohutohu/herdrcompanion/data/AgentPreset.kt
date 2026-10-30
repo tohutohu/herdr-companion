@@ -49,3 +49,12 @@ fun upsertPreset(presets: List<AgentPreset>, previousKey: String?, preset: Agent
 /** Removes the preset with the same combination, regardless of its display name. */
 fun removePreset(presets: List<AgentPreset>, preset: AgentPreset): List<AgentPreset> =
     presets.filterNot { it.key == preset.key }
+
+/**
+ * Drops presets for agents the gateway no longer runs (OpenCode and Devin
+ * before v2), so a saved favorite or the last-used one never selects them.
+ */
+fun AgentPresets.forAgents(known: Set<String>): AgentPresets = copy(
+    presets = presets.filter { it.provider in known },
+    lastUsed = lastUsed?.takeIf { it.provider in known },
+)

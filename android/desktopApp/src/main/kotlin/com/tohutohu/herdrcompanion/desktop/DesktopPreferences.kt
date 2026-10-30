@@ -5,6 +5,8 @@ import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.WindowPlacement
 import com.tohutohu.herdrcompanion.data.AgentPresets
 import com.tohutohu.herdrcompanion.data.DirectoryShortcuts
+import com.tohutohu.herdrcompanion.data.forAgents
+import com.tohutohu.herdrcompanion.ui.newsession.PROVIDERS
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.awt.Frame
@@ -164,7 +166,8 @@ internal fun decodeLines(value: String?): List<String> =
     value.orEmpty().split('\n').filter { it.isNotEmpty() }.distinct()
 
 internal fun decodeAgentPresets(value: String?): AgentPresets =
-    value?.let { runCatching { json.decodeFromString<AgentPresets>(it) }.getOrNull() } ?: AgentPresets()
+    (value?.let { runCatching { json.decodeFromString<AgentPresets>(it) }.getOrNull() } ?: AgentPresets())
+        .forAgents(PROVIDERS.map { it.id }.toSet())
 
 internal fun encodeAgentPresets(value: AgentPresets): String = json.encodeToString(value)
 
