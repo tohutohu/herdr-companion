@@ -299,6 +299,9 @@ async function start(p: Json) {
       displayName: m.displayName,
       description: m.description,
       efforts: m.supportedEffortLevels ?? [],
+      // The gateway offers auto mode on plan approval for these models.
+      resolvedModel: m.resolvedModel ?? null,
+      supportsAutoMode: !!m.supportsAutoMode,
     })),
   };
 }

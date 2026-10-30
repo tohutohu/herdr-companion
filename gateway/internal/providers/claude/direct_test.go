@@ -51,7 +51,11 @@ func fakeSidecar() {
 				reply(map[string]any{"permissionMode": "default", "account": map[string]any{}})
 				continue
 			}
-			reply(map[string]any{"permissionMode": "default", "claudeCodeVersion": "2.1.312", "account": map[string]any{"subscriptionType": sub}})
+			reply(map[string]any{"permissionMode": "default", "claudeCodeVersion": "2.1.312", "account": map[string]any{"subscriptionType": sub},
+				"models": []map[string]any{
+					{"value": "sonnet", "resolvedModel": "claude-sonnet-5-5", "supportsAutoMode": true},
+					{"value": "claude-haiku-4-5-20251001", "resolvedModel": "claude-haiku-4-5-20251001", "supportsAutoMode": false},
+				}})
 		case "send":
 			reply(map[string]any{})
 			text, _ := req.Params["text"].(string)
@@ -67,6 +71,9 @@ func fakeSidecar() {
 				emit(sid, "permission", map[string]any{"requestId": "toolu_bash", "toolName": "Bash", "title": "Claude wants to run make",
 					"input": map[string]any{"command": "make"}, "canAlwaysAllow": true})
 			case strings.Contains(text, "plan"):
+				if m, ok := strings.CutPrefix(text, "plan with "); ok {
+					emit(sid, "messageStart", map[string]any{"messageId": "msg_plan", "model": m})
+				}
 				emit(sid, "permission", map[string]any{"requestId": "toolu_plan", "toolName": "ExitPlanMode", "input": map[string]any{"plan": "1. do it"}})
 			case strings.Contains(text, "stream"):
 				emit(sid, "messageStart", map[string]any{"messageId": "msg_1", "model": "claude-haiku-5-5"})
@@ -239,6 +246,38 @@ func Testプランの承認はモードを切り替えて許可する(t *testing
 	p.Respond(ctx, id, direct, model.InteractionResponse{InteractionID: "toolu_plan", Answers: map[string]model.Answer{"0": {Text: "smaller steps"}}})
 	if r := sidecarRequests(t, log, "respond")[1]; r["behavior"] != "deny" || !strings.Contains(r["message"].(string), "smaller steps") {
 		t.Errorf("respond = %v", r)
+	}
+}
+
+func Testオートモードが使えるモデルではプランをオートモードで承認できる(t *testing.T) {
+	p, log := newSidecarProvider(t)
+	ctx := context.Background()
+	id, _ := p.DirectStart(ctx, providers.DirectStart{Cwd: "/w", Mode: "plan", Prompt: model.Input{Text: "plan with claude-sonnet-5-5[1m]"}})
+	eventually(t, "plan", func() bool { return info(p, id).Waiting })
+	msgs, _ := p.Messages(ctx, id, direct)
+	ia := findInteraction(msgs, "toolu_plan")
+	if ia == nil || ia.Questions[0].Options[0].Label != planAutoMode || ia.Questions[0].Options[1].Label != planManual {
+		t.Fatalf("plan card = %+v", ia)
+	}
+	if err := p.Respond(ctx, id, direct, model.InteractionResponse{InteractionID: "toolu_plan", Answers: map[string]model.Answer{"0": {Selected: []string{planAutoMode}}}}); err != nil {
+		t.Fatal(err)
+	}
+	if r := sidecarRequests(t, log, "respond")[0]; r["behavior"] != "allow" {
+		t.Errorf("respond = %v", r)
+	}
+	if m := sidecarRequests(t, log, "setMode"); len(m) != 1 || m[0]["mode"] != "auto" {
+		t.Errorf("setMode = %v", m)
+	}
+}
+
+func Testオートモード非対応のモデルではプランの選択肢に編集の自動承認を出す(t *testing.T) {
+	p, _ := newSidecarProvider(t)
+	ctx := context.Background()
+	id, _ := p.DirectStart(ctx, providers.DirectStart{Cwd: "/w", Mode: "plan", Prompt: model.Input{Text: "plan with claude-haiku-4-5-20251001"}})
+	eventually(t, "plan", func() bool { return info(p, id).Waiting })
+	msgs, _ := p.Messages(ctx, id, direct)
+	if ia := findInteraction(msgs, "toolu_plan"); ia == nil || ia.Questions[0].Options[0].Label != planAutoAccept {
+		t.Fatalf("plan card = %+v", ia)
 	}
 }
 

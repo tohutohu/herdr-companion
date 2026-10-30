@@ -53,6 +53,9 @@ type permissionRequest struct {
 	BlockedPath    string          `json:"blockedPath"`
 	CanAlwaysAllow bool            `json:"canAlwaysAllow"`
 	received       time.Time
+	// autoMode: the session's model could run in auto mode when this was
+	// asked, so a plan can be approved into it as in the terminal.
+	autoMode bool
 }
 
 type directSession struct {
@@ -69,6 +72,8 @@ type directSession struct {
 	pending                         []*permissionRequest
 	partialID, partialText          string
 	partialAt                       time.Time
+	// autoModels are the model ids the account can run in auto mode.
+	autoModels map[string]bool
 }
 
 type directState struct {
@@ -155,7 +160,12 @@ func sdkMode(mode string) string {
 type startReply struct {
 	PermissionMode    string `json:"permissionMode"`
 	ClaudeCodeVersion string `json:"claudeCodeVersion"`
-	Account           struct {
+	Models            []struct {
+		Value         string `json:"value"`
+		ResolvedModel string `json:"resolvedModel"`
+		AutoMode      bool   `json:"supportsAutoMode"`
+	} `json:"models"`
+	Account struct {
 		SubscriptionType *string `json:"subscriptionType"`
 		APIKeySource     *string `json:"apiKeySource"`
 		APIProvider      *string `json:"apiProvider"`
@@ -248,6 +258,13 @@ func (p *Provider) DirectStart(ctx context.Context, opts providers.DirectStart) 
 		s.alive = true
 		if r.PermissionMode != "" {
 			s.mode = r.PermissionMode
+		}
+		s.autoModels = map[string]bool{}
+		for _, m := range r.Models {
+			if m.AutoMode {
+				s.autoModels[m.Value] = true
+				s.autoModels[m.ResolvedModel] = true
+			}
 		}
 	}
 	p.direct.mu.Unlock()
@@ -463,6 +480,7 @@ func (p *Provider) sidecarEvent(ev sidecarEvent) {
 		var r permissionRequest
 		if json.Unmarshal(ev.Data, &r) == nil && r.ID != "" {
 			r.received = time.Now()
+			r.autoMode = s.autoModels[baseModel(s.model)]
 			s.pending = append(s.pending, &r)
 		}
 	case "permissionResolved":
@@ -608,10 +626,21 @@ func parseLive(live *providers.Live) *providers.Live {
 
 // --- interactions ---
 
+// The plan dialog's approvals. Where auto mode is available, Claude Code
+// 2.1.300 offers it in place of accepting edits (plan_screen_2_1_300_40cols.txt).
 const (
+	planAutoMode   = "Yes, and use auto mode"
 	planAutoAccept = "Yes, auto-accept edits"
 	planManual     = "Yes, manually approve edits"
 )
+
+// baseModel drops a context-window suffix such as "[1m]" from a model id.
+func baseModel(m string) string {
+	if i := strings.IndexByte(m, '['); i > 0 {
+		return m[:i]
+	}
+	return m
+}
 
 func (r *permissionRequest) interaction() (*model.Interaction, []model.Block) {
 	switch r.ToolName {
@@ -629,7 +658,11 @@ func (r *permissionRequest) interaction() (*model.Interaction, []model.Block) {
 		json.Unmarshal(r.Input, &in)
 		ia := planInteraction(r.ID)
 		ia.State = model.InteractionPending
-		ia.Questions[0].Options = planOptions([]model.Option{{Label: planAutoAccept}, {Label: planManual}})
+		first := planAutoAccept
+		if r.autoMode {
+			first = planAutoMode
+		}
+		ia.Questions[0].Options = planOptions([]model.Option{{Label: first}, {Label: planManual}})
 		var blocks []model.Block
 		if in.Plan != "" {
 			blocks = append(blocks, model.TextBlock("Plan:\n"+in.Plan))
@@ -752,6 +785,8 @@ func (p *Provider) directRespond(ctx context.Context, id string, resp model.Inte
 			label = a.Selected[0]
 		}
 		switch {
+		case label == planAutoMode:
+			params["behavior"], setMode = "allow", "auto"
 		case label == planAutoAccept || resp.Decision == model.DecisionApprove:
 			params["behavior"], setMode = "allow", "acceptEdits"
 		case label == planManual:
