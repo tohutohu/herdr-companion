@@ -457,6 +457,10 @@ class GatewayApi(
     suspend fun residentArtifactText(artifactId: String): String =
         execute(request(url("v1", "resident", "artifacts", artifactId, "content")).get().build())
 
+    /** The newest notifications of every task, for clients that show them themselves. */
+    suspend fun residentNotifications(limit: Int = 30): List<ResidentNotificationDto> =
+        get<ResidentNotificationsResponse>(url("v1", "resident", "notifications", query = mapOf("limit" to "$limit"))).notifications
+
     suspend fun previewSchedule(schedule: ScheduleDto): SchedulePreviewDto =
         json.decodeFromString(post(url("v1", "resident", "schedule", "preview"), jsonBody(json.encodeToString(SchedulePreviewRequest(schedule)))))
 

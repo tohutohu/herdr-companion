@@ -60,6 +60,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -168,11 +169,13 @@ fun main() {
             LaunchedEffect(appState) {
                 appState.restoreLayout(DesktopPreferences.loadLayout(), currentScreenBounds())
             }
+            val residentState = remember { DesktopResidentState({ connectionSource.current.settings }, http).also { it.start() } }
             val tearOff = remember { DesktopTearOff(appState) }
             DisposableEffect(appState) {
                 onDispose {
                     tearOff.close()
                     appState.close()
+                    residentState.close()
                 }
             }
             val windowIcon = remember { desktopWindowIcon() }
@@ -188,7 +191,7 @@ fun main() {
                 DesktopWindowPersistence(window)
                 LaunchedEffect(updater) { updater.startAutomaticChecks() }
                 SharedTheme {
-                    DesktopShell(appState, tearOff, api, updater, onCloseWindow = ::exitApplication)
+                    DesktopShell(appState, residentState, tearOff, api, updater, onCloseWindow = ::exitApplication)
                 }
             }
             for (detached in appState.detachedWindows) {
@@ -234,11 +237,20 @@ private fun DesktopWindowPersistence(window: java.awt.Window) {
 @Composable
 private fun FrameWindowScope.DesktopShell(
     state: DesktopAppState,
+    resident: DesktopResidentState,
     tearOff: DesktopTearOff,
     api: GatewayApi,
     updater: DesktopUpdater,
     onCloseWindow: () -> Unit,
 ) {
+    val stateHolder = rememberSaveableStateHolder()
+    LaunchedEffect(resident.notification?.id) {
+        val event = resident.notification ?: return@LaunchedEffect
+        if (java.awt.Window.getWindows().none { it.isActive } && DesktopPreferences.notificationsEnabled) {
+            DesktopNotificationService.show(event)
+        }
+        resident.dismissNotification(event.id)
+    }
     var query by rememberSaveable { mutableStateOf("") }
     var highlightedIndex by rememberSaveable { mutableStateOf(0) }
     var searchFocused by remember { mutableStateOf(false) }
@@ -292,7 +304,9 @@ private fun FrameWindowScope.DesktopShell(
         ) {
             Text("Herdr Companion", style = MaterialTheme.typography.headlineSmall)
             ConnectionIndicator(state.connectionState, state.connectionLabel)
+            TopTabSwitch(resident)
             Spacer(Modifier.weight(1f))
+            if (resident.topTab == DesktopTopTab.SESSIONS) {
             OutlinedTextField(
                 value = query,
                 onValueChange = {
@@ -346,6 +360,17 @@ private fun FrameWindowScope.DesktopShell(
                 Text("Refresh", modifier = Modifier.padding(start = 4.dp))
             }
             Button(onClick = actions::newSession) { Text("+ New Session") }
+            }
+        }
+            resident.banner?.let { b ->
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("常駐: ${b.title} — ${b.body}", maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                TextButton(onClick = { resident.openTask(b.taskId) }) { Text("開く") }
+                TextButton(onClick = resident::dismissBanner) { Text("Dismiss") }
+            }
         }
             state.transientError?.let { message ->
             Row(
@@ -367,6 +392,11 @@ private fun FrameWindowScope.DesktopShell(
             }
         }
             HorizontalDivider()
+            // Both views keep their saveable state while the other is shown;
+            // the session panes themselves live in DesktopAppState.
+            if (resident.topTab == DesktopTopTab.RESIDENT) {
+                stateHolder.SaveableStateProvider("resident") { DesktopResidentView(resident) }
+            } else stateHolder.SaveableStateProvider("sessions") {
             BoxWithConstraints(Modifier.fillMaxSize()) {
             var sidebarWidth by remember { mutableStateOf(DesktopPreferences.loadSidebarWidth().dp) }
             val minDetailWidth = if (state.openSessionIds.size > 1) {
@@ -655,6 +685,7 @@ private fun FrameWindowScope.DesktopShell(
                     }
                 }
                 }
+            }
             }
         }
     }
@@ -988,6 +1019,27 @@ private fun FrameWindowScope.DesktopMenuBar(actions: DesktopActions) {
             Item("Archive", enabled = actions.hasSelectedSession(), onClick = actions::archive)
             Item("Copy Session ID", enabled = actions.hasSelectedSession(), onClick = actions::copySelectedSessionId)
             Item("Open Project Directory", enabled = actions.hasProjectDirectory(), onClick = actions::openProjectDirectory)
+        }
+    }
+}
+
+/** Sessions | 常駐: the main window's two views. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TopTabSwitch(resident: DesktopResidentState) {
+    SingleChoiceSegmentedButtonRow {
+        SegmentedButton(
+            selected = resident.topTab == DesktopTopTab.SESSIONS,
+            onClick = { resident.topTab = DesktopTopTab.SESSIONS },
+            shape = SegmentedButtonDefaults.itemShape(0, 2),
+        ) { Text("Sessions") }
+        SegmentedButton(
+            selected = resident.topTab == DesktopTopTab.RESIDENT,
+            onClick = { resident.topTab = DesktopTopTab.RESIDENT },
+            shape = SegmentedButtonDefaults.itemShape(1, 2),
+        ) {
+            val extra = listOfNotNull(resident.unread.takeIf { it > 0 }?.let { "$it" }, resident.waiting.takeIf { it > 0 }?.let { "!$it" })
+            Text("常駐" + if (extra.isEmpty()) "" else " (${extra.joinToString(" ")})")
         }
     }
 }

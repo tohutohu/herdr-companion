@@ -41,6 +41,7 @@ func (s *Server) residentRoutes(api *http.ServeMux) {
 	api.HandleFunc("PUT /v1/resident/tasks/{id}/memory", s.residentPutMemory)
 	api.HandleFunc("GET /v1/resident/tasks/{id}/artifacts", s.residentArtifacts)
 	api.HandleFunc("GET /v1/resident/tasks/{id}/notifications", s.residentNotifications)
+	api.HandleFunc("GET /v1/resident/notifications", s.residentAllNotifications)
 	api.HandleFunc("GET /v1/resident/artifacts/{id}/content", s.residentArtifactContent)
 	api.HandleFunc("GET /v1/resident/runs/{id}", s.residentRun)
 	api.HandleFunc("POST /v1/resident/runs/{id}/cancel", s.residentCancel)
@@ -317,6 +318,17 @@ func (s *Server) residentArtifacts(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) residentNotifications(w http.ResponseWriter, r *http.Request) {
 	ns, err := s.Resident.Notifications(r.Context(), r.PathValue("id"), queryInt(r, "limit"))
+	if err != nil {
+		s.residentFail(w, r, "resident.notifications", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"notifications": ns})
+}
+
+// residentAllNotifications lists the newest outbox entries of every task,
+// for clients that show notifications themselves (the Mac UI polls it).
+func (s *Server) residentAllNotifications(w http.ResponseWriter, r *http.Request) {
+	ns, err := s.Resident.Notifications(r.Context(), "", queryInt(r, "limit"))
 	if err != nil {
 		s.residentFail(w, r, "resident.notifications", err)
 		return

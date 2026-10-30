@@ -25,4 +25,18 @@ class NavigatorTest {
         navigator.openLinkedSession("claude:one")
         assertEquals(listOf(SessionsRoute, original), stack.toList())
     }
+
+    @Test
+    fun 常駐タスクの通知を開くと開いていたタスクと編集画面を置き換える() {
+        val stack = NavBackStack<Route>(ResidentHomeRoute, ResidentTaskRoute("task_a"), ResidentFormRoute("task_a"))
+        Navigator(stack).openResidentFromNotification(ResidentTaskRoute("task_b", fromNotification = true))
+        assertEquals(listOf(ResidentHomeRoute, ResidentTaskRoute("task_b", fromNotification = true)), stack.toList())
+    }
+
+    @Test
+    fun 作成したタスクは一覧の上に開き作成画面を残さない() {
+        val stack = NavBackStack<Route>(ResidentHomeRoute, ResidentFormRoute())
+        Navigator(stack).replaceAbove(ResidentHomeRoute, ResidentTaskRoute("task_new"))
+        assertEquals(listOf(ResidentHomeRoute, ResidentTaskRoute("task_new")), stack.toList())
+    }
 }

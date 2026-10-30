@@ -330,3 +330,22 @@ data class ArtifactsResponse(val artifacts: List<ArtifactDto> = emptyList())
 
 @Serializable
 data class ResidentErrorResponse(val error: String = "", val code: String? = null)
+
+/** An outbox entry: a report the gateway decided to notify about. */
+@Serializable
+data class ResidentNotificationDto(
+    val id: String,
+    val taskId: String,
+    val runId: String = "",
+    /** change, question or failure. */
+    val kind: String = "",
+    val title: String = "",
+    val body: String = "",
+    val status: String = "",
+    val createdAt: String = "",
+    /** Not shown before this (quiet hours). */
+    val notBefore: String = "",
+)
+
+@Serializable
+data class ResidentNotificationsResponse(val notifications: List<ResidentNotificationDto> = emptyList())

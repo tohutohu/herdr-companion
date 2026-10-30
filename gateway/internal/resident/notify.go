@@ -268,16 +268,18 @@ func (s *Service) Notifications(ctx context.Context, taskID string, limit int) (
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	q := `SELECT id, task_id, run_id, kind, title, body, key, status, reason, created_at, not_before, attempts, sent_at, last_error FROM notifications`
+	// Deleted tasks' entries are not served.
+	q := `SELECT n.id, n.task_id, n.run_id, n.kind, n.title, n.body, n.key, n.status, n.reason, n.created_at, n.not_before, n.attempts, n.sent_at, n.last_error
+		FROM notifications n JOIN tasks t ON t.id = n.task_id WHERE t.deleted_at IS NULL`
 	args := []any{}
 	if taskID != "" {
 		if _, err := s.loadTask(ctx, taskID); err != nil {
 			return nil, err
 		}
-		q += ` WHERE task_id = ?`
+		q += ` AND n.task_id = ?`
 		args = append(args, taskID)
 	}
-	q += ` ORDER BY seq DESC LIMIT ?`
+	q += ` ORDER BY n.seq DESC LIMIT ?`
 	args = append(args, limit)
 	rows, err := s.store.db.QueryContext(ctx, q, args...)
 	if err != nil {
