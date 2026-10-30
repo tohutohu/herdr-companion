@@ -705,6 +705,9 @@ type daemonConn struct {
 
 	mu         sync.Mutex
 	subscribed map[string]bool
+	// released are threads handed over to the gateway's own app-server;
+	// sync does not subscribe to them again while the daemon has them.
+	released map[string]bool
 	// resumeFailed marks threads whose subscribe failure was logged. A TUI
 	// left open without a prompt keeps a thread loaded that cannot be
 	// resumed until its first turn, and sync retries it every few seconds.
@@ -758,6 +761,7 @@ func newDaemonConn(sink deadletter.Sink) *daemonConn {
 	return &daemonConn{
 		sink:             sink,
 		subscribed:       map[string]bool{},
+		released:         map[string]bool{},
 		resumeFailed:     map[string]bool{},
 		status:           map[string]ThreadStatus{},
 		pending:          map[string]map[string]pendingRequest{},
@@ -786,7 +790,7 @@ func (d *daemonConn) sync(ctx context.Context) error {
 	for _, id := range loaded.Data {
 		current[id] = true
 		d.mu.Lock()
-		done := d.subscribed[id]
+		done := d.subscribed[id] || d.released[id]
 		d.mu.Unlock()
 		if done {
 			continue
@@ -825,6 +829,11 @@ func (d *daemonConn) sync(ctx context.Context) error {
 	for id := range d.resumeFailed {
 		if !current[id] {
 			delete(d.resumeFailed, id)
+		}
+	}
+	for id := range d.released {
+		if !current[id] {
+			delete(d.released, id)
 		}
 	}
 	for id := range d.subscribed {

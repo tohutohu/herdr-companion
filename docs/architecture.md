@@ -91,6 +91,12 @@ gives way to the pane, and resuming with `backend: "herdr"` drops the record. St
 directly is refused (`409`) while Herdr runs the session. A session the user resumes in a plain
 terminal (`claude --resume`) while the gateway also runs it cannot be detected; don't.
 
+**Moving a Herdr session** (`POST /v1/sessions/{id}/migrate`, `hc migrate`): between turns
+only, the gateway checks the directory, closes the pane (ending the agent), waits until Herdr no
+longer lists it, for Codex hands the thread over from the shared daemon (stops re-subscribing,
+unsubscribes, waits for the daemon to unload it, since only one app-server may write a thread),
+and resumes it directly with the model, effort and permission mode from the transcript.
+
 **Restart and crashes.** The records survive gateway restarts. A turn that was running when the
 gateway stopped is shown as `failed` ("the turn was cut off"); its tool calls are never re-run
 and nothing is re-sent. The next message (or a model/effort change, which is recorded) resumes

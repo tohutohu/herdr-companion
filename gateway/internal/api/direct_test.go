@@ -264,3 +264,55 @@ func TestHerdrのセッションにはモデル変更を提供しない(t *testi
 		t.Errorf("model = %d %v", code, res)
 	}
 }
+
+func newMigrationServer(t *testing.T, status string) (*httptest.Server, *directFake, *fakeHerdr, string) {
+	t.Helper()
+	srv, dp, _ := newDirectServer(t) // for its provider and scratch root
+	srv.Close()
+	fh := &fakeHerdr{snap: &herdr.Snapshot{
+		Workspaces: []herdr.Workspace{{WorkspaceID: "w1", Label: "app"}},
+		Panes: []herdr.Pane{{
+			PaneID: "w1:p1", WorkspaceID: "w1", Agent: str("fake"), AgentStatus: status, Cwd: str(dp.root),
+			AgentSession: &herdr.AgentSession{Agent: "fake", Kind: "id", Value: "s1"},
+		}},
+	}}
+	store, _ := config.Load(filepath.Join(t.TempDir(), "config.json"))
+	svc := sessions.New(fh, time.Hour, dp)
+	direct, _ := runtime.New(filepath.Join(t.TempDir(), "direct.json"), time.Hour, dp)
+	svc.Direct = direct
+	s := &Server{
+		Sessions: svc, Direct: direct, Config: store, Sink: deadletter.Nop{}, Uploads: uploads.New(t.TempDir(), time.Hour),
+		Launcher: &launcher.Launcher{Herdr: fh, Roots: []string{dp.root}, Providers: []providers.Provider{dp}, Direct: direct,
+			StartTimeout: time.Second, PollInterval: time.Millisecond},
+	}
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+	return ts, dp, fh, store.Get().AuthToken
+}
+
+func TestHerdrで動いているセッションを同じIDのまま直接管理へ移す(t *testing.T) {
+	ts, dp, fh, token := newMigrationServer(t, herdr.StatusIdle)
+	code, res := call(t, ts, token, "POST", "/v1/sessions/fake:s1/migrate", nil)
+	if code != http.StatusOK || res["backend"] != "direct" || res["id"] != "fake:s1" {
+		t.Fatalf("migrate = %d %v", code, res)
+	}
+	if len(fh.snap.Panes) != 0 || !strings.Contains(strings.Join(fh.calls, ","), "close-workspace:w1") {
+		t.Errorf("pane not closed: %v", fh.calls)
+	}
+	if len(dp.starts) != 1 || dp.starts[0].Resume != "s1" || dp.starts[0].Cwd != dp.root || !dp.starts[0].Prompt.Empty() {
+		t.Errorf("starts = %+v", dp.starts)
+	}
+}
+
+func Test作業中や回答待ちのセッションは移さない(t *testing.T) {
+	for _, st := range []string{herdr.StatusWorking, herdr.StatusBlocked} {
+		ts, dp, fh, token := newMigrationServer(t, st)
+		code, res := call(t, ts, token, "POST", "/v1/sessions/fake:s1/migrate", nil)
+		if code != http.StatusConflict || !strings.Contains(res["error"].(string), "turn has ended") {
+			t.Fatalf("%s: migrate = %d %v", st, code, res)
+		}
+		if len(fh.calls) != 0 || len(dp.starts) != 0 {
+			t.Errorf("%s: acted: %v %v", st, fh.calls, dp.starts)
+		}
+	}
+}

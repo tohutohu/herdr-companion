@@ -6,6 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
+	"strings"
+	"time"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
@@ -90,6 +93,9 @@ func (p *Provider) DirectStart(ctx context.Context, opts providers.DirectStart) 
 		}
 		if err := d.c.call(cctx, "thread/resume", params, &r); err != nil {
 			var rerr *rpcError
+			if errors.As(err, &rerr) && strings.Contains(rerr.Message, "active writer") {
+				return "", fmt.Errorf("the thread is still open in another Codex app-server (a TUI or the shared daemon): %w", err)
+			}
 			if errors.As(err, &rerr) {
 				return "", fmt.Errorf("%w: %v", providers.ErrNotFound, err)
 			}
@@ -493,3 +499,49 @@ func (p *Provider) DirectSessions() []providers.DirectInfo {
 	}
 	return out
 }
+
+// ReleaseShared hands a thread over from the shared app-server daemon: the
+// gateway stops (re)subscribing to it there and waits until the daemon has
+// unloaded it, since only one app-server may write a thread. It fails when
+// another client still holds the thread open.
+func (p *Provider) ReleaseShared(ctx context.Context, id string) error {
+	d := p.currentDaemon()
+	if d == nil {
+		return nil
+	}
+	d.mu.Lock()
+	d.released[id] = true
+	subscribed := d.subscribed[id]
+	d.mu.Unlock()
+	cctx, cancel := context.WithTimeout(ctx, releaseTimeout)
+	defer cancel()
+	if subscribed {
+		if err := d.c.call(cctx, "thread/unsubscribe", map[string]any{"threadId": id}, nil); err != nil {
+			return fmt.Errorf("unsubscribe from the shared Codex app-server: %w", err)
+		}
+	}
+	d.mu.Lock()
+	delete(d.subscribed, id)
+	delete(d.status, id)
+	delete(d.pending, id)
+	d.mu.Unlock()
+	for {
+		var loaded struct {
+			Data []string `json:"data"`
+		}
+		if err := d.c.call(cctx, "thread/loaded/list", map[string]any{}, &loaded); err != nil {
+			return fmt.Errorf("the shared Codex app-server still holds the thread: %w", err)
+		}
+		if !slices.Contains(loaded.Data, id) {
+			return nil
+		}
+		select {
+		case <-cctx.Done():
+			return errors.New("the shared Codex app-server still holds the thread open for another client (a Codex TUI or app); close it there and resume the session")
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+}
+
+// releaseTimeout bounds waiting for the shared daemon to unload a thread.
+const releaseTimeout = 15 * time.Second

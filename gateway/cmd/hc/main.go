@@ -195,6 +195,7 @@ func (a *app) commands() map[string]func([]string) error {
 		"model":     a.cmdModel,
 		"effort":    a.cmdEffort,
 		"interrupt": a.cmdInterrupt,
+		"migrate":   a.cmdMigrate,
 		"archive":   a.cmdArchive,
 		"resume":    a.cmdResume,
 		"usage":     a.cmdUsage,

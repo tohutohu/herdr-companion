@@ -723,3 +723,51 @@ func (a *app) cmdInterrupt(args []string) error {
 	fmt.Fprintf(a.out, "interrupted %s\n", s.ID)
 	return nil
 }
+
+// cmdMigrate moves sessions from their Herdr panes to the Gateway's own
+// runtime. The pane is closed, which ends the agent; the session continues
+// under the same id. Sessions in the middle of a turn are refused.
+func (a *app) cmdMigrate(args []string) error {
+	pos, err := parseFlags(flag.NewFlagSet("migrate", flag.ContinueOnError), args)
+	if err != nil {
+		return err
+	}
+	if len(pos) == 0 {
+		return usagef("migrate takes one or more session IDs")
+	}
+	ctx := context.Background()
+	var sessions []model.Session
+	for _, ref := range pos {
+		s, err := a.resolve(ctx, ref)
+		if err != nil {
+			return err
+		}
+		if a.isSelf(s) {
+			return fmt.Errorf("%s is this session itself; moving it would end the agent running hc", ref)
+		}
+		sessions = append(sessions, s)
+	}
+	var results []model.Session
+	failed := false
+	for _, s := range sessions {
+		var after model.Session
+		err := a.client.do(ctx, http.MethodPost, "/v1/sessions/"+url.PathEscape(s.ID)+"/migrate", map[string]any{}, &after)
+		switch {
+		case err != nil:
+			failed = true
+			if !a.json {
+				fmt.Fprintf(a.out, "%s: not moved: %v\n", s.ID, err)
+			}
+		case !a.json:
+			fmt.Fprintf(a.out, "%s: now run by the gateway (%s)\n", s.ID, firstNonEmpty(string(after.Status), "idle"))
+		}
+		results = append(results, after)
+	}
+	if a.json {
+		return a.printJSON(results)
+	}
+	if failed {
+		return exitStatus(1)
+	}
+	return nil
+}

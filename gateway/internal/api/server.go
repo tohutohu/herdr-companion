@@ -105,6 +105,7 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("POST /v1/sessions/{id}/model", s.setModel)
 	api.HandleFunc("POST /v1/sessions/{id}/effort", s.setEffort)
 	api.HandleFunc("POST /v1/sessions/{id}/interrupt", s.interrupt)
+	api.HandleFunc("POST /v1/sessions/{id}/migrate", s.migrateSession)
 	api.HandleFunc("POST /v1/sessions/{id}/seen", s.markSeen)
 	api.HandleFunc("POST /v1/sessions/{id}/reload", s.reloadSession)
 	api.HandleFunc("GET /v1/sessions/{id}/messages/{mid}/images/{n}", s.getImage)
@@ -228,6 +229,10 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, sessionID, op stri
 		status = http.StatusServiceUnavailable
 	case errors.Is(err, providers.ErrNoTerminal), errors.Is(err, providers.ErrNotDirect), errors.Is(err, runtime.ErrNotManaged):
 		status = http.StatusConflict
+	case errors.Is(err, errBusy):
+		status = http.StatusConflict
+	case errors.Is(err, launcher.ErrPaneClosed):
+		status = http.StatusBadGateway
 	case errors.Is(err, errInvalidSetting):
 		status = http.StatusBadRequest
 	case errors.Is(err, providers.ErrNotLive), errors.Is(err, providers.ErrInteractionGone),

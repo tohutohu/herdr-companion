@@ -21,7 +21,7 @@ Herdr のペインで動くセッションを同じコマンドで扱う。
 | 見る | `ls` `show` `read` `export` |
 | 待つ | `until` `wait` `changes` |
 | 操作 | `send` `answer` `start` `archive` `resume` |
-| 設定 | `model` `effort` `mode` `interrupt`（直接管理のセッション。`mode` の巡回は Herdr でも可） |
+| 設定 | `model` `effort` `mode` `interrupt`（直接管理のセッション。`mode` の巡回は Herdr でも可）、`migrate`（Herdr → 直接管理） |
 | ターミナル | `term` `keys`（Herdr のペインのセッションだけ） |
 | その他 | `usage` `guide` `version` |
 
@@ -29,6 +29,7 @@ Herdr のペインで動くセッションを同じコマンドで扱う。
 - `hc model ID MODEL` / `hc effort ID LEVEL` はセッション ID と履歴を保ったまま変える。カタログに無い値は理由付きで拒否され、別の値には置き換わらない。Claude Code は次のモデル呼び出しから、Codex は次のターンから効き、それまで `hc show` に「switching to …」と出る。
 - `hc mode ID [MODE]` は巡回、または直接指定（直接管理のみ）。`hc interrupt ID` は実行中のターンだけを止める。
 - `hc term` / `hc keys` は直接管理のセッションには使えない（理由を表示して終了コード 1）。
+- `hc migrate ID...` は Herdr のペインで動くセッションを同じ ID のまま直接管理へ移す（ペインを閉じてエージェントを終了させる。ターンの合間だけ。自分自身は拒否）。
 - `hc resume ID [--backend herdr]` はどこで始めたセッションでも同じ ID で再開する。直接管理のセッションは `hc send` だけで再開する。
 
 ヘルプの表示には接続設定が要らない。コマンドラインの誤りは該当コマンドのヘルプページ名を添えて終了コード 2 で返す。

@@ -10,10 +10,15 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 )
 
-var errInvalidSetting = errors.New("invalid setting")
+var (
+	errInvalidSetting = errors.New("invalid setting")
+	errBusy           = errors.New("the session is working or waiting for an answer; move it once its turn has ended")
+)
 
 // validSetting checks a model, effort or mode against what the agent offers,
 // so an unknown choice is refused with the reason instead of the agent
@@ -195,4 +200,37 @@ func (s *Server) worktreeInUse(ctx context.Context, id, path string) bool {
 		}
 	}
 	return false
+}
+
+// migrateSession moves a session running in a Herdr pane to the direct
+// runtime, keeping its id and history. Only a session between turns moves:
+// closing the pane ends the agent, which would cut off a running turn or
+// lose a pending question.
+func (s *Server) migrateSession(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	sess, res, err := s.Sessions.Get(r.Context(), id)
+	if err != nil {
+		s.fail(w, r, id, "migrate_session", err)
+		return
+	}
+	switch {
+	case res.Live.IsDirect():
+		writeJSON(w, http.StatusOK, sess) // already direct
+		return
+	case !res.Live.InPane():
+		s.fail(w, r, id, "migrate_session", providers.ErrNotLive)
+		return
+	}
+	switch sess.Status {
+	case model.StatusRunning, model.StatusWaitingInput, model.StatusWaitingApproval:
+		s.fail(w, r, id, "migrate_session", errBusy)
+		return
+	}
+	if _, err := s.Launcher.Migrate(r.Context(), res.Provider.Name(), res.NativeID, res.Live.PaneID, sess.Cwd); err != nil {
+		s.Sink.Record(res.Provider.Name(), id, deadletter.SendError, "migrate session: "+err.Error(), nil)
+		s.fail(w, r, id, "migrate_session", err)
+		return
+	}
+	s.Sessions.Forget(id)
+	s.writeSession(w, r, id)
 }

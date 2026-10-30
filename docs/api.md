@@ -171,6 +171,7 @@ Herdr で動くセッションも同じ ID を使う。`paneId` は Herdr で動
 | POST | `/v1/sessions/{id}/model` | 要 | 実行中セッションのモデルを変更（直接管理のみ） |
 | POST | `/v1/sessions/{id}/effort` | 要 | 実行中セッションの推論強度を変更（直接管理のみ） |
 | POST | `/v1/sessions/{id}/interrupt` | 要 | 実行中のターンを中断（直接管理のみ） |
+| POST | `/v1/sessions/{id}/migrate` | 要 | Herdr で動くセッションを直接管理へ移す |
 | POST | `/v1/sessions/{id}/seen` | 要 | 既読にする |
 | POST | `/v1/sessions/{id}/reload` | 要 | キャッシュを捨てて読み直し、質問の取りこぼしを診断 |
 | POST / DELETE | `/v1/sessions/{id}/archive` | 要 | アーカイブ／解除 |
@@ -506,6 +507,16 @@ Herdr のセッションは `409`。プロセスが無い直接管理のセッ�
 
 直接管理のセッションの実行中ターンを中断する（Claude: `Query.interrupt()`、Codex: `turn/interrupt`）。セッションは残る。`202`。
 Herdr のセッションは `409`。
+
+### `POST /v1/sessions/{id}/migrate`
+
+Herdr のペインで動く Claude Code / Codex のセッションを、同じ ID と履歴のまま直接管理へ移す。ターンの合間
+（`idle` / `completed` / `failed`）だけが対象で、`running` / `waiting_*` は `409`（ペインを閉じるとエージェントが
+終わり、実行中のターンや保留中の質問が失われるため）。手順: 作業ディレクトリを確認 → ペインを閉じる（エージェント終了）
+→ Codex は共有 daemon がスレッドを手放すのを待つ → 直接管理で再開。Claude は transcript のモデル ID（`[1m]` 込み）・
+推論強度・Permission Mode を引き継ぐ（Bypass permissions は引き継がない）。ペインを閉じた後の再開に失敗した場合は
+`502`（セッションはどこでも動いていない状態になり、`resume` でやり直せる）。既に直接管理なら `200` でそのまま返す。
+`200` で更新後の Session。
 
 ### `POST /v1/sessions/{id}/seen`
 

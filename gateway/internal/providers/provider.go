@@ -416,3 +416,18 @@ func ParentDirs(dir string) []string {
 		}
 	}
 }
+
+// ResumeSettingser is implemented by providers whose resumed process would
+// otherwise fall back to the user's defaults: it returns the model, effort
+// and mode id the session ran with, for moving it from Herdr to the direct
+// runtime unchanged. Empty values keep the defaults.
+type ResumeSettingser interface {
+	ResumeSettings(ctx context.Context, nativeID string) (model, effort, mode string)
+}
+
+// SharedReleaser is implemented by providers that subscribe to sessions on a
+// shared server (Codex's app-server daemon), so a session moving to the
+// direct runtime is no longer held there.
+type SharedReleaser interface {
+	ReleaseShared(ctx context.Context, nativeID string) error
+}

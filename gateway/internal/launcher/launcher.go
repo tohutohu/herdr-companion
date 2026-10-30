@@ -362,6 +362,79 @@ func (l *Launcher) Start(ctx context.Context, req StartRequest) (*StartResult, e
 	return l.launch(ctx, plan)
 }
 
+// ErrPaneClosed wraps a failed resume after a migration closed the pane: the
+// session then runs nowhere and can be resumed again.
+var ErrPaneClosed = errors.New("the Herdr pane was closed, but resuming the session directly failed; resume it again")
+
+// Migrate moves a session from its Herdr pane to the direct runtime: the
+// directory is checked first, then the pane is closed (ending the agent),
+// and the session is resumed directly under the same id with the model,
+// effort and mode it ran with. The caller makes sure no turn is running.
+func (l *Launcher) Migrate(ctx context.Context, provider, nativeID, pane, cwd string) (*StartResult, error) {
+	p, _, err := l.provider(provider)
+	if err != nil {
+		return nil, err
+	}
+	if l.Direct == nil || !l.Direct.Supports(provider) {
+		return nil, ErrInvalidBackend
+	}
+	dir, err := l.resumeDir(ctx, cwd)
+	if err != nil {
+		return nil, err
+	}
+	opts := providers.DirectStart{Cwd: dir}
+	if rs, ok := p.(providers.ResumeSettingser); ok {
+		opts.Model, opts.Effort, opts.Mode = rs.ResumeSettings(ctx, nativeID)
+	}
+	ctx = context.WithoutCancel(ctx)
+	if err := l.Stop(ctx, pane); err != nil {
+		return nil, fmt.Errorf("close the Herdr pane: %w", err)
+	}
+	l.waitPaneGone(ctx, pane)
+	if sr, ok := p.(providers.SharedReleaser); ok {
+		if err := sr.ReleaseShared(ctx, nativeID); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrPaneClosed, err)
+		}
+	}
+	id := p.Name() + ":" + nativeID
+	if err := l.Direct.Resume(ctx, id, opts); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrPaneClosed, err)
+	}
+	slog.Info("session moved from herdr to the direct runtime", "provider", p.Name(), "session_id", id, "pane", pane, "cwd", dir,
+		"model", opts.Model, "effort", opts.Effort, "mode", opts.Mode)
+	return &StartResult{SessionID: id, Backend: model.BackendDirect}, nil
+}
+
+// waitPaneGone waits until Herdr no longer lists the pane, so its agent has
+// exited (and flushed its history) before the session is resumed.
+func (l *Launcher) waitPaneGone(ctx context.Context, pane string) {
+	deadline := time.Now().Add(l.startTimeout() / 4)
+	for time.Now().Before(deadline) {
+		if _, err := l.Herdr.Pane(ctx, pane); err != nil {
+			return
+		}
+		if !sleep(ctx, l.readyPoll()) {
+			return
+		}
+	}
+}
+
+// resumeDir checks a session's directory for resuming it.
+func (l *Launcher) resumeDir(ctx context.Context, cwd string) (string, error) {
+	if cwd == "" {
+		return "", ErrNoCwd
+	}
+	dir, err := l.resolveDir(cwd)
+	if errors.Is(err, files.ErrForbidden) {
+		dir, err = l.resolveWorktree(ctx, cwd)
+	}
+	if errors.Is(err, files.ErrNotFound) {
+		// e.g. the worktree it ran in was removed when it was archived
+		return "", ErrCwdGone
+	}
+	return dir, err
+}
+
 // Resume reopens an existing session that runs nowhere, under its own id:
 // directly by default, or in a new Herdr workspace in its working directory.
 func (l *Launcher) Resume(ctx context.Context, provider, nativeID, cwd string, trust bool, backend string) (*StartResult, error) {
@@ -372,17 +445,7 @@ func (l *Launcher) Resume(ctx context.Context, provider, nativeID, cwd string, t
 	if backend, err = l.backend(provider, backend); err != nil {
 		return nil, err
 	}
-	if cwd == "" {
-		return nil, ErrNoCwd
-	}
-	dir, err := l.resolveDir(cwd)
-	if errors.Is(err, files.ErrForbidden) {
-		dir, err = l.resolveWorktree(ctx, cwd)
-	}
-	if errors.Is(err, files.ErrNotFound) {
-		// e.g. the worktree it ran in was removed when it was archived
-		return nil, ErrCwdGone
-	}
+	dir, err := l.resumeDir(ctx, cwd)
 	if err != nil {
 		return nil, err
 	}

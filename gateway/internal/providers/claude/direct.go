@@ -814,3 +814,35 @@ func questionAnswers(ia *model.Interaction, resp model.InteractionResponse) (map
 	}
 	return out, nil
 }
+
+// ResumeSettings is what a Herdr session ran with, read from its transcript:
+// the exact model id ("[1m]" kept), effort and permission mode. Bypass
+// permissions is not carried over; it stays a choice made in a terminal.
+func (p *Provider) ResumeSettings(_ context.Context, nativeID string) (string, string, string) {
+	path, err := p.transcriptPath(nativeID)
+	if err != nil {
+		return "", "", ""
+	}
+	c, err := p.transcript(path, nativeID)
+	if err != nil {
+		return "", "", ""
+	}
+	defer c.mu.Unlock()
+	t := c.t
+	m := t.ModelID
+	if m == "" {
+		m = t.Model
+	}
+	if !providers.ValidModelID(m) {
+		m = ""
+	}
+	mode := t.PermissionMode
+	if mode == "bypassPermissions" || !providers.ValidModeID(mode) {
+		mode = ""
+	}
+	effort := t.Effort
+	if !providers.ValidEffortID(effort) {
+		effort = ""
+	}
+	return m, effort, mode
+}

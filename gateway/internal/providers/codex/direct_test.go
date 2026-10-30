@@ -245,3 +245,71 @@ func Testアプリサーバーが終了すると実行中のターンは失敗�
 		t.Error("send to a dead app-server succeeded")
 	}
 }
+
+func Test共有daemonのスレッドは手放されるまで待ってから引き継ぎ再購読しない(t *testing.T) {
+	pt := &pipeTransport{in: make(chan []byte, 16), out: make(chan []byte, 16), closed: make(chan struct{})}
+	t.Cleanup(func() { pt.close() })
+	var mu sync.Mutex
+	var calls []string
+	lists := 0
+	go func() {
+		for {
+			var b []byte
+			select {
+			case b = <-pt.out:
+			case <-pt.closed:
+				return
+			}
+			var m struct {
+				ID     json.RawMessage `json:"id"`
+				Method string          `json:"method"`
+			}
+			json.Unmarshal(b, &m)
+			mu.Lock()
+			calls = append(calls, m.Method)
+			var result any = map[string]any{}
+			if m.Method == "thread/loaded/list" {
+				lists++
+				data := []string{}
+				if lists < 3 { // the daemon unloads the thread a moment later
+					data = []string{directThreadID}
+				}
+				result = map[string]any{"data": data}
+			}
+			mu.Unlock()
+			b, _ = json.Marshal(map[string]any{"id": m.ID, "result": result})
+			pt.in <- b
+		}
+	}()
+	p := New("codex-not-used", "/nonexistent.sock", &fakeTerm{}, deadletter.Nop{})
+	d := newDaemonConn(deadletter.Nop{})
+	d.c = newRPCClient(pt, d)
+	d.subscribed[directThreadID] = true
+	p.daemon = d
+	if err := p.ReleaseShared(context.Background(), directThreadID); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	got := append([]string(nil), calls...)
+	mu.Unlock()
+	if got[0] != "thread/unsubscribe" || lists != 3 {
+		t.Errorf("calls = %v (lists %d)", got, lists)
+	}
+	// 手放す途中の同期でも再購読しない
+	d.mu.Lock()
+	d.released[directThreadID] = true
+	d.mu.Unlock()
+	mu.Lock()
+	lists = 0
+	mu.Unlock()
+	if err := d.sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for _, c := range calls[len(got):] {
+		if c == "thread/resume" {
+			t.Errorf("resubscribed: %v", calls)
+		}
+	}
+}

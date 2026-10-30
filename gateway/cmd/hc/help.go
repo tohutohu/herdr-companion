@@ -54,7 +54,7 @@ var commandGroups = []struct {
 	{"Look", []string{"ls", "show", "read", "export"}},
 	{"Wait", []string{"until", "wait", "changes"}},
 	{"Act", []string{"send", "answer", "start", "archive", "resume"}},
-	{"Settings", []string{"model", "effort", "mode", "interrupt"}},
+	{"Settings", []string{"model", "effort", "mode", "interrupt", "migrate"}},
 	{"Terminal", []string{"term", "keys"}},
 	{"Other", []string{"usage", "guide", "version"}},
 }
@@ -434,6 +434,22 @@ USAGE
 
 EXAMPLES
   hc effort a9b7 high
+`},
+	{"migrate", "move sessions from Herdr panes to the Gateway's own runtime", `hc migrate — move sessions out of Herdr
+
+USE WHEN
+  A Claude Code or Codex session runs in a Herdr pane and should be run by the Gateway
+  instead (model and effort changes, interrupt, no Herdr needed). Ask the user first: its
+  pane is closed, which ends the agent and its terminal; the session continues under the
+  same id with the model, effort and mode it had. Only sessions between turns move; one
+  that is running or waiting for an answer is refused. Refuses your own session.
+
+USAGE
+  hc migrate ID...
+
+OUTPUT
+  One line per session: "now run by the gateway" or "not moved: <reason>". Exit 1 when any
+  was not moved.
 `},
 	{"interrupt", "stop the running turn of a session (it stays open)", `hc interrupt — stop the running turn
 

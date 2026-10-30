@@ -120,3 +120,16 @@ func Testモードはモード名を指定して設定できる(t *testing.T) {
 		t.Errorf("posted %v", p)
 	}
 }
+
+func Test移行は自分自身を拒み他のセッションを順に移す(t *testing.T) {
+	g := directGateway()
+	a, out := newTestApp(t, g)
+	if code := a.run([]string{"migrate", "ffff0000"}); code != 1 || !strings.Contains(out.String(), "this session itself") {
+		t.Fatalf("self: code %d: %s", code, out.String())
+	}
+	g.replies = map[string]any{"/v1/sessions/claude:aaaa1111-0000/migrate": model.Session{ID: "claude:aaaa1111-0000", Status: model.StatusIdle, Backend: model.BackendDirect}}
+	got := a.mustRun(t, "migrate", "aaaa1111")
+	if !strings.Contains(got, "claude:aaaa1111-0000: now run by the gateway") || g.posted[0].Path != "/v1/sessions/claude:aaaa1111-0000/migrate" {
+		t.Errorf("output %q posted %v", got, g.posted)
+	}
+}
