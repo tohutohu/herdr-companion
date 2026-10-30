@@ -54,10 +54,56 @@ var commandGroups = []struct {
 	{"Wait", []string{"until", "wait", "changes"}},
 	{"Act", []string{"send", "answer", "start", "archive", "resume"}},
 	{"Settings", []string{"model", "effort", "mode", "interrupt"}},
+	{"Resident", []string{"resident"}},
 	{"Other", []string{"usage", "guide", "version"}},
 }
 
 var commandHelp = []helpPage{
+	{"resident", "standing tasks the Gateway runs on a schedule (常駐)", `hc resident — manage resident tasks (常駐)
+
+USE WHEN
+  The user wants something checked again and again ("every morning look at this repo and
+  tell me if anything needs me"). The Gateway runs it with its own agent run each time,
+  remembers state between runs and notifies only when it matters. These are not sessions:
+  hc ls never lists them.
+
+USAGE
+  hc resident ls                                  one line per task; "!" = waits for the user
+  hc resident show TASK                           settings, next 3 runs, memory, recent runs
+  hc resident create --name N --provider claude|codex --cwd DIR (--instruction T | --instruction-file F)
+                     [--daily HH:MM | --weekly mon,thu@HH:MM | --cron "M H D Mo W" | --once RFC3339 | --manual]
+                     [--tz Asia/Tokyo] [--model M] [--effort E] [--profile read_only|workspace_write]
+                     [--network] [--allow 'Bash(gh pr view:*)']... [--notify changes|always|never]
+                     [--max-minutes N] [--max-runs-per-day N] [--trust] [--file task.json]
+  hc resident update TASK [the same flags] [--enable|--disable]
+  hc resident preview --daily 07:00 [--tz ...]   the next 3 run times, nothing saved
+  hc resident pause TASK | resume TASK            stop / restart automatic runs
+  hc resident run TASK                            run now (joins a queued run if there is one)
+  hc resident runs TASK [--limit N]               run history, including skipped runs
+  hc resident log RUN                             one run: outcome, error, warnings, report
+  hc resident cancel RUN                          stop that run only
+  hc resident dismiss RUN                         close a run whose outcome is unknown, after checking it
+  hc resident send TASK TEXT | --file F           a follow-up instruction; a new run answers it
+  hc resident answer TASK TEXT                    answer the task's open question
+  hc resident messages TASK [--limit N]           the task's conversation
+  hc resident memory TASK [--set F]               show, or replace with {summary?, state?} from F ("-" = stdin)
+  hc resident delete TASK --yes                   stop the task for good
+
+  TASK is a task id, a unique prefix of it, or the exact name. --file takes the same JSON
+  the API takes (docs/api.md); flags override it. Long instructions: --instruction-file.
+
+NOTES
+  - The folder must be under the Gateway's workspace roots. A folder the agent never trusted
+    needs --trust: its project hooks and MCP servers will run unattended.
+  - Permissions are enforced by the agent (Claude's permission rules, Codex's sandbox).
+    Anything not allowed is denied, never approved; the run then reports "blocked".
+  - The agent can only use integrations the user configured (CLIs, MCP servers). hc itself
+    gives no mail or web access.
+  - A run cut off by a Gateway restart is never re-sent: it shows needs_reconciliation.
+
+EXIT STATUS
+  0 ok · 1 refused or failed (stderr says why) · 2 wrong command line
+`},
 	{"ls", "list sessions, one line each (\"!\" = needs you)", `hc ls — list sessions, one line each
 
 USE WHEN
