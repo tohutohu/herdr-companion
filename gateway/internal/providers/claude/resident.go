@@ -9,16 +9,17 @@ import (
 	"os"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/resident"
 )
 
-// ResidentRunner runs resident task runs through a sidecar of its own, so
-// its events never reach the session runtime's listener and stopping it
-// never touches a session. It shares the sessions' configuration: the same
+// ResidentRunner runs resident task runs, each through a sidecar of its
+// own, so its events never reach the session runtime's listener and ending
+// a run never touches a session or another run. When a run ends (finished,
+// stopped or timed out) its sidecar, Claude Code and every command they
+// started are ended. It shares the sessions' configuration: the same
 // sidecar executable, the user's claude CLI (login, version, settings) and
 // the same API-key billing guard.
 //
@@ -28,90 +29,63 @@ import (
 // the rules did not already allow are denied and reported, never approved.
 type ResidentRunner struct {
 	p *Provider
-
-	mu   sync.Mutex
-	sc   *sidecar
-	runs map[string]*residentRun
-}
-
-type residentRun struct {
-	events  chan sidecarEvent
-	denials []string
 }
 
 // ResidentRunner returns the provider's resident runner.
 func (p *Provider) ResidentRunner() *ResidentRunner {
-	return &ResidentRunner{p: p, runs: map[string]*residentRun{}}
+	return &ResidentRunner{p: p}
 }
 
-// Close ends the runner's sidecar and with it any run still going.
-func (r *ResidentRunner) Close() {
-	r.mu.Lock()
-	sc := r.sc
-	r.mu.Unlock()
-	if sc != nil {
-		sc.close()
-	}
-}
+// Close is a no-op: every run ends its own sidecar.
+func (r *ResidentRunner) Close() {}
 
-func (r *ResidentRunner) sidecar() (*sidecar, DirectConfig, error) {
+// open starts the run's sidecar. Events go to the returned channel; end
+// ends the sidecar and everything it started.
+func (r *ResidentRunner) open() (*sidecar, DirectConfig, chan sidecarEvent, func(), error) {
 	r.p.direct.mu.Lock()
 	cfg := r.p.direct.cfg
 	r.p.direct.mu.Unlock()
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.sc != nil && r.sc.alive() {
-		return r.sc, cfg, nil
-	}
 	if cfg.Sidecar == "" {
-		return nil, cfg, fmt.Errorf("%w: the Claude sidecar (herdr-claude-sidecar) was not found", providers.ErrRuntimeUnavailable)
+		return nil, cfg, nil, nil, fmt.Errorf("%w: the Claude sidecar (herdr-claude-sidecar) was not found", providers.ErrRuntimeUnavailable)
 	}
 	if cfg.Claude == "" {
-		return nil, cfg, fmt.Errorf("%w: the claude CLI was not found; install Claude Code or set claudeBinary", providers.ErrRuntimeUnavailable)
+		return nil, cfg, nil, nil, fmt.Errorf("%w: the claude CLI was not found; install Claude Code or set claudeBinary", providers.ErrRuntimeUnavailable)
 	}
-	sc, err := startSidecar(cfg.Sidecar, r.event, r.exited)
-	if err != nil {
-		return nil, cfg, fmt.Errorf("%w: %v", providers.ErrRuntimeUnavailable, err)
-	}
-	r.sc = sc
-	return sc, cfg, nil
-}
-
-func (r *ResidentRunner) event(ev sidecarEvent) {
-	r.mu.Lock()
-	run := r.runs[ev.SessionID]
-	r.mu.Unlock()
-	if run == nil {
-		return
-	}
-	switch ev.Event {
-	case "result", "exit", "denied", "init", "auth":
-		select {
-		case run.events <- ev:
+	events := make(chan sidecarEvent, 256)
+	deliver := func(ev sidecarEvent) {
+		switch ev.Event {
+		case "result", "exit", "denied", "init", "auth":
 		default:
-			slog.Warn("resident event dropped", "provider", providerName, "operation", "resident.event", "event", ev.Event)
+			return
+		}
+		select {
+		case events <- ev:
+		default:
+			go func() { events <- ev }()
 		}
 	}
-}
-
-func (r *ResidentRunner) exited(err error) {
-	r.mu.Lock()
-	runs := make([]*residentRun, 0, len(r.runs))
-	for _, run := range r.runs {
-		runs = append(runs, run)
-	}
-	r.mu.Unlock()
-	msg := "the Claude sidecar exited"
-	if err != nil {
-		msg += ": " + err.Error()
-	}
-	data, _ := json.Marshal(map[string]any{"error": msg})
-	for _, run := range runs {
-		select {
-		case run.events <- sidecarEvent{Event: "exit", Data: data}:
-		default:
+	exited := func(err error) {
+		msg := "the Claude sidecar exited"
+		if err != nil {
+			msg += ": " + err.Error()
 		}
+		data, _ := json.Marshal(map[string]any{"error": msg, "sidecar": true})
+		deliver(sidecarEvent{Event: "exit", Data: data})
 	}
+	sc, err := startSidecar(cfg.Sidecar, deliver, exited)
+	if err != nil {
+		return nil, cfg, nil, nil, fmt.Errorf("%w: %v", providers.ErrRuntimeUnavailable, err)
+	}
+	end := func() {
+		pid := 0
+		if sc.cmd.Process != nil {
+			pid = sc.cmd.Process.Pid
+		}
+		procs := providers.Descendants(pid)
+		sc.close()
+		providers.EndProcesses(procs, 3*time.Second)
+	}
+	return sc, cfg, events, end, nil
 }
 
 // readTools are allowed in every profile.
@@ -161,20 +135,13 @@ type residentResult struct {
 
 // Run executes one resident run and ends its Claude Code process.
 func (r *ResidentRunner) Run(ctx context.Context, req resident.RunRequest, hooks resident.RunHooks) (*resident.RunOutput, error) {
-	sc, cfg, err := r.sidecar()
+	sc, cfg, events, end, err := r.open()
 	if err != nil {
 		return nil, err
 	}
+	defer end()
 	id := newSessionID()
-	run := &residentRun{events: make(chan sidecarEvent, 64)}
-	r.mu.Lock()
-	r.runs[id] = run
-	r.mu.Unlock()
-	defer func() {
-		r.mu.Lock()
-		delete(r.runs, id)
-		r.mu.Unlock()
-	}()
+	var denials []string
 
 	// The agent's tools see which run they belong to (hc and herdr keep
 	// working as tools); no session id, since this is not a session.
@@ -199,20 +166,19 @@ func (r *ResidentRunner) Run(ctx context.Context, req resident.RunRequest, hooks
 		"outputFormat": map[string]any{"type": "json_schema", "schema": req.Schema},
 		"allowedTools": allowed, "disallowedTools": disallowed,
 	}
+	// stop asks Claude Code to end; end (deferred) makes sure it did.
 	stop := func() {
-		sctx, cancel := context.WithTimeout(context.Background(), controlTimeout)
+		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		sc.call(sctx, "stop", map[string]any{"sessionId": id}, nil)
-		// Wait for the process to end so nothing is left running.
-		deadline := time.After(10 * time.Second)
+		deadline := time.After(5 * time.Second)
 		for {
 			select {
-			case ev := <-run.events:
+			case ev := <-events:
 				if ev.Event == "exit" {
 					return
 				}
 			case <-deadline:
-				slog.Warn("resident run did not exit after stop", "provider", providerName, "operation", "resident.stop", "run_id", req.RunID)
 				return
 			}
 		}
@@ -254,12 +220,12 @@ func (r *ResidentRunner) Run(ctx context.Context, req resident.RunRequest, hooks
 	for {
 		select {
 		case <-ctx.Done():
-			ictx, cancel := context.WithTimeout(context.Background(), controlTimeout)
+			ictx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			sc.call(ictx, "interrupt", map[string]any{"sessionId": id}, nil)
 			cancel()
 			stop()
 			return nil, context.Cause(ctx)
-		case ev := <-run.events:
+		case ev := <-events:
 			switch ev.Event {
 			case "init":
 				var d struct {
@@ -279,8 +245,8 @@ func (r *ResidentRunner) Run(ctx context.Context, req resident.RunRequest, hooks
 				if d.Input != "" {
 					label += "(" + d.Input + ")"
 				}
-				if !slices.Contains(run.denials, label) {
-					run.denials = append(run.denials, label)
+				if !slices.Contains(denials, label) {
+					denials = append(denials, label)
 				}
 			case "auth":
 				var d struct {
@@ -308,7 +274,7 @@ func (r *ResidentRunner) Run(ctx context.Context, req resident.RunRequest, hooks
 					return nil, fmt.Errorf("read the run's result: %w", err)
 				}
 				stop()
-				return residentOutput(id, model, res, run.denials), nil
+				return residentOutput(id, model, res, denials), nil
 			}
 		}
 	}

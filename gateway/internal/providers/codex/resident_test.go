@@ -107,7 +107,6 @@ func newResidentRunner(t *testing.T, mode, model string) (*ResidentRunner, *resi
 	go srv.serve()
 	r := (&Provider{bin: "codex-not-used"}).ResidentRunner()
 	r.dial = func() (transport, int, error) { return pt, 0, nil }
-	t.Cleanup(r.Close)
 	return r, srv
 }
 
@@ -204,14 +203,13 @@ func Test停止するとターンを中断してスレッドを外す(t *testing
 func Test常駐用のapp_serverは通常のスレッド一覧の接続と別(t *testing.T) {
 	p := New("codex-not-used", nil)
 	r := p.ResidentRunner()
-	if p.currentOwned() != nil || r.conn != nil {
-		t.Fatal("unexpected connections")
+	if p.currentOwned() != nil {
+		t.Fatal("unexpected connection")
 	}
 	pt := &pipeTransport{in: make(chan []byte, 64), out: make(chan []byte, 64), closed: make(chan struct{})}
 	srv := &residentServer{pt: pt, mode: "answer", model: "m"}
 	go srv.serve()
 	r.dial = func() (transport, int, error) { return pt, 0, nil }
-	t.Cleanup(r.Close)
 	var sent atomic.Bool
 	if _, err := r.Run(context.Background(), req("", resident.Permissions{Profile: resident.ProfileReadOnly}), noHooks(&sent)); err != nil {
 		t.Fatal(err)

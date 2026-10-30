@@ -209,6 +209,11 @@ func normalize(in Settings) (Settings, error) {
 	}
 	switch s.Notify.Mode {
 	case "":
+		// No notification settings at all: the defaults, which report
+		// questions and failures too.
+		if s.Notify == (Notify{}) {
+			s.Notify = Notify{OnFailure: true, OnQuestion: true}
+		}
 		s.Notify.Mode = "changes"
 	case "changes", "always", "never":
 	default:

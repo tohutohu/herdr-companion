@@ -6,17 +6,19 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sync"
 	"time"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/resident"
 )
 
-// ResidentRunner runs resident task runs on a `codex app-server` of its own,
-// separate from the one hosting sessions and reading history: its threads,
-// notifications and server requests never reach the session runtime, and
-// stopping a run never touches a session.
+// ResidentRunner runs resident task runs, each on a `codex app-server` of
+// its own, separate from the one hosting sessions and reading history: its
+// threads, notifications and server requests never reach the session
+// runtime, and ending a run never touches a session or another run. When a
+// run ends (finished, stopped or timed out) its app-server and every
+// process it started are ended, including commands Codex runs in process
+// groups of their own, which turn/interrupt leaves running.
 //
 // Each run is one ephemeral thread (thread/start ephemeral: true) with
 // approvals off (approvalPolicy "never") and the sandbox the task's profile
@@ -24,17 +26,9 @@ import (
 // run's events are collected here, not read back from thread history.
 type ResidentRunner struct {
 	bin string
-	// dial starts the app-server; tests replace it.
+	// dial starts an app-server and returns its pid (0: none to reap);
+	// tests replace it.
 	dial func() (transport, int, error)
-
-	mu   sync.Mutex
-	conn *rpcClient
-	runs map[string]*codexRun // by thread id
-}
-
-type codexRun struct {
-	events  chan codexEvent
-	denials []string
 }
 
 type codexEvent struct {
@@ -44,111 +38,77 @@ type codexEvent struct {
 
 // ResidentRunner returns a runner using the provider's Codex binary.
 func (p *Provider) ResidentRunner() *ResidentRunner {
-	return &ResidentRunner{bin: p.bin, runs: map[string]*codexRun{}}
+	return &ResidentRunner{bin: p.bin}
 }
 
-// Close ends the runner's app-server and with it any run still going.
-func (r *ResidentRunner) Close() {
-	r.mu.Lock()
-	c := r.conn
-	r.mu.Unlock()
-	if c != nil {
-		c.close()
+// Close is a no-op: every run ends its own app-server.
+func (r *ResidentRunner) Close() {}
+
+// residentConn is one run's app-server connection.
+type residentConn struct {
+	c      *rpcClient
+	events chan codexEvent
+}
+
+func (h *residentConn) deliver(ev codexEvent) {
+	select {
+	case h.events <- ev:
+	default:
+		// Streaming deltas can fill the buffer; terminal events must arrive.
+		if ev.method == "turn/completed" || ev.method == "resident/closed" || ev.method == "resident/denied" {
+			go func() { h.events <- ev }()
+		}
 	}
 }
 
-type residentHandler struct{ r *ResidentRunner }
-
-func (h residentHandler) Notification(method string, params json.RawMessage) {
-	var p struct {
-		ThreadID string `json:"threadId"`
-	}
-	json.Unmarshal(params, &p)
-	h.r.deliver(p.ThreadID, codexEvent{method, params})
+func (h *residentConn) Notification(method string, params json.RawMessage) {
+	h.deliver(codexEvent{method, params})
 }
 
 // Request declines everything: approvals are off, so a request here means
 // the agent wanted something the run may not do unattended.
-func (h residentHandler) Request(id json.RawMessage, method string, params json.RawMessage) {
+func (h *residentConn) Request(id json.RawMessage, method string, params json.RawMessage) {
 	var p struct {
-		ThreadID string `json:"threadId"`
-		Command  any    `json:"command"`
-		Reason   string `json:"reason"`
+		Command any `json:"command"`
 	}
 	json.Unmarshal(params, &p)
-	r := h.r
-	r.mu.Lock()
-	c := r.conn
-	r.mu.Unlock()
-	if c == nil {
-		return
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
 	defer cancel()
-	switch method {
-	case "item/commandExecution/requestApproval", "item/fileChange/requestApproval":
-		c.respond(ctx, id, map[string]any{"decision": "decline"})
-	case "execCommandApproval", "applyPatchApproval":
-		c.respond(ctx, id, map[string]any{"decision": "denied"})
-	case "mcpServer/elicitation/request":
-		c.respond(ctx, id, map[string]any{"action": "decline", "content": nil})
-	case "item/tool/requestUserInput":
-		c.respond(ctx, id, map[string]any{"answers": map[string]any{}})
-	default:
-		c.respondError(ctx, id, -32601, "not available in an unattended resident run")
+	if h.c != nil {
+		switch method {
+		case "item/commandExecution/requestApproval", "item/fileChange/requestApproval":
+			h.c.respond(ctx, id, map[string]any{"decision": "decline"})
+		case "execCommandApproval", "applyPatchApproval":
+			h.c.respond(ctx, id, map[string]any{"decision": "denied"})
+		case "mcpServer/elicitation/request":
+			h.c.respond(ctx, id, map[string]any{"action": "decline", "content": nil})
+		case "item/tool/requestUserInput":
+			h.c.respond(ctx, id, map[string]any{"answers": map[string]any{}})
+		default:
+			h.c.respondError(ctx, id, -32601, "not available in an unattended resident run")
+		}
 	}
 	label := method
 	if p.Command != nil {
 		b, _ := json.Marshal(p.Command)
 		label += " " + string(b)
 	}
-	b, _ := json.Marshal(map[string]string{"threadId": p.ThreadID, "label": label})
-	r.deliver(p.ThreadID, codexEvent{"resident/denied", b})
+	b, _ := json.Marshal(map[string]string{"label": label})
+	h.deliver(codexEvent{"resident/denied", b})
 }
 
-func (h residentHandler) Closed(err error) {
-	r := h.r
-	r.mu.Lock()
-	r.conn = nil
-	runs := make(map[string]*codexRun, len(r.runs))
-	for k, v := range r.runs {
-		runs[k] = v
-	}
-	r.mu.Unlock()
+func (h *residentConn) Closed(err error) {
 	msg := "the Codex app-server exited"
 	if err != nil {
 		msg += ": " + err.Error()
 	}
 	b, _ := json.Marshal(map[string]string{"error": msg})
-	for id := range runs {
-		r.deliver(id, codexEvent{"resident/closed", b})
-	}
+	h.deliver(codexEvent{"resident/closed", b})
 }
 
-func (r *ResidentRunner) deliver(thread string, ev codexEvent) {
-	r.mu.Lock()
-	run := r.runs[thread]
-	r.mu.Unlock()
-	if run == nil {
-		return
-	}
-	select {
-	case run.events <- ev:
-	default:
-		// Item deltas are not needed; the terminal events must not be lost,
-		// so the buffer is large and only streaming noise can fill it.
-		if ev.method == "turn/completed" || ev.method == "resident/closed" {
-			go func() { run.events <- ev }()
-		}
-	}
-}
-
-func (r *ResidentRunner) client(ctx context.Context) (*rpcClient, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.conn != nil && r.conn.alive() {
-		return r.conn, nil
-	}
+// open starts the run's app-server. The returned end function ends it and
+// everything it started.
+func (r *ResidentRunner) open(ctx context.Context) (*residentConn, func(), error) {
 	dial := r.dial
 	if dial == nil {
 		dial = func() (transport, int, error) {
@@ -162,18 +122,23 @@ func (r *ResidentRunner) client(ctx context.Context) (*rpcClient, error) {
 	}
 	t, pid, err := dial()
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", providers.ErrRuntimeUnavailable, err)
+		return nil, nil, fmt.Errorf("%w: %v", providers.ErrRuntimeUnavailable, err)
 	}
-	c := newRPCClient(t, residentHandler{r})
+	h := &residentConn{events: make(chan codexEvent, 1024)}
+	h.c = newRPCClient(t, h)
+	end := func() {
+		procs := providers.Descendants(pid)
+		h.c.close()
+		providers.EndProcesses(procs, 3*time.Second)
+	}
 	ictx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
-	if err := c.initialize(ictx); err != nil {
-		c.close()
-		return nil, fmt.Errorf("%w: codex app-server initialize: %v", providers.ErrRuntimeUnavailable, err)
+	if err := h.c.initialize(ictx); err != nil {
+		end()
+		return nil, nil, fmt.Errorf("%w: codex app-server initialize: %v", providers.ErrRuntimeUnavailable, err)
 	}
-	r.conn = c
-	slog.Info("started codex app-server for resident runs", "provider", providerName, "operation", "resident.app-server", "pid", pid)
-	return c, nil
+	slog.Info("started codex app-server for a resident run", "provider", providerName, "operation", "resident.app-server", "pid", pid)
+	return h, end, nil
 }
 
 // residentSandbox maps a task's profile to Codex's sandbox.
@@ -189,10 +154,12 @@ func (r *ResidentRunner) Run(ctx context.Context, req resident.RunRequest, hooks
 	if len(req.Permissions.AllowedTools) > 0 {
 		return nil, errors.New("Codex runs have no per-command permission rules; remove allowedTools")
 	}
-	c, err := r.client(ctx)
+	h, end, err := r.open(ctx)
 	if err != nil {
 		return nil, err
 	}
+	defer end()
+	c := h.c
 	sandbox, policy := residentSandbox(req.Permissions)
 	params := map[string]any{
 		"cwd": req.Cwd, "ephemeral": true, "approvalPolicy": "never", "sandbox": sandbox,
@@ -211,19 +178,12 @@ func (r *ResidentRunner) Run(ctx context.Context, req resident.RunRequest, hooks
 	if thread == "" {
 		return nil, errors.New("codex app-server returned no thread id")
 	}
-	run := &codexRun{events: make(chan codexEvent, 1024)}
-	r.mu.Lock()
-	r.runs[thread] = run
-	r.mu.Unlock()
 	unload := func() {
-		uctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+		uctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := c.call(uctx, "thread/unsubscribe", map[string]any{"threadId": thread}, nil); err != nil {
-			slog.Warn("unloading a resident thread failed", "provider", providerName, "operation", "resident.unload", "run_id", req.RunID, "error", err)
+			slog.Debug("unloading a resident thread failed", "provider", providerName, "operation", "resident.unload", "run_id", req.RunID, "error", err)
 		}
-		r.mu.Lock()
-		delete(r.runs, thread)
-		r.mu.Unlock()
 	}
 	if req.Model != "" && opened.Model != "" && opened.Model != req.Model {
 		unload()
@@ -270,17 +230,18 @@ func (r *ResidentRunner) Run(ctx context.Context, req resident.RunRequest, hooks
 			cancel()
 			unload()
 			return nil, context.Cause(ctx)
-		case ev := <-run.events:
+		case ev := <-h.events:
 			switch ev.method {
 			case "item/completed":
 				var p struct {
-					Item struct {
+					ThreadID string `json:"threadId"`
+					Item     struct {
 						Type string `json:"type"`
 						Text string `json:"text"`
 					} `json:"item"`
 				}
 				json.Unmarshal(ev.params, &p)
-				if p.Item.Type == "agentMessage" {
+				if p.Item.Type == "agentMessage" && p.ThreadID == thread {
 					out.Text = p.Item.Text
 				}
 			case "thread/tokenUsage/updated":
@@ -315,13 +276,11 @@ func (r *ResidentRunner) Run(ctx context.Context, req resident.RunRequest, hooks
 					Error string `json:"error"`
 				}
 				json.Unmarshal(ev.params, &p)
-				r.mu.Lock()
-				delete(r.runs, thread)
-				r.mu.Unlock()
 				return nil, errors.New(p.Error)
 			case "turn/completed":
 				var p struct {
-					Turn struct {
+					ThreadID string `json:"threadId"`
+					Turn     struct {
 						ID     string `json:"id"`
 						Status string `json:"status"`
 						Error  *struct {
@@ -330,8 +289,8 @@ func (r *ResidentRunner) Run(ctx context.Context, req resident.RunRequest, hooks
 					} `json:"turn"`
 				}
 				json.Unmarshal(ev.params, &p)
-				if turnID != "" && p.Turn.ID != "" && p.Turn.ID != turnID {
-					continue
+				if p.ThreadID != thread || (turnID != "" && p.Turn.ID != "" && p.Turn.ID != turnID) {
+					continue // a subagent's thread
 				}
 				out.Usage.DurationMs = time.Since(begun).Milliseconds()
 				out.Usage.NumTurns = 1
