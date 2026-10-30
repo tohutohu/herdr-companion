@@ -34,6 +34,8 @@
 
 Gateway が予定どおり実行する常駐タスク（[resident.md](resident.md)）を管理する。セッションではないので `hc ls` には出ない（`promote` した Run を除く）。
 詳細は `hc help resident`。
+権限は既定のまま（`workspace_write`: Claude は auto モードで普通のコマンド・編集・Web を分類器が通す）でよく、
+念のための `--profile read_only`・細かい `--allow`・指示文での禁止は、ユーザーが求めたときだけ付ける。
 
 ```bash
 hc resident create --provider claude --model haiku --cwd ~/workspace/app \
