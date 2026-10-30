@@ -46,6 +46,7 @@ func (s *Server) residentRoutes(api *http.ServeMux) {
 	api.HandleFunc("GET /v1/resident/runs/{id}", s.residentRun)
 	api.HandleFunc("POST /v1/resident/runs/{id}/cancel", s.residentCancel)
 	api.HandleFunc("POST /v1/resident/runs/{id}/dismiss", s.residentDismiss)
+	api.HandleFunc("POST /v1/resident/runs/{id}/promote", s.residentPromote)
 	api.HandleFunc("POST /v1/resident/questions/{id}/answers", s.residentAnswer)
 }
 
@@ -396,6 +397,36 @@ func (s *Server) residentDismiss(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, run)
+}
+
+// residentPromote makes a run's conversation an ordinary session and
+// resumes it, so the user continues where the run left off. Promoting a run
+// again opens the same session (resumed when it runs nowhere).
+func (s *Server) residentPromote(w http.ResponseWriter, r *http.Request) {
+	p, err := s.Resident.Promote(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.residentFail(w, r, "resident.promote", err)
+		return
+	}
+	sess, res, err := s.Sessions.Get(r.Context(), p.SessionID)
+	if err != nil {
+		s.fail(w, r, p.SessionID, "resident.promote", err)
+		return
+	}
+	if res.Live == nil || res.Live.Dormant {
+		cwd := sess.Cwd
+		if cwd == "" {
+			cwd = p.Cwd
+		}
+		if _, err := s.Launcher.Resume(r.Context(), p.Provider, p.NativeID, cwd); err != nil {
+			s.fail(w, r, p.SessionID, "resident.promote", err)
+			return
+		}
+	}
+	if err := s.Archive.Remove(p.SessionID); err != nil {
+		slog.Warn("unarchive after promotion failed", "session_id", p.SessionID, "error", err)
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"sessionId": p.SessionID})
 }
 
 func (s *Server) residentAnswer(w http.ResponseWriter, r *http.Request) {

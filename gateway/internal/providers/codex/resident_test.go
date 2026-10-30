@@ -129,7 +129,7 @@ func Test常駐実行は一時スレッドで承認なしのサンドボック�
 		t.Errorf("out = %+v", out)
 	}
 	ts := srv.last("thread/start")
-	if ts["ephemeral"] != true || ts["approvalPolicy"] != "never" || ts["sandbox"] != "read-only" || ts["model"] != "gpt-6-luna" {
+	if ts["ephemeral"] != false || ts["approvalPolicy"] != "never" || ts["sandbox"] != "read-only" || ts["model"] != "gpt-6-luna" {
 		t.Errorf("thread/start = %v", ts)
 	}
 	tu := srv.last("turn/start")

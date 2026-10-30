@@ -270,9 +270,10 @@ async function start(p: Json) {
       settingSources: ["user", "project", "local"],
       systemPrompt: { type: "preset", preset: "claude_code" },
       // Sessions keep their transcript, the history the gateway reads.
-      // Resident runs are not sessions: nothing is saved under
-      // ~/.claude/projects, so they never show up in the session list.
-      persistSession: !resident,
+      // A resident run keeps one only when the gateway asks (persist), so
+      // that the user can continue it as a session; the gateway hides it
+      // from the session list until then and removes it when not needed.
+      persistSession: resident ? p.persist === true : true,
       includePartialMessages: !resident,
       pathToClaudeCodeExecutable: String(p.claudePath),
       env,

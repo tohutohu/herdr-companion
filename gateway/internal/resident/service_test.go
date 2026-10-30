@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -862,5 +863,126 @@ func TestSimpleCreate(t *testing.T) {
 		if !task.Notify.OnFailure || !task.Notify.OnQuestion || task.Limits.MaxRunMinutes != DefaultMaxRunMinutes {
 			t.Errorf("defaults = %+v %+v", task.Notify, task.Limits)
 		}
+	})
+}
+
+func TestConversations(t *testing.T) {
+	t.Run("報告したRunの会話はセッションに昇格でき、一覧に出るようになる", func(t *testing.T) {
+		h := newHarness(t)
+		task := h.create(nil)
+		h.runner.push(fakeStep{result: result(OutcomeChanged, "CIが落ちました")})
+		h.clock.Set(mustTime(t, "2026-10-30T07:00:10+09:00"))
+		h.settle()
+		run := h.runs(task.ID)[0]
+		if run.Conversation != ConversationKept {
+			t.Fatalf("conversation = %q", run.Conversation)
+		}
+		ms := h.messages(task.ID)
+		if len(ms) != 1 || ms[0].Conversation != ConversationKept {
+			t.Fatalf("messages = %+v", ms)
+		}
+		p, err := h.svc.Promote(bg, run.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := "claude:native-" + run.ID
+		if p.SessionID != want || p.Cwd != h.cwd() || p.NativeID != "native-"+run.ID {
+			t.Errorf("promotion = %+v", p)
+		}
+		if got := h.runner.titles["native-"+run.ID]; got != "CI監視（常駐 10/30 07:00）" {
+			t.Errorf("title = %q", got)
+		}
+		if h.svc.HiddenSessionIDs(bg)[want] {
+			t.Error("a promoted run is still hidden from the session list")
+		}
+		again, err := h.svc.Promote(bg, run.ID)
+		if err != nil || again.SessionID != want {
+			t.Errorf("second promotion = %+v, %v", again, err)
+		}
+		got, _ := h.svc.GetRun(bg, run.ID)
+		if got.Conversation != ConversationPromoted || got.SessionID != want {
+			t.Errorf("run = %q %q", got.Conversation, got.SessionID)
+		}
+		h.clock.Add(30 * 24 * time.Hour)
+		h.svc.Tick(bg)
+		if d := h.runner.discardedIDs(); len(d) != 0 {
+			t.Errorf("a promoted conversation was removed: %v", d)
+		}
+	})
+
+	t.Run("変化のない定期実行の会話はすぐ削除され、昇格できない", func(t *testing.T) {
+		h := newHarness(t)
+		task := h.create(nil)
+		h.clock.Set(mustTime(t, "2026-10-30T07:00:10+09:00"))
+		h.settle()
+		run := h.runs(task.ID)[0]
+		if run.Conversation != ConversationDiscarded {
+			t.Fatalf("conversation = %q", run.Conversation)
+		}
+		if d := h.runner.discardedIDs(); len(d) != 1 || d[0] != "native-"+run.ID {
+			t.Errorf("discarded = %v", d)
+		}
+		if _, err := h.svc.Promote(bg, run.ID); !errors.Is(err, ErrInvalid) {
+			t.Errorf("err = %v", err)
+		}
+	})
+
+	t.Run("保持期間を過ぎた会話は削除される。失敗したら1時間後にやり直す", func(t *testing.T) {
+		h := newHarness(t)
+		task := h.create(nil)
+		r, _ := h.svc.RunNow(bg, task.ID, "")
+		h.settle()
+		if d := h.runner.discardedIDs(); len(d) != 0 {
+			t.Fatalf("discarded too early: %v", d)
+		}
+		h.runner.discardErr = errors.New("app-server down")
+		h.clock.Add(14*24*time.Hour + time.Minute)
+		h.svc.Tick(bg)
+		if got, _ := h.svc.GetRun(bg, r.Run.ID); got.Conversation != ConversationKept {
+			t.Fatalf("after a failed removal: %q", got.Conversation)
+		}
+		h.runner.discardErr = nil
+		h.svc.Tick(bg)
+		// Moving the clock also made the daily schedule run (unchanged,
+		// removed at once); only this run's conversation is looked at.
+		native := "native-" + r.Run.ID
+		if slices.Contains(h.runner.discardedIDs(), native) {
+			t.Fatal("retried before an hour")
+		}
+		h.clock.Add(time.Hour)
+		h.svc.Tick(bg)
+		if got, _ := h.svc.GetRun(bg, r.Run.ID); got.Conversation != ConversationDiscarded || !slices.Contains(h.runner.discardedIDs(), native) {
+			t.Errorf("conversation = %q, discarded = %v", got.Conversation, h.runner.discardedIDs())
+		}
+	})
+
+	t.Run("タスクを削除すると昇格していない会話も削除される", func(t *testing.T) {
+		h := newHarness(t)
+		task := h.create(nil)
+		h.svc.RunNow(bg, task.ID, "")
+		h.settle()
+		if err := h.svc.DeleteTask(bg, task.ID); err != nil {
+			t.Fatal(err)
+		}
+		h.svc.Tick(bg)
+		if d := h.runner.discardedIDs(); len(d) != 1 {
+			t.Errorf("discarded = %v", d)
+		}
+	})
+
+	t.Run("実行中のRunは昇格できない", func(t *testing.T) {
+		h := newHarness(t)
+		task := h.create(nil)
+		release := make(chan struct{})
+		h.runner.started = make(chan string, 1)
+		h.runner.push(fakeStep{result: result(OutcomeChanged, "x"), block: release})
+		r, _ := h.svc.RunNow(bg, task.ID, "")
+		h.svc.Tick(bg)
+		<-h.runner.started
+		if _, err := h.svc.Promote(bg, r.Run.ID); !errors.Is(err, ErrConflict) {
+			t.Errorf("err = %v", err)
+		}
+		close(release)
+		h.settle()
 	})
 }

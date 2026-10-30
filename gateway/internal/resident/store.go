@@ -17,7 +17,7 @@ import (
 
 // SchemaVersion is the database layout this build writes. Older layouts are
 // migrated forward on open; a newer one is refused rather than guessed at.
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 var migrations = []string{
 	// 1: initial layout.
@@ -169,6 +169,13 @@ CREATE TABLE requests (
 	result TEXT NOT NULL,
 	created_at INTEGER NOT NULL
 );
+`,
+	// 2: runs keep their agent conversation, so one can become a session.
+	`
+ALTER TABLE runs ADD COLUMN conversation TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN keep_until INTEGER;
+ALTER TABLE runs ADD COLUMN session_id TEXT NOT NULL DEFAULT '';
+CREATE INDEX runs_conversation ON runs(conversation, keep_until);
 `,
 }
 

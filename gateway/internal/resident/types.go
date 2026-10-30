@@ -169,6 +169,10 @@ type Message struct {
 	Outcome   string `json:"outcome,omitempty"`
 	// QuestionID links a question message to its question.
 	QuestionID string `json:"questionId,omitempty"`
+	// Conversation and SessionID are the run's (see Run), so a report can
+	// offer to continue in a session.
+	Conversation string `json:"conversation,omitempty"`
+	SessionID    string `json:"sessionId,omitempty"`
 }
 
 // Memory is a task's state carried from run to run.
@@ -263,11 +267,25 @@ type Run struct {
 	NextWakeAt      *time.Time `json:"nextWakeAt,omitempty"`
 	// Interactive runs were asked for by the user (manual, follow-up,
 	// answer): their reply goes to the conversation even when unchanged.
-	Interactive bool       `json:"interactive"`
-	Attempts    []Attempt  `json:"attempts,omitempty"`
-	Artifacts   []Artifact `json:"artifacts,omitempty"`
-	Question    *Question  `json:"question,omitempty"`
+	Interactive bool `json:"interactive"`
+	// Conversation says whether the agent's conversation of the run is
+	// kept and can become a session ("kept"), already is one ("promoted",
+	// SessionID), or is gone ("discarded"; "" for runs that never kept one).
+	Conversation string     `json:"conversation,omitempty"`
+	SessionID    string     `json:"sessionId,omitempty"`
+	Attempts     []Attempt  `json:"attempts,omitempty"`
+	Artifacts    []Artifact `json:"artifacts,omitempty"`
+	Question     *Question  `json:"question,omitempty"`
 }
+
+// Conversation states of a run.
+const (
+	ConversationKept      = "kept"
+	ConversationPromoted  = "promoted"
+	ConversationDiscarded = "discarded"
+	// conversationDiscarding: being removed, no longer promotable.
+	conversationDiscarding = "discarding"
+)
 
 // Usage is what a run consumed, as the provider reported it.
 type Usage struct {

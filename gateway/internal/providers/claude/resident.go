@@ -23,10 +23,12 @@ import (
 // sidecar executable, the user's claude CLI (login, version, settings) and
 // the same API-key billing guard.
 //
-// Each run is one query() with persistSession: false (no transcript, so it
-// never appears among sessions), outputFormat set to the result contract,
-// and a permission mode chosen by the task's profile. Permission requests
-// the rules did not already allow are denied and reported, never approved.
+// Each run is one query() with outputFormat set to the result contract and
+// a permission mode chosen by the task's profile. Permission requests the
+// rules did not already allow are denied and reported, never approved. The
+// run's transcript is kept (persistSession) so the user can continue it as
+// a session; the gateway hides it from the session list until then, and
+// removes it (Discard) when it is not needed.
 type ResidentRunner struct {
 	p *Provider
 }
@@ -38,6 +40,41 @@ func (p *Provider) ResidentRunner() *ResidentRunner {
 
 // Close is a no-op: every run ends its own sidecar.
 func (r *ResidentRunner) Close() {}
+
+// Rename titles a run's transcript the way Claude Code's /rename does, so
+// the session list (and claude --resume) shows the title.
+func (r *ResidentRunner) Rename(ctx context.Context, nativeID, title string) error {
+	path, err := r.p.transcriptPath(nativeID)
+	if err != nil {
+		return err
+	}
+	line, err := json.Marshal(map[string]string{"type": "custom-title", "customTitle": title, "sessionId": nativeID})
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(append(line, '\n')); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
+
+// Discard removes a run's transcript and its subagent transcripts, as the
+// Agent SDK's deleteSession does.
+func (r *ResidentRunner) Discard(ctx context.Context, nativeID string) error {
+	path, err := r.p.transcriptPath(nativeID)
+	if err != nil {
+		return err
+	}
+	if err := os.RemoveAll(strings.TrimSuffix(path, ".jsonl")); err != nil {
+		return err
+	}
+	return os.Remove(path)
+}
 
 // open starts the run's sidecar. Events go to the returned channel; end
 // ends the sidecar and everything it started.
@@ -158,7 +195,7 @@ func (r *ResidentRunner) Run(ctx context.Context, req resident.RunRequest, hooks
 		"sessionId": id, "resume": false, "cwd": req.Cwd,
 		"model": req.Model, "effort": req.Effort, "permissionMode": mode,
 		"claudePath": cfg.Claude, "env": envMap,
-		"resident":     true,
+		"resident": true, "persist": true,
 		"outputFormat": map[string]any{"type": "json_schema", "schema": req.Schema},
 		"allowedTools": allowed, "disallowedTools": disallowed,
 	}

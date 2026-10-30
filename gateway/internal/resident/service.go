@@ -61,6 +61,10 @@ type Config struct {
 	QuestionTTL time.Duration
 	// Tick is how often the scheduler looks at the clock (default 30 s).
 	Tick time.Duration
+	// KeepConversations is how long a run's agent conversation is kept so
+	// it can become a session (default 14 days). Runs not shown in the task
+	// conversation (an unchanged scheduled check) are not kept.
+	KeepConversations time.Duration
 }
 
 func (c Config) withDefaults() Config {
@@ -81,6 +85,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.Tick <= 0 {
 		c.Tick = 30 * time.Second
+	}
+	if c.KeepConversations <= 0 {
+		c.KeepConversations = 14 * 24 * time.Hour
 	}
 	return c
 }
@@ -540,7 +547,11 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 		if _, err := tx.Exec(`UPDATE runs SET status = 'cancelled', ended_at = ?, error = 'task deleted' WHERE task_id = ? AND status = 'queued'`, ms(now), id); err != nil {
 			return err
 		}
-		_, err = tx.Exec(`UPDATE questions SET status = 'superseded' WHERE task_id = ? AND status = 'open'`, id)
+		if _, err := tx.Exec(`UPDATE questions SET status = 'superseded' WHERE task_id = ? AND status = 'open'`, id); err != nil {
+			return err
+		}
+		// Conversations not made sessions go with the task.
+		_, err = tx.Exec(`UPDATE runs SET keep_until = ? WHERE task_id = ? AND conversation = 'kept'`, ms(now), id)
 		return err
 	})
 	if err != nil {
@@ -845,8 +856,10 @@ func (s *Service) Messages(ctx context.Context, taskID, before string, limit int
 			return nil, false, err
 		}
 	}
-	rows, err := s.store.db.QueryContext(ctx, `SELECT id, task_id, role, kind, text, COALESCE(run_id,''), COALESCE(handled_by,''), COALESCE(outcome,''), COALESCE(question_id,''), created_at
-		FROM messages WHERE task_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?`, taskID, upper, limit+1)
+	rows, err := s.store.db.QueryContext(ctx, `SELECT m.id, m.task_id, m.role, m.kind, m.text, COALESCE(m.run_id,''), COALESCE(m.handled_by,''), COALESCE(m.outcome,''), COALESCE(m.question_id,''), m.created_at,
+		COALESCE(r.conversation,''), COALESCE(r.session_id,'')
+		FROM messages m LEFT JOIN runs r ON r.id = m.run_id AND m.role = 'assistant'
+		WHERE m.task_id = ? AND m.seq < ? ORDER BY m.seq DESC LIMIT ?`, taskID, upper, limit+1)
 	if err != nil {
 		return nil, false, err
 	}
@@ -855,7 +868,8 @@ func (s *Service) Messages(ctx context.Context, taskID, before string, limit int
 	for rows.Next() {
 		var m Message
 		var created int64
-		if err := rows.Scan(&m.ID, &m.TaskID, &m.Role, &m.Kind, &m.Text, &m.RunID, &m.HandledBy, &m.Outcome, &m.QuestionID, &created); err != nil {
+		if err := rows.Scan(&m.ID, &m.TaskID, &m.Role, &m.Kind, &m.Text, &m.RunID, &m.HandledBy, &m.Outcome, &m.QuestionID, &created,
+			&m.Conversation, &m.SessionID); err != nil {
 			return nil, false, err
 		}
 		m.CreatedAt = fromMs(created)
@@ -1087,11 +1101,12 @@ func (s *Service) Artifact(ctx context.Context, id string) (*Artifact, string, e
 }
 
 // HiddenSessionIDs are the gateway ids ("claude:<id>", "codex:<thread>") of
-// resident runs. They are not sessions: the session list leaves them out
-// should an agent have saved anything under them.
+// resident runs. They are not sessions: the session list leaves out the
+// conversations they keep, until one is promoted to a session.
 func (s *Service) HiddenSessionIDs(ctx context.Context) map[string]bool {
 	out := map[string]bool{}
-	rows, err := s.store.db.QueryContext(ctx, `SELECT provider, native_id FROM attempts WHERE native_id <> ''`)
+	rows, err := s.store.db.QueryContext(ctx, `SELECT a.provider, a.native_id FROM attempts a JOIN runs r ON r.id = a.run_id
+		WHERE a.native_id <> '' AND r.conversation <> 'promoted'`)
 	if err != nil {
 		return out
 	}

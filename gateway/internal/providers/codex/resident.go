@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
@@ -20,12 +21,16 @@ import (
 // process it started are ended, including commands Codex runs in process
 // groups of their own, which turn/interrupt leaves running.
 //
-// Each run is one ephemeral thread (thread/start ephemeral: true) with
-// approvals off (approvalPolicy "never") and the sandbox the task's profile
-// chooses; one turn/start carries the result contract as outputSchema. The
-// run's events are collected here, not read back from thread history.
+// Each run is one thread with approvals off (approvalPolicy "never") and
+// the sandbox the task's profile chooses; one turn/start carries the result
+// contract as outputSchema. The run's events are collected here, not read
+// back from thread history. The thread is saved (not ephemeral) so the user
+// can continue it as a session; the gateway hides it from the session list
+// until then, and removes it (Discard) when it is not needed.
 type ResidentRunner struct {
 	bin string
+	// p names and deletes saved threads through the gateway's app-server.
+	p *Provider
 	// dial starts an app-server and returns its pid (0: none to reap);
 	// tests replace it.
 	dial func() (transport, int, error)
@@ -38,11 +43,41 @@ type codexEvent struct {
 
 // ResidentRunner returns a runner using the provider's Codex binary.
 func (p *Provider) ResidentRunner() *ResidentRunner {
-	return &ResidentRunner{bin: p.bin}
+	return &ResidentRunner{bin: p.bin, p: p}
 }
 
 // Close is a no-op: every run ends its own app-server.
 func (r *ResidentRunner) Close() {}
+
+// Rename names a run's thread, as the session list shows it.
+func (r *ResidentRunner) Rename(ctx context.Context, nativeID, title string) error {
+	return r.threadCall(ctx, "thread/name/set", map[string]any{"threadId": nativeID, "name": title})
+}
+
+// Discard deletes a run's thread and its rollout.
+func (r *ResidentRunner) Discard(ctx context.Context, nativeID string) error {
+	return r.threadCall(ctx, "thread/delete", map[string]any{"threadId": nativeID})
+}
+
+func (r *ResidentRunner) threadCall(ctx context.Context, method string, params map[string]any) error {
+	if !threadIDPattern.MatchString(fmt.Sprint(params["threadId"])) {
+		return providers.ErrNotFound
+	}
+	c, err := r.p.client(ctx)
+	if err != nil {
+		return err
+	}
+	cctx, cancel := context.WithTimeout(ctx, callTimeout)
+	defer cancel()
+	if err := c.call(cctx, method, params, nil); err != nil {
+		var rerr *rpcError
+		if errors.As(err, &rerr) && strings.Contains(strings.ToLower(rerr.Message), "not found") {
+			return fmt.Errorf("%w: %v", providers.ErrNotFound, err)
+		}
+		return err
+	}
+	return nil
+}
 
 // residentConn is one run's app-server connection.
 type residentConn struct {
@@ -149,7 +184,7 @@ func residentSandbox(p resident.Permissions) (mode string, policy map[string]any
 	return "read-only", map[string]any{"type": "readOnly", "networkAccess": true}
 }
 
-// Run executes one resident run on an ephemeral thread and unloads it.
+// Run executes one resident run on a thread of its own and unloads it.
 func (r *ResidentRunner) Run(ctx context.Context, req resident.RunRequest, hooks resident.RunHooks) (*resident.RunOutput, error) {
 	if len(req.Permissions.AllowedTools) > 0 {
 		return nil, errors.New("Codex runs have no per-command permission rules; remove allowedTools")
@@ -162,7 +197,7 @@ func (r *ResidentRunner) Run(ctx context.Context, req resident.RunRequest, hooks
 	c := h.c
 	sandbox, policy := residentSandbox(req.Permissions)
 	params := map[string]any{
-		"cwd": req.Cwd, "ephemeral": true, "approvalPolicy": "never", "sandbox": sandbox,
+		"cwd": req.Cwd, "ephemeral": false, "approvalPolicy": "never", "sandbox": sandbox,
 	}
 	if req.Model != "" {
 		params["model"] = req.Model

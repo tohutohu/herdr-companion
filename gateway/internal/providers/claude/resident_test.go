@@ -3,12 +3,15 @@ package claude
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/resident"
@@ -26,7 +29,7 @@ func hooks(sent *atomic.Bool) resident.RunHooks {
 	}
 }
 
-func Test常駐実行は非永続で構造化出力と権限プロファイルとモデルを渡す(t *testing.T) {
+func Test常駐実行はtranscriptを残し構造化出力と権限プロファイルとモデルを渡す(t *testing.T) {
 	p, log := newSidecarProvider(t)
 	var notified atomic.Int32
 	p.SetDirectListener(func(string) { notified.Add(1) })
@@ -45,7 +48,7 @@ func Test常駐実行は非永続で構造化出力と権限プロファイル�
 		t.Fatalf("starts = %v", starts)
 	}
 	s := starts[0]
-	if s["resident"] != true || s["model"] != "sonnet" || s["effort"] != "high" || s["permissionMode"] != "default" {
+	if s["resident"] != true || s["persist"] != true || s["model"] != "sonnet" || s["effort"] != "high" || s["permissionMode"] != "default" {
 		t.Errorf("start = %v", s)
 	}
 	of, _ := s["outputFormat"].(map[string]any)
@@ -209,4 +212,42 @@ func toStrings(v any) []string {
 		}
 	}
 	return out
+}
+
+func Test常駐実行のtranscriptに題名を付けると一覧の題名になり削除するとサブエージェントごと消える(t *testing.T) {
+	dir := t.TempDir()
+	project := filepath.Join(dir, "projects", "-work")
+	id := "0b6c7a43-1f5e-4a3c-9d0e-2b8f4c1a7e55"
+	if err := os.MkdirAll(filepath.Join(project, id, "subagents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	transcript := filepath.Join(project, id+".jsonl")
+	line := `{"type":"user","sessionId":"` + id + `","cwd":"/work","timestamp":"2026-10-30T07:00:00Z","message":{"role":"user","content":"check"}}` + "\n"
+	if err := os.WriteFile(transcript, []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p := New(dir, deadletter.Nop{})
+	r := p.ResidentRunner()
+	if err := r.Rename(context.Background(), id, "CI監視（常駐 10/30 07:00）"); err != nil {
+		t.Fatal(err)
+	}
+	sum, err := p.Summary(context.Background(), id, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.Title != "CI監視（常駐 10/30 07:00）" {
+		t.Errorf("title = %q", sum.Title)
+	}
+	if err := r.Discard(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(transcript); !os.IsNotExist(err) {
+		t.Errorf("transcript remains: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(project, id)); !os.IsNotExist(err) {
+		t.Errorf("subagent directory remains: %v", err)
+	}
+	if err := r.Discard(context.Background(), id); !errors.Is(err, providers.ErrNotFound) {
+		t.Errorf("second discard = %v", err)
+	}
 }

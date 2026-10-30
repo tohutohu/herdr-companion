@@ -78,7 +78,8 @@ type activeRun struct {
 // --- queries ---
 
 const runColumns = `id, task_id, status, triggers, reason, interactive, queued_at, scheduled_for, started_at, ended_at, outcome, summary, report,
-	error_kind, error, settings, settings_version, memory_version, provider, model, effort, usage, warnings, notification_key, notify_decision, next_wake_at`
+	error_kind, error, settings, settings_version, memory_version, provider, model, effort, usage, warnings, notification_key, notify_decision, next_wake_at,
+	conversation, session_id`
 
 func scanRun(row scanner) (*Run, error) {
 	var r Run
@@ -87,7 +88,8 @@ func scanRun(row scanner) (*Run, error) {
 	var sched, started, ended, nextWake sql.NullInt64
 	var settings, usage, warnings sql.NullString
 	if err := row.Scan(&r.ID, &r.TaskID, &r.Status, &triggers, &r.Reason, &r.Interactive, &queued, &sched, &started, &ended, &r.Outcome, &r.Summary, &r.Report,
-		&r.ErrorKind, &r.Error, &settings, &r.SettingsVersion, &r.MemoryVersion, &r.Provider, &r.Model, &r.Effort, &usage, &warnings, &r.NotificationKey, &r.NotifyDecision, &nextWake); err != nil {
+		&r.ErrorKind, &r.Error, &settings, &r.SettingsVersion, &r.MemoryVersion, &r.Provider, &r.Model, &r.Effort, &usage, &warnings, &r.NotificationKey, &r.NotifyDecision, &nextWake,
+		&r.Conversation, &r.SessionID); err != nil {
 		if isNoRows(err) {
 			return nil, ErrNotFound
 		}
@@ -460,6 +462,11 @@ func (s *Service) execute(ctx context.Context, a *activeRun, run *Run, task *Tas
 				}
 				_, err := s.store.db.Exec(`UPDATE attempts SET phase = 'sending', native_id = ?, model = ? WHERE id = ? AND phase = 'preparing'`, nativeID, model, attemptID)
 				if err == nil {
+					// The agent saves the conversation from here on; it is
+					// kept for a while so it can become a session.
+					_, err = s.store.db.Exec(`UPDATE runs SET conversation = 'kept', keep_until = ? WHERE id = ?`, ms(s.clock().Add(s.cfg.KeepConversations)), run.ID)
+				}
+				if err == nil {
 					s.mu.Lock()
 					a.sent = true
 					s.mu.Unlock()
@@ -708,6 +715,12 @@ func (s *Service) finalize(ctx context.Context, runID, attemptID string, out *Ru
 			report = res.Summary
 		}
 		show := r.Interactive || res.Outcome != OutcomeUnchanged || status != RunCompleted
+		if !show {
+			// Nothing to talk about: an unchanged check leaves no conversation.
+			if _, err := tx.Exec(`UPDATE runs SET keep_until = ? WHERE id = ? AND conversation = 'kept'`, ms(now), runID); err != nil {
+				return err
+			}
+		}
 		if show {
 			kind := MsgReport
 			if status == RunFailed {

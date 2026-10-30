@@ -211,3 +211,43 @@ func Test常駐の実行は通常のセッション一覧に混ざらない(t *t
 		t.Errorf("sessions = %+v", got.Sessions)
 	}
 }
+
+func Test常駐の実行をセッションに昇格するAPI(t *testing.T) {
+	runner := &apiRunner{}
+	opt, svc, root := withResident(t, runner)
+	ts, _, _, tok := newTestServer(t, opt)
+	_, body := do(t, ts, tok, "POST", "/v1/resident/tasks", taskBody(root, nil), "application/json")
+	var task resident.Task
+	json.Unmarshal(body, &task)
+	_, body = do(t, ts, tok, "POST", "/v1/resident/tasks/"+task.ID+"/runs", []byte(`{}`), "application/json")
+	var posted resident.PostResult
+	json.Unmarshal(body, &posted)
+
+	// 終わっていない実行は昇格できない
+	resp, body := do(t, ts, tok, "POST", "/v1/resident/runs/"+posted.Run.ID+"/promote", nil, "")
+	if resp.StatusCode != 409 || !strings.Contains(string(body), "conflict") {
+		t.Errorf("queued: %d %s", resp.StatusCode, body)
+	}
+	(*svc).Tick(context.Background())
+	deadline := time.Now().Add(5 * time.Second)
+	for len((*svc).ActiveRuns()) > 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	_, body = do(t, ts, tok, "GET", "/v1/resident/tasks/"+task.ID+"/messages", nil, "")
+	if !strings.Contains(string(body), `"conversation":"kept"`) {
+		t.Errorf("messages = %s", body)
+	}
+	// このテストの Gateway には claude が無いので再開は 404 になるが、昇格は記録される
+	resp, body = do(t, ts, tok, "POST", "/v1/resident/runs/"+posted.Run.ID+"/promote", nil, "")
+	if resp.StatusCode != 404 {
+		t.Errorf("promote: %d %s", resp.StatusCode, body)
+	}
+	_, body = do(t, ts, tok, "GET", "/v1/resident/runs/"+posted.Run.ID, nil, "")
+	if !strings.Contains(string(body), `"conversation":"promoted"`) || !strings.Contains(string(body), `"sessionId":"claude:native-`+posted.Run.ID+`"`) {
+		t.Errorf("run = %s", body)
+	}
+	resp, body = do(t, ts, tok, "POST", "/v1/resident/runs/run_unknown/promote", nil, "")
+	if resp.StatusCode != 404 || !strings.Contains(string(body), "not_found") {
+		t.Errorf("unknown: %d %s", resp.StatusCode, body)
+	}
+}

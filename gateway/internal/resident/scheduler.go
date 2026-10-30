@@ -134,6 +134,7 @@ func (s *Service) Tick(ctx context.Context) {
 	if s.Notifier != nil {
 		s.Notifier.Deliver(ctx)
 	}
+	s.sweepConversations(ctx, now)
 }
 
 func (s *Service) fireDue(ctx context.Context, now time.Time) error {
