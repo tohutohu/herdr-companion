@@ -3,12 +3,14 @@
 監査日: 2026-10-15。現在の追加対応と検証は末尾の「9. 追補」を優先する。基準コミット: `1104f86`（1.6.1）。Androidに加え、その共通UI・HTTPクライアント・Desktop利用側と、Gateway/Managerの信頼境界を調査した。
 コード追跡、静的解析、独立した3担当の調査、既存テスト、障害条件の回帰テストを統合した記録である。全ファイルの行単位レビュー、侵入試験、全端末の動作保証ではない。
 
+> **2.0での変更**: 2.0でGatewayはClaude Code・Codexのセッションをすべて自分で動かす構成になり、Herdr連携（ペイン、ターミナル画面、起動のTerminal/Continue、ペインへのキー入力、Herdrの既読）、Codexの共有app-server daemon、OpenCode・Devinを削除した。第1節の構成とフローは2.0に合わせて更新した。第2節以降は監査時（1.6.1〜1.x）の記録で、そこに出るTerminalやHerdrの記述は当時の機能を指す。AndroidのRoomは2.0でv10になり、セッションの`paneId`・`backend`列を削除した。
+
 ## 1. 構成と重要なデータフロー
 
 ### 目的と制約
 
-MacでHerdr内のClaude Code / Codex / OpenCode / Devinを動かし、Androidから進捗確認、通知受信、メッセージ送信、質問・承認への回答、新規セッション開始、添付・ファイル確認を行う。
-会話の正本は各providerとHerdr。Gatewayは投影と変換を担当し、AndroidのRoomは再取得可能な表示キャッシュである。
+MacでGatewayが動かすClaude Code / Codexのセッションについて、Androidから進捗確認、通知受信、メッセージ送信、質問・承認への回答、新規セッション開始、添付・ファイル確認を行う。
+会話の正本は各provider（Claude Codeのtranscript、Codexのthread）。Gatewayはセッションの実行と、投影・変換を担当し、AndroidのRoomは再取得可能な表示キャッシュである。
 HTTPを一律禁止するとTailscale内通信という既存用途を壊す。GatewayやHerdrの再起動、実ユーザーのpaneへの送信は監査で実行していない。
 
 ### モジュールと依存方向
@@ -19,7 +21,7 @@ HTTPを一律禁止するとTailscale内通信という既存用途を壊す。G
 | `android/shared` | KMPのcommonMainにDTO・表示モデル・純粋ロジック・Compose UI。Android/JVM Desktop target。Android ContextやRoomを持ち込まない |
 | `android/gatewayClient` | Android/Desktop共用のJVM OkHttpクライアント。`shared`のDTO/Settingsに依存 |
 | `android/desktopApp` | Compose Desktop、独自状態・設定・ウィンドウ・通知・更新。`shared`/`gatewayClient`を利用。Android Roomとは別のインメモリ読取系 |
-| `gateway` | Go HTTP認証/API、Herdr socket、4 provider、ファイル/upload、起動/trust/worktree、usage/price、FCM watcher。任意のJev判定は既存仕様として境界確認のみ |
+| `gateway` | Go HTTP認証/API、セッション実行（Claude Agent SDKサイドカー、Codex app-server）、2 provider、ファイル/upload、起動/trust/worktree、usage/price、FCM watcher。任意のJev判定は既存仕様として境界確認のみ |
 | `macos` | SwiftUIメニューバーGateway Manager、子プロセス管理、設定/pairing、DMG/更新。Compose Desktopアプリとは別物 |
 | `.github` / `scripts` | バージョン共通化、Android APK・Mac DMG・Linux deb・CLI配布。現在のCIはタグと手動起動 |
 
@@ -29,15 +31,15 @@ HTTPを一律禁止するとTailscale内通信という既存用途を壊す。G
 ### 主要フローの追跡
 
 1. **設定・pairing**: Settings画面/QR → PairingのURL・応答検証 → `AppContainer.configure` → DataStore。接続変更は次プロセスへstageし、cache resetとFirebase初期化を先に完了。`connectionId`で古い通知/Workerを拒否する。
-2. **一覧**: STARTED中のRoute更新 → `SessionRepository.refreshSessions` → Gateway `/v1/sessions` → provider/Herdr → Room `replaceListing` → Flow → UiModel → 共通`SessionListScreen`。一覧の正本をUI内へ複製しない。
+2. **一覧**: STARTED中のRoute更新 → `SessionRepository.refreshSessions` → Gateway `/v1/sessions` → provider/runtime → Room `replaceListing` → Flow → UiModel → 共通`SessionListScreen`。一覧の正本をUI内へ複製しない。
 3. **詳細**: Navigation keyのsession ID → ViewModel → Room Flow → 共通`SessionDetailScreen`。poll/FCM prefetch/送信後refreshはGatewayのanchorを含む増分を`replaceFrom` transactionで保存する。今回、ETagの確定を保存後へ変更した。
-4. **送信・回答**: Composer → Android Outboxのアプリscopeで添付uploadと送信 → Gateway → provider。質問/承認はinteraction IDと回答DTOを送る。Gatewayのprovider別変換が端末キー操作/daemon APIを選択する。Outbox/SessionStartsは画面離脱には耐えるが、プロセス終了に耐える永続queueではない。
+4. **送信・回答**: Composer → Android Outboxのアプリscopeで添付uploadと送信 → Gateway → provider。質問/承認はinteraction IDと回答DTOを送る。Gatewayはprovider別にSDKサイドカー/app-serverの応答へ変換する。Outbox/SessionStartsは画面離脱には耐えるが、プロセス終了に耐える永続queueではない。
 5. **通知**: Gateway watcher → data-only FCM → `PushService`が通知表示し`PrefetchWorker`をenqueue → Roomへ取得。タップは接続IDを確認して詳細へ。RemoteInput返信は非公開Receiver → `ReplyWorker` → POST。WorkManagerはネットワーク条件/backoff/試行上限を持つ。
-6. **新規起動・復帰**: フォルダ/モデル/effort/プロンプト → 任意のdirectory check → アプリscopeの`SessionStarts` → Gateway launcher。trust要求、部分起動、Terminal/Continueに対応し、確認失敗時に安易な再起動を促さない。
+6. **新規起動・復帰**: フォルダ/モデル/effort/プロンプト → 任意のdirectory check → アプリscopeの`SessionStarts` → Gateway launcher。trust要求（`launchId`への回答）に対応し、確認失敗時に安易な再起動を促さない。
 7. **添付・閲覧**: OS文書picker → IOでURIメタデータ → 上限付き読み込み/upload。ファイルstatでプレビュー/Media3/ダウンロードを選択、保存はMediaStoreのpending行→成功後公開。画像認証はGatewayとscheme/host/portが同一の宛先に限定。
 8. **Desktop**: 同じUI/DTO/API → `DesktopAppState`/Repository → pane・独立ウィンドウ。listMutex、可視セッションのdetail poll、layout/preferences保存。ETag receiptも表示反映後にackするよう修正した。
 
-Room v8は1→8のAutoMigrationと各schemaを保持し、メッセージ末尾置換・一覧置換はそれぞれtransaction。破壊的fallbackは会話の原本ではなくcacheに限られるが、migration実DBテストがない。SessionEntityとMessageEntity間の書込み全体は単一transactionではない。
+Room v8（監査時。2.0ではv10）は1→8のAutoMigrationと各schemaを保持し、メッセージ末尾置換・一覧置換はそれぞれtransaction。破壊的fallbackは会話の原本ではなくcacheに限られるが、migration実DBテストがない。SessionEntityとMessageEntity間の書込み全体は単一transactionではない。
 時刻はDTOのISO timestampを`Instant`のepoch millisへ変換する。未知値は0となる実装で、表示順への影響はあり得るが、今回の入力経路調査で具体的なtimezone障害は確認しなかった。
 
 ## 2. 調査カバレッジ

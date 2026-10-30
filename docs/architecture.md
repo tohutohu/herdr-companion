@@ -1,9 +1,9 @@
 # Architecture
 
 Herdr Companion lets an Android phone (and the Compose Desktop UI and the `hc` CLI) start,
-follow and answer Claude Code / Codex / OpenCode / Devin sessions on a Mac. The Gateway runs
-Claude Code and Codex sessions itself; [Herdr](https://herdr.dev) is optional and stays usable on
-its own, and sessions running in Herdr panes are followed and driven as before.
+follow and answer Claude Code and Codex sessions on a Mac. The Gateway runs every session
+itself; it does not need or integrate with [Herdr](https://herdr.dev), which stays usable on its
+own (agents can still call `herdr` from their tools).
 
 ```text
 Android / Compose Desktop / hc
@@ -11,16 +11,22 @@ Android / Compose Desktop / hc
    ▼
 Herdr Companion Gateway (Go, on the Mac)
    ├─ Session manager (internal/sessions + internal/runtime)
-   │    ├─ direct: Claude ── herdr-claude-sidecar (Bun, Claude Agent SDK, stdio JSON lines)
-   │    │                    └─ the user's `claude` CLI, one query() per session
-   │    ├─ direct: Codex ─── the gateway's own `codex app-server` (stdio JSON-RPC)
-   │    └─ Herdr (optional) ─ which pane runs which native session, agent status,
-   │                          pane.read / send_keys / send_text / agent.prompt
-   ├─ Claude adapter ──── ~/.claude/projects/*/<session>.jsonl (history, all backends)
-   ├─ Codex adapter ───── thread/read, thread/list (+ shared daemon for Herdr TUIs)
-   ├─ Devin / OpenCode ── their own stores (read-only), Herdr panes for input
+   │    ├─ Claude ── herdr-claude-sidecar (Bun, Claude Agent SDK, stdio JSON lines)
+   │    │            └─ the user's `claude` CLI, one query() per session
+   │    └─ Codex ─── the gateway's own `codex app-server` (stdio JSON-RPC)
+   ├─ Claude adapter ──── ~/.claude/projects/*/<session>.jsonl (history)
+   ├─ Codex adapter ───── thread/read, thread/list on the same app-server, rollout files
    └─ FCM HTTP v1 ─────── data-only pushes on status transitions
 ```
+
+**Removed in 2.0.** 1.x also followed sessions in Herdr panes and ran OpenCode and Devin there.
+2.0 drops the Herdr client and everything built on panes (launching in Herdr workspaces, the
+terminal endpoints, launch continue, moving sessions out of panes, pane folder-trust dialogs,
+dialogs read off the screen, answers typed as keys, focus-based read state, the Herdr event
+stream), the connection to Codex's shared app-server daemon, and the OpenCode and Devin
+adapters. Their config keys (`herdrSocket`, `opencode`, `devin`, `codexDaemonSocket`) are
+ignored. A session that ran in a Herdr pane is now an ordinary offline session; resume restarts
+it in the gateway under the same id.
 
 ## Principles
 
@@ -29,51 +35,41 @@ Herdr Companion Gateway (Go, on the Mac)
   own storage (Claude's transcript JSONL, Codex's rollouts through
   app-server) and the live runtime state, reusing bounded in-memory
   projections when their source is unchanged. Restarting the gateway loses
-  nothing: directly managed sessions are resumed in a new process under the
-  same id when the next message arrives.
+  nothing: its sessions are resumed in a new process under the same id when
+  the next message arrives.
 - **Persistent gateway state** is limited to `~/.config/herdr-mobile/config.json`
   (listen address, auth token, FCM device tokens, optional paths), the set of
   archived session ids (`~/.local/state/herdr-mobile/archive.json`), small
   message-delivery receipts (`message-delivery/`), and dead-letter / log files
   under `~/.local/state/herdr-mobile/`, plus `direct-sessions.json`: one small
-  record per directly managed session (id, directory, requested model / effort /
+  record per session the gateway runs (id, directory, requested model / effort /
   mode, whether a turn was running) and `worktrees/` for the worktrees it made.
   The menu-bar manager uses the separate
   `desktop/` config/state directories; `HERDR_MOBILE_STATE_DIR` selects the
   gateway state root. Delivery receipts contain hashes and status, never text.
 - **In-memory only:** last seen status and completion revision per session
   (push de-duplication), bounded Codex display and rollout projections,
-  the FCM access token, and — for Codex — pending server requests received on
-  the daemon connection (the daemon replays them on reconnect).
+  the FCM access token, and the pending approvals and questions of running
+  sessions (they end with their process).
 - **Android caches persistently.** Room is the UI's read source. Gateway
   transcript/history projections are disposable and can be reconstructed.
 
 ## Identity
 
-Sessions are `claude:<session-id>`, `codex:<thread-id>`, and `devin:<session-id>`, whichever
-backend runs them. A direct Claude session gets its id from the gateway before it starts
-(`sessionId` option, a UUID), a direct Codex thread from `thread/start`, so a start returns the
-id at once and no pane or launch id stands in for it. A Herdr pane id is never an identity.
-Herdr's official integrations (`herdr integration install claude|codex|devin`) report the native id
-for each pane (`agent_session` in `session.snapshot`). A pane id is only
-*where* a session currently runs; a resumed session in another pane keeps its
-id. A stored `agent_session` is trusted only while the same agent still
-occupies the pane.
-Codex references are also checked against the thread's working directory
-(allowing filesystem aliases and Codex-managed worktrees). A shared daemon
-started inside a Herdr pane inherits that pane's hook environment and can
-report other threads to it. Mismatched references are ignored; when multiple
-valid panes still claim one session, none is selected for pane operations.
+Sessions are `claude:<session-id>` and `codex:<thread-id>`. A Claude session gets its id from
+the gateway before it starts (`sessionId` option, a UUID), a Codex thread from `thread/start`,
+so a start returns the id at once. Sessions started elsewhere (a terminal, or a Herdr pane in
+1.x) carry the same ids, so they are listed as offline and resume under that id.
 
-## Direct runtime
+## Runtime
 
-`internal/runtime.Manager` tracks the sessions the gateway runs itself. Providers that implement
+`internal/runtime.Manager` tracks the sessions the gateway runs. Providers that implement
 `providers.DirectRuntime` own the processes (start/resume, stop, interrupt, model, effort, mode);
-`Send` and `Respond` take a `Live` with `Direct` set. The manager maps their state to the same
-`Live.HerdrStatus` values a pane would have (`working`, `blocked`, `done`, `idle`), so status
-normalization, `unread`, and push de-duplication are shared with Herdr sessions:
+`Send` and `Respond` take the session's `Live`. The manager maps their state to `Live.State`
+(`working`, `blocked`, `done`, `idle`), from which the sessions service derives the public status,
+`unread`, and push de-duplication:
 
-| Runtime state | `HerdrStatus` | Public status |
+| Runtime state | `Live.State` | Public status |
 |---|---|---|
 | turn running | `working` | `running` |
 | permission request / question pending | `blocked` | `waiting_approval` / `waiting_input` |
@@ -81,24 +77,14 @@ normalization, `unread`, and push de-duplication are shared with Herdr sessions:
 | seen (`POST …/seen`), or no turn yet | `idle` | `idle` |
 | process died during a turn, or the gateway stopped during one | – | `failed`, with `error` |
 | no process (dormant) | `idle` | `idle`, `canSend: true` |
+| not run by the gateway | (no `Live`) | `offline`, `canSend: false` |
 
 Each finished turn changes the session's completion revision (`<startedAt>#<turns>`), so a
 completion is pushed once even when the running state was never observed.
 
-**Ownership.** A session is driven by one runtime at a time. If a session appears both in a
-Herdr pane and in the direct runtime, the one whose process runs wins; a dormant direct record
-gives way to the pane, and resuming with `backend: "herdr"` drops the record. Starting or resuming
-directly is refused (`409`) while Herdr runs the session. A session the user resumes in a plain
-terminal (`claude --resume`) while the gateway also runs it cannot be detected; don't.
-
-**Moving a Herdr session** (`POST /v1/sessions/{id}/migrate`, `hc migrate`): between turns
-only, the gateway checks the directory, closes the pane (ending the agent), waits until Herdr no
-longer lists it, for Codex hands the thread over from the shared daemon (stops re-subscribing,
-unsubscribes, waits for the daemon to unload it, since only one app-server may write a thread),
-and resumes it directly with the model, effort and permission mode from the transcript.
-A Codex thread the shared daemon has loaded is refused before the pane is closed: the daemon
-(Codex 0.166) keeps the thread's writer lock (`~/.codex/thread-writer-locks/<id>.lock`) even
-after the last client leaves and the thread is unloaded, until the daemon exits.
+**One writer.** A session must run in one process at a time. The gateway cannot detect a session
+the user resumes in a plain terminal (`claude --resume`, `codex resume`) while it runs it, nor one
+still running in a terminal (or a Herdr pane) when it is resumed from the app; don't.
 
 **Restart and crashes.** The records survive gateway restarts. A turn that was running when the
 gateway stopped is shown as `failed` ("the turn was cut off"); its tool calls are never re-run
@@ -108,6 +94,10 @@ are children of the gateway: they exit with it (closed stdin), and Claude Code p
 closed by the sidecar. A runtime that exits on its own marks its sessions dormant (and a running
 turn failed); the next operation starts a new one. Records idle longer than
 `offlineSessionDays` are dropped; the session then shows offline like any other.
+
+Model, effort and mode changes, interrupt and `seen` work on every session the gateway runs. A
+model, effort or mode id sent to a dormant session is recorded for the process that resumes it;
+interrupt and mode cycling need a running process (`409`).
 
 ### Claude Code: Agent SDK sidecar
 
@@ -144,13 +134,14 @@ with ids, responses, and session events); nothing listens on a port.
   login, is refused with the reason, unless `claudeAllowApiKey` is set. Bedrock/Vertex
   configured by the user are left alone.
 - The agent's environment drops the gateway's own Claude Code / Herdr pane variables
-  (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `HERDR_PANE_ID`, `HERDR_SOCKET_PATH`, …) and sets
-  `HC_SESSION_ID=claude:<id>`, so `hc` knows its own session and the agent can still start or use
-  Herdr from its Bash tool as an independent tool.
+  (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `HERDR_PANE_ID`, `HERDR_SOCKET_PATH`, …), in case the
+  gateway runs inside one during development, and sets `HC_SESSION_ID=claude:<id>`, so `hc` knows
+  its own session. Herdr's own configuration (`HERDR_SESSION`, the default socket) is kept, so the
+  agent can still use Herdr from its Bash tool as a separate tool.
 
 ### Codex: the gateway's app-server
 
-The gateway's private `codex app-server` (stdio) serves history reads and hosts direct threads:
+The gateway's private `codex app-server` (stdio) serves history reads and hosts the threads it runs:
 `thread/start {cwd, model?}` (everything else from the user's Codex config, as for the CLI),
 `thread/resume`, `turn/start` / `turn/steer` (images as `localImage`), `turn/interrupt`,
 `thread/unsubscribe`, and server requests (`requestUserInput`, approvals) answered as JSON-RPC
@@ -158,60 +149,33 @@ responses. Model, effort and collaboration mode (default / plan) are kept per th
 with every `turn/start` (`model`, `effort`, `collaborationMode`), the way Codex's own clients and
 PASEO do: a change never touches a running turn and applies from the next one on the same
 thread id (`settingsApply: "next_turn"`). Available models and efforts come from `model/list`.
-The TUI-only dialogs read from a pane (plan "Implement this plan?", async question queue, rate
-limit) do not exist for direct threads. Codex exports `CODEX_THREAD_ID` to its commands, which
+The Codex TUI's own dialogs (plan "Implement this plan?", async question queue, rate limit
+prompt) do not exist for these threads. Codex exports `CODEX_THREAD_ID` to its commands, which
 `hc` uses to recognize its own session.
 
 ### Folder trust and worktrees
 
 The SDK and app-server show no folder-trust dialog, but project settings (hooks, MCP servers)
-run code. A direct start without `trust: true` in a folder the agent never trusted (Claude:
+run code. A start without `trust: true` in a folder the agent never trusted (Claude:
 `hasTrustDialogAccepted` in `~/.claude.json`; Codex: `trust_level = "trusted"` in
 `config.toml`, both only read) returns `trustRequired` with a `launchId`, answered through
-`POST /v1/launches/{launchId}/trust`. Worktrees for direct sessions are made with git
+`POST /v1/launches/{launchId}/trust`. `trust: true` writes no trust entry. Worktrees are made with git
 (`git worktree add -b worktree/<name>` under the state directory's `worktrees/`) and marked as
 the gateway's; archiving removes them with `git worktree remove` (never `--force`), keeping one
 another live session uses or that has uncommitted or untracked changes. Branches are kept.
+Worktrees 1.x had Herdr make for its launches carry the same marker and are removed the same way.
 
 ## Status
 
-| Herdr `agent_status` | Provider hint | Public status |
-|---|---|---|
-| `working` | | `running` |
-| `blocked` | pending approval | `waiting_approval` |
-| `blocked` | question / unknown | `waiting_input` |
-| `done` | last turn failed | `failed` |
-| `done` | | `completed` |
-| `idle`, `unknown` | last turn failed | `failed` |
-| `idle`, `unknown` | | `idle` |
-| (not running anywhere) | | `offline` |
-
-This table is for sessions in Herdr panes; direct sessions use the runtime mapping above.
-
-A Codex thread loaded on the shared daemon may report its own status
-(`waitingOnApproval`, `waitingOnUserInput`, `systemError`), which wins while
-the session has a Herdr pane. Without a pane, every session is `offline`
-with `canSend: false`, even if its thread remains loaded on the daemon.
+The runtime table above is the whole mapping: a session the gateway runs gets its status from its
+`Live.State` and the provider's hints (a pending approval or question, a failed last turn), and
+any other recently updated session is `offline`.
 
 ## Provider adapters
 
 `internal/providers.Provider` is the whole abstraction:
-`Summary`, `Recent`, `Messages`, `Image`, `Send`, `Respond`.
-OpenCode v1 and official v2 share one adapter and the `opencode:<session-id>`
-identity; the native database schema selects the history format.
-
-### Devin CLI
-
-- History is read from Devin CLI's shared SQLite database in `mode=ro`.
-  `sessions.main_chain_id` selects the active path in the message forest; abandoned
-  branches are not shown.
-- The adapter reads session metadata and `chat_message` JSON, including text,
-  tool calls/results, inline image data, and explicit context usage when present.
-  Unknown records are dead-lettered and kept visible as a recoverable placeholder.
-- New prompts and image/file paths use the Herdr pane. Resuming uses Devin's
-  `--resume <session-id>` flag, and model families come from `devin models list`.
-- Devin workspace trust screens are intentionally left for the terminal fallback
-  when their layout is not recognized by the installed CLI version.
+`Summary`, `Recent`, `Messages`, `Image`, `Send`, `Respond`, plus `DirectRuntime` for the
+processes. Claude Code and Codex are the only providers.
 
 ### Claude Code
 
@@ -228,60 +192,36 @@ identity; the native database schema selects the history format.
   Each lookup is recorded, and when a later line changes one, only the
   entries that asked are converted again. File links and sizes are those of
   the entry's conversion, as for file references; a reload refreshes them.
-  Blocked sessions are converted in full on every read: their cards are
-  completed from the screen.
 - Cross-session peer messages are visible even in meta user entries and
   queued-command attachments. The body and sender become a `session_message`
   notice, separate from user prompts. Sender links are resolved on each read
   from the public `sessions/<pid>.json` record, with socket, name and start-time
   checks to avoid PID reuse. Missing peers remain readable without a link.
-- `AskUserQuestion`: an `interaction` block built from the tool input. It is
-  `pending` only while the pane is `blocked` and the tool has no result.
-- Approvals: any other unanswered tool call while `blocked`.
+- Pending `AskUserQuestion` calls, approvals and plans are the sidecar's
+  permission requests (see above), shown as `interaction` blocks; the
+  transcript gives the answered cards.
 - `ExitPlanMode`: the plan text, a file block linking the saved plan
   (`planFilePath` under `~/.claude/plans`, which the file API also serves for
   Claude sessions) and a `questions` interaction with `kind: "plan"` that
-  counts as an approval for the session status. Its options are the rows of
-  the plan dialog read from the visible screen while it is pending ("Yes,
-  auto-accept edits", "Yes, manually approve edits", …) plus "No, keep
-  planning" (Esc); free text is the "Tell Claude what to change" row
-  (`otherLabel`). The answer summary comes from the tool result (approved,
-  rejected, or the feedback).
-- Answers are translated to key presses in the adapter
-  (verified against Claude Code 2.1.x): approve = Enter, deny = Esc;
-  single-select = Down×n + Enter; free text = move to "Type something",
-  type, Enter; multi-select = Space/Down per option, then "Submit";
-  multiple questions end with the "Submit answers" review tab.
-- Sending: ordinary prompt text uses `send_text` and `Enter` (with
-  `Shift+Enter` for embedded newlines), so Claude Code does not wrap a long
-  message in `<pasted_content>`. Enter is sent as CSI 13 u: a plain CR read
-  together with a long line becomes a newline inside that line. Text with a
-  line over 800 UTF-16 units is one bracketed paste instead, because Claude
-  Code takes such a read as an unbracketed paste and keeps only the last read
-  of the line; the transcript parser removes the `<pasted_content>` frame
-  again (verified with Claude Code 2.1.280). Images are pasted one by one as file paths,
-  which Claude Code turns into `[Image #N]`; other attachments are appended to
-  the prompt text as paths for Claude to read. Text containing terminal control
-  characters falls back to `agent.prompt`.
-- Claude Code reads a pasted image asynchronously and takes input that
-  arrives meanwhile first, which leaves the prompt unsent in the composer, so
-  each paste is followed on the pane until its label shows. Right after a
-  start or on a busy machine that takes seconds. A path pasted just as the
-  `SessionStart` hook reports the session is inserted as text instead; it is
-  erased with as many DEL as it has characters and pasted again, and after
-  three pastes left as text for Claude to read (verified with Claude Code
-  2.1.296).
+  counts as an approval for the session status. Its options are "Yes,
+  auto-accept edits" (or "Yes, and use auto mode" for a model that supports
+  auto mode), "Yes, manually approve edits" and "No, keep planning"; free
+  text is "Tell Claude what to change" (`otherLabel`). The answer summary
+  comes from the tool result (approved, rejected, or the feedback).
+- Sending: the prompt goes into the session's input stream; images are
+  attached as image content blocks, other attachments are appended to the
+  text as paths for Claude to read.
 
 ### Codex
 
-- History: `thread/read {includeTurns:true}` through a private
-  `codex app-server` (stdio) or the shared daemon when connected.
+- History: `thread/read {includeTurns:true}` through the gateway's private
+  `codex app-server` (stdio).
 - Display reads reuse history and converted messages while the rollout file
-  identity, size, mtime and daemon event/connection generation remain unchanged.
+  identity, size, mtime and the app-server's event/connection generation remain unchanged.
   The cache holds at most 64 entries and approximately `historyCacheMB`
   (default 2048 MiB) of history and message projections, with a 30-second reconciliation deadline. Small metadata
   (`includeTurns:false`) has a 5-second deadline. Actions always read fresh data
-  and invalidate display reads. Pending requests, mode and terminal dialogs are
+  and invalidate display reads. Pending requests and mode are
   recomputed rather than cached with the history.
 - Lists and notification watching consume an incremental rollout projection:
   latest text, turn state, token accounting and question/plan hints. Oversized
@@ -292,65 +232,19 @@ identity; the native database schema selects the history format.
   records are retried; file replacement, truncation and same-size rewrites reset
   the projection. Projection entries are bounded to 64 and question data to
   1 MiB per entry; oversized relevant records use canonical reconciliation.
-- When the TUI runs on the shared daemon (`codex --remote unix://`), the
-  gateway subscribes to loaded threads (`thread/loaded/list` +
-  `thread/resume`). Server requests (`item/tool/requestUserInput`, command /
-  file-change / permission approvals) are kept in memory and shown as
-  interactions; answers are sent as JSON-RPC responses. Messages are sent with
+- Server requests (`item/tool/requestUserInput`, command / file-change /
+  permission approvals) are kept in memory and shown as interactions;
+  answers are sent as JSON-RPC responses. Messages are sent with
   `turn/start` (or `turn/steer` during an active turn) including `localImage`.
   Non-image attachments have no structured form, so their paths are appended to
   the text item.
-- Without the daemon, messages go through the pane. Queued async questions
-  (`agentMessage` with `delivery: "async"` and `questions`) are answered from
-  question cards one at a time, including multi-question calls and queues
-  spanning multiple calls. The visible queue count, position and question text
-  select the current card; each original question index has its own card ID.
-  Answers open the queue using its displayed shortcut (Alt+Up on 0.154.0,
-  Shift+Left on 0.160.0), verify the question, and submit through the TUI.
-  The next card appears after submission. Existing drafts are not overwritten.
-  A visible queue can still be answered after its originating turn completes;
-  discarded queues do not become pending solely from unanswered history.
-  The multi-question flow was checked against an isolated Codex 0.160.0 TUI.
-  Tagged `send_user_message_question_reply` user messages are rendered as
-  answered question cards, retaining the original options when available.
-  Answered question IDs are excluded from the pending queue, including replies
-  received in a later turn. Invalid or quoted payloads remain ordinary text.
-- After a Plan mode turn ends with a `plan` item the TUI asks "Implement this
-  plan?" on its own; the app-server never sees it. While it is on the visible
-  screen of the session's pane it is a `questions` interaction with
-  `kind: "plan"` (rows read from the screen) and the session waits for
-  approval. The answer is Down×n + Enter after checking the screen again;
-  row 1 switches the TUI to Default and sends "Implement the plan.".
+- Tagged `send_user_message_question_reply` user messages (answers to Codex's
+  async questions) are rendered as answered question cards, retaining the
+  original options when available. Invalid or quoted payloads remain ordinary
+  text.
 - Answered `requestUserInput` prompts are not in thread items. They are
   rebuilt from the rollout's `request_user_input` call and its output and
   shown as answered cards before the agent message that followed the answer.
-- Herdr's `api schema` (protocol 22) defines the `pane.read` visible source
-  and the key/text request shapes used here; scrollback is not dialog state.
-
-### OpenCode v1 / official v2
-
-- History is read directly from the native SQLite database in `mode=ro`, including
-  active WAL writes. v1 uses `session`, `message`, and `part`; released v2.0.9 uses
-  `session_v2` and `session_message`. Migrated duplicate ids prefer v2.
-- Both versions use Herdr's `opencode` identity and its official TUI integration.
-  New sessions can also be located by a unique matching cwd and creation time.
-- v2's local shared service is discovered from XDG state's `opencode/service.json`.
-  The embedded password is only sent to loopback; redirects are disabled.
-  An explicitly configured server supports either protocol version.
-- Text, tool output, inline/file images, current model, agent and reported cost
-  map to the common DTOs. Reasoning is hidden. Unknown records are dead-lettered
-  with their complete source record for `debug replay`.
-- v1 permission/question endpoints and v2 permission/form endpoints expose pending
-  interactions. Responses re-read the request and verify its session ownership.
-  v2 option labels map back to the form's native values. Conditional, hidden and
-  unsupported field types retain terminal fallback. Approvals offer once/deny;
-  the provider's persistent `always` permission is not mislabeled as session-only.
-- Sends use the connected server, or Herdr for plain text without a server. An
-  ambiguous HTTP failure is never retried through the terminal. v1 sessions are
-  not sent to an unrelated discovered v2 service. Image sends require the server.
-- v2's root TUI has no model flag: `PreparedLauncher` creates the session with
-  its selected model via API, then the launcher opens `--session <id>` and keeps
-  that known identity. v1 continues to use `--model`.
 
 ## Message model
 
@@ -367,8 +261,7 @@ replaces it when the agent picks it up).
 
 The app shows a message the moment it is sent and follows it until the
 conversation has it: *Sending…* (upload and POST in flight), *Delivered*
-(the gateway answered: the text is typed into the pane or given to the
-daemon), *Queued* (the conversation shows it with `queued`), and finally the
+(the gateway answered: the agent has the text), *Queued* (the conversation shows it with `queued`), and finally the
 real message. Sends run in the app's scope in an in-memory `Outbox`, one at a
 time per session, so leaving the screen does not cancel them; the gateway also
 finishes a send whose client hung up (`context.WithoutCancel`, 2 min). A
@@ -421,19 +314,14 @@ entries are written once per process.
 with its caches, drops them and reads again, then records a question or
 approval that the app was not showing (`not_shown`), that the cached read
 lacked (`stale_cache`), or a session waiting for an answer with nothing
-answerable pending (`uncaptured`, with the tail of the pane's screen). These
-are the cases where a question is on the agent's screen but not in the app. `herdr-mobile-gateway debug replay FILE` re-runs the current
+answerable pending (`uncaptured`). These are the cases where the agent waits
+for an answer the app does not show. `herdr-mobile-gateway debug replay FILE` re-runs the current
 parsers on stored payloads.
 
 ## Notifications
 
-The watcher re-evaluates every live session (direct and Herdr) when the direct runtime reports
-a change (`Watcher.Kick`, debounced), when Herdr reports a pane status change, and every 15 s,
-which also reconciles anything missed. Herdr being unavailable is logged once and otherwise
-ignored. For Herdr it subscribes to `pane.agent_status_changed` for all panes (plus
-pane topology events to resubscribe). Topology
-events arrive with underscore names (`pane_created`, `pane_closed`,
-`pane_agent_detected`), while status subscription events use dots. Transitions
+The watcher re-evaluates every live session when the runtime reports a change
+(`Watcher.Kick`, debounced) and every 15 s, which also reconciles anything missed. Transitions
 into `completed` / `waiting_input` / `waiting_approval` / `failed` send an FCM
 data message `{sessionId, status, title, body, provider, providerName, project, canSend, report}`
 with Android priority `HIGH` and no collapse key: FCM keeps only four distinct
@@ -444,11 +332,10 @@ project name only stands in until there is one) because that first line is all
 a collapsed notification shows, then the last message. `report` is the last
 assistant text as message JSON, cut so the whole payload stays under 3800 bytes
 (FCM allows 4096); the app shows it in the conversation before its fetch
-succeeds, under a `push:` id that is never an incremental anchor. `running → idle` counts as completion because Herdr turns `done` into
-`idle` once the pane was looked at. The first observation after start never
+succeeds, under a `push:` id that is never an incremental anchor. `running → idle` counts as completion because a finished turn
+becomes `idle` instead of `completed` once someone has looked at it. The first observation after start never
 pushes. For Codex, the watcher also remembers the latest finished turn's
-content revision (turn ID, status, error, and items). Herdr can briefly report
-old sessions as `running`, but returning to completion or failure with the
+content revision (turn ID, status, error, and items); returning to completion or failure with the
 same revision does not send another push. A new turn still notifies even if
 its final text matches the previous turn, even when the running state was
 missed between reads. A changed revision in a terminal state also catches a
@@ -465,14 +352,9 @@ only a short notification-history preview. Delivery failures distinguish a
 known rejection from an unconfirmed outcome; the latter removes the immediate
 reply action and asks the user to check the conversation first.
 
-For direct sessions read state is the gateway's: a finished turn is `unread` until
-`POST /v1/sessions/{id}/seen`. For Herdr sessions read state is Herdr's, not the app's. Herdr reports a finished agent as `done`
-until its pane is focused, then as `idle`; a pane that is focused when its
-agent finishes goes straight to `idle`. The gateway sends that as `unread` on
-each session, and the session-list row shows a marker and heavier text while it
-is set. `POST /v1/sessions/{id}/seen` focuses the pane of a `done` session (and
-leaves any other pane alone), which works with no Herdr terminal attached but
-does switch the pane an attached one shows. Android marks the session seen while
+Read state is the gateway's: a finished turn is `unread` (`done`) until
+`POST /v1/sessions/{id}/seen` turns it `idle`, and the session-list row shows a
+marker and heavier text while it is set. Android marks the session seen while
 its detail screen is open; the Mac UI does so when the user opens or selects a
 session, not while it merely stays open.
 Foreground screens poll every 3 s (detail) / 5 s (list). On Android, dragging
@@ -489,54 +371,21 @@ confirmation. The notification reports pending, done, failed, or unconfirmed.
 
 ## Starting sessions
 
-By default (`backend` omitted or `"direct"`) Claude Code and Codex are started by the direct
-runtime (see above) and the start returns the session id. OpenCode and Devin, and any start with
-`backend: "herdr"`, use Herdr: `internal/launcher` creates a Herdr workspace in the chosen
-directory and runs `agent.start`. Providers implement `providers.Launchable`: extra CLI arguments
-(Codex attaches to the shared daemon when present) and the keys that accept
-their folder-trust dialog. The dialog is answered only when the request says
-`trust: true`; otherwise the launch stops there, is kept in memory until
-answered (or the gateway restarts), and returns `trustRequired: true`. The app then asks the user and
-answers with `POST /v1/launches/{pane}/trust`, which continues the launch
-(first prompt, session id) or closes the workspace. The native session id is then read from the pane's
-`agent_session`, which the Herdr integration hook reports at startup.
-Herdr restores its workspaces after a restart by resuming their agents in
-place. Such an agent can stop at the folder-trust dialog with no launch
-waiting on it, so the messages of a `waiting_input` session with nothing else
-pending end with a `kind: "trust"` approval while that dialog fills the bottom
-of its pane. Approving it sends the same keys; denying it stops the pane.
-The first prompt can carry uploads like a message: Claude Code gets them the
-way `Send` enters them (images pasted, other paths in the text); the other
-agents get every path appended to the text, which their TUIs attach (Codex
-and Devin images) or read.
-An optional model id is passed as the CLI's `--model`. Devin returns model
-families from `devin models list`. Claude Code has no catalog API, so its list is the CLI aliases (`fable`, `opus`, `sonnet`,
-`haiku`); Codex's comes from `model/list`. A running direct session's model and effort can be
-changed (`POST /v1/sessions/{id}/model`, `/effort`), checked against the same catalog; the
-Herdr TUI's `/model` is not offered because it also changes the user's default for new sessions.
+`internal/launcher` checks the directory, the folder trust (see above) and the model, effort and
+mode against the provider's catalog, then has the runtime start the session; the start returns
+the session id. The first prompt can carry uploads like a message (Claude: images as content
+blocks, other paths in the text; Codex: `localImage` items, other paths in the text).
 
-An optional reasoning effort goes with it: Claude takes `--effort` (the levels
-its `/effort` command offers, the same for every model), Codex has no flag for
-it, so the TUI is given `-c model_reasoning_effort="…"`, which it forwards to
-the shared daemon. Codex lists the efforts per model in `model/list`, so
-`/v1/models` returns them on each model plus a catalog-level list (Claude's
-levels, or the default model's for Codex) used when no model is picked.
+Claude Code has no catalog API, so its model list is the CLI aliases (`fable`, `opus`, `sonnet`,
+`haiku`); Codex's comes from `model/list`, with the efforts per model, so `/v1/models` returns
+them on each model plus a catalog-level list (Claude's levels, or the default model's for Codex)
+used when no model is picked. A running session's model and effort can be changed
+(`POST /v1/sessions/{id}/model`, `/effort`), checked against the same catalog.
 
-The session mode can be picked for the new session too, and `/v1/models`
-returns the modes a provider offers (`modes`, with one marked `default`).
-Claude Code takes them as `--permission-mode`, so its list is that flag's own
-values, named as its status line names them, minus Bypass permissions, which
-opens a warning screen the launcher cannot answer. Codex has no such flag, and its
-thread only exists once the first prompt runs, so the provider implements
-`LaunchModeSetter`: the launcher sends the TUI's Shift+Tab shortcut on the
-ready pane before the first prompt, which switches a fresh session between
-the two collaboration modes it has. A key sent while the TUI is still drawing
-its startup notices is dropped, so the status line is read back and the
-shortcut repeated; Codex applies its own plan-mode reasoning effort there,
-just as it does for the shortcut typed by hand. A mode that cannot be set is reported as
-a launch warning rather than failing the start.
-Devin passes its safe `--permission-mode` values (`auto`, `accept-edits`, and
-`smart`) directly to the CLI.
+The session mode can be picked for the new session too, and `/v1/models` returns the modes a
+provider offers (`modes`, with one marked `default`). Claude Code's are its permission modes,
+named as its status line names them, minus Bypass permissions, which the gateway never sets;
+Codex's are its two collaboration modes (default, plan), given with every `turn/start`.
 
 The app does not ask for the agent, the model, the effort and the mode
 separately on every start: named combinations are stored in the
@@ -551,21 +400,12 @@ is selected.
 Sessions report the model they last used (`model`), the reasoning effort
 (`effort`) and a display label for the mode (`mode`):
 
-- Claude: `model` / `effort` of the newest assistant reply (or the display
-  name from a later `/model`); `permissionMode` of the latest entry that has
-  one. A Shift+Tab change is recorded with the next prompt, and
-  `permission-mode` entries are re-appended later with the current mode. Until
-  that happens, a live status-line read keeps the changed mode visible without
-  sending a dummy prompt.
-- Codex: the thread's `model` / `reasoningEffort`. The permission preset is
-  only known for threads loaded on the shared daemon: `thread/resume` gives
-  the approval policy and sandbox, `thread/settings/updated` also gives the
-  collaboration mode. A thread that starts in Plan mode sends that
-  notification before the gateway subscribes, so Plan mode also comes from
-  the newest `collaboration_mode` in the rollout (`turn_context`, or
-  `thread_settings_applied` when the TUI switches mode). The mode endpoint
-  preserves the current model and effort when it can use the shared daemon;
-  standalone TUIs use their native shortcut.
+- Claude: `model` / `effort` of the newest assistant reply; `permissionMode`
+  of the latest entry that has one, or the mode the runtime reports for the
+  running session.
+- Codex: the thread's `model` / `reasoningEffort`. The permission preset comes
+  from the app-server; Plan mode also comes from the newest
+  `collaboration_mode` in the rollout.
 
 They also report how full the context window is (`context`: used tokens,
 window size, percent), omitted until an agent has accounted for a turn:
@@ -601,64 +441,35 @@ left unpriced rather than guessed, and the field is omitted entirely.
 ### Worktrees
 
 A start can ask for a new git worktree of the chosen directory's repository
-(`worktree: true`; a directory outside a repository is refused). Herdr
-creates it for every agent (`worktree.create`: `~/.herdr/worktrees/…` on a
-new `worktree/<name>` branch) and opens the workspace the agent is started
-in. The agents' own worktree options (Claude Code's and Codex's
-`--worktree`) are not used, so every worktree shows up in Herdr the same way
-and Herdr removes it again. A launch that does not go ahead has Herdr remove
-the worktree (`worktree.remove`) instead of just closing the workspace.
+(`worktree: true`; a directory outside a repository is refused). The gateway
+creates it with git (`git worktree add -b worktree/<name>` under the state
+directory's `worktrees/`) and starts the agent in it. The agents' own worktree
+options (Claude Code's and Codex's `--worktree`) are not used.
 
 The gateway keeps no list of them. A worktree it had created gets
 `herdr-companion.json` in its git directory (`.git/worktrees/<name>/`), so
 archiving only removes those. A Codex TUI started with `--worktree` from a
 terminal runs in its worktree without changing its process directory, so for
-a thread in `$CODEX_HOME/worktrees` the thread's cwd, not the pane's, is the
-session directory (`Summary.PinnedCwd`).
-
-A new pane's shell may still be running its startup files; Herdr then
-answers `agent.start` with `agent_pane_busy`, which is retried until the
-start timeout. A workspace whose agent fails to start is closed again.
-
-Codex TUIs on the shared daemon run their hooks inside the daemon, so Herdr
-never learns the thread id. The launcher then finds the newest non-ephemeral
-thread created in that directory (`providers.SessionLocator`) and reports it
-with `pane.report_agent_session`. The creation time comes from the thread id
-(UUIDv7): a thread that has had no turn yet has no rollout, and the daemon
-then reports the time of the read as its `createdAt`, so a TUI left open
-without a prompt would otherwise pass for the session just launched.
-Reports carry a nanosecond `seq` and `session_start_source` (`startup`, or
-`resume` for an id known before the start) as the hooks' do: Herdr keeps the
-session a pane has unless a report names how the new one started and is
-newer.
+a thread in `$CODEX_HOME/worktrees` the thread's cwd is the session directory
+(`Summary.PinnedCwd`).
 
 ## Archive and resume
 
-- Archive: a running direct session's process is ended and its runtime record
-  dropped; a Herdr session's pane is closed (the whole workspace when it
-  was the only pane). The id is stored in `archive.json`. Archived
-  sessions are left out of the offline part of `GET /v1/sessions`; a live
-  one is still listed (e.g. resumed from a terminal).
-- The worktree the session ran in is then removed by Herdr
-  (`internal/worktree`) when it carries the gateway's marker: `worktree.open`
-  finds the workspace to remove it through (opening one if none is), and
-  `worktree.remove` deletes the checkout and closes that workspace. A
-  workspace that was already open there (another pane still uses it), or
-  uncommitted or untracked changes, which Herdr refuses to remove without
-  `force` (ignored files do not count), keep it, and the response carries a
-  `warning` saying why. Herdr keeps the branch, so commits are never lost.
-- Resume restarts a session that runs nowhere under its native id and removes it from the
-  archive: directly by default (SDK `resume`, `thread/resume`; also for sessions started in a
-  terminal), or with `backend: "herdr"` in a new workspace in its working directory
-  (`claude --resume <id>`, `codex resume <id>`). A worktree outside
-  `workspaceRoots` may be resumed when its repository is inside them; one
-  that was removed answers 409.
-- A Codex thread can remain loaded on the shared app-server after its Herdr
-  pane closes, but is still `offline` with `canSend: false`. Pending daemon
-  interactions are hidden and sends and responses are rejected until it has
-  a Herdr pane again. Resume reopens the pane and removes it from the archive.
-  Successfully sending a message to an archived session reopened from a
-  terminal also removes it from the archive. Failed sends leave it archived.
+- Archive: a running session's process is ended and its runtime record
+  dropped. The id is stored in `archive.json`. Archived sessions are left
+  out of the offline part of `GET /v1/sessions`; a live one is still listed.
+- The worktree the session ran in is then removed with git
+  (`internal/worktree`) when it carries the gateway's marker. One another
+  live session still uses, or with uncommitted or untracked changes (ignored
+  files do not count), is kept, and the response carries a `warning` saying
+  why. The branch is kept, so commits are never lost.
+- Resume restarts a session that runs nowhere under its native id in a new
+  process (SDK `resume`, `thread/resume`; also for sessions started in a
+  terminal or, in 1.x, a Herdr pane) and removes it from the archive. Its body
+  is ignored. A worktree outside `workspaceRoots` may be resumed when its
+  repository is inside them; one that was removed answers 409.
+- Successfully sending a message to an archived session also removes it from
+  the archive. Failed sends leave it archived.
 
 Directories are restricted to `workspaceRoots` with the same checks as file
 access; new folder names must be a single, non-hidden path segment.
@@ -699,12 +510,10 @@ Full request and response shapes, auth and connection details: [api.md](api.md).
 |---|---|---|
 | GET | `/healthz` | no auth |
 | GET | `/v1/sessions` | live + recent offline sessions |
-| POST | `/v1/sessions` | start `{provider, cwd, prompt, uploads?[], model?, effort?, mode?, trust, worktree?, backend?}` directly (default for Claude/Codex) or in a new Herdr workspace → `{sessionId?, paneId?, launchId?, backend, warning?, trustRequired?}` |
-| POST | `/v1/launches/{pane or launchId}/trust` | `{trust}` answer a start that returned `trustRequired`: continue it or cancel it → StartResult |
-| GET / POST | `/v1/launches/{pane}/terminal` | terminal fallback before a session id exists; only panes launched by this gateway |
-| POST | `/v1/launches/{pane}/continue` | retry readiness after manual terminal interaction, then send the retained initial prompt once |
+| POST | `/v1/sessions` | start `{provider, cwd, prompt, uploads?[], model?, effort?, mode?, trust, worktree?}` → `{sessionId?, launchId?, warning?, trustRequired?}` |
+| POST | `/v1/launches/{launchId}/trust` | `{trust}` answer a start that returned `trustRequired`: continue it or cancel it → StartResult |
 | GET | `/v1/agents` | installed CLI versions and latest update status/output |
-| POST | `/v1/agents/{provider}/update` | start the provider's update command (`claude update`, `codex update`, `opencode upgrade`, or `devin update`); repeated requests while running share the same job |
+| POST | `/v1/agents/{provider}/update` | start the provider's update command (`claude update` or `codex update`); repeated requests while running share the same job |
 | GET | `/v1/models?provider=` | models and efforts offered for new sessions `{models[{id, name, description?, default?, efforts?[]}], efforts?[{id, name, description?, default?}]}` |
 | GET | `/v1/directories?path=` | workspace roots, or subfolders of `path` (`git` when `path` is in a repository) |
 | POST | `/v1/directories` | create `{parent, name}` under a root |
@@ -712,22 +521,20 @@ Full request and response shapes, auth and connection details: [api.md](api.md).
 | GET | `/v1/sessions/{id}` | one session |
 | POST / DELETE | `/v1/sessions/{id}/archive` | archive (stops a running session, removes its worktree) → session + `warning?` / unarchive |
 | POST | `/v1/sessions/archive` | archive `{ids[]}` in one request (stops running sessions) → `{sessions[]}` (each with `warning?`) |
-| POST | `/v1/sessions/{id}/resume` | `{trust, backend?}` restart under the same id, directly or in a new Herdr workspace → StartResult |
+| POST | `/v1/sessions/{id}/resume` | `{}` restart under the same id in a new process → StartResult |
 | GET | `/v1/sessions/{id}/messages?after=` | `{session, messages}` |
 | POST | `/v1/sessions/{id}/messages` | `{text, uploads[], requestId?}`; optional durable at-most-once delivery |
 | GET | `/v1/message-delivery` | `{idempotency}`; required capability check before automatic message retries |
 | POST | `/v1/sessions/{id}/respond` | `{interactionId, answers{qid:{selected[],text}}, decision}` |
-| POST | `/v1/sessions/{id}/mode` | `{mode?}` advance to the next mode, or set one (direct sessions) |
-| POST | `/v1/sessions/{id}/model` | `{model}` change a direct session's model → session (`pendingModel`, `settingsApply`) |
-| POST | `/v1/sessions/{id}/effort` | `{effort, model?}` change a direct session's reasoning effort → session |
-| POST | `/v1/sessions/{id}/interrupt` | stop a direct session's running turn |
-| POST | `/v1/sessions/{id}/seen` | mark a `done` session seen in Herdr by focusing its pane; `{ok}` |
+| POST | `/v1/sessions/{id}/mode` | `{mode?}` advance to the next mode, or set one |
+| POST | `/v1/sessions/{id}/model` | `{model}` change a session's model → session (`pendingModel`, `settingsApply`) |
+| POST | `/v1/sessions/{id}/effort` | `{effort, model?}` change a session's reasoning effort → session |
+| POST | `/v1/sessions/{id}/interrupt` | stop a session's running turn |
+| POST | `/v1/sessions/{id}/seen` | mark a finished turn seen (clears `unread`); `{ok}` |
 | POST | `/v1/sessions/{id}/reload` | `{shown[]}` drop the provider's caches, read again → `{session, messages, findings[]}` (see Dead letters) |
 | GET | `/v1/sessions/{id}/messages/{mid}/images/{n}` | inline image bytes |
 | GET | `/v1/sessions/{id}/files?path=` | directory listing |
 | GET | `/v1/sessions/{id}/files/content?path=` | file bytes |
-| GET | `/v1/sessions/{id}/terminal?lines=` | recent pane text (Herdr sessions; direct → 409) |
-| POST | `/v1/sessions/{id}/terminal` | `{text, keys[]}` (allow-listed keys) |
 | POST | `/v1/uploads` | streamed raw body up to 500 MiB, optional `Content-Disposition` file name → `{id, name}` (deleted after 24 h) |
 | GET | `/v1/usage` | cached subscription limits `{providers[{provider, displayName, plan?, account?, windows[{key, label, scope?, usedPercent, windowMinutes?, resetsAt?}], updatedAt?, error?}], fetchedAt?, error?}` |
 | POST | `/v1/usage/refresh` | re-read the limits now (takes ~10 s) → same shape |
@@ -737,7 +544,7 @@ Full request and response shapes, auth and connection details: [api.md](api.md).
 
 `POST /v1/directories/check {cwd, prompt}` validates cwd with the same root and
 symlink restrictions as launch, then returns `{verdict, historyCount}`. It never
-creates a workspace. The Android new-session screen calls it before launch;
+starts anything. The Android new-session screen calls it before launch;
 only a high-confidence `mismatch` opens a confirmation. The exact checked
 request is retained for "Start anyway". Cancellation does not proceed to launch.
 Errors, old gateways (404), and disabled checks preserve the normal start flow.
@@ -765,25 +572,14 @@ persistent derived history or decision cache. The request has a 10-second contex
 budget, of which history gets at most 3 seconds; provider filesystem reads may
 finish after cancellation. API errors return unavailable without logging payloads.
 
-## Agent updates and startup fallback
+## Agent updates
 
-Herdr-launched Codex TUIs (new and resumed) pass
-`-c check_for_update_on_startup=false`. Updates are explicit in Android Settings.
-The authenticated update endpoints execute only the configured Codex binary or
-`claude` on the Gateway PATH, with fixed `--version` / `update` arguments, no shell
-and no interactive stdin. Native CLI installations supporting these commands
-are required; package-manager-only installations report their CLI error/output
-and may require updating on the Mac. Update jobs survive HTTP disconnects and
-leaving the Android screen, are serialized per provider, have a ten-minute
-limit, and retain at most 32 KiB of output. Status lives until Gateway restart.
-Existing Herdr panes and the shared Codex app-server are never restarted by the
-Gateway. Direct sessions keep the version they started with until their process is
-restarted (archive and resume, or a gateway restart and the next message). A running shared app-server retains its old version until the user
-restarts it after finishing active sessions.
-
-A partial start keeps its pane and initial prompt in the launcher. Android's
-pending start screen offers Terminal and Continue start. Continue rechecks
-readiness (and still asks for folder trust when needed). A prompt is not retried
-after a send attempt, including an ambiguous send failure. Terminal access and
-pending launch state last until Gateway restart; dismissing the Android row
-does not close the pane. Partial resumes are also listed as pending starts.
+Updates are explicit in Android Settings. The authenticated update endpoints execute only the
+configured Codex binary or `claude` on the Gateway PATH, with fixed `--version` / `update`
+arguments, no shell and no interactive stdin. Native CLI installations supporting these commands
+are required; package-manager-only installations report their CLI error/output and may require
+updating on the Mac. Update jobs survive HTTP disconnects and leaving the Android screen, are
+serialized per provider, have a ten-minute limit, and retain at most 32 KiB of output. Status
+lives until Gateway restart. Running sessions keep the version they started with until their
+process is restarted (archive and resume, or a gateway restart and the next message), and the
+gateway's Codex app-server keeps its version until it is started again.
