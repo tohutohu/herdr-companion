@@ -71,3 +71,28 @@ func TestClaudeのキューは実際に取り込まれた項目を除く(t *test
 		})
 	}
 }
+
+func TestClaudeの別セッションメッセージはルーティング属性が違っても取り込み済みとして除く(t *testing.T) {
+	// Claude Code 2.1: the enqueue record carries hop-chain, the remove record
+	// does not, and the queued_command attachment is 1 ms earlier than the enqueue.
+	timestamp := time.Date(2026, 10, 30, 9, 56, 25, 587_000_000, time.UTC)
+	raw := func(text string) json.RawMessage { b, _ := json.Marshal(text); return b }
+	frame := func(attrs string) string {
+		return `<cross-session-message from="uds:/tmp/cc-socks/42521.sock"` + attrs + ` from-name="peer-a" from-mode="prompting">
+返信です。
+</cross-session-message>`
+	}
+	entries := []*entry{
+		{Type: "queue-operation", Operation: "enqueue", Timestamp: timestamp, Content: raw(frame(` hop-chain="225f6e0f631b2881af12018a"`))},
+		{Type: "queue-operation", Operation: "remove", Timestamp: timestamp.Add(time.Minute), Content: raw(frame(""))},
+		{Type: "attachment", Timestamp: timestamp.Add(-time.Millisecond), Attachment: &attachment{Type: attachmentQueuedCommand, IsMeta: true, Prompt: raw(frame(""))}},
+	}
+	if got := queuedPrompts(entries); len(got) != 0 {
+		t.Fatalf("queued = %+v", got)
+	}
+	// A different body from the same sender is still waiting.
+	entries[1].Content = raw(`<cross-session-message from="uds:/tmp/cc-socks/42521.sock" from-name="peer-a">別の返信</cross-session-message>`)
+	if got := queuedPrompts(entries); len(got) != 1 || !got[0].Queued || got[0].Blocks[0].Type != model.BlockSessionMessage {
+		t.Fatalf("queued = %+v", got)
+	}
+}

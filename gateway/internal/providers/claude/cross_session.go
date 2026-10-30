@@ -82,6 +82,16 @@ func crossSessionFrame(text string) *peerOrigin {
 	return p
 }
 
+// queueMatchText is the text a queued prompt is matched by. Claude Code adds
+// routing attributes such as hop-chain to a peer frame's enqueue record but not
+// to its remove record, so a frame is matched by its sender and body.
+func queueMatchText(text string) string {
+	if p := crossSessionFrame(text); p != nil {
+		return "\x00peer\x00" + p.From + "\x00" + p.Body
+	}
+	return text
+}
+
 var peerSocketRE = regexp.MustCompile(`^uds:(/[^\x00\r\n]*/([1-9][0-9]*)\.sock)$`)
 
 // Resolve on each read, outside the transcript cache: a peer can disappear or

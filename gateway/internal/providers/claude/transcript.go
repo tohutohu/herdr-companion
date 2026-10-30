@@ -943,7 +943,7 @@ func queuedPrompts(entries []*entry) []model.Message {
 	queuedText := func(e *entry) string {
 		s, ok := texts[e]
 		if !ok {
-			s = e.contentText()
+			s = queueMatchText(e.contentText())
 			texts[e] = s
 		}
 		return s
@@ -984,18 +984,18 @@ func queuedPrompts(entries []*entry) []model.Message {
 			case "dequeue":
 				if e.contentText() == "" {
 					dequeues = append(dequeues, &dequeue{before: at})
-				} else if i := queueIndex(queue, e.contentText(), queuedText); i >= 0 {
+				} else if i := queueIndex(queue, queueMatchText(e.contentText()), queuedText); i >= 0 {
 					remove(i)
 				}
 			case "remove":
-				if i := queueIndex(queue, e.contentText(), queuedText); i >= 0 {
+				if i := queueIndex(queue, queueMatchText(e.contentText()), queuedText); i >= 0 {
 					remove(i)
 				}
 			}
 		case "user":
 			if e.Message != nil {
 				if text := queuedContentText(e.Message.Content); text != "" {
-					consume(queueIndex(queue, text, queuedText), true)
+					consume(queueIndex(queue, queueMatchText(text), queuedText), true)
 				}
 			}
 		case "attachment":
