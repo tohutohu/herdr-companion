@@ -218,3 +218,21 @@ func Test対応していないプロバイダーは直接管理を拒む(t *test
 		t.Error("start succeeded")
 	}
 }
+
+func Testモードを巡回しても再開用の記録には表示名を残さない(t *testing.T) {
+	m, rt := newManager(t, filepath.Join(t.TempDir(), "direct.json"))
+	ctx := context.Background()
+	id, _ := m.Start(ctx, "claude", providers.DirectStart{Cwd: "/w", Mode: "plan"})
+	rt.set("s1", func(in *providers.DirectInfo) { in.Mode = "Accept edits" })
+	if err := m.SetMode(ctx, id, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SetMode(ctx, id, "acceptEdits"); err != nil {
+		t.Fatal(err)
+	}
+	m.Stop(ctx, id)
+	m.EnsureRunning(ctx, id)
+	if last := rt.starts[len(rt.starts)-1]; last.Mode != "acceptEdits" {
+		t.Errorf("resume mode = %q", last.Mode)
+	}
+}

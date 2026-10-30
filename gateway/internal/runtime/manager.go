@@ -478,8 +478,11 @@ func (m *Manager) SetMode(ctx context.Context, id, mode string) error {
 	if err := rt.DirectSetMode(ctx, native, mode); err != nil {
 		return err
 	}
-	if in, ok := m.info(id); ok && in.Mode != "" {
-		mode = in.Mode
+	if mode == "" {
+		// Cycled: the runtime knows the new mode only by its label, which
+		// is no mode id to resume with. The running process keeps it.
+		m.notify()
+		return nil
 	}
 	return m.update(id, func(r *Record) { r.Mode = mode })
 }
