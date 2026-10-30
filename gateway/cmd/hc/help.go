@@ -101,8 +101,9 @@ NOTES
     and use the network. Claude runs in auto mode where the model offers it (else
     acceptEdits): as in the user's own sessions, Claude Code's classifier lets ordinary
     commands, edits and web access through on its own, so they need no --allow. Codex runs
-    in the workspace-write sandbox. What would need a person's approval is denied, never
-    approved; the run then reports "blocked".
+    in the workspace-write sandbox, and its auto review decides what would leave it. What
+    would need a person's approval is denied, never approved; the run then reports
+    "blocked".
   - Keep these defaults unless the user asks otherwise. Do not choose --profile read_only,
     a narrow --allow list or tighter limits, and do not write bans such as "do not edit
     files" into the instruction, just to be safe. Add --allow only for a call that a run

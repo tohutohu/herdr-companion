@@ -530,7 +530,8 @@ instruction, conversation, memory, wake-ups and run history. Full description (J
 - Claude: a sidecar started for the run, `query()` with `persistSession: true`,
   `outputFormat` and permission mode / tool rules from the task's profile; other permission
   requests are denied and reported. Codex: an app-server started for the run, a saved
-  (not ephemeral) thread with `approvalPolicy: "never"` and the profile's sandbox, `outputSchema` on
+  (not ephemeral) thread with the profile's sandbox and approvals (`workspace_write`: `on-request`
+  decided by Codex's auto review, `approvalsReviewer: "auto_review"`; `read_only`: `never`), `outputSchema` on
   `turn/start`. When a run ends, is stopped or times out, its runtime and every process it
   started (including commands in their own process groups) are ended; nothing shared with
   sessions is touched. Login, CLI path and the API-key billing guard are the sessions'.

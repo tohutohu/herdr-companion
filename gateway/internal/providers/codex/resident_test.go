@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,7 +18,7 @@ import (
 type residentServer struct {
 	pt    *pipeTransport
 	model string
-	mode  string // "answer", "hang", "approval"
+	mode  string // "answer", "hang", "approval", "review"
 	mu    sync.Mutex
 	calls []directCall
 	resps []map[string]any
@@ -83,6 +84,11 @@ func (s *residentServer) play() {
 		return
 	case "approval":
 		s.send(map[string]any{"id": 77, "method": "item/commandExecution/requestApproval", "params": map[string]any{"threadId": residentThread, "command": "git push"}})
+	case "review":
+		n("item/autoApprovalReview/completed", map[string]any{"reviewId": "rv1", "action": map[string]any{"type": "command", "command": "touch /etc/x", "cwd": "/work", "source": "shell"},
+			"review": map[string]any{"status": "approved", "riskLevel": "low"}})
+		n("item/autoApprovalReview/completed", map[string]any{"reviewId": "rv2", "action": map[string]any{"type": "command", "command": "git push --force", "cwd": "/work", "source": "shell"},
+			"review": map[string]any{"status": "denied", "riskLevel": "high", "rationale": "履歴を書き換える"}})
 	}
 	n("item/completed", map[string]any{"item": map[string]any{"type": "agentMessage", "text": `{"schemaVersion":1,"outcome":"unchanged","summary":"変化なし"}`}})
 	n("thread/tokenUsage/updated", map[string]any{"turnId": "turn-r1", "tokenUsage": map[string]any{"total": map[string]any{"inputTokens": 120, "cachedInputTokens": 40, "outputTokens": 30}}})
@@ -129,7 +135,7 @@ func Test常駐実行は一時スレッドで承認なしのサンドボック�
 		t.Errorf("out = %+v", out)
 	}
 	ts := srv.last("thread/start")
-	if ts["ephemeral"] != false || ts["approvalPolicy"] != "never" || ts["sandbox"] != "read-only" || ts["model"] != "gpt-6-luna" {
+	if ts["ephemeral"] != false || ts["approvalPolicy"] != "never" || ts["approvalsReviewer"] != nil || ts["sandbox"] != "read-only" || ts["model"] != "gpt-6-luna" {
 		t.Errorf("thread/start = %v", ts)
 	}
 	tu := srv.last("turn/start")
@@ -139,6 +145,28 @@ func Test常駐実行は一時スレッドで承認なしのサンドボック�
 	}
 	if srv.last("thread/unsubscribe") == nil {
 		t.Error("the thread was not unloaded")
+	}
+}
+
+func Test編集できるタスクは承認をauto_reviewに任せて却下を記録する(t *testing.T) {
+	r, srv := newResidentRunner(t, "review", "gpt-6-luna")
+	var sent atomic.Bool
+	out, err := r.Run(context.Background(), req("gpt-6-luna", resident.Permissions{Profile: resident.ProfileWorkspaceWrite}), noHooks(&sent))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := srv.last("thread/start")
+	if ts["approvalPolicy"] != "on-request" || ts["approvalsReviewer"] != "auto_review" || ts["sandbox"] != "workspace-write" {
+		t.Errorf("thread/start = %v", ts)
+	}
+	tu := srv.last("turn/start")
+	pol, _ := tu["sandboxPolicy"].(map[string]any)
+	if tu["approvalPolicy"] != "on-request" || tu["approvalsReviewer"] != "auto_review" || pol["type"] != "workspaceWrite" {
+		t.Errorf("turn/start = %v", tu)
+	}
+	want := []string{"auto review denied git push --force: 履歴を書き換える"}
+	if !slices.Equal(out.PermissionDenials, want) {
+		t.Errorf("denials = %q, want %q", out.PermissionDenials, want)
 	}
 }
 

@@ -7,7 +7,7 @@
 - [x] Gateway: `internal/resident`（SQLite・スキーマ版管理・予定・結果契約・スケジューラ・実行キュー・復旧・通知 Outbox）
 - [x] Gateway: API `/v1/resident/*`, `/v1/capabilities`
 - [x] Claude: sidecar の常駐モード（persistSession:false, outputFormat, 権限）／Run ごとの sidecar
-- [x] Codex: Run ごとの app-server（ephemeral, outputSchema, sandbox, approvals never）
+- [x] Codex: Run ごとの app-server（ephemeral, outputSchema, sandbox, 編集可は auto review・読み取りのみは approvals never）
 - [x] Run 終了・停止・時間切れでプロセスツリーごと終了
 - [x] 通常セッションへの非混入（一覧の除外、Watcher・Manager 非登録）
 - [x] hc: `hc resident ...`

@@ -1,6 +1,7 @@
 package codex
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -21,9 +22,12 @@ import (
 // process it started are ended, including commands Codex runs in process
 // groups of their own, which turn/interrupt leaves running.
 //
-// Each run is one thread with approvals off (approvalPolicy "never") and
-// the sandbox the task's profile chooses; one turn/start carries the result
-// contract as outputSchema. The run's events are collected here, not read
+// Each run is one thread with the sandbox the task's profile chooses. An
+// editing task asks for approvals as the user's own sessions do, but
+// routes them to Codex's auto review (approvalsReviewer "auto_review"),
+// which approves or denies each one without a person; a read-only task
+// has approvals off (approvalPolicy "never"). One turn/start carries the
+// result contract as outputSchema. The run's events are collected here, not read
 // back from thread history. The thread is saved (not ephemeral), as a
 // session's is, so the user can continue it as one; the gateway hides it
 // from the session list until then.
@@ -84,8 +88,9 @@ func (h *residentConn) deliver(ev codexEvent) {
 	select {
 	case h.events <- ev:
 	default:
-		// Streaming deltas can fill the buffer; terminal events must arrive.
-		if ev.method == "turn/completed" || ev.method == "resident/closed" || ev.method == "resident/denied" {
+		// Streaming deltas can fill the buffer; terminal events and
+		// denials must arrive.
+		if ev.method == "turn/completed" || ev.method == "resident/closed" || ev.method == "resident/denied" || ev.method == "item/autoApprovalReview/completed" {
 			go func() { h.events <- ev }()
 		}
 	}
@@ -95,8 +100,9 @@ func (h *residentConn) Notification(method string, params json.RawMessage) {
 	h.deliver(codexEvent{method, params})
 }
 
-// Request declines everything: approvals are off, so a request here means
-// the agent wanted something the run may not do unattended.
+// Request declines everything: approvals are off or go to auto review, so
+// a request here means the agent wanted something the run may not do
+// unattended.
 func (h *residentConn) Request(id json.RawMessage, method string, params json.RawMessage) {
 	var p struct {
 		Command any `json:"command"`
@@ -171,12 +177,13 @@ func (r *ResidentRunner) open(ctx context.Context) (*residentConn, func(), error
 	return h, end, nil
 }
 
-// residentSandbox maps a task's profile to Codex's sandbox.
-func residentSandbox(p resident.Permissions) (mode string, policy map[string]any) {
+// residentSandbox maps a task's profile to Codex's sandbox and approvals.
+// reviewer is "" when approvals are off.
+func residentSandbox(p resident.Permissions) (mode string, policy map[string]any, approval, reviewer string) {
 	if p.Profile == resident.ProfileWorkspaceWrite {
-		return "workspace-write", map[string]any{"type": "workspaceWrite", "networkAccess": true}
+		return "workspace-write", map[string]any{"type": "workspaceWrite", "networkAccess": true}, "on-request", "auto_review"
 	}
-	return "read-only", map[string]any{"type": "readOnly", "networkAccess": true}
+	return "read-only", map[string]any{"type": "readOnly", "networkAccess": true}, "never", ""
 }
 
 // Run executes one resident run on a thread of its own and unloads it.
@@ -190,9 +197,12 @@ func (r *ResidentRunner) Run(ctx context.Context, req resident.RunRequest, hooks
 	}
 	defer end()
 	c := h.c
-	sandbox, policy := residentSandbox(req.Permissions)
+	sandbox, policy, approval, reviewer := residentSandbox(req.Permissions)
 	params := map[string]any{
-		"cwd": req.Cwd, "ephemeral": false, "approvalPolicy": "never", "sandbox": sandbox,
+		"cwd": req.Cwd, "ephemeral": false, "approvalPolicy": approval, "sandbox": sandbox,
+	}
+	if reviewer != "" {
+		params["approvalsReviewer"] = reviewer
 	}
 	if req.Model != "" {
 		params["model"] = req.Model
@@ -226,7 +236,10 @@ func (r *ResidentRunner) Run(ctx context.Context, req resident.RunRequest, hooks
 	}
 	turn := map[string]any{
 		"threadId": thread, "input": []map[string]any{{"type": "text", "text": req.Prompt}},
-		"outputSchema": req.Schema, "approvalPolicy": "never", "sandboxPolicy": policy,
+		"outputSchema": req.Schema, "approvalPolicy": approval, "sandboxPolicy": policy,
+	}
+	if reviewer != "" {
+		turn["approvalsReviewer"] = reviewer
 	}
 	if req.Model != "" {
 		turn["model"] = req.Model
@@ -246,7 +259,7 @@ func (r *ResidentRunner) Run(ctx context.Context, req resident.RunRequest, hooks
 	}
 	hooks.Sent()
 	turnID := started.Turn.ID
-	slog.Info("resident run sent to Codex", "provider", providerName, "operation", "resident.run", "run_id", req.RunID, "sandbox", sandbox, "model", model)
+	slog.Info("resident run sent to Codex", "provider", providerName, "operation", "resident.run", "run_id", req.RunID, "sandbox", sandbox, "approvals", approval, "reviewer", reviewer, "model", model)
 
 	out := &resident.RunOutput{NativeID: thread, Model: model}
 	begun := time.Now()
@@ -295,6 +308,10 @@ func (r *ResidentRunner) Run(ctx context.Context, req resident.RunRequest, hooks
 				if turnID == "" {
 					turnID = p.Turn.ID
 				}
+			case "item/autoApprovalReview/completed":
+				if label := reviewDenial(ev.params); label != "" {
+					out.PermissionDenials = append(out.PermissionDenials, label)
+				}
 			case "resident/denied":
 				var p struct {
 					Label string `json:"label"`
@@ -335,4 +352,39 @@ func (r *ResidentRunner) Run(ctx context.Context, req resident.RunRequest, hooks
 			}
 		}
 	}
+}
+
+// reviewDenial labels an action auto review did not approve, as a denied
+// approval request is labelled; "" when it was approved.
+func reviewDenial(params json.RawMessage) string {
+	var p struct {
+		Action struct {
+			Type    string   `json:"type"`
+			Command string   `json:"command"`
+			Program string   `json:"program"`
+			Argv    []string `json:"argv"`
+		} `json:"action"`
+		Review struct {
+			Status    string `json:"status"`
+			Rationale string `json:"rationale"`
+		} `json:"review"`
+	}
+	if json.Unmarshal(params, &p) != nil || p.Review.Status == "" || p.Review.Status == "approved" || p.Review.Status == "inProgress" {
+		return ""
+	}
+	label := "auto review " + p.Review.Status
+	what := p.Action.Command
+	if what == "" && len(p.Action.Argv) > 0 {
+		what = strings.Join(p.Action.Argv, " ")
+	}
+	if what == "" {
+		what = cmp.Or(p.Action.Program, p.Action.Type)
+	}
+	if what != "" {
+		label += " " + what
+	}
+	if p.Review.Rationale != "" {
+		label += ": " + p.Review.Rationale
+	}
+	return label
 }

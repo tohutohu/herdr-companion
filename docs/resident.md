@@ -156,13 +156,13 @@ SQLite（`modernc.org/sqlite`、純 Go で cgo 不要）、WAL、`synchronous=FU
 | | フォルダ内の編集可（`workspace_write`、既定） | 読み取りのみ（`read_only`） |
 |---|---|---|
 | Claude | auto モード（モデルが対応していれば。Claude Code の分類器が各操作を判断し、人に聞く操作は拒否）、未対応なら `acceptEdits` | permissionMode `default`、Read/Glob/Grep/LS を許可、Edit/Write/MultiEdit/NotebookEdit を禁止 |
-| Codex | sandbox `workspace-write`、approvalPolicy `never` | sandbox `read-only`、approvalPolicy `never` |
+| Codex | sandbox `workspace-write`、approvalPolicy `on-request` を auto review（`approvalsReviewer: auto_review`）が人の代わりに判断 | sandbox `read-only`、approvalPolicy `never` |
 
 - ネットワークは常に使える（Claude は WebSearch/WebFetch を許可、Codex は sandbox の `networkAccess: true`）。
   古いクライアントが送る `permissions.network` は無視する。
 - Claude には追加の許可ルール（例 `Bash(gh pr view:*)`、`mcp__github__get_issue`）を指定できる。無制限の `Bash` は不可。
   ユーザー・プロジェクトの設定にある許可ルールは `claude -p` と同様に有効（Claude Code が既定で許す読み取り専用コマンドも含む）。
-- それ以外の権限要求は自動で拒否する（Claude: 常駐用の `canUseTool` が拒否して記録、Codex: 承認要求に decline）。
+- それ以外の権限要求は自動で拒否する（Claude: 常駐用の `canUseTool` が拒否して記録、Codex: auto review の却下を記録し、Gateway に来た承認要求には decline）。
   通常セッションの承認設定は変えない。bypassPermissions は使わない。
 - 必要な権限・ログイン・判断がなければ、エージェントは `blocked` と質問を返し、Run は `waiting_user` になる（プロセスは待たせない）。
   回答は期限（7 日）と対象 Run を照合して保存し、質問した Run のチェックポイントから新しい Run を始める。古い承認 ID は再送しない。
