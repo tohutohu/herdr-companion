@@ -159,7 +159,9 @@ func renderTools(w io.Writer, parts []toolPart, o renderOpts) {
 			latest = firstLine(p.text)
 		}
 	}
-	if latest == "" && len(parts) > 0 {
+	if calls == 0 && len(parts) > 0 {
+		// Codex: each tool item is one call with its output, none from the assistant.
+		calls = len(parts)
 		latest = firstLine(parts[len(parts)-1].text)
 	}
 	if !o.tools {

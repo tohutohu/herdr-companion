@@ -171,6 +171,20 @@ func Testツール呼び出しは散文の間で1行にまとまる(t *testing.T
 	}
 }
 
+func TestCodexのツール項目は1件ずつ呼び出しとして数える(t *testing.T) {
+	rows := foldRows([]model.Message{
+		text("u", model.RoleUser, 0, "テストして"),
+		text("t1", model.RoleTool, 1, "$ cat go.mod\nmodule x"),
+		text("t2", model.RoleTool, 2, "$ go test ./...\nok"),
+		text("a", model.RoleAssistant, 3, "通りました。"),
+	})
+	out := &bytes.Buffer{}
+	renderRow(out, rows[1], renderOpts{short: "bbbb3333"})
+	if got := out.String(); got != "   ⋯ 2 tool calls, latest: $ go test ./...\n" {
+		t.Errorf("got %q", got)
+	}
+}
+
 func Test読むたびに前回以降の新着だけを表示する(t *testing.T) {
 	g := sampleGateway()
 	a, _ := newTestApp(t, g)
