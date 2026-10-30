@@ -231,7 +231,7 @@ func renderInteraction(w io.Writer, ia model.Interaction, short string) {
 		}
 	}
 	if !ia.Supported {
-		fmt.Fprintf(w, "  answer: not supported here; use the terminal: hc term %s, then hc keys %s KEY...\n", short, short)
+		fmt.Fprintf(w, "  answer: not supported here; interrupt (hc interrupt %s) or send new instructions\n", short)
 		return
 	}
 	fmt.Fprintf(w, "  answer: %s\n", answerHint(ia, short))

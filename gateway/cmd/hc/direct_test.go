@@ -11,7 +11,7 @@ func directGateway() *fakeGateway {
 	g := sampleGateway()
 	g.sessions = append(g.sessions, model.Session{
 		ID: "claude:dddd4444-0000", Provider: "claude", Project: "app", Status: model.StatusIdle,
-		UpdatedAt: t0, CanSend: true, Backend: model.BackendDirect, Model: "claude-haiku-5-5", Effort: "low",
+		UpdatedAt: t0, CanSend: true, Model: "claude-haiku-5-5", Effort: "low",
 	})
 	return g
 }
@@ -34,15 +34,15 @@ func Test自分自身はエージェントが報告するセッションIDで判
 	if got := selfSession(get); got != "claude:gw" {
 		t.Errorf("gateway: %q", got)
 	}
-	if defaultCursor("claude:gw", "w1:p1") != "session-claude:gw" || defaultCursor("", "w1:p1") != "pane-w1:p1" || defaultCursor("", "") != "default" {
+	if defaultCursor("claude:gw") != "session-claude:gw" || defaultCursor("") != "default" {
 		t.Error("cursor")
 	}
 }
 
-func Test直接管理の自分自身には送信もアーカイブも中断もしない(t *testing.T) {
+func Test自分自身には送信もアーカイブも中断もしない(t *testing.T) {
 	g := directGateway()
 	a, out := newTestApp(t, g)
-	a.selfPane, a.selfID = "", "claude:dddd4444-0000"
+	a.selfID = "claude:dddd4444-0000"
 	for _, args := range [][]string{{"send", "dddd4444", "hi"}, {"archive", "dddd4444"}, {"interrupt", "dddd4444"}} {
 		out.Reset()
 		if code := a.run(args); code != 1 || !strings.Contains(out.String(), "yourself") {
@@ -54,22 +54,22 @@ func Test直接管理の自分自身には送信もアーカイブも中断も�
 	}
 }
 
-func Test直接起動はセッションIDをすぐに表示する(t *testing.T) {
+func Test起動はセッションIDをすぐに表示する(t *testing.T) {
 	g := directGateway()
-	g.replies = map[string]any{"/v1/sessions": map[string]any{"sessionId": "claude:eeee5555-0000", "backend": "direct"}}
+	g.replies = map[string]any{"/v1/sessions": map[string]any{"sessionId": "claude:eeee5555-0000"}}
 	a, _ := newTestApp(t, g)
 	got := a.mustRun(t, "start", "--cwd", "/tmp/x", "--model", "haiku", "hello")
 	if !strings.Contains(got, "started claude:eeee5555-0000") || strings.Contains(got, "pane") {
 		t.Errorf("output:\n%s", got)
 	}
-	if body := g.posted[0].Body; body["backend"] != "" || body["model"] != "haiku" || body["trust"] != true {
+	if body := g.posted[0].Body; body["backend"] != nil || body["model"] != "haiku" || body["trust"] != true {
 		t.Errorf("body %v", body)
 	}
 }
 
-func Test信頼されていないフォルダの直接起動は理由を示す(t *testing.T) {
+func Test信頼されていないフォルダの起動は理由を示す(t *testing.T) {
 	g := directGateway()
-	g.replies = map[string]any{"/v1/sessions": map[string]any{"launchId": "launch-claude-1", "backend": "direct", "trustRequired": true}}
+	g.replies = map[string]any{"/v1/sessions": map[string]any{"launchId": "launch-claude-1", "trustRequired": true}}
 	a, _ := newTestApp(t, g)
 	got := a.mustRun(t, "start", "--cwd", "/tmp/x", "--no-trust", "hello")
 	if !strings.Contains(got, "never trusted") || strings.Contains(got, "hc term") {
@@ -97,15 +97,14 @@ func Testモデル変更は次のターンから適用されることを示す(t
 	}
 }
 
-func Test直接管理のセッションにはターミナル操作をしない(t *testing.T) {
+func Testターミナル操作と移行のコマンドはない(t *testing.T) {
 	g := directGateway()
 	a, out := newTestApp(t, g)
-	if code := a.run([]string{"term", "dddd4444"}); code != 1 || !strings.Contains(out.String(), "no terminal") {
-		t.Fatalf("code %d: %s", code, out.String())
-	}
-	out.Reset()
-	if code := a.run([]string{"keys", "dddd4444", "enter"}); code != 1 || !strings.Contains(out.String(), "no terminal") {
-		t.Fatalf("code %d: %s", code, out.String())
+	for _, cmd := range []string{"term", "keys", "migrate"} {
+		out.Reset()
+		if code := a.run([]string{cmd, "dddd4444"}); code != 2 {
+			t.Errorf("%s: code %d: %s", cmd, code, out.String())
+		}
 	}
 	if len(g.posted) != 0 {
 		t.Errorf("posted %v", g.posted)
@@ -118,18 +117,5 @@ func Testモードはモード名を指定して設定できる(t *testing.T) {
 	a.mustRun(t, "mode", "dddd4444", "plan")
 	if p := g.posted[0]; p.Path != "/v1/sessions/claude:dddd4444-0000/mode" || p.Body["mode"] != "plan" {
 		t.Errorf("posted %v", p)
-	}
-}
-
-func Test移行は自分自身を拒み他のセッションを順に移す(t *testing.T) {
-	g := directGateway()
-	a, out := newTestApp(t, g)
-	if code := a.run([]string{"migrate", "ffff0000"}); code != 1 || !strings.Contains(out.String(), "this session itself") {
-		t.Fatalf("self: code %d: %s", code, out.String())
-	}
-	g.replies = map[string]any{"/v1/sessions/claude:aaaa1111-0000/migrate": model.Session{ID: "claude:aaaa1111-0000", Status: model.StatusIdle, Backend: model.BackendDirect}}
-	got := a.mustRun(t, "migrate", "aaaa1111")
-	if !strings.Contains(got, "claude:aaaa1111-0000: now run by the gateway") || g.posted[0].Path != "/v1/sessions/claude:aaaa1111-0000/migrate" {
-		t.Errorf("output %q posted %v", got, g.posted)
 	}
 }

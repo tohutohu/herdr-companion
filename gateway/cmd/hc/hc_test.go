@@ -112,9 +112,9 @@ func newTestApp(t *testing.T, g *fakeGateway) (*app, *bytes.Buffer) {
 	out := &bytes.Buffer{}
 	a := &app{
 		out: out, errOut: out, in: strings.NewReader(""),
-		client:   newClient(connection{baseURL: srv.URL, token: "secret"}),
-		state:    &stateStore{dir: t.TempDir()},
-		selfPane: "self:p1",
+		client: newClient(connection{baseURL: srv.URL, token: "secret"}),
+		state:  &stateStore{dir: t.TempDir()},
+		selfID: "claude:ffff0000-self",
 	}
 	old := pollInterval
 	pollInterval = 5 * time.Millisecond
@@ -141,10 +141,10 @@ func text(id string, role model.Role, minute int, s string) model.Message {
 func sampleGateway() *fakeGateway {
 	return &fakeGateway{
 		sessions: []model.Session{
-			{ID: "claude:aaaa1111-0000", Provider: "claude", Project: "app", Title: "ログイン修正", Status: model.StatusIdle, UpdatedAt: t0, PaneID: "w1:p1", CanSend: true},
-			{ID: "claude:aaaa2222-0000", Provider: "claude", Project: "app", Status: model.StatusRunning, UpdatedAt: t0, PaneID: "w2:p1", CanSend: true},
-			{ID: "codex:bbbb3333", Provider: "codex", Project: "api", Status: model.StatusIdle, UpdatedAt: t0, PaneID: "w3:p1", CanSend: true},
-			{ID: "claude:ffff0000-self", Provider: "claude", Project: "boss", Status: model.StatusRunning, UpdatedAt: t0, PaneID: "self:p1", CanSend: true},
+			{ID: "claude:aaaa1111-0000", Provider: "claude", Project: "app", Title: "ログイン修正", Status: model.StatusIdle, UpdatedAt: t0, CanSend: true},
+			{ID: "claude:aaaa2222-0000", Provider: "claude", Project: "app", Status: model.StatusRunning, UpdatedAt: t0, CanSend: true},
+			{ID: "codex:bbbb3333", Provider: "codex", Project: "api", Status: model.StatusIdle, UpdatedAt: t0, CanSend: true},
+			{ID: "claude:ffff0000-self", Provider: "claude", Project: "boss", Status: model.StatusRunning, UpdatedAt: t0, CanSend: true},
 		},
 		messages: map[string][]model.Message{
 			"claude:aaaa1111-0000": {
@@ -421,13 +421,12 @@ func Test自分自身には送信しない(t *testing.T) {
 	}
 }
 
-func Testセッションは前方一致かペインIDで指定できる(t *testing.T) {
+func Testセッションは前方一致かIDで指定できる(t *testing.T) {
 	g := sampleGateway()
 	cases := map[string]string{
 		"aaaa1111":             "claude:aaaa1111-0000",
 		"bbbb":                 "codex:bbbb3333",
 		"codex:bbbb3333":       "codex:bbbb3333",
-		"w2:p1":                "claude:aaaa2222-0000",
 		"claude:aaaa2222-0000": "claude:aaaa2222-0000",
 	}
 	for ref, want := range cases {

@@ -46,13 +46,11 @@ type app struct {
 	client *client
 	state  *stateStore
 	cursor string
-	// selfPane is the Herdr pane this process runs in, and selfID the
-	// session that runs this process when the agent itself reports it
-	// (HC_SESSION_ID from the Gateway, CLAUDE_CODE_SESSION_ID, or
+	// selfID is the session that runs this process when the agent itself
+	// reports it (HC_SESSION_ID from the Gateway, CLAUDE_CODE_SESSION_ID, or
 	// CODEX_THREAD_ID). That session is the caller itself: never reported as
 	// a change, never sent to, archived or waited for.
-	selfPane string
-	selfID   string
+	selfID string
 }
 
 func main() {
@@ -189,13 +187,10 @@ func (a *app) commands() map[string]func([]string) error {
 		"send":      a.cmdSend,
 		"answer":    a.cmdAnswer,
 		"start":     a.cmdStart,
-		"term":      a.cmdTerm,
-		"keys":      a.cmdKeys,
 		"mode":      a.cmdMode,
 		"model":     a.cmdModel,
 		"effort":    a.cmdEffort,
 		"interrupt": a.cmdInterrupt,
-		"migrate":   a.cmdMigrate,
 		"archive":   a.cmdArchive,
 		"resume":    a.cmdResume,
 		"usage":     a.cmdUsage,
@@ -214,9 +209,6 @@ func (a *app) setup(g globalFlags) error {
 	if a.state == nil {
 		a.state = &stateStore{dir: stateDir()}
 	}
-	if a.selfPane == "" {
-		a.selfPane = os.Getenv("HERDR_PANE_ID")
-	}
 	if a.selfID == "" {
 		a.selfID = selfSession(os.Getenv)
 	}
@@ -225,7 +217,7 @@ func (a *app) setup(g globalFlags) error {
 		a.cursor = os.Getenv("HC_CURSOR")
 	}
 	if a.cursor == "" {
-		a.cursor = defaultCursor(a.selfID, a.selfPane)
+		a.cursor = defaultCursor(a.selfID)
 	}
 	return nil
 }
@@ -247,14 +239,11 @@ func selfSession(getenv func(string) string) string {
 	return ""
 }
 
-// defaultCursor keeps agents in different sessions or panes from taking
-// each other's changes: each reads with its own cursor unless told otherwise.
-func defaultCursor(session, pane string) string {
-	switch {
-	case session != "":
+// defaultCursor keeps agents in different sessions from taking each other's
+// changes: each reads with its own cursor unless told otherwise.
+func defaultCursor(session string) string {
+	if session != "" {
 		return "session-" + session
-	case pane != "":
-		return "pane-" + pane
 	}
 	return "default"
 }

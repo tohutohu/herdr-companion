@@ -4,9 +4,9 @@ const guideText = `hc guide — playbook for supervising coding-agent sessions t
 
 PURPOSE
   You are an agent that delegates to, watches or answers other agent sessions (Claude Code,
-  Codex, OpenCode, Devin) on the Mac. The Gateway runs Claude Code and Codex sessions itself
-  (no Herdr needed); sessions in Herdr panes work too. hc does the polling and the diffing,
-  so each call prints only what you have to act on, plus the exact command for the next step.
+  Codex) on the Mac. The Gateway runs these sessions itself. hc does the polling and the
+  diffing, so each call prints only what you have to act on, plus the exact command for the
+  next step.
 
 BEFORE YOU START
   hc ls                     sessions and their short IDs ("!" = waiting for an answer;
@@ -25,7 +25,6 @@ WORKFLOW 2 — start new work
   hc until ID --timeout 9m   →  hc read ID
   The id is printed at once ("started claude:<id>").
   Add --worktree for a separate checkout, --mode plan to review a plan first.
-  --backend herdr starts it in a Herdr workspace instead, with a terminal.
 
 WORKFLOW 3 — fan out and join
   hc start --cwd DIR "part A"  ·  hc start --cwd DIR "part B"  ·  ...
@@ -54,17 +53,15 @@ WORKFLOW 6 — steer a running session
   hc mode ID plan             set a mode (hc mode ID cycles)
   hc interrupt ID             stop the running turn; the session stays
 
-WORKFLOW 7 — when the structured answer is not enough (Herdr sessions)
-  A question marked "not supported here", an odd dialog, or a stuck agent in a Herdr pane:
-  hc term ID                  the screen
-  hc keys ID down enter       type into it (or hc keys ID --text "y" enter)
-  Look at hc term again after each step. Sessions the Gateway runs have no terminal.
+WORKFLOW 7 — when the structured answer is not enough
+  A question marked "not supported here", or a stuck agent:
+  hc interrupt ID             stop the turn, then hc send ID with new instructions
 
 RULES OF THUMB
   - Read before you answer: the user may have answered meanwhile (hc answer refuses when
     nothing is pending).
   - Do not send prompts to a session the user is driving unless asked to.
-  - hc archive stops the agent (and closes its pane); it is for finished work.
+  - hc archive stops the agent; it is for finished work.
   - Long transcripts: hc export ID writes Markdown to a file you can grep.
   - Scripts and exact ids: add --json to any command.
 

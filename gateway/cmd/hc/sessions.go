@@ -48,11 +48,11 @@ func nativeID(id string) string {
 	return id
 }
 
-// matchSession finds the one session ref names: a full id, a native id, a
-// pane id, or a unique prefix of either id.
+// matchSession finds the one session ref names: a full id, a native id, or
+// a unique prefix of either id.
 func matchSession(sessions []model.Session, ref string) (model.Session, []model.Session) {
 	for _, s := range sessions {
-		if s.ID == ref || nativeID(s.ID) == ref || (s.PaneID != "" && s.PaneID == ref && s.Status != model.StatusOffline) {
+		if s.ID == ref || nativeID(s.ID) == ref {
 			return s, nil
 		}
 	}
@@ -95,10 +95,7 @@ func (a *app) resolve(ctx context.Context, ref string) (model.Session, error) {
 }
 
 func (a *app) isSelf(s model.Session) bool {
-	if a.selfID != "" && s.ID == a.selfID {
-		return true
-	}
-	return a.selfPane != "" && s.PaneID == a.selfPane && s.Status != model.StatusOffline
+	return a.selfID != "" && s.ID == a.selfID
 }
 
 func needsYou(s model.Status) bool {
@@ -252,12 +249,6 @@ func (a *app) cmdShow(args []string) error {
 	}
 	var facts []string
 	facts = append(facts, "updated "+age(s.UpdatedAt)+" ago")
-	if s.Backend == model.BackendDirect {
-		facts = append(facts, "run by the gateway (no terminal)")
-	}
-	if s.PaneID != "" {
-		facts = append(facts, "pane "+s.PaneID)
-	}
 	if s.Model != "" {
 		facts = append(facts, strings.TrimSpace(s.Model+" "+s.Effort))
 	}
@@ -500,7 +491,7 @@ func (a *app) diffSessions(prev *snapshot, cur []model.Session) []event {
 		old, ok := prev.Sessions[s.ID]
 		switch {
 		case s.Status == model.StatusOffline && (!ok || old.Status == model.StatusOffline):
-			// Sessions outside Herdr come and go from the list as they age;
+			// Sessions not running come and go from the list as they age;
 			// only a session that stops running is news.
 			continue
 		case !ok:
@@ -795,8 +786,8 @@ func turnEnded(s model.Session, sawRunning bool, before time.Time) bool {
 }
 
 // repliedAfter reports whether the agent has said something since before.
-// It catches a turn too short to be seen running that ends idle (Herdr
-// reports idle rather than completed when the pane is focused).
+// It catches a turn too short to be seen running that ends idle (a finished
+// turn reports idle rather than completed once someone has looked at it).
 func (a *app) repliedAfter(ctx context.Context, id string, before time.Time) bool {
 	_, msgs, err := a.client.messages(ctx, id)
 	if err != nil {

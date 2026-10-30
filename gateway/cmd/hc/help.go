@@ -11,9 +11,8 @@ import (
 // --help") is one command's reference, "hc help TOPIC" explains one idea,
 // and "hc guide" is the playbook for running as a supervising agent.
 
-const overviewText = `hc — watch, answer and drive coding-agent sessions on the Mac (Claude Code, Codex,
-     OpenCode, Devin) through the Herdr Companion Gateway. The Gateway runs Claude Code and
-     Codex sessions itself; sessions in Herdr panes are listed and driven too.
+const overviewText = `hc — watch, answer and drive coding-agent sessions on the Mac (Claude Code, Codex)
+     through the Herdr Companion Gateway, which runs these sessions itself.
 
 USE IT WHEN
   - a session may be asking a question or waiting for a tool/plan approval
@@ -54,8 +53,7 @@ var commandGroups = []struct {
 	{"Look", []string{"ls", "show", "read", "export"}},
 	{"Wait", []string{"until", "wait", "changes"}},
 	{"Act", []string{"send", "answer", "start", "archive", "resume"}},
-	{"Settings", []string{"model", "effort", "mode", "interrupt", "migrate"}},
-	{"Terminal", []string{"term", "keys"}},
+	{"Settings", []string{"model", "effort", "mode", "interrupt"}},
 	{"Other", []string{"usage", "guide", "version"}},
 }
 
@@ -286,11 +284,11 @@ FLAGS
   --timeout D  how long --wait waits (default 110s)
 
 NOT SUPPORTED HERE
-  Some dialogs cannot be answered through the Gateway ("answer: not supported here").
-  Use the terminal: hc term ID, then hc keys ID KEY...
+  Some requests cannot be answered through the Gateway ("answer: not supported here").
+  Interrupt the turn (hc interrupt ID) and send new instructions instead.
 
 SEE ALSO
-  hc show ID · hc keys
+  hc show ID · hc interrupt
 `},
 	{"start", "start a new agent session with a prompt", `hc start — start a new agent session
 
@@ -298,28 +296,24 @@ USE WHEN
   New work needs its own agent: a separate task, a parallel attempt, a fresh context.
 
 USAGE
-  hc start --cwd DIR [--provider claude] [--model M] [--effort E] [--mode M] [--backend B]
+  hc start --cwd DIR [--provider claude] [--model M] [--effort E] [--mode M]
            [--worktree] [--no-trust] [--file F]... [--wait [--timeout 110s]] PROMPT... | -
 
 FLAGS
   --cwd DIR      working directory on the Gateway's Mac (default: current directory; required
                  when hc talks to a Gateway on another machine)
-  --provider P   claude (default), codex, opencode or devin
+  --provider P   claude (default) or codex
   --model M      model id (as in the app); --effort E reasoning effort id
   --mode M       start mode id, e.g. plan
   --worktree     start in a new git worktree of DIR
-  --backend B    direct (default for claude and codex: the Gateway runs the agent, Herdr is
-                 not needed) or herdr (a new Herdr workspace, with a terminal)
-  --no-trust     do not trust a folder the agent was never trusted in (a direct start is then
-                 not made; a Herdr start stops at the agent's dialog, see hc term)
+  --no-trust     do not trust a folder the agent was never trusted in (the start is then
+                 not made)
   --file F       attach a local file to the first prompt (repeatable)
   --wait         wait for the first turn to end and print what the agent said
   --timeout D    how long --wait waits (default 110s)
 
 OUTPUT
-  "started claude:<id>" — the id is known at once for a direct start. A Herdr start prints
-  "(pane P)" too; if its agent has not reported its id yet, only the pane: find the session
-  with hc ls, or use the pane id with hc term / hc keys.
+  "started claude:<id>" — the id is known at once.
 
 EXAMPLES
   hc start --cwd ~/workspace/app "fix the login bug" --wait --timeout 9m
@@ -328,7 +322,7 @@ EXAMPLES
 SEE ALSO
   hc until · hc archive
 `},
-	{"archive", "stop sessions (and close their panes)", `hc archive — stop sessions and close their panes
+	{"archive", "stop sessions", `hc archive — stop sessions
 
 USE WHEN
   A session's work is finished and it should no longer run. This stops the agent; ask first
@@ -344,61 +338,24 @@ SEE ALSO
 	{"resume", "restart a stopped or archived session under its id", `hc resume — restart a session under its id
 
 USE WHEN
-  A session is offline (its agent exited) or archived and you need it to continue. Works for
-  sessions started anywhere, also in a plain terminal. A session the Gateway ran needs no
-  resume: hc send restarts it.
+  A session is offline or archived and you need it to continue. Works for sessions started
+  anywhere, also in a plain terminal (claude --resume / codex resume elsewhere at the same
+  time would write the same history twice; don't). A session the Gateway still lists as
+  running needs no resume: hc send restarts its process.
 
 USAGE
-  hc resume ID [--backend direct|herdr]
+  hc resume ID
 
 OUTPUT
-  "resumed ID" (or "resumed ID in pane P" with --backend herdr). Then send it a prompt.
-`},
-	{"term", "the raw terminal screen of a Herdr session (fallback)", `hc term — the raw terminal screen
-
-USE WHEN
-  A dialog cannot be answered with hc answer, the agent looks stuck, or a session that just
-  started has no id yet (pass its pane id). Only sessions in Herdr panes have a terminal;
-  for a session the Gateway runs, use hc read / hc answer / hc interrupt.
-
-USAGE
-  hc term ID [--lines N]
-
-FLAGS
-  --lines N   lines from the bottom of the screen (default 60, 1-2000)
-
-SEE ALSO
-  hc keys
-`},
-	{"keys", "type keys or text into a Herdr session's terminal (fallback)", `hc keys — type into a session's terminal
-
-USE WHEN
-  hc term shows a dialog or prompt that the structured commands cannot handle.
-  Look again with hc term after each step.
-
-USAGE
-  hc keys ID [--text T] [KEY...]
-
-KEYS
-  enter esc tab shift+tab space backspace up down left right ctrl+c ctrl+d 1-9 y n
-
-FLAGS
-  --text T   text typed before the keys
-
-EXAMPLES
-  hc keys a9b7 down enter
-  hc keys a9b7 --text "yes" enter
-
-SEE ALSO
-  hc term · hc answer (prefer it when it works)
+  "resumed ID". Then send it a prompt.
 `},
 	{"mode", "cycle or set the agent's mode (Plan, Accept edits, ...)", `hc mode — cycle or set the agent's mode
 
 USE WHEN
   The session should switch between its modes (Claude Code: default, Accept edits, Plan, …;
   Codex: default, plan). Without MODE each call moves one step; it prints the mode before and
-  after. MODE (a mode id, e.g. plan, acceptEdits, manual) sets it directly; only sessions the
-  Gateway runs take a MODE. Codex applies a mode from its next turn.
+  after. MODE (a mode id, e.g. plan, acceptEdits, manual) sets it directly. Codex applies a
+  mode from its next turn.
 
 USAGE
   hc mode ID [MODE]
@@ -414,7 +371,7 @@ USAGE
 
   MODEL is a model id as hc start --model takes it (claude: fable, opus, sonnet, haiku;
   codex: an id from its catalog). An unknown id is refused with the list of valid ones;
-  nothing else is picked instead. Only sessions the Gateway runs (not Herdr panes).
+  nothing else is picked instead.
 
 WHEN IT APPLIES
   Claude Code: from its next model request, which can be inside the running turn.
@@ -435,28 +392,10 @@ USAGE
 EXAMPLES
   hc effort a9b7 high
 `},
-	{"migrate", "move sessions from Herdr panes to the Gateway's own runtime", `hc migrate — move sessions out of Herdr
-
-USE WHEN
-  A Claude Code or Codex session runs in a Herdr pane and should be run by the Gateway
-  instead (model and effort changes, interrupt, no Herdr needed). Ask the user first: its
-  pane is closed, which ends the agent and its terminal; the session continues under the
-  same id with the model, effort and mode it had. Only sessions between turns move; one
-  that is running or waiting for an answer is refused. Refuses your own session.
-  A Codex thread open on the shared app-server daemon (every Codex pane) is refused too:
-  the daemon keeps the thread locked until it restarts, so nothing else could resume it.
-
-USAGE
-  hc migrate ID...
-
-OUTPUT
-  One line per session: "now run by the gateway" or "not moved: <reason>". Exit 1 when any
-  was not moved.
-`},
 	{"interrupt", "stop the running turn of a session (it stays open)", `hc interrupt — stop the running turn
 
 USE WHEN
-  A session the Gateway runs is going the wrong way. The turn stops; the session stays and
+  A session is going the wrong way. The turn stops; the session stays and
   takes the next message. Refuses to interrupt your own session.
 
 USAGE
@@ -478,7 +417,7 @@ OUTPUT
 USAGE
   hc guide
 
-Prints the workflows (delegate, supervise, fan out, answer, terminal fallback) and the
+Prints the workflows (delegate, supervise, fan out, answer, steer) and the
 rules of thumb. Read it once before working with hc for a long time.
 `},
 	{"version", "the release this hc was built for", `hc version — the release this hc was built for
@@ -497,10 +436,11 @@ STATUSES
   waiting_approval   it waits for a tool or plan approval (hc answer)   "!" needs you
   completed          the turn ended
   idle               nothing to do; a finished turn becomes idle once someone looked at
-                     it (Herdr: the pane got focus; the app: the session was opened)
+                     it (the session was opened in the app)
   failed             the agent reported an error, or its process stopped during the turn
-  offline            the agent is not running (hc resume restarts it). Sessions the
-                     Gateway runs are never offline: hc send restarts their process.
+  offline            the Gateway does not run the session (hc resume restarts it). A
+                     running session whose process stopped is not offline: hc send
+                     restarts it.
 
 WHAT NEEDS YOU
   hc wait / hc changes report a session that moved to waiting_input, waiting_approval,
@@ -518,19 +458,17 @@ WHAT IS DONE
   Any of these works wherever a command takes ID:
     a unique prefix of the session id     a9b7  (hc shows the shortest unique one, 8+ chars)
     the full id                           claude:a9b7233a-…  or the part after "claude:"
-    the Herdr pane id                     w3:p1  (of a running session)
   An ambiguous prefix lists the sessions it matches. Archived sessions are found too.
-  A session that just started may have only a pane id; hc term / hc keys accept it.
 `},
-	{"cursors", "incremental reads, per-pane cursors, --peek", `hc help cursors — reading only what is new
+	{"cursors", "incremental reads, per-session cursors, --peek", `hc help cursors — reading only what is new
 
   hc read, hc changes and hc wait remember what they showed you, per cursor, so the next
   call prints only what is new. hc until moves the cursor for the sessions it reported.
   --peek (read, changes) shows without moving it.
 
   The cursor is per session by default (HC_SESSION_ID, which the Gateway sets for the
-  sessions it runs, or the agent's own CLAUDE_CODE_SESSION_ID / CODEX_THREAD_ID), else per
-  Herdr pane (HERDR_PANE_ID), so agents do not take each other's changes. --cursor NAME or
+  sessions it runs, or the agent's own CLAUDE_CODE_SESSION_ID / CODEX_THREAD_ID), so agents
+  do not take each other's changes. --cursor NAME or
   HC_CURSOR shares or separates them. The same variables tell hc which session is you.
   State lives in ~/.local/state/herdr-mobile/hc/<cursor>/ (HC_STATE_DIR to move it).
 

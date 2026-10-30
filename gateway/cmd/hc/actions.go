@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -160,7 +159,7 @@ func (a *app) cmdAnswer(args []string) error {
 		return err
 	}
 	if !ia.Supported {
-		return fmt.Errorf("this %s cannot be answered through the Gateway; use the terminal: hc term %s, then hc keys %s KEY...", ia.Type, pos[0], pos[0])
+		return fmt.Errorf("this %s cannot be answered through the Gateway; interrupt the turn (hc interrupt %s) or send new instructions", ia.Type, pos[0])
 	}
 	res, summary, err := buildResponse(ia, pos[1:])
 	if err != nil {
@@ -321,23 +320,20 @@ func optionLabel(opts []model.Option, v string) (string, bool) {
 
 type startResult struct {
 	SessionID     string `json:"sessionId,omitempty"`
-	PaneID        string `json:"paneId,omitempty"`
 	LaunchID      string `json:"launchId,omitempty"`
-	Backend       string `json:"backend,omitempty"`
 	Warning       string `json:"warning,omitempty"`
 	TrustRequired bool   `json:"trustRequired,omitempty"`
 }
 
 func (a *app) cmdStart(args []string) error {
 	fs := flag.NewFlagSet("start", flag.ContinueOnError)
-	provider := fs.String("provider", "claude", "claude, codex, opencode or devin")
+	provider := fs.String("provider", "claude", "claude or codex")
 	cwd := fs.String("cwd", "", "working directory (default: current directory)")
 	modelID := fs.String("model", "", "model id (see the app or GET /v1/models)")
 	effort := fs.String("effort", "", "reasoning effort id")
 	mode := fs.String("mode", "", "start mode id, e.g. plan")
 	worktree := fs.Bool("worktree", false, "start in a new git worktree of cwd")
-	noTrust := fs.Bool("no-trust", false, "do not accept the folder-trust dialog")
-	backend := fs.String("backend", "", `"direct" (default: the Gateway runs the agent) or "herdr" (a new Herdr workspace)`)
+	noTrust := fs.Bool("no-trust", false, "do not start in a folder the agent was never trusted in")
 	var files stringList
 	fs.Var(&files, "file", "attach a local file to the first prompt (repeatable)")
 	wf := addWaitFlags(fs)
@@ -365,7 +361,7 @@ func (a *app) cmdStart(args []string) error {
 	}
 	body := map[string]any{
 		"provider": *provider, "cwd": dir, "prompt": prompt, "model": *modelID, "effort": *effort,
-		"mode": *mode, "trust": !*noTrust, "worktree": *worktree, "backend": *backend,
+		"mode": *mode, "trust": !*noTrust, "worktree": *worktree,
 	}
 	if len(uploads) > 0 {
 		body["uploads"] = uploads
@@ -374,30 +370,19 @@ func (a *app) cmdStart(args []string) error {
 	if err := a.client.do(ctx, http.MethodPost, "/v1/sessions", body, &res); err != nil {
 		return err
 	}
-	if res.SessionID == "" && res.PaneID != "" && *wf.wait {
-		res.SessionID = a.awaitIdentity(ctx, res.PaneID, *wf.timeout)
-	}
 	if a.json && !*wf.wait {
 		return a.printJSON(res)
 	}
 	short := nativeID(res.SessionID)
 	if !a.json {
-		switch {
-		case res.SessionID != "" && res.PaneID != "":
-			short = clipID(short, 8)
-			fmt.Fprintf(a.out, "started %s (pane %s)\n", res.SessionID, res.PaneID)
-		case res.SessionID != "":
+		if res.SessionID != "" {
 			short = clipID(short, 8)
 			fmt.Fprintf(a.out, "started %s\n", res.SessionID)
-		case res.PaneID != "":
-			fmt.Fprintf(a.out, "started in pane %s; the agent has not reported its session id yet (find it with hc ls)\n", res.PaneID)
 		}
 		if res.Warning != "" {
 			fmt.Fprintf(a.out, "warning: %s\n", res.Warning)
 		}
-		if res.TrustRequired && res.PaneID != "" {
-			fmt.Fprintf(a.out, "stopped at the folder-trust dialog; see: hc term %s\n", res.PaneID)
-		} else if res.TrustRequired {
+		if res.TrustRequired {
 			fmt.Fprintln(a.out, "not started: the agent was never trusted in this folder; run again without --no-trust to trust it")
 		}
 	}
@@ -405,108 +390,6 @@ func (a *app) cmdStart(args []string) error {
 		return nil
 	}
 	return a.afterAct(ctx, short, res.SessionID, time.Time{}, wf)
-}
-
-// awaitIdentity waits for the agent in pane to report its session id.
-func (a *app) awaitIdentity(ctx context.Context, pane string, timeout time.Duration) string {
-	deadline := time.Now().Add(min(timeout, time.Minute))
-	for time.Now().Before(deadline) {
-		if list, err := a.client.sessions(ctx, false); err == nil {
-			for _, s := range list {
-				if s.PaneID == pane && s.Status != model.StatusOffline {
-					return s.ID
-				}
-			}
-		}
-		time.Sleep(pollInterval)
-	}
-	return ""
-}
-
-// terminalPath is the session's terminal, or a launch's while its agent
-// has no session id yet.
-func (a *app) terminalPath(ctx context.Context, ref string) (string, error) {
-	s, err := a.resolve(ctx, ref)
-	if err == nil {
-		if s.Backend == model.BackendDirect {
-			return "", fmt.Errorf("%s is run by the gateway itself and has no terminal; use hc read / hc send / hc answer", ref)
-		}
-		return "/v1/sessions/" + url.PathEscape(s.ID) + "/terminal", nil
-	}
-	var probe json.RawMessage
-	launch := "/v1/launches/" + url.PathEscape(ref) + "/terminal"
-	if a.client.do(ctx, http.MethodGet, launch+"?lines=1", nil, &probe) == nil {
-		return launch, nil
-	}
-	return "", err
-}
-
-func (a *app) cmdTerm(args []string) error {
-	fs := flag.NewFlagSet("term", flag.ContinueOnError)
-	lines := fs.Int("lines", 60, "lines from the bottom of the screen (1-2000)")
-	pos, err := parseFlags(fs, args)
-	if err != nil {
-		return err
-	}
-	if len(pos) != 1 {
-		return usagef("term takes one session ID (or the pane id of a starting session)")
-	}
-	ctx := context.Background()
-	path, err := a.terminalPath(ctx, pos[0])
-	if err != nil {
-		return err
-	}
-	var res struct {
-		PaneID   string `json:"paneId"`
-		Text     string `json:"text"`
-		Revision int64  `json:"revision"`
-	}
-	if err := a.client.do(ctx, http.MethodGet, path+"?lines="+strconv.Itoa(*lines), nil, &res); err != nil {
-		return err
-	}
-	if a.json {
-		return a.printJSON(res)
-	}
-	fmt.Fprintln(a.out, strings.TrimRight(res.Text, " \n"))
-	return nil
-}
-
-var terminalKeys = []string{
-	"enter", "esc", "tab", "shift+tab", "space", "backspace", "up", "down", "left", "right",
-	"ctrl+c", "ctrl+d", "1", "2", "3", "4", "5", "6", "7", "8", "9", "y", "n",
-}
-
-func (a *app) cmdKeys(args []string) error {
-	fs := flag.NewFlagSet("keys", flag.ContinueOnError)
-	text := fs.String("text", "", "text to type before the keys")
-	pos, err := parseFlags(fs, args)
-	if err != nil {
-		return err
-	}
-	if len(pos) < 1 || (len(pos) == 1 && *text == "") {
-		return usagef("keys needs a session ID and keys (%s) and/or --text", strings.Join(terminalKeys, " "))
-	}
-	keys := []string{}
-	for _, k := range pos[1:] {
-		k = strings.ToLower(k)
-		if !slices.Contains(terminalKeys, k) {
-			return usagef("unknown key %q; keys: %s", k, strings.Join(terminalKeys, " "))
-		}
-		keys = append(keys, k)
-	}
-	ctx := context.Background()
-	path, err := a.terminalPath(ctx, pos[0])
-	if err != nil {
-		return err
-	}
-	if err := a.client.do(ctx, http.MethodPost, path, map[string]any{"text": *text, "keys": keys}, nil); err != nil {
-		return err
-	}
-	if a.json {
-		return a.printJSON(map[string]bool{"ok": true})
-	}
-	fmt.Fprintf(a.out, "sent; check the screen with: hc term %s\n", pos[0])
-	return nil
 }
 
 func (a *app) cmdMode(args []string) error {
@@ -588,9 +471,7 @@ func (a *app) cmdArchive(args []string) error {
 }
 
 func (a *app) cmdResume(args []string) error {
-	fs := flag.NewFlagSet("resume", flag.ContinueOnError)
-	backend := fs.String("backend", "", `"direct" (default) or "herdr"`)
-	pos, err := parseFlags(fs, args)
+	pos, err := parseFlags(flag.NewFlagSet("resume", flag.ContinueOnError), args)
 	if err != nil {
 		return err
 	}
@@ -603,17 +484,13 @@ func (a *app) cmdResume(args []string) error {
 		return err
 	}
 	var res startResult
-	if err := a.client.do(ctx, http.MethodPost, "/v1/sessions/"+url.PathEscape(s.ID)+"/resume", map[string]any{"trust": true, "backend": *backend}, &res); err != nil {
+	if err := a.client.do(ctx, http.MethodPost, "/v1/sessions/"+url.PathEscape(s.ID)+"/resume", map[string]any{}, &res); err != nil {
 		return err
 	}
 	if a.json {
 		return a.printJSON(res)
 	}
-	if res.PaneID != "" {
-		fmt.Fprintf(a.out, "resumed %s in pane %s\n", s.ID, res.PaneID)
-	} else {
-		fmt.Fprintf(a.out, "resumed %s\n", s.ID)
-	}
+	fmt.Fprintf(a.out, "resumed %s\n", s.ID)
 	if res.Warning != "" {
 		fmt.Fprintf(a.out, "warning: %s\n", res.Warning)
 	}
@@ -721,53 +598,5 @@ func (a *app) cmdInterrupt(args []string) error {
 		return a.printJSON(map[string]bool{"ok": true})
 	}
 	fmt.Fprintf(a.out, "interrupted %s\n", s.ID)
-	return nil
-}
-
-// cmdMigrate moves sessions from their Herdr panes to the Gateway's own
-// runtime. The pane is closed, which ends the agent; the session continues
-// under the same id. Sessions in the middle of a turn are refused.
-func (a *app) cmdMigrate(args []string) error {
-	pos, err := parseFlags(flag.NewFlagSet("migrate", flag.ContinueOnError), args)
-	if err != nil {
-		return err
-	}
-	if len(pos) == 0 {
-		return usagef("migrate takes one or more session IDs")
-	}
-	ctx := context.Background()
-	var sessions []model.Session
-	for _, ref := range pos {
-		s, err := a.resolve(ctx, ref)
-		if err != nil {
-			return err
-		}
-		if a.isSelf(s) {
-			return fmt.Errorf("%s is this session itself; moving it would end the agent running hc", ref)
-		}
-		sessions = append(sessions, s)
-	}
-	var results []model.Session
-	failed := false
-	for _, s := range sessions {
-		var after model.Session
-		err := a.client.do(ctx, http.MethodPost, "/v1/sessions/"+url.PathEscape(s.ID)+"/migrate", map[string]any{}, &after)
-		switch {
-		case err != nil:
-			failed = true
-			if !a.json {
-				fmt.Fprintf(a.out, "%s: not moved: %v\n", s.ID, err)
-			}
-		case !a.json:
-			fmt.Fprintf(a.out, "%s: now run by the gateway (%s)\n", s.ID, firstNonEmpty(string(after.Status), "idle"))
-		}
-		results = append(results, after)
-	}
-	if a.json {
-		return a.printJSON(results)
-	}
-	if failed {
-		return exitStatus(1)
-	}
 	return nil
 }
