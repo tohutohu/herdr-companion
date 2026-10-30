@@ -48,12 +48,12 @@ class FileDownloads(
         scope.launch {
             val resolver = context.contentResolver
             val mimeType = mimeTypeFor(name)
-            val values = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, name)
-                put(MediaStore.Downloads.MIME_TYPE, mimeType)
-                put(MediaStore.Downloads.IS_PENDING, 1)
+            val uri = try {
+                insertDownload(name, mimeType)
+            } catch (e: Exception) {
+                flow.value = DownloadState.Failed(e.message ?: e.toString())
+                return@launch
             }
-            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
             if (uri == null) {
                 flow.value = DownloadState.Failed("Could not create the download file")
                 return@launch
@@ -61,7 +61,7 @@ class FileDownloads(
             try {
                 val out = resolver.openOutputStream(uri) ?: error("Could not open the download file")
                 out.use { api.downloadFile(sessionId, path, it) { n -> flow.value = DownloadState.Running(n, size) } }
-                resolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
+                publish(uri, name)
                 flow.value = DownloadState.Done(uri, mimeType)
             } catch (e: Throwable) {
                 resolver.delete(uri, null, null)
@@ -99,12 +99,7 @@ class FileDownloads(
                 }
                 val mimeType = metadata.mimeType
                 val name = imageName(mimeType)
-                val values = ContentValues().apply {
-                    put(MediaStore.Downloads.DISPLAY_NAME, name)
-                    put(MediaStore.Downloads.MIME_TYPE, mimeType)
-                    put(MediaStore.Downloads.IS_PENDING, 1)
-                }
-                val inserted = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                val inserted = insertDownload(name, mimeType)
                 if (inserted == null) {
                     flow.value = DownloadState.Failed("Could not create the download file")
                     return@launch
@@ -115,12 +110,7 @@ class FileDownloads(
                 out.use { destination ->
                     temp.inputStream().use { input -> input.copyTo(destination) }
                 }
-                context.contentResolver.update(
-                    inserted,
-                    ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) },
-                    null,
-                    null,
-                )
+                publish(inserted, name)
                 flow.value = DownloadState.Done(inserted, mimeType)
             } catch (e: Throwable) {
                 uri?.let { context.contentResolver.delete(it, null, null) }
@@ -129,6 +119,38 @@ class FileDownloads(
             } finally {
                 temp.delete()
             }
+        }
+    }
+
+    private fun insertDownload(name: String, mimeType: String): Uri? = context.contentResolver.insert(
+        MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+        ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, name)
+            put(MediaStore.Downloads.MIME_TYPE, mimeType)
+            put(MediaStore.Downloads.IS_PENDING, 1)
+        },
+    )
+
+    /**
+     * Makes a finished download visible under [name]. MediaStore numbers a
+     * taken name ("app-release (1).apk", …) only up to a limit and then
+     * refuses with "Failed to build unique file", so after many downloads of
+     * the same file the name gets the time instead.
+     */
+    private fun publish(uri: Uri, name: String) {
+        val resolver = context.contentResolver
+        try {
+            resolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
+        } catch (_: IllegalStateException) {
+            resolver.update(
+                uri,
+                ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, timestampedName(name, System.currentTimeMillis()))
+                    put(MediaStore.Downloads.IS_PENDING, 0)
+                },
+                null,
+                null,
+            )
         }
     }
 
@@ -149,6 +171,13 @@ class FileDownloads(
         fun mimeTypeFor(name: String): String =
             MimeTypeMap.getSingleton().getMimeTypeFromExtension(name.substringAfterLast('.', "").lowercase())
                 ?: "application/octet-stream"
+
+        /** "app-release.apk" → "app-release-20261030-153212.apk" (local time). */
+        fun timestampedName(name: String, epochMillis: Long): String {
+            val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.ROOT).format(java.util.Date(epochMillis))
+            val dot = name.lastIndexOf('.')
+            return if (dot > 0) name.substring(0, dot) + "-" + stamp + name.substring(dot) else "$name-$stamp"
+        }
 
         private fun imageKey(url: String) = "image\u0000$url"
 
