@@ -86,7 +86,6 @@ USAGE
   hc resident cancel RUN                          stop that run only
   hc resident dismiss RUN                         close a run whose outcome is unknown, after checking it
   hc resident promote RUN                         continue a run's conversation as a session; prints its ID
-  hc resident send TASK TEXT | --file F           a follow-up instruction; a new run answers it
   hc resident answer TASK TEXT                    answer the task's open question
   hc resident messages TASK [--limit N]           the task's conversation
   hc resident memory TASK [--set F]               show, or replace with {summary?, state?} from F ("-" = stdin)
@@ -114,8 +113,8 @@ NOTES
   - --precheck runs CMD with /bin/sh -c in the folder before each automatic run (default
     60 s limit). Exit 0 starts the agent with CMD's stdout in its prompt; exit 1 ends the run
     as skipped without the agent (not counted in --max-runs-per-day); anything else fails the
-    run. stdin is the task's memory as JSON {summary, state}. Manual runs, follow-ups and
-    answers always start the agent. CMD runs as the user, outside --profile and the sandbox.
+    run. stdin is the task's memory as JSON {summary, state}. Manual runs and answers
+    always start the agent. CMD runs as the user, outside --profile and the sandbox.
     --precheck '' removes it.
   - Every run keeps its agent conversation, as a session does. promote turns it into an
     ordinary session, resumed and listed by hc ls, so hc send can ask about what the run found.

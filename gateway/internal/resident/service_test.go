@@ -81,16 +81,16 @@ func TestCreateAndScheduledRun(t *testing.T) {
 		}
 	})
 
-	t.Run("手動の質問への返答は変化がなくても会話に返す", func(t *testing.T) {
+	t.Run("手動実行の結果は変化がなくても会話に返す", func(t *testing.T) {
 		h := newHarness(t)
 		task := h.create(nil)
 		h.runner.push(fakeStep{result: result(OutcomeUnchanged, "まだ変化はありません", func(r map[string]any) { r["report"] = "詳しく調べました: 変化なし" })})
-		if _, err := h.svc.PostMessage(bg, task.ID, "詳しく調べて", "req-follow-1"); err != nil {
+		if _, err := h.svc.RunNow(bg, task.ID, "req-manual-1"); err != nil {
 			t.Fatal(err)
 		}
 		h.settle()
 		ms := h.messages(task.ID)
-		if len(ms) != 2 || ms[0].Role != RoleUser || ms[1].Text != "詳しく調べました: 変化なし" {
+		if len(ms) != 1 || ms[0].Text != "詳しく調べました: 変化なし" {
 			t.Fatalf("messages = %+v", ms)
 		}
 		if len(h.notifications(task.ID)) != 0 {
@@ -268,27 +268,13 @@ func TestNotificationRules(t *testing.T) {
 }
 
 func TestIdempotencyAndConcurrency(t *testing.T) {
-	t.Run("同じrequestIdの再送では追加指示も手動実行も増えない", func(t *testing.T) {
+	t.Run("同じrequestIdの再送では手動実行が増えない", func(t *testing.T) {
 		h := newHarness(t)
 		task := h.create(nil)
-		a, err := h.svc.PostMessage(bg, task.ID, "詳しく", "req-0001")
-		if err != nil {
-			t.Fatal(err)
-		}
-		b, err := h.svc.PostMessage(bg, task.ID, "詳しく", "req-0001")
-		if err != nil || b.Message.ID != a.Message.ID || b.Run.ID != a.Run.ID {
-			t.Fatalf("retry = %+v %v", b, err)
-		}
-		if _, err := h.svc.PostMessage(bg, task.ID, "別の内容", "req-0001"); !errors.Is(err, ErrConflict) {
-			t.Errorf("reused id with another text: %v", err)
-		}
 		r1, _ := h.svc.RunNow(bg, task.ID, "run-0001")
 		r2, _ := h.svc.RunNow(bg, task.ID, "run-0001")
 		if r1.Run.ID != r2.Run.ID {
 			t.Error("a retried run request made another run")
-		}
-		if n := len(h.messages(task.ID)); n != 1 {
-			t.Errorf("messages = %d", n)
 		}
 		h.settle()
 		if h.runner.callCount() != 1 {
@@ -331,7 +317,7 @@ func TestIdempotencyAndConcurrency(t *testing.T) {
 			t.Errorf("runner calls = %d", c)
 		}
 	})
-	t.Run("実行中に届いた追加指示は捨てずに次のRunで扱い、定期実行は1件にまとめる", func(t *testing.T) {
+	t.Run("実行中に押した手動実行と定期実行は次の1件のRunにまとめる", func(t *testing.T) {
 		h := newHarness(t)
 		task := h.create(func(r *CreateRequest) { r.Schedule = Schedule{Kind: ScheduleCron, Cron: "*/5 * * * *"} })
 		block := make(chan struct{})
@@ -340,7 +326,7 @@ func TestIdempotencyAndConcurrency(t *testing.T) {
 		h.svc.RunNow(bg, task.ID, "")
 		h.svc.Tick(bg)
 		<-h.runner.started
-		h.svc.PostMessage(bg, task.ID, "PR #12も見て", "")
+		h.svc.RunNow(bg, task.ID, "")
 		for i := 0; i < 3; i++ { // three schedule occurrences while running
 			h.clock.Add(5 * time.Minute)
 			h.svc.Tick(bg)
@@ -353,11 +339,8 @@ func TestIdempotencyAndConcurrency(t *testing.T) {
 		close(block)
 		h.runner.started = nil
 		h.settle()
-		if !strings.Contains(h.runner.lastPrompt(), "PR #12も見て") {
-			t.Error("the follow-up was not in the next run's prompt")
-		}
 		rs := h.runs(task.ID)
-		if !contains(rs[0].Triggers, TriggerFollowUp) || !contains(rs[0].Triggers, TriggerSchedule) || !rs[0].Interactive {
+		if !contains(rs[0].Triggers, TriggerManual) || !contains(rs[0].Triggers, TriggerSchedule) || !rs[0].Interactive {
 			t.Errorf("merged run = %+v", rs[0])
 		}
 	})
@@ -820,17 +803,17 @@ func TestMemoryAndQuestions(t *testing.T) {
 			t.Errorf("err = %v", err)
 		}
 	})
-	t.Run("追加指示のRunは以前の会話とMemoryを参照できる", func(t *testing.T) {
+	t.Run("次のRunは以前の会話とMemoryを参照できる", func(t *testing.T) {
 		h := newHarness(t)
 		task := h.create(nil)
 		h.runner.push(fakeStep{result: result(OutcomeChanged, "PR #5 のCIが失敗", withKey("pr5"), withSet("failingPR", "5"),
 			func(r map[string]any) { r["memorySummary"] = "PR #5 を追跡中" })})
 		h.svc.RunNow(bg, task.ID, "")
 		h.settle()
-		h.svc.PostMessage(bg, task.ID, "詳しく調べて", "")
+		h.svc.RunNow(bg, task.ID, "")
 		h.settle()
 		p := h.runner.lastPrompt()
-		for _, want := range []string{"PR #5 のCIが失敗", "PR #5 を追跡中", `"failingPR": 5`, "詳しく調べて", "## 7. External data", "actually checked in this run"} {
+		for _, want := range []string{"PR #5 のCIが失敗", "PR #5 を追跡中", `"failingPR": 5`, "## 7. External data", "actually checked in this run"} {
 			if !strings.Contains(p, want) {
 				t.Errorf("prompt lacks %q", want)
 			}

@@ -33,7 +33,6 @@ func (s *Server) residentRoutes(api *http.ServeMux) {
 	api.HandleFunc("POST /v1/resident/tasks/{id}/pause", s.residentEnabled(false))
 	api.HandleFunc("POST /v1/resident/tasks/{id}/resume", s.residentEnabled(true))
 	api.HandleFunc("GET /v1/resident/tasks/{id}/messages", s.residentMessages)
-	api.HandleFunc("POST /v1/resident/tasks/{id}/messages", s.residentPostMessage)
 	api.HandleFunc("POST /v1/resident/tasks/{id}/read", s.residentRead)
 	api.HandleFunc("GET /v1/resident/tasks/{id}/runs", s.residentRuns)
 	api.HandleFunc("POST /v1/resident/tasks/{id}/runs", s.residentRunNow)
@@ -238,20 +237,6 @@ func (s *Server) residentMessages(w http.ResponseWriter, r *http.Request) {
 type textRequest struct {
 	Text      string `json:"text"`
 	RequestID string `json:"requestId,omitempty"`
-}
-
-func (s *Server) residentPostMessage(w http.ResponseWriter, r *http.Request) {
-	var req textRequest
-	if err := decodeBody(r, &req); err != nil {
-		s.residentFail(w, r, "resident.message", err)
-		return
-	}
-	res, err := s.Resident.PostMessage(r.Context(), r.PathValue("id"), req.Text, req.RequestID)
-	if err != nil {
-		s.residentFail(w, r, "resident.message", err)
-		return
-	}
-	writeJSON(w, http.StatusAccepted, res)
 }
 
 func (s *Server) residentRead(w http.ResponseWriter, r *http.Request) {

@@ -915,49 +915,12 @@ func insertMessage(tx *sql.Tx, m *Message) error {
 	return err
 }
 
-// PostResult is what posting a message or asking for a run returns.
+// PostResult is what answering a question or asking for a run returns.
 type PostResult struct {
 	Message *Message `json:"message,omitempty"`
 	Run     *Run     `json:"run"`
 	// Merged means the request joined a run that was already queued.
 	Merged bool `json:"merged,omitempty"`
-}
-
-// PostMessage stores a follow-up instruction and queues a run for it (or
-// lets the task's queued run take it).
-func (s *Service) PostMessage(ctx context.Context, taskID, text, requestID string) (*PostResult, error) {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return nil, invalid("text is empty")
-	}
-	if len(text) > 32<<10 {
-		return nil, invalid("text is longer than 32 KiB")
-	}
-	now := s.clock()
-	var res *PostResult
-	err := s.store.tx(ctx, func(tx *sql.Tx) error {
-		var err error
-		res, _, err = once(tx, requestID, "message:"+taskID, map[string]string{"task": taskID, "text": text}, now, func() (*PostResult, error) {
-			if _, err := loadTaskTx(tx, taskID); err != nil {
-				return nil, err
-			}
-			m := &Message{TaskID: taskID, Role: RoleUser, Kind: MsgInstruction, Text: text, CreatedAt: now}
-			if err := insertMessage(tx, m); err != nil {
-				return nil, err
-			}
-			run, merged, err := s.enqueueTx(tx, taskID, TriggerFollowUp, "follow-up instruction", nil, true, now)
-			if err != nil {
-				return nil, err
-			}
-			return &PostResult{Message: m, Run: run, Merged: merged}, nil
-		})
-		return err
-	})
-	if err != nil {
-		return nil, err
-	}
-	s.changed()
-	return res, nil
 }
 
 // MarkRead marks the conversation read through messageID (or entirely).

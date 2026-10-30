@@ -43,7 +43,6 @@ hc resident create --provider claude --model haiku --cwd ~/workspace/app \
 hc resident preview --cron "0 7 * * 1-5"            # 次の3回（保存しない）
 hc resident ls                                      # "!" は判断待ち・要確認
 hc resident run CI監視                              # 今すぐ実行（待機中の Run があればまとめる）
-hc resident send CI監視 "詳しく調べて"               # 追加指示（新しい Run が答える）
 hc resident answer CI監視 "マージしないで報告だけ"   # 判断待ちへの回答
 hc resident runs CI監視 && hc resident log RUN       # 実行履歴と 1 件の詳細
 hc resident cancel RUN                              # その Run だけを停止
@@ -53,7 +52,7 @@ hc resident update 物件 --precheck 'python3 scrape.py'  # 事前チェック: 
 ```
 
 - TASK はタスク ID、その一意な前方一致、または名前。`--file task.json` で API と同じ JSON を渡せ、フラグが上書きする。
-- 作成・手動実行・追加指示・回答は requestId を付けて送る（`--request-id` で固定すれば再試行しても増えない）。
+- 作成・手動実行・回答は requestId を付けて送る（`--request-id` で固定すれば再試行しても増えない）。
 - 更新は現在の版（`expectedVersion`）を自動で付ける。ほかで変更されていれば `conflict` で失敗する。
 - `--json` は API の JSON をそのまま出す。終了コードは 0 成功、1 拒否・失敗（理由を stderr に出す）、2 コマンドラインの誤り。
 - 常駐に対応しない Gateway では「update the Gateway」と出て終了コード 1。

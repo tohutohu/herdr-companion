@@ -704,8 +704,8 @@ Run と会話のメッセージには `conversation`（`kept`: 昇格できる�
 
 ### 冪等性と競合
 
-- タスク作成・手動実行・追加指示・回答は `requestId`（8–100 文字の `[A-Za-z0-9._:-]`）を受け付ける。同じ ID の再送は最初の結果を返し、
-  同じ ID で内容が違えば 409。通信の再試行で Run や追加指示が増えない。
+- タスク作成・手動実行・回答は `requestId`（8–100 文字の `[A-Za-z0-9._:-]`）を受け付ける。同じ ID の再送は最初の結果を返し、
+  同じ ID で内容が違えば 409。通信の再試行で Run や回答が増えない。
 - 更新（PATCH）と Memory の保存は `expectedVersion` が現在の版と一致したときだけ成功する（不一致は 409）。
 
 ### エンドポイント
@@ -719,7 +719,6 @@ Run と会話のメッセージには `conversation`（`kept`: 昇格できる�
 | DELETE | `/v1/resident/tasks/{id}` | 削除（以後起動しない、実行中の Run は停止） |
 | POST | `/v1/resident/tasks/{id}/pause` / `resume` | 自動起動の一時停止／再開 → Task。pause に `{until}`（RFC 3339、未来かつ 366 日以内）を付けるとその時刻に自動で再開する。省略すると再開するまで止める |
 | GET | `/v1/resident/tasks/{id}/messages?before=&limit=` | 会話 `{messages[], more}`（古い順） |
-| POST | `/v1/resident/tasks/{id}/messages` | 追加指示 `{text, requestId?}` → 202 `{message, run, merged}` |
 | POST | `/v1/resident/tasks/{id}/read` | 既読 `{messageId?}`（省略で最新まで） |
 | GET | `/v1/resident/tasks/{id}/runs?before=&limit=` | 実行履歴 `{runs[], more}`（新しい順、skipped を含む） |
 | POST | `/v1/resident/tasks/{id}/runs` | 今すぐ実行 `{requestId?}` → 202 `{run, merged}` |
@@ -768,7 +767,7 @@ Run と会話のメッセージには `conversation`（`kept`: 昇格できる�
 `skipped` / `dismissed`。`outcome`: `changed` / `unchanged` / `blocked` / `failed`。`errorKind`: `contract`（結果契約違反）/
 `provider` / `permission` / `timeout` / `interrupted` / `config` / `agent` / `precheck`（事前チェックのコマンドが失敗）。
 事前チェックが条件なし（exit 1）で終えた Run は `skipped` で、`startedAt` があり、`summary` に理由、`report` にコマンドの出力が入る。`triggers`: `schedule` / `catch_up` / `self_wake` /
-`manual` / `follow_up` / `answer`。そのほか `settings`（開始時に固定した設定）、`model`、`effort`、`usage`、`warnings`、
+`manual` / `answer`（以前の Run には廃止した追加指示の `follow_up` も残る）。そのほか `settings`（開始時に固定した設定）、`model`、`effort`、`usage`、`warnings`、
 `notifyDecision`、`nextWakeAt`、`attempts[]`（`phase`: `preparing` / `sending` / `running` / `finished` / `failed` /
 `cancelled` / `unknown` / `abandoned`）。
 

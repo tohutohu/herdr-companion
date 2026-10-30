@@ -124,14 +124,14 @@ type resMessage struct {
 
 func (a *app) cmdResident(args []string) error {
 	if len(args) == 0 {
-		return usagef("resident needs a subcommand: ls, show, create, update, pause, resume, run, runs, log, cancel, dismiss, promote, send, answer, messages, memory, preview, delete")
+		return usagef("resident needs a subcommand: ls, show, create, update, pause, resume, run, runs, log, cancel, dismiss, promote, answer, messages, memory, preview, delete")
 	}
 	sub, rest := args[0], args[1:]
 	cmds := map[string]func([]string) error{
 		"ls": a.resLs, "show": a.resShow, "create": a.resCreate, "update": a.resUpdate,
 		"pause": a.resEnabled(false), "resume": a.resEnabled(true), "run": a.resRunNow, "runs": a.resRuns,
 		"log": a.resLog, "cancel": a.resRunAction("cancel"), "dismiss": a.resRunAction("dismiss"), "promote": a.resPromote,
-		"send": a.resSend, "answer": a.resAnswer, "messages": a.resMessages, "memory": a.resMemory,
+		"answer": a.resAnswer, "messages": a.resMessages, "memory": a.resMemory,
 		"preview": a.resPreview, "delete": a.resDelete,
 	}
 	run, ok := cmds[sub]
@@ -831,42 +831,6 @@ func (a *app) resRunAction(action string) func([]string) error {
 		fmt.Fprintln(a.out, runLine(r))
 		return nil
 	}
-}
-
-func (a *app) resSend(args []string) error {
-	fs := flag.NewFlagSet("resident send", flag.ContinueOnError)
-	file := fs.String("file", "", "")
-	reqID := fs.String("request-id", "", "")
-	pos, err := parseFlags(fs, args)
-	if err != nil {
-		return err
-	}
-	if len(pos) < 1 || (len(pos) < 2 && *file == "") {
-		return usagef("resident send needs a TASK and TEXT (or --file)")
-	}
-	text := strings.Join(pos[1:], " ")
-	if *file != "" {
-		b, err := readInput(*file)
-		if err != nil {
-			return err
-		}
-		text = string(b)
-	}
-	ctx := context.Background()
-	t, err := a.resolveTask(ctx, pos[0])
-	if err != nil {
-		return err
-	}
-	var res postResult
-	if err := a.client.do(ctx, http.MethodPost, "/v1/resident/tasks/"+url.PathEscape(t.ID)+"/messages",
-		map[string]any{"text": text, "requestId": firstNonEmpty(*reqID, newRequestID())}, &res); err != nil {
-		return residentErr(err)
-	}
-	if a.json {
-		return a.printJSON(res)
-	}
-	fmt.Fprintf(a.out, "sent; run %s will take it (hc resident messages %s)\n", shortRun(res.Run.ID), shortTask(t.ID))
-	return nil
 }
 
 func (a *app) resAnswer(args []string) error {

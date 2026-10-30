@@ -166,20 +166,16 @@ func TestPrecheckRuns(t *testing.T) {
 		}
 	})
 
-	t.Run("手動実行と追加指示は条件に合わなくてもエージェントを起動し、その旨を伝える", func(t *testing.T) {
+	t.Run("手動実行は条件に合わなくてもエージェントを起動し、その旨を伝える", func(t *testing.T) {
 		h := newHarness(t)
 		task := h.create(withPrecheck("echo 0件; exit 1"))
 		h.svc.RunNow(bg, task.ID, "")
 		h.settle()
-		if _, err := h.svc.PostMessage(bg, task.ID, "最近の様子は？", "req-follow-precheck"); err != nil {
-			t.Fatal(err)
-		}
-		h.settle()
-		if h.runner.callCount() != 2 {
+		if h.runner.callCount() != 1 {
 			t.Fatalf("agent calls = %d", h.runner.callCount())
 		}
 		p := h.runner.lastPrompt()
-		if !strings.Contains(p, "found nothing to look at (exit 1), but the user started this run") || !strings.Contains(p, "0件") || !strings.Contains(p, "最近の様子は？") {
+		if !strings.Contains(p, "found nothing to look at (exit 1), but the user started this run") || !strings.Contains(p, "0件") {
 			t.Errorf("prompt = %s", p)
 		}
 	})

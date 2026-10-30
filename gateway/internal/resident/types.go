@@ -153,7 +153,7 @@ const (
 
 // Message kinds.
 const (
-	MsgInstruction = "instruction" // a follow-up instruction from the user
+	MsgInstruction = "instruction" // a follow-up instruction (no longer sent; kept for old conversations)
 	MsgAnswer      = "answer"      // the user's answer to a question
 	MsgReport      = "report"      // a run's report
 	MsgQuestion    = "question"    // the agent asks the user
@@ -226,7 +226,7 @@ const (
 	TriggerSchedule = "schedule"
 	TriggerSelf     = "self_wake"
 	TriggerManual   = "manual"
-	TriggerFollowUp = "follow_up"
+	TriggerFollowUp = "follow_up" // no longer queued; kept for old runs
 	TriggerAnswer   = "answer"
 	TriggerCatchUp  = "catch_up"
 )
@@ -271,8 +271,8 @@ type Run struct {
 	NotificationKey string     `json:"notificationKey,omitempty"`
 	NotifyDecision  string     `json:"notifyDecision,omitempty"`
 	NextWakeAt      *time.Time `json:"nextWakeAt,omitempty"`
-	// Interactive runs were asked for by the user (manual, follow-up,
-	// answer): their reply goes to the conversation even when unchanged.
+	// Interactive runs were asked for by the user (manual, answer): their
+	// reply goes to the conversation even when unchanged.
 	Interactive bool `json:"interactive"`
 	// Conversation says whether the agent's conversation of the run is
 	// kept and can become a session ("kept") or already is one ("promoted",
