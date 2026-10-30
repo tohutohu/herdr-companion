@@ -124,15 +124,18 @@ SQLite（`modernc.org/sqlite`、純 Go で cgo 不要）、WAL、`synchronous=FU
 
 ## 権限
 
-無人実行の範囲はタスクの権限プロファイルで決め、各エージェントの権限機構で強制する（プロンプトの文言には頼らない）。
+設定はセッション起動と同じ程度に絞っている。アプリのフォームは指示・フォルダ・エージェント（モデル/effort）・予定だけで、
+タスク名は省略すると指示の 1 行目になる。権限・通知・上限は既定値（API と `hc` では指定もできる）。
 
-| | 読み取りのみ（`read_only`） | フォルダ内の編集可（`workspace_write`） |
+無人実行の範囲は権限プロファイルで決め、各エージェントの権限機構で強制する（プロンプトの文言には頼らない）。既定は `workspace_write`。
+
+| | フォルダ内の編集可（`workspace_write`、既定） | 読み取りのみ（`read_only`） |
 |---|---|---|
-| Claude | permissionMode `default`、Read/Glob/Grep/LS を許可、Edit/Write/MultiEdit/NotebookEdit を禁止 | permissionMode `acceptEdits`（作業フォルダ内の編集） |
-| Codex | sandbox `read-only`、approvalPolicy `never` | sandbox `workspace-write`、approvalPolicy `never` |
+| Claude | auto モード（モデルが対応していれば。Claude Code の分類器が各操作を判断し、人に聞く操作は拒否）、未対応なら `acceptEdits` | permissionMode `default`、Read/Glob/Grep/LS を許可、Edit/Write/MultiEdit/NotebookEdit を禁止 |
+| Codex | sandbox `workspace-write`、approvalPolicy `never` | sandbox `read-only`、approvalPolicy `never` |
 
-- ネットワーク: Claude は WebSearch/WebFetch の許可/禁止、Codex は sandbox の `networkAccess`。Claude の Bash で許可したコマンドが
-  ネットワークを使うことは止められない。
+- ネットワークは常に使える（Claude は WebSearch/WebFetch を許可、Codex は sandbox の `networkAccess: true`）。
+  古いクライアントが送る `permissions.network` は無視する。
 - Claude には追加の許可ルール（例 `Bash(gh pr view:*)`、`mcp__github__get_issue`）を指定できる。無制限の `Bash` は不可。
   ユーザー・プロジェクトの設定にある許可ルールは `claude -p` と同様に有効（Claude Code が既定で許す読み取り専用コマンドも含む）。
 - それ以外の権限要求は自動で拒否する（Claude: 常駐用の `canUseTool` が拒否して記録、Codex: 承認要求に decline）。
@@ -140,7 +143,9 @@ SQLite（`modernc.org/sqlite`、純 Go で cgo 不要）、WAL、`synchronous=FU
 - 必要な権限・ログイン・判断がなければ、エージェントは `blocked` と質問を返し、Run は `waiting_user` になる（プロセスは待たせない）。
   回答は期限（7 日）と対象 Run を照合して保存し、質問した Run のチェックポイントから新しい Run を始める。古い承認 ID は再送しない。
 - フォルダは workspaceRoots の中だけ。エージェント自身が信頼していないフォルダは、作成時に明示の信頼確認（`trust: true`）が必要
-  （プロジェクトの hooks / MCP が無人で動くため）。確認はタスクに記録し、エージェントの信頼設定には書き込まない。
+  （プロジェクトの hooks / MCP が無人で動くため）。確認はタスクに記録し、Gateway はエージェントの信頼設定に書き込まない。
+  ただし Codex は `workspace-write` の実行で、そのフォルダを `~/.codex/config.toml` に `trust_level = "trusted"` として自分で追加する
+  （codex-cli 0.166.0 で確認）。
 - Claude のログイン・API キー課金のガードは通常セッションと同じ（`claudeAllowApiKey` がなければ API キーでは実行しない）。
 - モデル・effort は保存時に Provider のカタログで検証し、実行時に提供されないモデルは置き換えずに失敗させる。
 - メール・Web 検索などの外部連携は、この Mac で設定済みの CLI / MCP だけが使える。未設定ならエージェントが理由を返す。

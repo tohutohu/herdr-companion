@@ -134,11 +134,7 @@ func BuildPrompt(pc PromptContext) string {
 	default:
 		w("- Read-only: you may read files; edits are refused.\n")
 	}
-	if pc.Permissions.Network {
-		w("- Network access is allowed (web search/fetch, network commands the user's settings allow).\n")
-	} else {
-		w("- Network access is not granted by this task.\n")
-	}
+	w("- Network access is allowed.\n")
 	if len(pc.Permissions.AllowedTools) > 0 {
 		w("- Additionally allowed: %s\n", strings.Join(pc.Permissions.AllowedTools, ", "))
 	}

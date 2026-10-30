@@ -105,11 +105,7 @@ func residentPermissions(p resident.Permissions) (mode string, allowed, disallow
 	} else {
 		disallowed = append(disallowed, editTools...)
 	}
-	if p.Network {
-		allowed = append(allowed, "WebSearch", "WebFetch")
-	} else {
-		disallowed = append(disallowed, "WebSearch", "WebFetch")
-	}
+	allowed = append(allowed, "WebSearch", "WebFetch")
 	allowed = append(allowed, p.AllowedTools...)
 	return mode, allowed, disallowed
 }
@@ -202,6 +198,19 @@ func (r *ResidentRunner) Run(ctx context.Context, req resident.RunRequest, hooks
 		stop()
 		return nil, fmt.Errorf("model %q is not offered by this Claude Code login; it was not replaced with another", req.Model)
 	}
+	// Like the user's own sessions, an editing task runs in auto mode where
+	// the model offers it: Claude Code's classifier decides each call, and
+	// what it would ask a person about is denied (nobody is there).
+	if mode == "acceptEdits" && autoModeOffered(start, req.Model) {
+		mctx, cancel := context.WithTimeout(ctx, controlTimeout)
+		err := sc.call(mctx, "setMode", map[string]any{"sessionId": id, "mode": "auto"}, nil)
+		cancel()
+		if err != nil {
+			slog.Warn("resident run stays in acceptEdits: auto mode refused", "provider", providerName, "operation", "resident.run", "run_id", req.RunID, "error", err)
+		} else {
+			mode = "auto"
+		}
+	}
 	model := req.Model
 	if err := hooks.BeforeSend(id, model); err != nil {
 		stop()
@@ -278,6 +287,19 @@ func (r *ResidentRunner) Run(ctx context.Context, req resident.RunRequest, hooks
 			}
 		}
 	}
+}
+
+// autoModeOffered reports whether the run's model can run in auto mode
+// ("" is the login's default model).
+func autoModeOffered(r startReply, model string) bool {
+	for _, m := range r.Models {
+		match := model == "" && m.Value == "default"
+		match = match || model != "" && (m.Value == model || m.ResolvedModel == model || baseModel(m.Value) == baseModel(model))
+		if match {
+			return m.AutoMode
+		}
+	}
+	return false
 }
 
 // modelOffered reports whether the login offers model, as an alias or a

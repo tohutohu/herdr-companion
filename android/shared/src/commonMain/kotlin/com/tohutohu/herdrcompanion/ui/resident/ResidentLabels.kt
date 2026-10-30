@@ -74,7 +74,7 @@ fun scheduleLabel(s: ScheduleDto, formatInstant: (String) -> String, defaultTime
 
 fun permissionsLabel(p: PermissionsDto): String {
     val parts = mutableListOf(if (p.profile == PermissionProfile.WORKSPACE_WRITE) "フォルダ内の編集可" else "読み取りのみ")
-    parts += if (p.network) "ネットワーク可" else "ネットワークなし"
+    parts += "ネットワーク可"
     if (p.allowedTools.isNotEmpty()) parts += "追加許可 ${p.allowedTools.size}件"
     return parts.joinToString(" · ")
 }

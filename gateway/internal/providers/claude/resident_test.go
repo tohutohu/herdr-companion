@@ -54,7 +54,7 @@ func Test常駐実行は非永続で構造化出力と権限プロファイル�
 	}
 	allowed := toStrings(s["allowedTools"])
 	disallowed := toStrings(s["disallowedTools"])
-	if !slices.Contains(allowed, "Bash(gh pr view:*)") || !slices.Contains(disallowed, "Edit") || !slices.Contains(disallowed, "WebFetch") {
+	if !slices.Contains(allowed, "Bash(gh pr view:*)") || !slices.Contains(disallowed, "Edit") || !slices.Contains(allowed, "WebFetch") {
 		t.Errorf("allowed = %v, disallowed = %v", allowed, disallowed)
 	}
 	env, _ := s["env"].(map[string]any)
@@ -69,14 +69,48 @@ func Test常駐実行は非永続で構造化出力と権限プロファイル�
 	}
 }
 
-func Test書き込みプロファイルはacceptEditsでネットワーク許可はWeb系ツールを許す(t *testing.T) {
-	mode, allowed, disallowed := residentPermissions(resident.Permissions{Profile: resident.ProfileWorkspaceWrite, Network: true})
-	if mode != "acceptEdits" || !slices.Contains(allowed, "WebFetch") || slices.Contains(disallowed, "Edit") {
+func Test書き込みプロファイルはacceptEditsでWeb系ツールは常に許す(t *testing.T) {
+	mode, allowed, disallowed := residentPermissions(resident.Permissions{Profile: resident.ProfileWorkspaceWrite})
+	if mode != "acceptEdits" || !slices.Contains(allowed, "WebFetch") || slices.Contains(disallowed, "Edit") || slices.Contains(disallowed, "WebFetch") {
 		t.Errorf("mode=%s allowed=%v disallowed=%v", mode, allowed, disallowed)
 	}
 	mode, _, _ = residentPermissions(resident.Permissions{Profile: resident.ProfileReadOnly})
 	if mode == "bypassPermissions" || mode == "dontAsk" || mode == "auto" {
 		t.Errorf("mode = %s", mode)
+	}
+}
+
+func Test編集可のタスクはモデルが対応していればautoモードで実行する(t *testing.T) {
+	p, log := newSidecarProvider(t)
+	r := p.ResidentRunner()
+	var sent atomic.Bool
+	// sonnet supports auto mode in the fake sidecar's model list.
+	if _, err := r.Run(context.Background(), residentRequest("check", resident.Permissions{Profile: resident.ProfileWorkspaceWrite}), hooks(&sent)); err != nil {
+		t.Fatal(err)
+	}
+	modes := sidecarRequests(t, log, "setMode")
+	if len(modes) != 1 || modes[0]["mode"] != "auto" {
+		t.Errorf("setMode = %v", modes)
+	}
+	req := residentRequest("check", resident.Permissions{Profile: resident.ProfileWorkspaceWrite})
+	req.Model = "claude-haiku-4-5-20251001"
+	if _, err := r.Run(context.Background(), req, hooks(&sent)); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(sidecarRequests(t, log, "setMode")); n != 1 {
+		t.Errorf("a model without auto mode was switched to it (%d setMode calls)", n)
+	}
+}
+
+func Test読み取り専用のタスクはautoモードにしない(t *testing.T) {
+	p, log := newSidecarProvider(t)
+	r := p.ResidentRunner()
+	var sent atomic.Bool
+	if _, err := r.Run(context.Background(), residentRequest("check", resident.Permissions{Profile: resident.ProfileReadOnly}), hooks(&sent)); err != nil {
+		t.Fatal(err)
+	}
+	if len(sidecarRequests(t, log, "setMode")) != 0 {
+		t.Error("a read-only run was switched to auto mode")
 	}
 }
 

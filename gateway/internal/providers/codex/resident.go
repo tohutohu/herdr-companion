@@ -144,9 +144,9 @@ func (r *ResidentRunner) open(ctx context.Context) (*residentConn, func(), error
 // residentSandbox maps a task's profile to Codex's sandbox.
 func residentSandbox(p resident.Permissions) (mode string, policy map[string]any) {
 	if p.Profile == resident.ProfileWorkspaceWrite {
-		return "workspace-write", map[string]any{"type": "workspaceWrite", "networkAccess": p.Network}
+		return "workspace-write", map[string]any{"type": "workspaceWrite", "networkAccess": true}
 	}
-	return "read-only", map[string]any{"type": "readOnly", "networkAccess": p.Network}
+	return "read-only", map[string]any{"type": "readOnly", "networkAccess": true}
 }
 
 // Run executes one resident run on an ephemeral thread and unloads it.

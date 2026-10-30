@@ -739,7 +739,7 @@ UUID のみを渡す。長文を Data の10KB制限で失わず、同じセッ�
   "id": "task_…", "name": "CI監視", "instruction": "…", "provider": "claude", "model": "haiku", "effort": "low",
   "cwd": "/Users/me/workspace/app",
   "schedule": {"kind": "weekly", "time": "07:00", "days": ["mon", "thu"], "timezone": "Asia/Tokyo"},
-  "permissions": {"profile": "read_only", "network": false, "allowedTools": ["Bash(gh pr view:*)"]},
+  "permissions": {"profile": "workspace_write", "allowedTools": ["Bash(gh pr view:*)"]},
   "notify": {"mode": "changes", "onFailure": true, "onQuestion": true, "cooldownMinutes": 0, "quietStart": "23:00", "quietEnd": "07:00"},
   "limits": {"maxRunMinutes": 30, "maxRunsPerDay": 12, "expiresAt": null},
   "enabled": true, "version": 3, "trustedAt": "…",
@@ -752,7 +752,8 @@ UUID のみを渡す。長文を Data の10KB制限で失わず、同じセッ�
 
 - `schedule.kind`: `manual` / `once`（`at`）/ `daily`（`time`）/ `weekly`（`days`, `time`）/ `cron`（`cron`）。`timezone` は IANA 名。
 - `state`: `idle`（稼働中）/ `queued` / `running` / `waiting_user` / `needs_attention` / `paused`。
-- 作成時、未指定の `notify` は判断待ち・失敗も通知する既定、`limits` は 30 分・12 回。
+- 作成に必要なのは `instruction`・`provider`・`cwd`・`schedule` だけ。`name` を省くと指示の 1 行目、`permissions` は
+  `workspace_write`（ネットワークは常に可、`network` は無視）、`notify` は判断待ち・失敗も通知する既定、`limits` は 30 分・12 回。
 
 ### Run
 

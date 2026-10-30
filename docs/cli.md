@@ -36,9 +36,8 @@ Gateway が予定どおり実行する常駐タスク（[resident.md](resident.m
 詳細は `hc help resident`。
 
 ```bash
-hc resident create --name "CI監視" --provider claude --model haiku --cwd ~/workspace/app \
-  --instruction-file ci.md --weekly mon,thu@07:00 --tz Asia/Tokyo \
-  --allow 'Bash(gh run list:*)' --network --trust   # 信頼していないフォルダは --trust が必要
+hc resident create --provider claude --model haiku --cwd ~/workspace/app \
+  --instruction-file ci.md --weekly mon,thu@07:00 --trust   # 名前は指示の1行目、信頼していないフォルダは --trust
 hc resident preview --cron "0 7 * * 1-5"            # 次の3回（保存しない）
 hc resident ls                                      # "!" は判断待ち・要確認
 hc resident run CI監視                              # 今すぐ実行（待機中の Run があればまとめる）

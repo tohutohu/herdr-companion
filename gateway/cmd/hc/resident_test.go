@@ -69,7 +69,7 @@ func TestResidentCommands(t *testing.T) {
 		os.WriteFile(instr, []byte("毎朝CIを確認して\n変化があれば知らせて"), 0o644)
 		out := a.mustRun(t, "resident", "create", "--name", "CI監視", "--provider", "claude", "--cwd", dir,
 			"--instruction-file", instr, "--weekly", "mon,thu@07:00", "--tz", "Europe/London",
-			"--allow", "Bash(gh run list:*)", "--network", "--trust", "--model", "haiku")
+			"--allow", "Bash(gh run list:*)", "--trust", "--model", "haiku")
 		if !strings.Contains(out, "created abc12345") {
 			t.Errorf("out = %s", out)
 		}
@@ -77,7 +77,7 @@ func TestResidentCommands(t *testing.T) {
 		sched := body["schedule"].(map[string]any)
 		perms := body["permissions"].(map[string]any)
 		if sched["kind"] != "weekly" || sched["time"] != "07:00" || sched["timezone"] != "Europe/London" ||
-			perms["network"] != true || perms["allowedTools"].([]any)[0] != "Bash(gh run list:*)" || body["trust"] != true ||
+			perms["allowedTools"].([]any)[0] != "Bash(gh run list:*)" || body["trust"] != true ||
 			!strings.Contains(body["instruction"].(string), "変化があれば") || body["requestId"] == "" || body["model"] != "haiku" {
 			t.Errorf("body = %v", body)
 		}

@@ -306,13 +306,13 @@ func clipLine(s string, n int) string {
 
 // taskFlags are the settings create and update share.
 type taskFlags struct {
-	fs                                                 *flag.FlagSet
-	file, name, provider, model, effort, cwd, instr    *string
-	instrFile, daily, weekly, cron, once, tz, profile  *string
-	manual, network, noNetwork, trust, enable, disable *bool
-	allow                                              *multiFlag
-	notify                                             *string
-	maxMinutes, maxRuns                                *int
+	fs                                                *flag.FlagSet
+	file, name, provider, model, effort, cwd, instr   *string
+	instrFile, daily, weekly, cron, once, tz, profile *string
+	manual, trust, enable, disable                    *bool
+	allow                                             *multiFlag
+	notify                                            *string
+	maxMinutes, maxRuns                               *int
 }
 
 type multiFlag []string
@@ -339,8 +339,6 @@ func newTaskFlags(name string) *taskFlags {
 	f.profile = fs.String("profile", "", "")
 	f.notify = fs.String("notify", "", "")
 	f.manual = fs.Bool("manual", false, "")
-	f.network = fs.Bool("network", false, "")
-	f.noNetwork = fs.Bool("no-network", false, "")
 	f.trust = fs.Bool("trust", false, "")
 	f.enable = fs.Bool("enable", false, "")
 	f.disable = fs.Bool("disable", false, "")
@@ -429,19 +427,13 @@ func (f *taskFlags) body(set map[string]bool) (map[string]any, error) {
 		}
 		m["schedule"] = sched
 	}
-	if set["profile"] || set["network"] || set["no-network"] || len(*f.allow) > 0 {
+	if set["profile"] || len(*f.allow) > 0 {
 		perms, _ := m["permissions"].(map[string]any)
 		if perms == nil {
 			perms = map[string]any{}
 		}
 		if set["profile"] {
 			perms["profile"] = *f.profile
-		}
-		if set["network"] {
-			perms["network"] = true
-		}
-		if set["no-network"] {
-			perms["network"] = false
 		}
 		if len(*f.allow) > 0 {
 			perms["allowedTools"] = []string(*f.allow)

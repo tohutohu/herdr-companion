@@ -69,7 +69,7 @@ class DesktopResidentFlowTest {
         shot("1-home")
         rule.onNode(androidx.compose.ui.test.hasContentDescription("新しいタスク")).performClick()
         rule.waitText("新しい常駐タスク")
-        rule.onNode(hasSetTextAction() and hasText("タスク名")).performTextInput(name)
+        rule.onNode(hasSetTextAction() and hasText("タスク名（省略可）")).performTextInput(name)
         rule.onNode(hasSetTextAction() and hasText("指示")).performTextInput("Read README.md and report the fruit it names. Keep it very short.")
         rule.onNode(hasSetTextAction() and hasText("作業フォルダ（workspaceRoots 内）")).performTextInput(cwd)
         rule.onNodeWithText("Codex").performClick()

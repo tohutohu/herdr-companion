@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -32,30 +31,23 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.tohutohu.herdrcompanion.data.api.DirListingDto
-import com.tohutohu.herdrcompanion.data.api.LimitsDto
 import com.tohutohu.herdrcompanion.data.api.ModelsResponse
-import com.tohutohu.herdrcompanion.data.api.NotifyDto
-import com.tohutohu.herdrcompanion.data.api.PermissionProfile
-import com.tohutohu.herdrcompanion.data.api.PermissionsDto
 import com.tohutohu.herdrcompanion.data.api.ResidentTaskDto
 import com.tohutohu.herdrcompanion.data.api.ResidentTaskRequest
 import com.tohutohu.herdrcompanion.data.api.ScheduleDto
@@ -64,8 +56,13 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/** The form's editable values; a task's settings or the new-task defaults. */
+/**
+ * The form's editable values: as few as starting a session. Permissions,
+ * notifications and limits keep the gateway's defaults (or the task's own
+ * values when editing).
+ */
 data class ResidentDraft(
+    /** Optional: the gateway names a task after its instruction's first line. */
     val name: String = "",
     val instruction: String = "",
     val provider: String = "claude",
@@ -79,18 +76,6 @@ data class ResidentDraft(
     /** RFC 3339 for a one-off run. */
     val at: String = "",
     val timezone: String = "Asia/Tokyo",
-    val profile: String = PermissionProfile.READ_ONLY,
-    val network: Boolean = false,
-    val allowedTools: String = "",
-    val notifyMode: String = "changes",
-    val onFailure: Boolean = true,
-    val onQuestion: Boolean = true,
-    val cooldown: String = "0",
-    val quietStart: String = "",
-    val quietEnd: String = "",
-    val maxMinutes: String = "30",
-    val maxRuns: String = "12",
-    val enabled: Boolean = true,
 ) {
     fun schedule() = ScheduleDto(
         kind = kind,
@@ -101,33 +86,22 @@ data class ResidentDraft(
         timezone = timezone,
     )
 
-    fun permissions() = PermissionsDto(
-        profile = profile,
-        network = network,
-        allowedTools = if (provider == "claude") allowedTools.lines().map { it.trim() }.filter { it.isNotEmpty() } else emptyList(),
+    /** The fields this form owns; anything else stays as it is. */
+    fun request(trust: Boolean, requestId: String? = null, expectedVersion: Long? = null) = ResidentTaskRequest(
+        name = name.trim().ifEmpty { null }, instruction = instruction, provider = provider,
+        model = if (expectedVersion == null) model.ifBlank { null } else model,
+        effort = if (expectedVersion == null) effort.ifBlank { null } else effort,
+        cwd = cwd, schedule = schedule(), trust = trust.takeIf { it },
+        requestId = requestId, expectedVersion = expectedVersion,
     )
 
-    fun notify() = NotifyDto(
-        mode = notifyMode, onFailure = onFailure, onQuestion = onQuestion,
-        cooldownMinutes = cooldown.toIntOrNull() ?: 0,
-        quietStart = quietStart.takeIf { it.isNotBlank() }, quietEnd = quietEnd.takeIf { it.isNotBlank() },
-    )
-
-    fun limits(existing: LimitsDto?) = LimitsDto(
-        maxRunMinutes = maxMinutes.toIntOrNull() ?: 0,
-        maxRunsPerDay = maxRuns.toIntOrNull() ?: 0,
-        expiresAt = existing?.expiresAt,
-    )
+    val complete get() = instruction.isNotBlank() && cwd.isNotBlank()
 
     companion object {
         fun from(t: ResidentTaskDto) = ResidentDraft(
             name = t.name, instruction = t.instruction, provider = t.provider, model = t.model.orEmpty(), effort = t.effort.orEmpty(),
             cwd = t.cwd, kind = t.schedule.kind, time = t.schedule.time ?: "07:00", days = t.schedule.days?.toSet() ?: emptySet(),
             cron = t.schedule.cron ?: "0 7 * * 1-5", at = t.schedule.at.orEmpty(), timezone = t.schedule.timezone ?: "Asia/Tokyo",
-            profile = t.permissions.profile, network = t.permissions.network, allowedTools = t.permissions.allowedTools.joinToString("\n"),
-            notifyMode = t.notify.mode, onFailure = t.notify.onFailure, onQuestion = t.notify.onQuestion,
-            cooldown = t.notify.cooldownMinutes.toString(), quietStart = t.notify.quietStart.orEmpty(), quietEnd = t.notify.quietEnd.orEmpty(),
-            maxMinutes = t.limits.maxRunMinutes.toString(), maxRuns = t.limits.maxRunsPerDay.toString(), enabled = t.enabled,
         )
     }
 }
@@ -203,24 +177,9 @@ fun ResidentTaskForm(
             try {
                 val d = draft
                 val id = if (existingId == null) {
-                    backend.create(
-                        ResidentTaskRequest(
-                            name = d.name, instruction = d.instruction, provider = d.provider, model = d.model.ifBlank { null },
-                            effort = d.effort.ifBlank { null }, cwd = d.cwd, schedule = d.schedule(), permissions = d.permissions(),
-                            notify = d.notify(), limits = d.limits(null), enabled = d.enabled, trust = trust.takeIf { it },
-                            requestId = createRequestId,
-                        ),
-                    ).id
+                    backend.create(d.request(trust, requestId = createRequestId)).id
                 } else {
-                    backend.update(
-                        existingId,
-                        ResidentTaskRequest(
-                            name = d.name, instruction = d.instruction, provider = d.provider, model = d.model, effort = d.effort,
-                            cwd = d.cwd, schedule = d.schedule(), permissions = d.permissions(), notify = d.notify(),
-                            limits = d.limits(existing?.limits), enabled = d.enabled, trust = trust.takeIf { it },
-                            expectedVersion = existing?.version,
-                        ),
-                    ).id
+                    backend.update(existingId, d.request(trust, expectedVersion = existing?.version)).id
                 }
                 onSaved(id)
             } catch (e: CancellationException) {
@@ -245,7 +204,7 @@ fun ResidentTaskForm(
                 title = { Text(if (existingId == null) "新しい常駐タスク" else "設定を編集") },
                 navigationIcon = { IconButton(onClick = onCancel) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "戻る") } },
                 actions = {
-                    TextButton(onClick = { save() }, enabled = !saving && draft.name.isNotBlank() && draft.instruction.isNotBlank() && draft.cwd.isNotBlank()) {
+                    TextButton(onClick = { save() }, enabled = !saving && draft.complete) {
                         Text(if (saving) "保存中…" else "保存")
                     }
                 },
@@ -265,7 +224,6 @@ fun ResidentTaskForm(
                         style = MaterialTheme.typography.bodySmall)
                 }
             }
-            OutlinedTextField(draft.name, { draft = draft.copy(name = it) }, label = { Text("タスク名") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
             OutlinedTextField(
                 draft.instruction, { draft = draft.copy(instruction = it) },
                 label = { Text("指示") },
@@ -311,46 +269,17 @@ fun ResidentTaskForm(
                 preview.isNotEmpty() -> Text("次の実行: " + preview.joinToString(" / ") { backend.formatInstant(it) }, style = MaterialTheme.typography.bodySmall)
                 else -> Text("予定された実行はありません", style = MaterialTheme.typography.bodySmall)
             }
-            Section("権限（エージェントの権限機構で強制）")
-            listOf(PermissionProfile.READ_ONLY to "読み取りのみ", PermissionProfile.WORKSPACE_WRITE to "作業フォルダ内の編集を許可").forEach { (p, l) ->
-                Row(Modifier.fillMaxWidth().clickable { draft = draft.copy(profile = p) }, verticalAlignment = Alignment.CenterVertically) {
-                    RadioButton(draft.profile == p, { draft = draft.copy(profile = p) })
-                    Text(l)
-                }
-            }
-            SwitchRow("ネットワークを許可", draft.network) { draft = draft.copy(network = it) }
-            if (draft.provider == "claude") {
-                OutlinedTextField(
-                    draft.allowedTools, { draft = draft.copy(allowedTools = it) },
-                    label = { Text("追加で許可するツール（1行に1つ）") },
-                    placeholder = { Text("Bash(gh pr view:*)\nmcp__github__get_issue") },
-                    modifier = Modifier.fillMaxWidth(), minLines = 2,
-                )
-            }
-            Text("許可していない操作は自動で拒否され、実行は「進められず」として報告します。外部サービスはこの Mac で設定済みの CLI や MCP だけが使えます。",
+            OutlinedTextField(
+                draft.name, { draft = draft.copy(name = it) },
+                label = { Text("タスク名（省略可）") },
+                placeholder = { Text("指示の1行目") },
+                modifier = Modifier.fillMaxWidth(), singleLine = true,
+            )
+            Text("フォルダ内のファイル編集とネットワークは使えます。人の承認が必要な操作は無人では行わず、実行は「進められず」として知らせます。",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Section("通知")
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("changes" to "必要な変化だけ", "always" to "変化があれば常に", "never" to "通知しない").forEach { (m, l) ->
-                    FilterChip(draft.notifyMode == m, { draft = draft.copy(notifyMode = m) }, label = { Text(l) })
-                }
-            }
-            SwitchRow("判断待ちを通知", draft.onQuestion) { draft = draft.copy(onQuestion = it) }
-            SwitchRow("失敗を通知", draft.onFailure) { draft = draft.copy(onFailure = it) }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                NumberField("クールダウン（分）", draft.cooldown, Modifier.weight(1f)) { draft = draft.copy(cooldown = it) }
-                OutlinedTextField(draft.quietStart, { draft = draft.copy(quietStart = it) }, label = { Text("静穏 開始") }, modifier = Modifier.weight(1f), singleLine = true)
-                OutlinedTextField(draft.quietEnd, { draft = draft.copy(quietEnd = it) }, label = { Text("静穏 終了") }, modifier = Modifier.weight(1f), singleLine = true)
-            }
-            Section("上限")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                NumberField("1回の最大（分）", draft.maxMinutes, Modifier.weight(1f)) { draft = draft.copy(maxMinutes = it) }
-                NumberField("1日の最大起動数", draft.maxRuns, Modifier.weight(1f)) { draft = draft.copy(maxRuns = it) }
-            }
-            SwitchRow("有効（予定どおり自動実行する）", draft.enabled) { draft = draft.copy(enabled = it) }
             HorizontalDivider()
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { save() }, enabled = !saving && draft.name.isNotBlank() && draft.instruction.isNotBlank() && draft.cwd.isNotBlank()) {
+                Button(onClick = { save() }, enabled = !saving && draft.complete) {
                     Text(if (saving) "保存中…" else "保存")
                 }
                 OutlinedButton(onClick = onCancel) { Text("キャンセル") }
@@ -365,20 +294,6 @@ fun ResidentTaskForm(
 @Composable
 private fun Section(title: String) {
     Text(title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
-}
-
-@Composable
-private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, modifier = Modifier.weight(1f))
-        Switch(checked, onChange)
-    }
-}
-
-@Composable
-private fun NumberField(label: String, value: String, modifier: Modifier, onChange: (String) -> Unit) {
-    OutlinedTextField(value, { onChange(it.filter(Char::isDigit)) }, label = { Text(label) }, modifier = modifier, singleLine = true,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
 }
 
 @Composable

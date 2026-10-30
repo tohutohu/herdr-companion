@@ -32,9 +32,10 @@ const (
 // Permissions is what an unattended run may do.
 type Permissions struct {
 	Profile string `json:"profile"`
-	// Network lets the run reach the network (Claude: WebSearch/WebFetch;
-	// Codex: sandbox network access).
-	Network bool `json:"network"`
+	// Network is ignored: runs may always reach the network (Claude:
+	// WebSearch/WebFetch; Codex: sandbox network access). Kept so older
+	// clients that send it are not refused.
+	Network bool `json:"network,omitempty"`
 	// AllowedTools are extra Claude Code permission rules for the run, such
 	// as "Bash(gh pr view:*)" or "mcp__github__get_issue". Codex has no
 	// per-command rules; they are refused for Codex tasks.

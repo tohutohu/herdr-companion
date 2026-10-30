@@ -70,11 +70,11 @@ USE WHEN
 USAGE
   hc resident ls                                  one line per task; "!" = waits for the user
   hc resident show TASK                           settings, next 3 runs, memory, recent runs
-  hc resident create --name N --provider claude|codex --cwd DIR (--instruction T | --instruction-file F)
+  hc resident create --provider claude|codex --cwd DIR (--instruction T | --instruction-file F)
                      [--daily HH:MM | --weekly mon,thu@HH:MM | --cron "M H D Mo W" | --once RFC3339 | --manual]
-                     [--tz Asia/Tokyo] [--model M] [--effort E] [--profile read_only|workspace_write]
-                     [--network] [--allow 'Bash(gh pr view:*)']... [--notify changes|always|never]
-                     [--max-minutes N] [--max-runs-per-day N] [--trust] [--file task.json]
+                     [--name N] [--tz Asia/Tokyo] [--model M] [--effort E] [--trust]
+                     rarely needed: [--profile read_only|workspace_write] [--allow 'Bash(gh pr view:*)']...
+                     [--notify changes|always|never] [--max-minutes N] [--max-runs-per-day N] [--file task.json]
   hc resident update TASK [the same flags] [--enable|--disable]
   hc resident preview --daily 07:00 [--tz ...]   the next 3 run times, nothing saved
   hc resident pause TASK | resume TASK            stop / restart automatic runs
@@ -95,8 +95,10 @@ USAGE
 NOTES
   - The folder must be under the Gateway's workspace roots. A folder the agent never trusted
     needs --trust: its project hooks and MCP servers will run unattended.
-  - Permissions are enforced by the agent (Claude's permission rules, Codex's sandbox).
-    Anything not allowed is denied, never approved; the run then reports "blocked".
+  - The name defaults to the instruction's first line. Runs may edit files in the folder
+    (Claude: auto mode where the model offers it, else acceptEdits; Codex: workspace-write
+    sandbox) and use the network; --profile read_only forbids edits. What would need a
+    person's approval is denied, never approved; the run then reports "blocked".
   - The agent can only use integrations the user configured (CLIs, MCP servers). hc itself
     gives no mail or web access.
   - A run cut off by a Gateway restart is never re-sent: it shows needs_reconciliation.

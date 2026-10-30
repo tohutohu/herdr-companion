@@ -121,7 +121,7 @@ func noHooks(sent *atomic.Bool) resident.RunHooks {
 func Test常駐実行は一時スレッドで承認なしのサンドボックスと出力スキーマを渡す(t *testing.T) {
 	r, srv := newResidentRunner(t, "answer", "gpt-6-luna")
 	var sent atomic.Bool
-	out, err := r.Run(context.Background(), req("gpt-6-luna", resident.Permissions{Profile: resident.ProfileReadOnly, Network: true}), noHooks(&sent))
+	out, err := r.Run(context.Background(), req("gpt-6-luna", resident.Permissions{Profile: resident.ProfileReadOnly}), noHooks(&sent))
 	if err != nil {
 		t.Fatal(err)
 	}

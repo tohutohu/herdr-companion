@@ -105,16 +105,20 @@ class ResidentApiTest {
     }
 
     @Test
-    fun `フォームの値から予定と権限を組み立てる`() {
-        val d = ResidentDraft(kind = "weekly", time = "07:30", days = setOf("thu", "mon"), timezone = "Europe/London",
-            provider = "codex", allowedTools = "Bash(ls:*)", network = true)
+    fun `フォームは予定と基本項目だけを送り権限や通知は既定値に任せる`() {
+        val d = ResidentDraft(instruction = "CIを確認", cwd = "/w", kind = "weekly", time = "07:30", days = setOf("thu", "mon"), timezone = "Europe/London", provider = "codex")
         val s = d.schedule()
         assertEquals(listOf("mon", "thu"), s.days)
         assertEquals("07:30", s.time)
         assertNull(s.cron)
-        // Codex has no per-command rules; they are not sent.
-        assertEquals(emptyList(), d.permissions().allowedTools)
-        assertTrue(d.permissions().network)
+        val create = d.request(trust = false, requestId = "r1")
+        assertNull(create.name) // the gateway names it after the instruction
+        assertNull(create.permissions)
+        assertNull(create.notify)
+        assertNull(create.limits)
+        assertNull(create.trust)
+        // Editing can clear a model back to the default.
+        assertEquals("", ResidentDraft(instruction = "x", cwd = "/w").request(trust = true, expectedVersion = 3).model)
     }
 
     @Test

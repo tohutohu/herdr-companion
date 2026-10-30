@@ -145,13 +145,17 @@ var profileOwnedTools = []string{"Edit", "Write", "NotebookEdit", "MultiEdit"}
 func normalize(in Settings) (Settings, error) {
 	s := in
 	s.Name = strings.TrimSpace(s.Name)
+	s.Instruction = strings.TrimSpace(s.Instruction)
 	if s.Name == "" {
-		return s, invalid("name is required")
+		// Like a session, a task needs no name: its instruction's first line stands in.
+		s.Name = defaultName(s.Instruction)
+	}
+	if s.Name == "" {
+		return s, invalid("instruction is required")
 	}
 	if utf8.RuneCountInString(s.Name) > 80 {
 		return s, invalid("name is longer than 80 characters")
 	}
-	s.Instruction = strings.TrimSpace(s.Instruction)
 	if s.Instruction == "" {
 		return s, invalid("instruction is required")
 	}
@@ -179,9 +183,10 @@ func normalize(in Settings) (Settings, error) {
 		return s, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
 	s.Schedule = sched
+	s.Permissions.Network = false
 	switch s.Permissions.Profile {
 	case "":
-		s.Permissions.Profile = ProfileReadOnly
+		s.Permissions.Profile = ProfileWorkspaceWrite
 	case ProfileReadOnly, ProfileWorkspaceWrite:
 	default:
 		return s, invalid("unknown permission profile %q (read_only or workspace_write)", s.Permissions.Profile)
@@ -246,6 +251,16 @@ func normalize(in Settings) (Settings, error) {
 		return s, invalid("maxRunsPerDay must be between 1 and %d", maxRunsPerDayLimit)
 	}
 	return s, nil
+}
+
+// defaultName is a task name made from the instruction's first line.
+func defaultName(instruction string) string {
+	line, _, _ := strings.Cut(instruction, "\n")
+	line = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "#-*> "))
+	if r := []rune(line); len(r) > 40 {
+		line = string(r[:40]) + "…"
+	}
+	return line
 }
 
 // validateEnv checks the parts of the settings that depend on the Mac: the

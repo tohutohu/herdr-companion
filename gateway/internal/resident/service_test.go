@@ -845,3 +845,22 @@ func TestHiddenSessionIDs(t *testing.T) {
 		}
 	})
 }
+
+func TestSimpleCreate(t *testing.T) {
+	t.Run("名前を省くと指示の1行目を名前にし権限は編集可でネットワークの指定は無視する", func(t *testing.T) {
+		h := newHarness(t)
+		task, err := h.svc.CreateTask(bg, CreateRequest{Settings: Settings{
+			Instruction: "# 毎朝CIを確認して、落ちていたら知らせて\n詳細は…", Provider: ProviderCodex, Cwd: h.cwd(),
+			Schedule: Schedule{Kind: ScheduleDaily, Time: "07:00"}, Permissions: Permissions{Network: true},
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if task.Name != "毎朝CIを確認して、落ちていたら知らせて" || task.Permissions.Profile != ProfileWorkspaceWrite || task.Permissions.Network {
+			t.Errorf("task = %q %+v", task.Name, task.Permissions)
+		}
+		if !task.Notify.OnFailure || !task.Notify.OnQuestion || task.Limits.MaxRunMinutes != DefaultMaxRunMinutes {
+			t.Errorf("defaults = %+v %+v", task.Notify, task.Limits)
+		}
+	})
+}

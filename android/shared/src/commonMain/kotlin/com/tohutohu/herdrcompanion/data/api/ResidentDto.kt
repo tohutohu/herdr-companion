@@ -45,8 +45,7 @@ object ScheduleKind {
 @Serializable
 data class PermissionsDto(
     /** read_only or workspace_write. */
-    val profile: String = PermissionProfile.READ_ONLY,
-    val network: Boolean = false,
+    val profile: String = PermissionProfile.WORKSPACE_WRITE,
     /** Extra Claude Code permission rules, e.g. Bash(gh pr view:*). */
     val allowedTools: List<String> = emptyList(),
 )
