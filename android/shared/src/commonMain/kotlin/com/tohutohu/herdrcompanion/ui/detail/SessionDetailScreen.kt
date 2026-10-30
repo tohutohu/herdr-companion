@@ -477,7 +477,10 @@ fun SessionDetailScreen(
                     .clipToBounds()
                     .then(if (state.pullToRefresh) Modifier.nestedScroll(pull.connection) else Modifier),
             ) {
-                CompositionLocalProvider(LocalRowResize provides onRowResize) {
+                CompositionLocalProvider(
+                    LocalRowResize provides onRowResize,
+                    LocalAnsweredInteractions provides state.answeredInteractions,
+                ) {
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),

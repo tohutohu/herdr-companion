@@ -55,6 +55,9 @@ private const val LIST_POLL_MS = 5_000L
 private const val DETAIL_POLL_MS = 3_000L
 private const val RELOAD_NOTICE_MS = 4_000L
 
+/** How long an accepted answer keeps its card disabled while the transcript catches up. */
+private const val ANSWER_SETTLE_MS = 30_000L
+
 /** Selection is intentionally separate from the Android navigation back stack. */
 class DesktopSelectionState {
     var selectedId by mutableStateOf<String?>(null)
@@ -649,6 +652,7 @@ class DesktopAppState(
                         pending = pendingBySession[id].orEmpty(),
                         error = null,
                         answering = detailsBySession[id]?.answering == true,
+                        answeredInteractions = detailsBySession[id]?.answeredInteractions.orEmpty(),
                         attachments = composerAttachmentStates(id),
                         actionBusy = id in busySessionIds,
                         loading = false,
@@ -876,6 +880,7 @@ class DesktopAppState(
             try {
                 repository.respond(id, response)
                 logger.fine("interaction response accepted by Gateway")
+                markAnswered(id, response.interactionId)
             } catch (error: Exception) {
                 val mapped = error.toDesktopGatewayError()
                 transientError = mapped.message
@@ -883,6 +888,14 @@ class DesktopAppState(
             } finally {
                 if (isShown(id)) updateDetail(id) { it.copy(answering = false) }
             }
+        }
+    }
+
+    private fun markAnswered(id: String, interactionId: String) {
+        updateDetail(id) { it.copy(answeredInteractions = it.answeredInteractions + interactionId) }
+        scope.launch {
+            delay(ANSWER_SETTLE_MS)
+            updateDetail(id) { it.copy(answeredInteractions = it.answeredInteractions - interactionId) }
         }
     }
 

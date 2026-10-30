@@ -23,12 +23,19 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.scan
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 private const val POLL_MS = 3_000L
 private const val NOTICE_MS = 4_000L
+
+/**
+ * How long an accepted answer keeps its card disabled while the transcript
+ * catches up. If the card is still pending after that, it can be answered again.
+ */
+private const val ANSWER_SETTLE_MS = 30_000L
 private const val PULL_MIN_MS = 500L
 
 /**
@@ -117,6 +124,9 @@ class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidV
     /** An answer to a question or approval is on its way. */
     private val _answering = MutableStateFlow(false)
     val answering = _answering.asStateFlow()
+
+    private val _answeredInteractions = MutableStateFlow<Set<String>>(emptySet())
+    val answeredInteractions = _answeredInteractions.asStateFlow()
 
     /** A live agent TUI is moving to its next available session mode. */
     private val _modeChanging = MutableStateFlow(false)
@@ -256,11 +266,14 @@ class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidV
     fun discard(localId: String) = outbox.discard(localId)
 
     fun respond(response: InteractionResponseDto) {
+        // A second tap can land before the card recomposes disabled.
+        if (_answering.value) return
+        _answering.value = true
         Notifications.cancel(getApplication(), sessionId)
         viewModelScope.launch {
-            _answering.value = true
             try {
                 repo.respond(sessionId, response)
+                markAnswered(response.interactionId)
                 delay(800)
                 refresh()
             } catch (e: CancellationException) {
@@ -270,6 +283,14 @@ class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidV
             } finally {
                 _answering.value = false
             }
+        }
+    }
+
+    private fun markAnswered(interactionId: String) {
+        _answeredInteractions.update { it + interactionId }
+        viewModelScope.launch {
+            delay(ANSWER_SETTLE_MS)
+            _answeredInteractions.update { it - interactionId }
         }
     }
 

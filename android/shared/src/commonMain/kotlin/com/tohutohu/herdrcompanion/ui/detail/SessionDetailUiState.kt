@@ -37,6 +37,12 @@ data class SessionDetailUiState(
     val messageKeys: Map<String, String> = emptyMap(),
     val error: String?,
     val answering: Boolean,
+    /**
+     * Interactions the gateway accepted an answer for that the transcript may
+     * still show as pending. Their controls stay disabled: answering again
+     * would only be refused as no longer pending.
+     */
+    val answeredInteractions: Set<String> = emptySet(),
     val attachments: List<AttachmentUiState> = emptyList(),
     val actionBusy: Boolean = false,
     val modeChanging: Boolean = false,

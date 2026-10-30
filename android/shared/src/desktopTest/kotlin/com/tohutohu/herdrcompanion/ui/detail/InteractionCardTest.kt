@@ -160,6 +160,65 @@ class InteractionCardTest {
         rule.runOnIdle { assertNull(response) }
     }
 
+    private var enabled by mutableStateOf(true)
+    private var answered by mutableStateOf(emptySet<String>())
+    private var state by mutableStateOf("pending")
+    private var sent = 0
+
+    /** Plays the screen's part: the request disables the card until it finishes. */
+    private fun answerableContent() {
+        rule.setContent {
+            MaterialTheme {
+                CompositionLocalProvider(LocalAnsweredInteractions provides answered) {
+                    InteractionCard(
+                        interaction = InteractionDto(
+                            id = "question-1", type = "questions", state = state, supported = true,
+                            questions = listOf(
+                                QuestionDto("choices", "single", question = "Choose one",
+                                    options = listOf(OptionDto("Logs"), OptionDto("Images"))),
+                            ),
+                        ),
+                        enabled = enabled,
+                        onRespond = {
+                            sent++
+                            enabled = false
+                        },
+                        onOpenTerminal = {},
+                    )
+                }
+            }
+        }
+    }
+
+    private val answerButton = SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button)
+
+    @Test
+    fun 回答が受理された後は質問が閉じるまで再送信できない() {
+        answerableContent()
+        rule.onNodeWithText("Logs").performClick()
+        rule.onNode(answerButton).performClick()
+        rule.runOnIdle {
+            answered = setOf("question-1")
+            enabled = true
+        }
+        rule.onNode(answerButton).assertIsNotEnabled().performClick()
+        rule.onNodeWithText("Images").performClick()
+        rule.runOnIdle { assertEquals(1, sent) }
+
+        rule.runOnIdle { state = "answered" }
+        rule.onNodeWithText("Answered").assertExists()
+    }
+
+    @Test
+    fun 回答の送信に失敗したら再び回答できる() {
+        answerableContent()
+        rule.onNodeWithText("Logs").performClick()
+        rule.onNode(answerButton).performClick()
+        rule.runOnIdle { enabled = true }
+        rule.onNode(answerButton).assertIsEnabled().performClick()
+        rule.runOnIdle { assertEquals(2, sent) }
+    }
+
     @Test
     fun 複数選択の行が一つのチェック可能な操作として状態を伝える() {
         content()

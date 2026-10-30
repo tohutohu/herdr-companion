@@ -57,6 +57,7 @@ fun SessionDetailRoute(
     val error by vm.error.collectAsState()
     val loading by vm.loading.collectAsState()
     val answering by vm.answering.collectAsState()
+    val answeredInteractions by vm.answeredInteractions.collectAsState()
     val modeChanging by vm.modeChanging.collectAsState()
     val reloading by vm.reloading.collectAsState()
     val reloadNotice by vm.reloadNotice.collectAsState()
@@ -98,6 +99,7 @@ fun SessionDetailRoute(
         messageKeys = messagePresentation.messageKeys,
         error = attachmentError ?: error,
         answering = answering,
+        answeredInteractions = answeredInteractions,
         loading = loading,
         reloading = reloading,
         reloadNotice = reloadNotice,

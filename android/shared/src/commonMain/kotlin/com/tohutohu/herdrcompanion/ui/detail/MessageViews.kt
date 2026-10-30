@@ -28,6 +28,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -165,6 +166,9 @@ internal const val RESIZE_MS = UiMotion.ResizeMs
  * around it in step with it instead of animating them after it.
  */
 internal val LocalRowResize = staticCompositionLocalOf<() -> Unit> { {} }
+
+/** See [SessionDetailUiState.answeredInteractions]. */
+internal val LocalAnsweredInteractions = compositionLocalOf<Set<String>> { emptySet() }
 
 /** The reader's own messages: a plain neutral bubble, sent or on its way. */
 internal val UserBubbleShape = RoundedCornerShape(20.dp)

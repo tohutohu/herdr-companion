@@ -122,17 +122,21 @@ fun InteractionCard(
     onOpenTerminal: () -> Unit,
 ) {
     val pending = interaction.isPending
+    // An accepted answer keeps the card busy until the transcript reports it
+    // answered; otherwise the controls come back and a second press fails.
+    val accepted = interaction.id in LocalAnsweredInteractions.current
+    val active = enabled && !accepted
     // Remember which control was pressed, but use the caller's request state
     // to drive progress. Re-enabling after a failure restores the same control.
     var submitted by remember(interaction.id) { mutableStateOf<InteractionResponseDto?>(null) }
-    LaunchedEffect(enabled, pending) {
-        if (enabled || !pending) submitted = null
+    LaunchedEffect(active, pending) {
+        if (active || !pending) submitted = null
     }
     val respond: (InteractionResponseDto) -> Unit = {
         submitted = it
         onRespond(it)
     }
-    val responding = pending && !enabled && submitted != null
+    val responding = pending && !active && (submitted != null || accepted)
     // Answering settles the card: its colours fade and the controls give way
     // to the summary instead of snapping.
     val container by animateColorAsState(
@@ -161,8 +165,8 @@ fun InteractionCard(
                         when {
                             !open -> AnsweredSummary(interaction)
                             !interaction.supported -> Unsupported(interaction, onOpenTerminal)
-                            interaction.type == "approval" -> Approval(interaction, enabled, if (responding) submitted?.decision else null, respond)
-                            interaction.type == "questions" -> Questions(interaction, enabled, responding, respond)
+                            interaction.type == "approval" -> Approval(interaction, active, if (responding) submitted?.decision else null, respond)
+                            interaction.type == "questions" -> Questions(interaction, active, responding, respond)
                             else -> Unsupported(interaction, onOpenTerminal)
                         }
                     }
