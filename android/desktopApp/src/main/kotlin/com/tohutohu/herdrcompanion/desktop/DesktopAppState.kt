@@ -6,6 +6,7 @@ import androidx.compose.runtime.setValue
 import com.tohutohu.herdrcompanion.data.Message
 import com.tohutohu.herdrcompanion.data.SendState
 import com.tohutohu.herdrcompanion.data.api.GatewayApi
+import com.tohutohu.herdrcompanion.data.api.GatewayException
 import com.tohutohu.herdrcompanion.data.api.InteractionResponseDto
 import com.tohutohu.herdrcompanion.data.api.MessageDto
 import com.tohutohu.herdrcompanion.data.api.MessageSnapshot
@@ -18,6 +19,7 @@ import com.tohutohu.herdrcompanion.ui.detail.AttachmentUiState
 import com.tohutohu.herdrcompanion.ui.detail.PendingMessageUiState
 import com.tohutohu.herdrcompanion.ui.detail.ReloadNotice
 import com.tohutohu.herdrcompanion.ui.detail.SessionDetailUiState
+import com.tohutohu.herdrcompanion.ui.detail.SessionSettingsUiState
 import com.tohutohu.herdrcompanion.ui.detail.pendingInteractionIds
 import com.tohutohu.herdrcompanion.ui.detail.reloadNotice
 import com.tohutohu.herdrcompanion.ui.sessions.ArchivedSessionsPager
@@ -657,6 +659,7 @@ class DesktopAppState(
                         showBackButton = false,
                         sendOnEnter = true,
                         sendWithModifier = false,
+                        settings = detailsBySession[id]?.settings ?: SessionSettingsUiState(),
                     ))
                     snapshot?.acknowledge()
                     if (reload && notice != null) clearReloadNoticeLater(id, notice)
@@ -894,6 +897,81 @@ class DesktopAppState(
                 val mapped = error.toDesktopGatewayError()
                 reportError(mapped.message)
                 logger.warning("session mode change failed: ${mapped.kind}")
+            } finally {
+                setBusy(id, false)
+            }
+        }
+    }
+
+    /** Reads the model catalog for a direct session's pickers; once, or again after a failure. */
+    fun loadSettings(id: String) {
+        val detail = detailsBySession[id] ?: return
+        val provider = detail.session?.provider ?: return
+        if (detail.settings.loading || detail.settings.catalog != null) return
+        updateDetail(id) { it.copy(settings = it.settings.copy(loading = true, loadError = null)) }
+        scope.launch {
+            try {
+                val catalog = repository.models(provider)
+                updateDetail(id) { it.copy(settings = it.settings.copy(catalog = catalog, loading = false)) }
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (error: Exception) {
+                val mapped = error.toDesktopGatewayError()
+                updateDetail(id) { it.copy(settings = it.settings.copy(loading = false, loadError = mapped.message)) }
+                logger.warning("model catalog failed: ${mapped.kind}")
+            }
+        }
+    }
+
+    fun setModel(id: String, model: String) = changeSetting(id) { applySession(id, repository.setModel(id, model)) }
+
+    fun setEffort(id: String, effort: String) = changeSetting(id) { applySession(id, repository.setEffort(id, effort)) }
+
+    /** The next poll shows the mode the agent reports. */
+    fun setMode(id: String, mode: String) = changeSetting(id) { repository.setMode(id, mode) }
+
+    /**
+     * One model / effort / mode change at a time. The gateway's reason for
+     * refusing one (an unknown model, a Herdr session) is shown as it is.
+     */
+    private fun changeSetting(id: String, change: suspend () -> Unit) {
+        val detail = detailsBySession[id] ?: return
+        if (detail.settings.changing) return
+        updateDetail(id) { it.copy(settings = it.settings.copy(changing = true, changeError = null)) }
+        scope.launch {
+            try {
+                change()
+                logger.fine("session setting change requested")
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (error: Exception) {
+                val message = (error as? GatewayException)?.takeIf { it.code == 400 || it.code == 409 }?.message
+                    ?: error.toDesktopGatewayError().message
+                updateDetail(id) { it.copy(settings = it.settings.copy(changeError = message)) }
+                logger.warning("session setting change failed: ${error.toDesktopGatewayError().kind}")
+            } finally {
+                updateDetail(id) { it.copy(settings = it.settings.copy(changing = false)) }
+            }
+        }
+    }
+
+    /** Shows a session the gateway returned right away, without waiting for the next poll. */
+    private fun applySession(id: String, session: com.tohutohu.herdrcompanion.data.api.SessionDto) {
+        updateDetail(id) { it.copy(session = session.toUiModel()) }
+    }
+
+    /** Stops the running turn of a session the gateway runs directly. */
+    fun interrupt(id: String) {
+        if (id in busySessionIds) return
+        setBusy(id, true)
+        scope.launch {
+            try {
+                repository.interrupt(id)
+                logger.fine("session interrupt requested")
+            } catch (error: Exception) {
+                val mapped = error.toDesktopGatewayError()
+                reportError(mapped.message)
+                logger.warning("session interrupt failed: ${mapped.kind}")
             } finally {
                 setBusy(id, false)
             }

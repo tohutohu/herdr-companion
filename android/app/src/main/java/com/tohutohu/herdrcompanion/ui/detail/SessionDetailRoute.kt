@@ -61,6 +61,8 @@ fun SessionDetailRoute(
     val reloading by vm.reloading.collectAsState()
     val reloadNotice by vm.reloadNotice.collectAsState()
     val pullRefreshing by vm.pullRefreshing.collectAsState()
+    val settings by vm.settings.collectAsState()
+    val interrupting by vm.interrupting.collectAsState()
     val actions = rememberSessionActions(onChanged = { vm.refresh() })
     actions.Dialogs()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -102,8 +104,9 @@ fun SessionDetailRoute(
         pullToRefresh = true,
         pullRefreshing = pullRefreshing,
         attachments = attachments.toList(),
-        actionBusy = session?.let { actions.busy(it.id) } == true,
+        actionBusy = session?.let { actions.busy(it.id) } == true || interrupting,
         modeChanging = modeChanging,
+        settings = settings,
     )
 
     // Dictation words and rules are kept per project, shared by its sessions.
@@ -139,6 +142,11 @@ fun SessionDetailRoute(
                     is SessionDetailAction.Discard -> vm.discard(action.localId)
                     is SessionDetailAction.Respond -> vm.respond(action.response)
                     SessionDetailAction.CycleMode -> vm.cycleMode()
+                    SessionDetailAction.LoadSettings -> vm.loadSettings()
+                    is SessionDetailAction.SetModel -> vm.setModel(action.model)
+                    is SessionDetailAction.SetEffort -> vm.setEffort(action.effort)
+                    is SessionDetailAction.SetMode -> vm.setMode(action.mode)
+                    SessionDetailAction.Interrupt -> vm.interrupt()
                     SessionDetailAction.Reload -> vm.reload()
                     SessionDetailAction.PullRefresh -> vm.pullRefresh()
                     SessionDetailAction.DismissReloadNotice -> vm.dismissReloadNotice()

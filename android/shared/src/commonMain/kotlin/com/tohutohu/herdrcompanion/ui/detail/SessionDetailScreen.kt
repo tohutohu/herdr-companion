@@ -40,6 +40,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -92,6 +93,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tohutohu.herdrcompanion.data.SendState
+import com.tohutohu.herdrcompanion.data.api.Backend
 import com.tohutohu.herdrcompanion.data.api.InteractionResponseDto
 import com.tohutohu.herdrcompanion.data.api.Status
 import com.tohutohu.herdrcompanion.model.headline
@@ -146,6 +148,14 @@ fun SessionDetailScreen(
     // The header carries only what changes; the directory and the context bar
     // open under it when the title or the context ring is tapped.
     var detailsOpen by rememberSaveable(state.sessionId) { mutableStateOf(false) }
+    // The model catalog is read only once the pickers are about to show.
+    val settingsShown = detailsOpen && session != null && settingsChangeable(session)
+    LaunchedEffect(settingsShown, session?.provider) {
+        val settings = state.settings
+        if (settingsShown && settings.catalog == null && !settings.loading && settings.loadError == null) {
+            onAction(SessionDetailAction.LoadSettings)
+        }
+    }
 
     // The list is laid out bottom-up, so it opens at the newest message and
     // growing items (streamed output, loading images) keep the bottom in place.
@@ -318,15 +328,28 @@ fun SessionDetailScreen(
                             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                                 session?.let { s ->
                                     val modeChangeSupported = s.provider == "claude" || s.provider == "codex"
-                                    DropdownMenuItem(
-                                        text = { Text("Terminal") },
-                                        leadingIcon = { Icon(Icons.Default.Terminal, contentDescription = null) },
-                                        enabled = s.paneId != null,
-                                        onClick = {
-                                            menu = false
-                                            onAction(SessionDetailAction.OpenTerminal)
-                                        },
-                                    )
+                                    // A session the gateway runs directly has no terminal.
+                                    if (s.paneId != null) {
+                                        DropdownMenuItem(
+                                            text = { Text("Terminal") },
+                                            leadingIcon = { Icon(Icons.Default.Terminal, contentDescription = null) },
+                                            onClick = {
+                                                menu = false
+                                                onAction(SessionDetailAction.OpenTerminal)
+                                            },
+                                        )
+                                    }
+                                    if (s.direct && s.status in WORKING_STATUSES) {
+                                        DropdownMenuItem(
+                                            text = { Text("Interrupt") },
+                                            leadingIcon = { Icon(Icons.Default.Stop, contentDescription = null) },
+                                            enabled = !state.actionBusy,
+                                            onClick = {
+                                                menu = false
+                                                onAction(SessionDetailAction.Interrupt)
+                                            },
+                                        )
+                                    }
                                     DropdownMenuItem(
                                         text = { Text("Reload") },
                                         leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
@@ -339,7 +362,8 @@ fun SessionDetailScreen(
                                     if (modeChangeSupported) {
                                         DropdownMenuItem(
                                             text = { Text("Change mode") },
-                                            enabled = s.live && s.paneId != null && !state.actionBusy && !state.modeChanging,
+                                            enabled = s.live && (s.paneId != null || s.backend == Backend.DIRECT) &&
+                                                !state.actionBusy && !state.modeChanging,
                                             onClick = {
                                                 menu = false
                                                 onAction(SessionDetailAction.CycleMode)
@@ -415,8 +439,17 @@ fun SessionDetailScreen(
                         )
                     }
                     ContextBar(it.contextUsedTokens, it.contextWindowTokens, it.contextUsedPercent)
+                    if (settingsChangeable(it)) SessionSettingsPanel(it, state.settings, onAction)
                     HorizontalDivider()
                 }
+            }
+            ExpandingContent(value = session?.error?.takeIf { it.isNotBlank() }) {
+                Text(
+                    it,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                )
             }
             ExpandingContent(value = error) {
                 Text(
@@ -526,6 +559,9 @@ fun SessionDetailScreen(
 }
 
 private const val SETTLE_MS = 400L
+
+/** The agent is in a turn, which a direct session can interrupt. */
+private val WORKING_STATUSES = setOf(Status.RUNNING, Status.WAITING_INPUT, Status.WAITING_APPROVAL)
 
 /** An item of the message list. A sent message's key passes to the message it becomes. */
 private sealed interface ListEntry {
@@ -641,7 +677,7 @@ private fun Composer(
                     textStyle = MaterialTheme.typography.bodyMedium.copy(letterSpacing = 0.sp),
                     placeholder = {
                         Text(
-                            if (enabled || busy) "Message…" else "Session is not running in Herdr",
+                            if (enabled || busy) "Message…" else "Session is not running",
                             style = MaterialTheme.typography.bodyMedium.copy(letterSpacing = 0.sp),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -706,7 +742,7 @@ private fun ResumeBar(busy: Boolean, onResume: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                "Not running in Herdr",
+                "Not running",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f),

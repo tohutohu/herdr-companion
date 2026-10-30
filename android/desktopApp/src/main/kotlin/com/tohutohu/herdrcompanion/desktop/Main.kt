@@ -1260,6 +1260,11 @@ private fun handleDetailAction(
         is SessionDetailAction.Discard -> state.discard(sessionId, action.localId)
         is SessionDetailAction.Respond -> state.respond(sessionId, action.response)
         SessionDetailAction.CycleMode -> state.cycleMode(sessionId)
+        SessionDetailAction.LoadSettings -> state.loadSettings(sessionId)
+        is SessionDetailAction.SetModel -> state.setModel(sessionId, action.model)
+        is SessionDetailAction.SetEffort -> state.setEffort(sessionId, action.effort)
+        is SessionDetailAction.SetMode -> state.setMode(sessionId, action.mode)
+        SessionDetailAction.Interrupt -> state.interrupt(sessionId)
         SessionDetailAction.Reload -> state.reload(sessionId)
         // The desktop list does not offer the pull.
         SessionDetailAction.PullRefresh -> Unit

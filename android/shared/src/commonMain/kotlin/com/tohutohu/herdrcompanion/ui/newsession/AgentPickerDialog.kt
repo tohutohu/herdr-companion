@@ -127,7 +127,11 @@ fun AgentPickerDialog(
     )
 }
 
-/** Model or effort dropdown; the first entry keeps the agent's own default. */
+/**
+ * Model or effort dropdown; the first entry keeps the agent's own default.
+ * Without [defaultEntry] (a running session's setting) only real choices are
+ * offered, and a [selected] id the catalog does not know is shown as it is.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun OptionPicker(
@@ -138,6 +142,7 @@ internal fun OptionPicker(
     enabled: Boolean = true,
     onSelect: (String) -> Unit,
     modifier: Modifier = Modifier,
+    defaultEntry: Boolean = true,
 ) {
     var expanded by remember { mutableStateOf(false) }
     LaunchedEffect(enabled) {
@@ -145,7 +150,8 @@ internal fun OptionPicker(
     }
     val defaultName = options.firstOrNull { it.default }?.name
     val defaultLabel = if (defaultName != null) "Default ($defaultName)" else "Default"
-    val current = options.firstOrNull { it.id == selected }?.name ?: defaultLabel
+    val current = options.firstOrNull { it.id == selected }?.name
+        ?: if (defaultEntry || selected.isEmpty()) defaultLabel else selected
     ExposedDropdownMenuBox(
         expanded = expanded,
         onExpandedChange = { if (enabled) expanded = it },
@@ -167,13 +173,15 @@ internal fun OptionPicker(
                 .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(
-                text = { Text(defaultLabel) },
-                onClick = {
-                    onSelect("")
-                    expanded = false
-                },
-            )
+            if (defaultEntry) {
+                DropdownMenuItem(
+                    text = { Text(defaultLabel) },
+                    onClick = {
+                        onSelect("")
+                        expanded = false
+                    },
+                )
+            }
             options.forEach { m ->
                 DropdownMenuItem(
                     text = {

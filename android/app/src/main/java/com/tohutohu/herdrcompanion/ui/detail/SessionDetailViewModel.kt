@@ -273,6 +273,84 @@ class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidV
         }
     }
 
+    private val _settings = MutableStateFlow(SessionSettingsUiState())
+    val settings = _settings.asStateFlow()
+
+    /**
+     * Reads what the agent offers for the details panel's pickers. Loaded
+     * once; after a failure the panel's Retry calls it again.
+     */
+    fun loadSettings() {
+        val provider = session.value?.provider ?: return
+        val current = _settings.value
+        if (current.loading || current.catalog != null) return
+        _settings.value = current.copy(loading = true, loadError = null)
+        viewModelScope.launch {
+            try {
+                val catalog = repo.models(provider)
+                _settings.value = _settings.value.copy(catalog = catalog, loading = false)
+            } catch (e: CancellationException) {
+                _settings.value = _settings.value.copy(loading = false)
+                throw e
+            } catch (e: Exception) {
+                _settings.value = _settings.value.copy(loading = false, loadError = e.message ?: "unknown error")
+            }
+        }
+    }
+
+    fun setModel(model: String) = changeSetting { repo.setModel(sessionId, model) }
+
+    fun setEffort(effort: String) = changeSetting { repo.setEffort(sessionId, effort) }
+
+    fun setMode(mode: String) = changeSetting {
+        repo.setMode(sessionId, mode)
+        // The mode is reported with the next transcript snapshot.
+        delay(300)
+        refresh()
+    }
+
+    /**
+     * Sends one model / effort / mode change at a time. The gateway's reason
+     * for refusing one (an unknown model, a Herdr session) is shown as it is.
+     */
+    private fun changeSetting(change: suspend () -> Unit) {
+        if (_settings.value.changing) return
+        _settings.value = _settings.value.copy(changing = true, changeError = null)
+        viewModelScope.launch {
+            try {
+                change()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _settings.value = _settings.value.copy(changeError = e.message ?: "The change failed.")
+            } finally {
+                _settings.value = _settings.value.copy(changing = false)
+            }
+        }
+    }
+
+    private val _interrupting = MutableStateFlow(false)
+    val interrupting = _interrupting.asStateFlow()
+
+    /** Stops the turn a session the gateway runs directly is in. */
+    fun interrupt() {
+        if (_interrupting.value) return
+        viewModelScope.launch {
+            _interrupting.value = true
+            try {
+                repo.interrupt(sessionId)
+                delay(300)
+                refresh()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _error.value = "Interrupt failed: ${e.message}"
+            } finally {
+                _interrupting.value = false
+            }
+        }
+    }
+
     fun cycleMode() {
         if (_modeChanging.value) return
         viewModelScope.launch {
