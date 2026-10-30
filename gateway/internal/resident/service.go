@@ -648,7 +648,7 @@ func (s *Service) decorate(ctx context.Context, t *Task) error {
 	t.LastRun = last
 	var rep Report
 	var at int64
-	err = db.QueryRowContext(ctx, `SELECT id, outcome, summary, ended_at FROM runs WHERE task_id = ? AND ended_at IS NOT NULL
+	err = db.QueryRowContext(ctx, `SELECT id, outcome, COALESCE(NULLIF(summary, ''), error), ended_at FROM runs WHERE task_id = ? AND ended_at IS NOT NULL
 		AND (outcome IN ('changed','blocked','failed') OR status IN ('failed','timed_out','needs_reconciliation','waiting_user')) ORDER BY ended_at DESC LIMIT 1`, t.ID).
 		Scan(&rep.RunID, &rep.Outcome, &rep.Summary, &at)
 	switch {
@@ -686,7 +686,7 @@ func (s *Service) decorate(ctx context.Context, t *Task) error {
 		t.State = TaskWaitingUser
 	case reconcile > 0:
 		t.State = TaskNeedsAttention
-		t.Attention = "A run was cut off and its outcome is unknown; check it before running again."
+		t.Attention = "中断されて成否が分からない実行があります。結果を確認してから再実行してください。"
 	case queued > 0:
 		t.State = TaskQueued
 	case !t.Enabled:

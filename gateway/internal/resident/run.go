@@ -60,8 +60,8 @@ type RunOutput struct {
 }
 
 var (
-	errUserCancel  = errors.New("stopped by the user")
-	errTaskDeleted = errors.New("the task was deleted")
+	errUserCancel  = errors.New("ユーザーが停止しました")
+	errTaskDeleted = errors.New("タスクが削除されました")
 	errShutdown    = errors.New("the gateway is shutting down")
 	errRunTimeout  = errors.New("the run exceeded its time limit")
 	errNotSent     = errors.New("the prompt was not sent")
@@ -501,7 +501,7 @@ func (s *Service) execute(ctx context.Context, a *activeRun, run *Run, task *Tas
 		case errors.Is(cause, errTaskDeleted):
 			status, kind, msg = RunCancelled, "", errTaskDeleted.Error()
 		case errors.Is(cause, errRunTimeout):
-			status, kind, msg = RunTimedOut, ErrKindTimeout, fmt.Sprintf("the run exceeded its limit of %d minutes and was stopped", task.Limits.MaxRunMinutes)
+			status, kind, msg = RunTimedOut, ErrKindTimeout, fmt.Sprintf("1回の上限 %d 分を超えたため停止しました", task.Limits.MaxRunMinutes)
 		case errors.Is(err, errNotSent) || !sent:
 			kind = ErrKindConfig
 		}
@@ -892,7 +892,7 @@ func (s *Service) Recover(ctx context.Context) error {
 		default:
 			s.store.db.ExecContext(ctx, `UPDATE attempts SET phase = 'unknown', ended_at = ?, error = 'the gateway stopped during the run' WHERE id = ?`, ms(now), attemptID)
 			s.fail(ctx, id, RunNeedsReconciliation, ErrKindInterrupted,
-				"the gateway stopped while the agent was working ("+phase+"); its actions may or may not have completed", now)
+				"エージェントの作業中にGatewayが停止しました（"+phase+"）。操作が完了したかは分かりません", now)
 			slog.Warn("resident run needs reconciliation", "operation", "resident.recover", "run_id", id)
 		}
 		if err != nil {

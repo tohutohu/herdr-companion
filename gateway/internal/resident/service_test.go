@@ -438,7 +438,7 @@ func TestScheduleChanges(t *testing.T) {
 		if !rs[0].ScheduledFor.Equal(mustTime(t, "2026-10-31T12:00:00+09:00")) || rs[0].Triggers[0] != TriggerCatchUp {
 			t.Errorf("made-up run = %+v", rs[0])
 		}
-		if !strings.Contains(rs[1].Reason, "4 scheduled run(s)") {
+		if !strings.Contains(rs[1].Reason, "予定 4 回") {
 			t.Errorf("skip reason = %q", rs[1].Reason)
 		}
 		got, _ := h.svc.GetTask(bg, task.ID)
@@ -471,7 +471,7 @@ func TestScheduleChanges(t *testing.T) {
 		if strings.Join(got, ",") != "skipped,skipped,completed,completed" {
 			t.Errorf("runs = %v", got)
 		}
-		if rs := h.runs(task.ID); !strings.Contains(rs[0].Reason, "daily limit") {
+		if rs := h.runs(task.ID); !strings.Contains(rs[0].Reason, "起動上限") {
 			t.Errorf("reason = %q", rs[0].Reason)
 		}
 	})
@@ -489,7 +489,7 @@ func TestSelfWake(t *testing.T) {
 		)
 		h.svc.RunNow(bg, task.ID, "")
 		h.settle()
-		if rs := h.runs(task.ID); len(rs[0].Warnings) == 0 || !strings.Contains(rs[0].Warnings[0], "at least") {
+		if rs := h.runs(task.ID); len(rs[0].Warnings) == 0 || !strings.Contains(rs[0].Warnings[0], "以上先") {
 			t.Errorf("a 5 minute wake-up was accepted: %+v", rs[0])
 		}
 		h.svc.RunNow(bg, task.ID, "")
@@ -540,7 +540,7 @@ func TestSelfWake(t *testing.T) {
 		h.runner.push(fakeStep{result: result(OutcomeUnchanged, "後で", withWake(end.Add(time.Hour)))})
 		h.svc.RunNow(bg, task.ID, "")
 		h.settle()
-		if rs := h.runs(task.ID); len(rs[0].Warnings) == 0 || !strings.Contains(rs[0].Warnings[0], "task ends") {
+		if rs := h.runs(task.ID); len(rs[0].Warnings) == 0 || !strings.Contains(rs[0].Warnings[0], "期限") {
 			t.Errorf("warnings = %v", rs[0].Warnings)
 		}
 	})

@@ -259,7 +259,7 @@ fun ResidentTaskForm(
             loadError?.let { ErrorBanner("読み込めません: $it") }
             saveError?.let { ErrorBanner(it) }
             if (trustNeeded) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().clickable { trust = !trust }, verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(trust, { trust = it })
                     Text("このフォルダを信頼する: プロジェクトの hooks や MCP サーバーが無人で実行されます。内容を確認してから選んでください。",
                         style = MaterialTheme.typography.bodySmall)

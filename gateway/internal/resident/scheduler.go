@@ -221,9 +221,9 @@ func (s *Service) fireTaskTx(tx *sql.Tx, taskID string, now time.Time) (bool, er
 			}
 			if len(missed) > 0 {
 				first := missed[0]
-				reason := fmt.Sprintf("missed while the gateway was stopped or the Mac slept: %d scheduled run(s) from %s", len(missed), first.Format(time.RFC3339))
+				reason := fmt.Sprintf("Gateway停止またはMacのスリープ中の予定 %d 回を見送り（最初 %s）", len(missed), first.Format(time.RFC3339))
 				if len(missed) == 1 {
-					reason = "missed while the gateway was stopped or the Mac slept (scheduled " + first.Format(time.RFC3339) + ")"
+					reason = "Gateway停止またはMacのスリープ中の予定を見送り（予定 " + first.Format(time.RFC3339) + "）"
 				}
 				last := missed[len(missed)-1]
 				if err := skipTx(tx, taskID, reason, &last, now); err != nil {
@@ -267,7 +267,7 @@ func (s *Service) fireTaskTx(tx *sql.Tx, taskID string, now time.Time) (bool, er
 		for _, id := range wakeIDs {
 			tx.Exec(`UPDATE wakeups SET status = 'skipped', reason = 'the task has ended' WHERE id = ?`, id)
 		}
-		return false, skipTx(tx, taskID, "the task has ended (expiresAt)", scheduledFor, now)
+		return false, skipTx(tx, taskID, "タスクの期限を過ぎています", scheduledFor, now)
 	}
 	n, err := automaticStartsToday(tx, t, now)
 	if err != nil {
@@ -279,7 +279,7 @@ func (s *Service) fireTaskTx(tx *sql.Tx, taskID string, now time.Time) (bool, er
 		for _, id := range wakeIDs {
 			tx.Exec(`UPDATE wakeups SET status = 'skipped', reason = 'daily limit' WHERE id = ?`, id)
 		}
-		return false, skipTx(tx, taskID, fmt.Sprintf("daily limit reached (%d runs today, limit %d)", n, t.Limits.MaxRunsPerDay), scheduledFor, now)
+		return false, skipTx(tx, taskID, fmt.Sprintf("1日の起動上限に達したため見送り（今日 %d 回、上限 %d 回）", n, t.Limits.MaxRunsPerDay), scheduledFor, now)
 	}
 	var run *Run
 	merged := false
@@ -316,13 +316,13 @@ func (s *Service) addScheduleWakeAfterTx(tx *sql.Tx, t *Task, consumed string, n
 func (s *Service) setSelfWakeTx(tx *sql.Tx, t *Task, runID string, at time.Time, reason string, now time.Time) (string, error) {
 	switch {
 	case at.Before(now.Add(s.cfg.MinSelfWake)):
-		return fmt.Sprintf("nextWakeAt %s refused: it must be at least %s ahead", at.Format(time.RFC3339), s.cfg.MinSelfWake), nil
+		return fmt.Sprintf("再確認の予約 %s は拒否: %s 以上先である必要があります", at.Format(time.RFC3339), s.cfg.MinSelfWake), nil
 	case at.After(now.Add(s.cfg.MaxSelfWake)):
-		return fmt.Sprintf("nextWakeAt %s refused: it is more than %s ahead", at.Format(time.RFC3339), s.cfg.MaxSelfWake), nil
+		return fmt.Sprintf("再確認の予約 %s は拒否: %s より先は予約できません", at.Format(time.RFC3339), s.cfg.MaxSelfWake), nil
 	case t.Limits.ExpiresAt != nil && at.After(*t.Limits.ExpiresAt):
-		return fmt.Sprintf("nextWakeAt %s refused: the task ends at %s", at.Format(time.RFC3339), t.Limits.ExpiresAt.Format(time.RFC3339)), nil
+		return fmt.Sprintf("再確認の予約 %s は拒否: タスクの期限 %s より後です", at.Format(time.RFC3339), t.Limits.ExpiresAt.Format(time.RFC3339)), nil
 	case !t.Enabled:
-		return "nextWakeAt ignored: the task is paused", nil
+		return "再確認の予約は無視: タスクは一時停止中です", nil
 	}
 	// A scheduled run within MinSelfWake of the request covers it.
 	var schedDue sql.NullInt64
@@ -333,7 +333,7 @@ func (s *Service) setSelfWakeTx(tx *sql.Tx, t *Task, runID string, at time.Time,
 			if _, err := tx.Exec(`UPDATE wakeups SET status = 'cancelled', reason = 'replaced by a newer request' WHERE task_id = ? AND kind = 'self' AND status = 'pending'`, t.ID); err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("nextWakeAt %s merged into the scheduled run at %s", at.Format(time.RFC3339), d.Format(time.RFC3339)), nil
+			return fmt.Sprintf("再確認の予約 %s は %s の定期実行にまとめました", at.Format(time.RFC3339), d.Format(time.RFC3339)), nil
 		}
 	}
 	if _, err := tx.Exec(`UPDATE wakeups SET status = 'cancelled', reason = 'replaced by a newer request' WHERE task_id = ? AND kind = 'self' AND status = 'pending'`, t.ID); err != nil {

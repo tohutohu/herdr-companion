@@ -26,6 +26,10 @@ internal class DeviceGatewayFixture : AutoCloseable {
     // needs a fresh chain name so those rows cannot affect queue assertions.
     val connectionId = "device-test-${UUID.randomUUID()}"
     val transcript = "端末内 fixture の会話"
+    val residentTaskId = "task_device"
+    val residentReport = "端末内 fixture の常駐報告"
+    private val residentTask = """{"id":"$residentTaskId","name":"端末テストの常駐","provider":"claude","cwd":"/work","state":"idle","unread":1,
+        "schedule":{"kind":"daily","time":"07:00","timezone":"Asia/Tokyo"}}"""
     val attempts = CopyOnWriteArrayList<SendMessageRequest>()
     val accepted = CopyOnWriteArrayList<SendMessageRequest>()
     val nextPostStatus = AtomicInteger(202)
@@ -41,6 +45,13 @@ internal class DeviceGatewayFixture : AutoCloseable {
                 val path = request.target.substringBefore('?')
                 return when {
                     path == "/v1/message-delivery" -> response(200, """{"idempotency":true}""")
+                    path == "/v1/capabilities" -> response(200, """{"messageIdempotency":true,"resident":{"version":1,"defaultTimezone":"Asia/Tokyo"}}""")
+                    path == "/v1/resident/tasks" -> response(200, """{"tasks":[$residentTask]}""")
+                    path == "/v1/resident/tasks/$residentTaskId" -> response(200, """{"task":$residentTask,"upcoming":["2026-11-02T22:00:00Z"]}""")
+                    path == "/v1/resident/tasks/$residentTaskId/messages" -> response(200,
+                        """{"messages":[{"id":"m1","role":"assistant","kind":"report","text":"$residentReport","createdAt":"2026-10-30T00:00:00Z"}]}""")
+                    path == "/v1/resident/tasks/$residentTaskId/runs" -> response(200, """{"runs":[]}""")
+                    path == "/v1/resident/tasks/$residentTaskId/read" -> response(200, """{"ok":true}""")
                     path == "/v1/sessions" -> response(200, GatewayApi.json.encodeToString(SessionsResponse(listOf(session))))
                     path == "/v1/sessions/$sessionId" -> response(200, GatewayApi.json.encodeToString(session))
                     path == "/v1/sessions/$sessionId/seen" -> response(200, "{}")

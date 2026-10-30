@@ -102,6 +102,39 @@ class DeviceNotificationPipelineTest {
         }
     }
 
+    @Test fun 常駐の合成pushで通知しタップで常駐タスクを開き同じ通知IDは再表示しない() {
+        val notificationId = "ntf_${UUID.randomUUID()}"
+        fun push() = runBlocking { FcmBroadcastProcessor(context).process(Intent("com.google.android.c2dm.intent.RECEIVE")
+            .setPackage(context.packageName)
+            .putExtra("google.message_id", UUID.randomUUID().toString())
+            .putExtra("from", "device-test")
+            .putExtra("type", "resident")
+            .putExtra("gatewayId", fixture.gatewayId)
+            .putExtra("taskId", fixture.residentTaskId)
+            .putExtra("runId", "run_device")
+            .putExtra("notificationId", notificationId)
+            .putExtra("kind", "change")
+            .putExtra("title", "端末テストの常駐")
+            .putExtra("body", "CIが復旧しました")).await() }
+        push()
+        await("resident notification posted") { residentNotification() != null }
+        val notification = residentNotification()!!
+        assertEquals("CIが復旧しました", notification.extras.getCharSequence(android.app.Notification.EXTRA_TEXT).toString())
+        // The same outbox entry delivered again is not shown again.
+        notifications.cancelAll()
+        push()
+        SystemClock.sleep(2_000)
+        assertNull(residentNotification())
+        main = ActivityScenario.launch(Intent(context, MainActivity::class.java).setAction(Intent.ACTION_VIEW))
+        notification.contentIntent.send()
+        compose.waitUntil(20_000) {
+            compose.onAllNodesWithText(fixture.residentReport, substring = true).fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
+    private fun residentNotification(): android.app.Notification? =
+        notifications.activeNotifications.firstOrNull { it.tag == "resident" && it.id == fixture.residentTaskId.hashCode() }?.notification
+
     @Test fun 実RemoteInputの長文をHTTPへ送り再取得したRoomで本文が一致する() {
         val reply = "日本語の長文🙂\n".repeat(3_000).trim()
         sendNotificationReply(reply)
