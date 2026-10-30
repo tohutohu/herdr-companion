@@ -30,6 +30,10 @@ type Service struct {
 	// Direct is the runtime of the sessions the gateway runs. Optional in
 	// tests; without it no session is live.
 	Direct *runtime.Manager
+	// Hidden lists gateway ids that are not sessions (resident task runs),
+	// kept out of the offline list in case an agent saved anything for
+	// them. Optional.
+	Hidden func(ctx context.Context) map[string]bool
 }
 
 func New(offlineWindow time.Duration, ps ...providers.Provider) *Service {
@@ -259,10 +263,17 @@ func (s *Service) recentSessions(ctx context.Context, p providers.Provider, live
 	if err != nil {
 		slog.Warn("listing recent sessions failed", "provider", p.Name(), "operation", "recent", "error", err)
 	}
+	var hidden map[string]bool
+	if s.Hidden != nil {
+		hidden = s.Hidden(ctx)
+	}
 	var out []model.Session
 	for i := range recent {
 		r := &Resolved{Provider: p, NativeID: recent[i].NativeID}
 		if _, ok := live[r.ID()]; ok {
+			continue
+		}
+		if hidden[r.ID()] {
 			continue
 		}
 		if s.archived(r.ID()) {

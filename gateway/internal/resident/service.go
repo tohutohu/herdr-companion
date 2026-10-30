@@ -1065,3 +1065,22 @@ func (s *Service) Artifact(ctx context.Context, id string) (*Artifact, string, e
 	}
 	return &a, t.Cwd, nil
 }
+
+// HiddenSessionIDs are the gateway ids ("claude:<id>", "codex:<thread>") of
+// resident runs. They are not sessions: the session list leaves them out
+// should an agent have saved anything under them.
+func (s *Service) HiddenSessionIDs(ctx context.Context) map[string]bool {
+	out := map[string]bool{}
+	rows, err := s.store.db.QueryContext(ctx, `SELECT provider, native_id FROM attempts WHERE native_id <> ''`)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var p, id string
+		if rows.Scan(&p, &id) == nil {
+			out[p+":"+id] = true
+		}
+	}
+	return out
+}

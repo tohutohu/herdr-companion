@@ -29,6 +29,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/launcher"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/resident"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/runtime"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/sessions"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/uploads"
@@ -51,6 +52,9 @@ type Server struct {
 	Usage *usage.Service
 	// Direct runs the sessions.
 	Direct *runtime.Manager
+	// Resident owns the resident tasks; nil leaves /v1/resident out (and
+	// /v1/capabilities says so).
+	Resident *resident.Service
 }
 
 func (s *Server) Handler() http.Handler {
@@ -94,6 +98,7 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("POST /v1/uploads", s.upload)
 	api.HandleFunc("GET /v1/usage", s.getUsage)
 	api.HandleFunc("POST /v1/usage/refresh", s.refreshUsage)
+	s.residentRoutes(api)
 	api.HandleFunc("POST /v1/devices", s.registerDevice)
 	api.HandleFunc("DELETE /v1/devices", s.unregisterDevice)
 	mux.Handle("/v1/", s.auth(api))

@@ -832,3 +832,16 @@ func rawState(m map[string]string) map[string]json.RawMessage {
 	}
 	return out
 }
+
+func TestHiddenSessionIDs(t *testing.T) {
+	t.Run("常駐の実行IDをセッション一覧から隠すために返す", func(t *testing.T) {
+		h := newHarness(t)
+		task := h.create(nil)
+		r, _ := h.svc.RunNow(bg, task.ID, "")
+		h.settle()
+		ids := h.svc.HiddenSessionIDs(bg)
+		if !ids["claude:native-"+r.Run.ID] || len(ids) != 1 {
+			t.Errorf("ids = %v", ids)
+		}
+	})
+}

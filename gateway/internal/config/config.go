@@ -58,6 +58,13 @@ type Config struct {
 	// MiB (default 2048). Detail screens poll every few seconds, and a history
 	// dropped from the cache is decoded again from the start.
 	HistoryCacheMB int `json:"historyCacheMB,omitempty"`
+	// ResidentMaxConcurrentRuns caps resident task runs across all tasks
+	// (default 1).
+	ResidentMaxConcurrentRuns int `json:"residentMaxConcurrentRuns,omitempty"`
+	// ResidentCatchUpHours: a scheduled resident run missed while the Mac
+	// slept or the gateway was stopped is made up when it is at most this
+	// old (default 24); older ones are recorded as skipped.
+	ResidentCatchUpHours int `json:"residentCatchUpHours,omitempty"`
 }
 
 // FirebaseAndroid is client configuration, never a service-account private key.

@@ -29,6 +29,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/claude"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/codex"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/resident"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/runtime"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/sessions"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/uploads"
@@ -181,20 +182,43 @@ func serve(args []string) error {
 	go limits.Run(ctx)
 
 	watcher := &notifications.Watcher{Sessions: svc, Conversations: svc, Config: store, Sink: sink}
-	if sender, err := newSender(cfg); err != nil {
+	var sender notifications.Sender
+	if fcm, err := newSender(cfg); err != nil {
 		slog.Warn("push notifications disabled", "operation", "fcm", "error", err)
 	} else {
-		watcher.Sender = sender
+		sender = fcm
+		watcher.Sender = fcm
 	}
 	direct.SetListener(watcher.Kick)
 	go watcher.Run(ctx)
 
+	// Resident tasks: their own database, sidecar and app-server; nothing
+	// is shared with the session runtime or its watcher but the FCM sender.
+	residentStore, err := resident.Open(filepath.Join(config.StateDir(), "resident.db"))
+	if err != nil {
+		return fmt.Errorf("open resident tasks: %w", err)
+	}
+	defer residentStore.Close()
+	claudeResident, codexResident := claudeProvider.ResidentRunner(), codexProvider.ResidentRunner()
+	residents := resident.New(residentStore, residentEnv{launch: launch, providers: []providers.Provider{claudeProvider, codexProvider}},
+		map[string]resident.Runner{resident.ProviderClaude: claudeResident, resident.ProviderCodex: codexResident},
+		resident.Config{MaxConcurrentRuns: cfg.ResidentMaxConcurrentRuns, CatchUpWindow: time.Duration(cfg.ResidentCatchUpHours) * time.Hour}, nil)
+	residents.Notifier = &resident.Notifier{Store: residentStore, Sender: sender, Config: store}
+	if err := residents.Recover(ctx); err != nil {
+		return fmt.Errorf("recover resident runs: %w", err)
+	}
+	svc.Hidden = residents.HiddenSessionIDs
+	residentDone := make(chan struct{})
+	go func() { residents.Run(ctx); close(residentDone) }()
+
 	srv := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           (&api.Server{MessageDelivery: delivery, AgentUpdates: agentupdate.New(ctx, cfg.CodexBinary), Sessions: svc, Uploads: up, Config: store, Sink: sink, Launcher: launch, Archive: archived, Usage: limits, DirectoryCheck: dirCheck, Direct: direct}).Handler(),
+		Handler:           (&api.Server{MessageDelivery: delivery, AgentUpdates: agentupdate.New(ctx, cfg.CodexBinary), Sessions: svc, Uploads: up, Config: store, Sink: sink, Launcher: launch, Archive: archived, Usage: limits, DirectoryCheck: dirCheck, Direct: direct, Resident: residents}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+	shutdownDone := make(chan struct{})
 	go func() {
+		defer close(shutdownDone)
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -203,12 +227,19 @@ func serve(args []string) error {
 		// processes (the Codex app-server ends with ctx).
 		direct.Shutdown()
 		claudeProvider.Close()
+		// Resident runs cut off here are decided on the next start.
+		<-residentDone
+		residents.Shutdown(15 * time.Second)
+		claudeResident.Close()
+		codexResident.Close()
 	}()
 	slog.Info("gateway listening", "operation", "serve", "addr", cfg.Listen, "config", store.Path(),
 		"claude_sidecar", sidecarPath(cfg.ClaudeSidecar), "claude", claudePath(cfg.ClaudeBinary))
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
+	// Let the shutdown finish before the resident database is closed.
+	<-shutdownDone
 	return nil
 }
 
@@ -348,4 +379,30 @@ func claudePath(configured string) string {
 		}
 	}
 	return ""
+}
+
+// residentEnv gives resident tasks the checks new sessions get: workspace
+// roots, the agents' own folder trust and their model catalogs.
+type residentEnv struct {
+	launch    *launcher.Launcher
+	providers []providers.Provider
+}
+
+func (e residentEnv) ResolveDir(p string) (string, error) { return e.launch.ResolveDir(p) }
+
+func (e residentEnv) FolderTrusted(provider, cwd string) bool {
+	for _, p := range e.providers {
+		if p.Name() != provider {
+			continue
+		}
+		if tc, ok := p.(providers.TrustChecker); ok {
+			return tc.FolderTrusted(cwd)
+		}
+		return true
+	}
+	return false
+}
+
+func (e residentEnv) Catalog(ctx context.Context, provider string) (providers.ModelCatalog, error) {
+	return e.launch.Models(ctx, provider)
 }
