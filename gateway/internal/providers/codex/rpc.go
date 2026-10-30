@@ -194,6 +194,15 @@ func (c *rpcClient) respond(ctx context.Context, id json.RawMessage, result any)
 	return c.t.write(ctx, b)
 }
 
+// respondError refuses a server-initiated request.
+func (c *rpcClient) respondError(ctx context.Context, id json.RawMessage, code int, msg string) error {
+	b, err := json.Marshal(map[string]any{"id": id, "error": map[string]any{"code": code, "message": msg}})
+	if err != nil {
+		return err
+	}
+	return c.t.write(ctx, b)
+}
+
 func (c *rpcClient) initialize(ctx context.Context) error {
 	params := map[string]any{
 		"clientInfo":   map[string]string{"name": "herdr_companion_gateway", "title": "Herdr Companion Gateway", "version": "0.1.0"},
@@ -216,12 +225,12 @@ type stdioTransport struct {
 	wmu   sync.Mutex
 }
 
-func startStdio(bin string) (*stdioTransport, error) {
+func startStdio(bin string, set map[string]string) (*stdioTransport, error) {
 	cmd := exec.Command(bin, "app-server")
 	// The gateway may itself run in a Herdr pane during development; its
 	// pane must not leak into the agent's tools (hc and herdr would act on
 	// that pane).
-	cmd.Env = providers.ChildEnv(os.Environ(), nil)
+	cmd.Env = providers.ChildEnv(os.Environ(), set)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err

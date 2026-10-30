@@ -26,6 +26,7 @@ import {
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { readFileSync } from "node:fs";
+import { residentPermissionHandler, residentResultFields } from "./resident";
 import { createInterface } from "node:readline";
 
 const VERSION = "1";
@@ -96,6 +97,10 @@ type Session = {
   input: InputQueue;
   pending: Map<string, Pending>;
   closed: boolean;
+  // Resident runs are unattended: permission requests are denied (and
+  // reported) instead of waiting for a user, and the result event carries
+  // the final text, structured output and usage.
+  resident: boolean;
 };
 
 const sessions = new Map<string, Session>();
@@ -209,6 +214,7 @@ function forward(s: Session, m: SDKMessage) {
         isError: m.is_error,
         errors: "errors" in m ? m.errors : undefined,
         numTurns: m.num_turns,
+        ...(s.resident ? residentResultFields(m) : {}),
       });
       return;
     case "auth_status":
@@ -245,6 +251,7 @@ async function start(p: Json) {
   const input = new InputQueue();
   const pending = new Map<string, Pending>();
   const env = (p.env ?? {}) as Record<string, string>;
+  const resident = p.resident === true;
   const q = query({
     prompt: input,
     options: {
@@ -262,15 +269,21 @@ async function start(p: Json) {
       // permission rules) and Claude Code's own system prompt.
       settingSources: ["user", "project", "local"],
       systemPrompt: { type: "preset", preset: "claude_code" },
-      persistSession: true,
-      includePartialMessages: true,
+      // Sessions keep their transcript, the history the gateway reads.
+      // Resident runs are not sessions: nothing is saved under
+      // ~/.claude/projects, so they never show up in the session list.
+      persistSession: !resident,
+      includePartialMessages: !resident,
       pathToClaudeCodeExecutable: String(p.claudePath),
       env,
-      canUseTool: permissionHandler(id, pending),
+      ...(p.outputFormat ? { outputFormat: p.outputFormat as never } : {}),
+      ...(Array.isArray(p.allowedTools) ? { allowedTools: p.allowedTools as string[] } : {}),
+      ...(Array.isArray(p.disallowedTools) ? { disallowedTools: p.disallowedTools as string[] } : {}),
+      canUseTool: resident ? residentPermissionHandler((event, data) => emit(id, event, data)) : permissionHandler(id, pending),
       stderr: (d: string) => log("claude stderr", { sessionId: id, text: d.slice(0, 500) }),
     },
   });
-  const s: Session = { id, q, input, pending, closed: false };
+  const s: Session = { id, q, input, pending, closed: false, resident };
   sessions.set(id, s);
   void pump(s);
   let init;

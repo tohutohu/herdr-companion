@@ -117,7 +117,7 @@ func (p *Provider) ownedConn(ctx context.Context) (*serverConn, error) {
 	if p.owned != nil && p.owned.c.alive() {
 		return p.owned, nil
 	}
-	t, err := startStdio(p.bin)
+	t, err := startStdio(p.bin, nil)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", providers.ErrRuntimeUnavailable, err)
 	}

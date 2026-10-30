@@ -34,6 +34,7 @@ func fakeSidecar() {
 	}
 	sc := bufio.NewScanner(os.Stdin)
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
+	residents := map[string]bool{}
 	for sc.Scan() {
 		logf.Write(append(sc.Bytes(), '\n'))
 		var req struct {
@@ -46,6 +47,9 @@ func fakeSidecar() {
 		reply := func(v any) { out.Encode(map[string]any{"id": req.ID, "result": v}) }
 		switch req.Method {
 		case "start":
+			if req.Params["resident"] == true {
+				residents[sid] = true
+			}
 			sub := "Claude Max"
 			if os.Getenv("HERDR_FAKE_SIDECAR_NOLOGIN") == "1" {
 				reply(map[string]any{"permissionMode": "default", "account": map[string]any{}})
@@ -59,6 +63,10 @@ func fakeSidecar() {
 		case "send":
 			reply(map[string]any{})
 			text, _ := req.Params["text"].(string)
+			if residents[sid] {
+				fakeResidentTurn(text, func(ev string, data map[string]any) { emit(sid, ev, data) })
+				continue
+			}
 			emit(sid, "state", map[string]any{"state": "running"})
 			switch {
 			case strings.Contains(text, "crash"):
@@ -94,6 +102,23 @@ func fakeSidecar() {
 			reply(map[string]any{})
 		}
 	}
+}
+
+// fakeResidentTurn answers a resident run's prompt.
+func fakeResidentTurn(text string, emit func(string, map[string]any)) {
+	emit("init", map[string]any{"model": "claude-sonnet-5-5"})
+	if strings.Contains(text, "hang") {
+		return
+	}
+	var denials []string
+	if strings.Contains(text, "deny") {
+		emit("denied", map[string]any{"requestId": "toolu_1", "toolName": "Bash", "input": "gh run list"})
+		denials = append(denials, "Bash")
+	}
+	emit("result", map[string]any{"subtype": "success", "isError": false, "numTurns": 2, "result": "done",
+		"structuredOutput": map[string]any{"schemaVersion": 1, "outcome": "unchanged", "summary": "変化なし"},
+		"usage":            map[string]any{"input_tokens": 100, "output_tokens": 20, "cache_read_input_tokens": 50},
+		"totalCostUsd":     0.02, "durationMs": 1500, "permissionDenials": denials})
 }
 
 func newSidecarProvider(t *testing.T) (*Provider, string) {
