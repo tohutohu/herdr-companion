@@ -43,6 +43,8 @@ func (g *residentGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		t := map[string]any{"id": "task_abc12345", "name": body["name"], "schedule": body["schedule"], "version": 1, "state": "idle"}
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(t)
+	case strings.HasSuffix(r.URL.Path, "/promote"):
+		json.NewEncoder(w).Encode(map[string]any{"sessionId": "claude:0b6c7a43-1f5e-4a3c-9d0e-2b8f4c1a7e55"})
 	case strings.HasSuffix(r.URL.Path, "/runs") && r.Method == http.MethodPost:
 		json.NewEncoder(w).Encode(map[string]any{"run": map[string]any{"id": "run_r1", "status": "queued"}})
 	default:
@@ -121,6 +123,16 @@ func TestResidentCommands(t *testing.T) {
 		last := g.reqs[len(g.reqs)-1]
 		if last.Path != "/v1/resident/tasks/task_aaaa1111/runs" || last.Body["requestId"] != "fixed-request-1" || !strings.Contains(out, "queued run r1") {
 			t.Errorf("out = %s, request = %+v", out, last)
+		}
+	})
+	t.Run("promoteは実行の会話をセッションにしてそのIDを表示する", func(t *testing.T) {
+		g := &residentGateway{}
+		a, _ := newResidentApp(t, g)
+		out := a.mustRun(t, "resident", "promote", "r1")
+		last := g.reqs[len(g.reqs)-1]
+		if g.methods[len(g.methods)-1] != http.MethodPost || last.Path != "/v1/resident/runs/run_r1/promote" ||
+			strings.TrimSpace(out) != "session claude:0b6c7a43-1f5e-4a3c-9d0e-2b8f4c1a7e55" {
+			t.Errorf("out = %q, request = %s %+v", out, g.methods[len(g.methods)-1], last)
 		}
 	})
 	t.Run("常駐に対応しないGatewayでは更新を促して終了コード1", func(t *testing.T) {

@@ -99,6 +99,8 @@ type resRun struct {
 	Effort         string     `json:"effort"`
 	Warnings       []string   `json:"warnings"`
 	NotifyDecision string     `json:"notifyDecision"`
+	Conversation   string     `json:"conversation"`
+	SessionID      string     `json:"sessionId"`
 	Attempts       []struct {
 		Phase    string `json:"phase"`
 		Provider string `json:"provider"`
@@ -117,13 +119,13 @@ type resMessage struct {
 
 func (a *app) cmdResident(args []string) error {
 	if len(args) == 0 {
-		return usagef("resident needs a subcommand: ls, show, create, update, pause, resume, run, runs, log, cancel, dismiss, send, answer, messages, memory, preview, delete")
+		return usagef("resident needs a subcommand: ls, show, create, update, pause, resume, run, runs, log, cancel, dismiss, promote, send, answer, messages, memory, preview, delete")
 	}
 	sub, rest := args[0], args[1:]
 	cmds := map[string]func([]string) error{
 		"ls": a.resLs, "show": a.resShow, "create": a.resCreate, "update": a.resUpdate,
 		"pause": a.resEnabled(false), "resume": a.resEnabled(true), "run": a.resRunNow, "runs": a.resRuns,
-		"log": a.resLog, "cancel": a.resRunAction("cancel"), "dismiss": a.resRunAction("dismiss"),
+		"log": a.resLog, "cancel": a.resRunAction("cancel"), "dismiss": a.resRunAction("dismiss"), "promote": a.resPromote,
 		"send": a.resSend, "answer": a.resAnswer, "messages": a.resMessages, "memory": a.resMemory,
 		"preview": a.resPreview, "delete": a.resDelete,
 	}
@@ -719,6 +721,34 @@ func (a *app) resLog(args []string) error {
 	if r.Status == "needs_reconciliation" {
 		fmt.Fprintf(a.out, "The outcome is unknown. Check what it did, then: hc resident dismiss %s\n", shortRun(r.ID))
 	}
+	switch r.Conversation {
+	case "kept":
+		fmt.Fprintf(a.out, "Continue this run's conversation as a session: hc resident promote %s\n", shortRun(r.ID))
+	case "promoted":
+		fmt.Fprintf(a.out, "session: %s\n", r.SessionID)
+	}
+	return nil
+}
+
+// resPromote makes a run's conversation a session (resumed, listed by hc ls).
+func (a *app) resPromote(args []string) error {
+	pos, err := parseFlags(flag.NewFlagSet("resident promote", flag.ContinueOnError), args)
+	if err != nil {
+		return err
+	}
+	if len(pos) != 1 {
+		return usagef("resident promote needs a RUN id")
+	}
+	var res struct {
+		SessionID string `json:"sessionId"`
+	}
+	if err := a.client.do(context.Background(), http.MethodPost, runPath(pos[0])+"/promote", map[string]any{}, &res); err != nil {
+		return residentErr(err)
+	}
+	if a.json {
+		return a.printJSON(res)
+	}
+	fmt.Fprintf(a.out, "session %s\n", res.SessionID)
 	return nil
 }
 

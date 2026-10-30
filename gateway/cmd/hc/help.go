@@ -83,6 +83,7 @@ USAGE
   hc resident log RUN                             one run: outcome, error, warnings, report
   hc resident cancel RUN                          stop that run only
   hc resident dismiss RUN                         close a run whose outcome is unknown, after checking it
+  hc resident promote RUN                         continue a run's conversation as a session; prints its ID
   hc resident send TASK TEXT | --file F           a follow-up instruction; a new run answers it
   hc resident answer TASK TEXT                    answer the task's open question
   hc resident messages TASK [--limit N]           the task's conversation
@@ -102,6 +103,9 @@ NOTES
   - The agent can only use integrations the user configured (CLIs, MCP servers). hc itself
     gives no mail or web access.
   - A run cut off by a Gateway restart is never re-sent: it shows needs_reconciliation.
+  - A run that reported something keeps its conversation for 14 days (an unchanged
+    scheduled check keeps none). promote turns it into an ordinary session, resumed and
+    listed by hc ls, so hc send can ask about what the run found.
 
 EXIT STATUS
   0 ok · 1 refused or failed (stderr says why) · 2 wrong command line
