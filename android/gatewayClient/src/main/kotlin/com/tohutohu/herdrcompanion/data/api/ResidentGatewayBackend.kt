@@ -45,7 +45,6 @@ class ResidentGatewayBackend(
     override suspend fun setEnabled(id: String, enabled: Boolean, until: String?) = call { setResidentEnabled(id, enabled, until) }
     override suspend fun runNow(id: String, requestId: String) = call { runResidentNow(id, requestId) }
     override suspend fun messages(id: String, limit: Int) = call { residentMessages(id, limit) }
-    override suspend fun postMessage(id: String, text: String, requestId: String) = call { postResidentMessage(id, text, requestId) }
     override suspend fun markRead(id: String) = call { markResidentRead(id) }
     override suspend fun runs(id: String, limit: Int) = call { residentRuns(id, limit) }
     override suspend fun run(runId: String) = call { residentRun(runId) }

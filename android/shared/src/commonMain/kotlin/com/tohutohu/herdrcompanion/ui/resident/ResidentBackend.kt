@@ -37,7 +37,6 @@ interface ResidentBackend {
     suspend fun setEnabled(id: String, enabled: Boolean, until: String? = null): ResidentTaskDto
     suspend fun runNow(id: String, requestId: String): ResidentPostResultDto
     suspend fun messages(id: String, limit: Int = 100): ResidentMessagesResponse
-    suspend fun postMessage(id: String, text: String, requestId: String): ResidentPostResultDto
     suspend fun markRead(id: String)
     suspend fun runs(id: String, limit: Int = 50): ResidentRunsResponse
     suspend fun run(runId: String): ResidentRunDto

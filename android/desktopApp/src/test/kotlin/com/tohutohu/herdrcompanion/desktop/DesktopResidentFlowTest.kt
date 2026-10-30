@@ -60,7 +60,7 @@ class DesktopResidentFlowTest {
     }
 
     @Test
-    fun 常駐ビューで作成し実行して報告を受け追加指示を送り停止できる() {
+    fun 常駐ビューで作成し実行して報告を受け停止できる() {
         assumeTrue("set HERDR_RESIDENT_E2E_URL to run", url.isNotEmpty())
         val state = DesktopResidentState({ Settings(url, token) }, OkHttpClient())
         val name = "desktop e2e ${System.currentTimeMillis() % 100000}"
@@ -93,18 +93,13 @@ class DesktopResidentFlowTest {
         shot("4-running")
         waitReports(1)
         shot("5-report")
-        rule.onNode(hasSetTextAction() and hasText("追加指示（例: 詳しく調べて）")).performTextInput("Which fruit did the last run find? Answer from the memory only.")
-        rule.onNode(androidx.compose.ui.test.hasContentDescription("追加指示を送る")).performClick()
-        rule.waitText("Which fruit did the last run find?")
-        waitReports(2)
-        shot("6-follow-up")
         rule.onNodeWithText("今すぐ実行").performClick()
         rule.waitText("今回の実行を停止", 30_000)
         rule.onNodeWithText("今回の実行を停止").performClick()
         rule.onNodeWithText("実行履歴").performClick()
         rule.waitText("停止", 60_000)
         rule.waitText("ユーザーが停止しました", 60_000)
-        shot("7-stopped")
+        shot("6-stopped")
         state.close()
     }
 }

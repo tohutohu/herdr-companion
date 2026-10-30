@@ -277,7 +277,7 @@ fun ResidentTaskForm(
             }
             if (draft.kind != ScheduleKind.MANUAL && draft.kind != ScheduleKind.ONCE) TimezonePicker(draft.timezone) { draft = draft.copy(timezone = it) }
             when {
-                draft.kind == ScheduleKind.MANUAL -> Text("自動では実行しません（今すぐ実行・追加指示・エージェントの再確認予約のみ）", style = MaterialTheme.typography.bodySmall)
+                draft.kind == ScheduleKind.MANUAL -> Text("自動では実行しません（今すぐ実行・エージェントの再確認予約のみ）", style = MaterialTheme.typography.bodySmall)
                 previewError != null -> Text("予定が正しくありません: $previewError", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 preview.isNotEmpty() -> Text("次の実行: " + preview.joinToString(" / ") { backend.formatInstant(it) }, style = MaterialTheme.typography.bodySmall)
                 else -> Text("予定された実行はありません", style = MaterialTheme.typography.bodySmall)

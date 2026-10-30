@@ -428,9 +428,6 @@ class GatewayApi(
     suspend fun residentMessages(id: String, limit: Int = 100): ResidentMessagesResponse =
         get(url("v1", "resident", "tasks", id, "messages", query = mapOf("limit" to "$limit")))
 
-    suspend fun postResidentMessage(id: String, text: String, requestId: String): ResidentPostResultDto =
-        json.decodeFromString(post(url("v1", "resident", "tasks", id, "messages"), jsonBody(json.encodeToString(ResidentTextRequest(text, requestId)))))
-
     suspend fun markResidentRead(id: String) {
         post(url("v1", "resident", "tasks", id, "read"), jsonBody(json.encodeToString(ResidentReadRequest())))
     }

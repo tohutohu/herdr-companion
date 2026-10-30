@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,7 +18,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -217,10 +215,8 @@ fun ResidentTaskScreen(
                         }
                     }
                     when (tab) {
-                        0 -> Conversation(state.messages, backend, Modifier.weight(1f), sending = busy == "追加指示",
-                            continuing = busy == "セッションで続ける", continueEnabled = busy == null, onContinue = continueInSession) { text, requestId, sent ->
-                            act("追加指示", onSuccess = sent) { backend.postMessage(taskId, text, requestId) }
-                        }
+                        0 -> Conversation(state.messages, backend, Modifier.weight(1f),
+                            continuing = busy == "セッションで続ける", continueEnabled = busy == null, onContinue = continueInSession)
                         1 -> RunHistory(state.runs, backend, Modifier.weight(1f), busy != null,
                             onCancel = { act("実行停止") { backend.cancelRun(it) } },
                             onDismiss = { act("確認済みにする") { backend.dismissRun(it) } },
@@ -329,7 +325,7 @@ private fun PauseDialog(onDismiss: () -> Unit, onPause: (PauseLength) -> Unit) {
         title = { Text("一時停止") },
         text = {
             Column {
-                Text("止めている間は予定の実行をしません（手動実行・追加指示は動きます）。止めていた間の予定は後から実行しません。",
+                Text("止めている間は予定の実行をしません（今すぐ実行・回答は動きます）。止めていた間の予定は後から実行しません。",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 PauseLength.entries.forEach { length ->
                     Text(
@@ -374,18 +370,12 @@ private fun Conversation(
     messages: List<ResidentMessageDto>,
     backend: ResidentBackend,
     modifier: Modifier,
-    sending: Boolean,
     continuing: Boolean,
     continueEnabled: Boolean,
     onContinue: ((runId: String) -> Unit)?,
-    onSend: (text: String, requestId: String, sent: () -> Unit) -> Unit,
 ) {
     val list = rememberLazyListState()
     LaunchedEffect(messages.size) { if (messages.isNotEmpty()) list.scrollToItem(messages.size - 1) }
-    var draft by rememberSaveable { mutableStateOf("") }
-    // One request id per logical send, reused when the same text is retried
-    // after a failure, so a lost answer does not queue the instruction twice.
-    var requestId by remember { mutableStateOf<Pair<String, String>?>(null) }
     Column(modifier) {
         if (messages.isEmpty()) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -400,25 +390,6 @@ private fun Conversation(
                 }
             }
         }
-        HorizontalDivider()
-        Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                draft, { draft = it },
-                placeholder = { Text("追加指示（例: 詳しく調べて）") },
-                modifier = Modifier.weight(1f).heightIn(max = 160.dp),
-            )
-            IconButton(
-                onClick = {
-                    val text = draft.trim()
-                    val id = requestId?.takeIf { it.first == text }?.second ?: backend.newRequestId()
-                    requestId = text to id
-                    onSend(text, id) { draft = ""; requestId = null }
-                },
-                enabled = draft.isNotBlank() && !sending,
-            ) { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "追加指示を送る") }
-        }
-        Text("追加指示は新しい実行として順番に処理されます。予定や権限の変更は「設定を編集」から行ってください。",
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
     }
 }
 
