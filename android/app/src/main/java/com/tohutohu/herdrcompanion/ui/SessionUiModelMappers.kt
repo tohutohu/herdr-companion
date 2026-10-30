@@ -29,6 +29,11 @@ fun SessionEntity.toUiModel() = SessionUiModel(
     archived = archived,
     live = status != Status.OFFLINE,
     unread = unread,
+    backend = backend,
+    pendingModel = pendingModel,
+    pendingEffort = pendingEffort,
+    settingsApply = settingsApply,
+    error = error,
 )
 
 /** Converts Android-owned launch tracking into the common list state. */

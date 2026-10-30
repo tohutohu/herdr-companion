@@ -123,4 +123,52 @@ class SessionStartsTest {
         yield()
         assertNull(starts.entries.value.single().paneId)
     }
+    @Test fun `直接実行の信頼確認は起動IDに回答しペインを持たない`() = runBlocking {
+        val answered = mutableListOf<Pair<String, Boolean>>()
+        val starts = SessionStarts(this,
+            { StartSessionResponse(launchId = "launch-1", backend = "direct", trustRequired = true) },
+            { launch, trust -> answered += launch to trust; StartSessionResponse(sessionId = "claude:s1", backend = "direct") }, {})
+        val id = starts.enqueue(request)
+        yield()
+        val waiting = starts.entries.value.single()
+        assertEquals("launch-1", waiting.trustPane)
+        assertNull(waiting.paneId)
+        assertFalse(waiting.needsContinue)
+        starts.answerTrust(id, true)
+        yield()
+        assertEquals(listOf("launch-1" to true), answered)
+        val started = starts.entries.value.single()
+        assertEquals("claude:s1", started.sessionId)
+        assertNull(started.paneId)
+        assertNull(started.trustPane)
+    }
+
+    @Test fun `直接実行の起動はペインがなくても続行待ちにせず一覧と照合する`() = runBlocking {
+        val starts = SessionStarts(this,
+            { StartSessionResponse(sessionId = "codex:t1", backend = "direct", warning = "slow start") },
+            { _, _ -> error("unused") }, {})
+        starts.enqueue(request)
+        yield()
+        val entry = starts.entries.value.single()
+        assertNull(entry.paneId)
+        assertFalse(entry.needsContinue)
+        assertEquals("slow start", entry.notice)
+        starts.reconcile(setOf("codex:t1"))
+        assertTrue(starts.entries.value.single().listed)
+    }
+
+    @Test fun `直接実行の信頼を拒否すると起動IDも残さず取り消しを伝える`() = runBlocking {
+        val starts = SessionStarts(this,
+            { StartSessionResponse(launchId = "launch-2", backend = "direct", trustRequired = true) },
+            { _, _ -> StartSessionResponse(launchId = "launch-2", backend = "direct") }, {})
+        val id = starts.enqueue(request)
+        yield()
+        starts.answerTrust(id, false)
+        yield()
+        val entry = starts.entries.value.single()
+        assertNull(entry.trustPane)
+        assertNull(entry.paneId)
+        assertFalse(entry.needsContinue)
+        assertEquals("Session start cancelled.", entry.notice)
+    }
 }

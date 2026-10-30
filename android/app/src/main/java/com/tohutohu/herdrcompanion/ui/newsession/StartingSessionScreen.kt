@@ -84,7 +84,8 @@ fun StartingSessionScreen(
                                 }
                             }
                         }
-                    } else {
+                    } else if (entry.paneId != null) {
+                        // A Herdr Codex pane reports its session id only after the first prompt.
                         Text("Codex is ready. Enter your first prompt in the terminal, and this session will appear in the list when its ID is available.")
                     }
                     TextButton(onClick = { onAction(StartingSessionAction.Dismiss) }) { Text("Dismiss") }

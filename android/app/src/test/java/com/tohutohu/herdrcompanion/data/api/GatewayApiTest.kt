@@ -207,6 +207,7 @@ class GatewayApiTest {
         api.startSession(StartSessionRequest("codex", "/w/app", "", true))
         val plain = server.takeRequest().body!!.utf8()
         assertTrue(!plain.contains("model") && !plain.contains("effort") && !plain.contains("mode"))
+        assertTrue(!plain.contains("backend"))
         assertTrue(!plain.contains("worktree"))
 
         server.enqueue(MockResponse.Builder().code(201).body("""{"paneId":"w1:p4"}""").build())
@@ -347,5 +348,80 @@ class GatewayApiTest {
         // 古いGatewayは git を返さないので worktree は選べない
         server.enqueue(MockResponse.Builder().body("""{"path":"/w/app","entries":[]}""").build())
         assertTrue(!api.directories("/w/app").git)
+    }
+    @Test
+    fun `直接実行のセッションのモデルとエフォートを変更し保留中の値を受け取る`() = runBlocking {
+        val session = """{"id":"claude:s1","provider":"claude","status":"running","updatedAt":"2026-10-30T10:00:00Z",""" +
+            """"backend":"direct","model":"opus","pendingModel":"sonnet","settingsApply":"next_request"}"""
+        server.enqueue(MockResponse.Builder().body(session).build())
+        val changed = api.setModel("claude:s1", "sonnet")
+        assertEquals("sonnet", changed.pendingModel)
+        assertEquals("next_request", changed.settingsApply)
+        server.takeRequest().let {
+            assertEquals("POST", it.method)
+            assertEquals("/v1/sessions/claude:s1/model", it.target)
+            assertEquals("""{"model":"sonnet"}""", it.body!!.utf8())
+        }
+
+        server.enqueue(MockResponse.Builder().body(session.replace("\"pendingModel\":\"sonnet\"", "\"pendingEffort\":\"high\"")).build())
+        assertEquals("high", api.setEffort("claude:s1", "high").pendingEffort)
+        server.takeRequest().let {
+            assertEquals("/v1/sessions/claude:s1/effort", it.target)
+            assertEquals("""{"effort":"high"}""", it.body!!.utf8())
+        }
+
+        server.enqueue(MockResponse.Builder().body(session).build())
+        api.setEffort("claude:s1", "max", model = "opus")
+        assertEquals("""{"model":"opus","effort":"max"}""", server.takeRequest().body!!.utf8())
+    }
+
+    @Test
+    fun `提供されていないモデルへの変更はゲートウェイの理由をそのまま伝える`() = runBlocking {
+        val reason = "invalid setting: model gpt-9 is not available; choose one of: opus, sonnet"
+        server.enqueue(MockResponse.Builder().code(400).body("""{"error":"$reason"}""").build())
+        val e = runCatching { api.setModel("claude:s1", "gpt-9") }.exceptionOrNull() as GatewayException
+        assertEquals(400, e.code)
+        assertEquals(reason, e.message)
+    }
+
+    @Test
+    fun `中断とモードの指定はそれぞれのAPIを呼びモードの巡回は本文なしで送る`() = runBlocking {
+        server.enqueue(MockResponse.Builder().code(202).body("""{"ok":true}""").build())
+        api.interrupt("codex:t1")
+        server.takeRequest().let {
+            assertEquals("POST", it.method)
+            assertEquals("/v1/sessions/codex:t1/interrupt", it.target)
+        }
+
+        server.enqueue(MockResponse.Builder().code(202).body("""{"ok":true}""").build())
+        api.setMode("codex:t1", "plan")
+        server.takeRequest().let {
+            assertEquals("/v1/sessions/codex:t1/mode", it.target)
+            assertEquals("""{"mode":"plan"}""", it.body!!.utf8())
+        }
+
+        server.enqueue(MockResponse.Builder().code(202).body("""{"ok":true}""").build())
+        api.cycleMode("codex:t1")
+        assertEquals(0, server.takeRequest().body?.size ?: 0)
+    }
+
+    @Test
+    fun `直接実行の起動はペインなしで受け取り信頼の回答を起動IDに送る`() = runBlocking {
+        server.enqueue(MockResponse.Builder().code(201).body("""{"launchId":"launch-1","backend":"direct","trustRequired":true}""").build())
+        val started = api.startSession(StartSessionRequest("claude", "/w/new", "", true, backend = "direct"))
+        assertNull(started.paneId)
+        assertTrue(started.trustRequired)
+        assertEquals("launch-1", started.trustTarget)
+        assertTrue(server.takeRequest().body!!.utf8().contains("\"backend\":\"direct\""))
+
+        server.enqueue(MockResponse.Builder().body("""{"sessionId":"claude:s9","backend":"direct"}""").build())
+        val answered = api.answerTrust(started.trustTarget!!, trust = true)
+        assertEquals("claude:s9", answered.sessionId)
+        assertNull(answered.paneId)
+        assertEquals("/v1/launches/launch-1/trust", server.takeRequest().target)
+
+        server.enqueue(MockResponse.Builder().body("""{"sessionId":"claude:s1","backend":"direct"}""").build())
+        assertEquals("direct", api.resume("claude:s1", trust = true, backend = "direct").backend)
+        assertEquals("""{"trust":true,"backend":"direct"}""", server.takeRequest().body!!.utf8())
     }
 }

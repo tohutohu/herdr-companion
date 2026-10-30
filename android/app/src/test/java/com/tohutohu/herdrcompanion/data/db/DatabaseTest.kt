@@ -10,6 +10,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -24,7 +25,7 @@ class DatabaseTest {
     @Test
     fun `全旧バージョンから会話とセッションを失わず移行できる`() = runBlocking(Dispatchers.IO) {
         val context = RuntimeEnvironment.getApplication()
-        for (version in 1..7) {
+        for (version in 1..8) {
             context.deleteDatabase("herdr-mobile.db")
             val schema = javaClass.getResourceAsStream("/com.tohutohu.herdrcompanion.data.db.AppDatabase/$version.json")!!
                 .bufferedReader().use { Json.parseToJsonElement(it.readText()).jsonObject.getValue("database").jsonObject }
@@ -55,7 +56,7 @@ class DatabaseTest {
                 val messages = db.messages().observe("session-test").first()
                 assertEquals("migration $version", listOf("message-test"), messages.map { it.id })
                 assertEquals("[]", messages.single().blocksJson)
-                assertEquals(8, db.openHelper.readableDatabase.version)
+                assertEquals(9, db.openHelper.readableDatabase.version)
             } finally {
                 db.close()
                 context.deleteDatabase("herdr-mobile.db")
@@ -73,6 +74,46 @@ class DatabaseTest {
             db.messages().upsert(listOf(message("m1", 0), message("m2-old", 1), message("m3-old", 2)))
             db.messages().replaceFrom("s", 1, listOf(message("m2-new", 1)))
             assertEquals(listOf("m1", "m2-new"), db.messages().observe("s").first().map { it.id })
+        } finally {
+            db.close()
+            context.deleteDatabase("herdr-mobile.db")
+        }
+    }
+    @Test
+    fun `版8から移行すると直接実行の列は空で始まり保存した値を読み戻せる`() = runBlocking(Dispatchers.IO) {
+        val context = RuntimeEnvironment.getApplication()
+        context.deleteDatabase("herdr-mobile.db")
+        val schema = javaClass.getResourceAsStream("/com.tohutohu.herdrcompanion.data.db.AppDatabase/8.json")!!
+            .bufferedReader().use { Json.parseToJsonElement(it.readText()).jsonObject.getValue("database").jsonObject }
+        context.openOrCreateDatabase("herdr-mobile.db", 0, null).use { old ->
+            schema.getValue("entities").jsonArray.forEach { item ->
+                val entity = item.jsonObject
+                val table = entity.getValue("tableName").jsonPrimitive.content
+                old.execSQL(entity.getValue("createSql").jsonPrimitive.content.replace("\${TABLE_NAME}", table))
+            }
+            old.execSQL(
+                "INSERT INTO sessions (id, provider, providerName, project, status, updatedAt, canSend, listed, lastSyncedAt) " +
+                    "VALUES ('claude:s1', 'claude', 'Claude Code', 'p', 'running', 0, 1, 1, 0)",
+            )
+            schema.getValue("setupQueries").jsonArray.forEach { old.execSQL(it.jsonPrimitive.content) }
+            old.version = 8
+        }
+        val db = AppDatabase.create(context)
+        try {
+            val migrated = db.sessions().get("claude:s1")!!
+            assertEquals("running", migrated.status)
+            assertNull(migrated.backend)
+            assertNull(migrated.pendingModel)
+            assertNull(migrated.error)
+            db.sessions().upsert(
+                listOf(migrated.copy(backend = "direct", pendingModel = "sonnet", pendingEffort = "high", settingsApply = "next_request", error = "boom")),
+            )
+            val stored = db.sessions().get("claude:s1")!!
+            assertEquals("direct", stored.backend)
+            assertEquals("sonnet", stored.pendingModel)
+            assertEquals("high", stored.pendingEffort)
+            assertEquals("next_request", stored.settingsApply)
+            assertEquals("boom", stored.error)
         } finally {
             db.close()
             context.deleteDatabase("herdr-mobile.db")

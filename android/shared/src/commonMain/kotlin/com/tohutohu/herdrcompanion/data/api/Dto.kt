@@ -32,8 +32,33 @@ data class SessionDto(
     val unread: Boolean = false,
     /** Only in archive responses: why the session's worktree was kept. */
     val warning: String? = null,
+    /** Where a live session runs: [Backend.DIRECT] or [Backend.HERDR]; absent when offline. */
+    val backend: String? = null,
+    /**
+     * A model or effort change the agent has not used yet; [settingsApply]
+     * says when it will ("next_request" or "next_turn").
+     */
+    val pendingModel: String? = null,
+    val pendingEffort: String? = null,
+    val settingsApply: String? = null,
+    /** Why a session the gateway runs directly failed. */
+    val error: String? = null,
 ) {
     val isLive get() = status != Status.OFFLINE
+}
+
+/** Where a live session runs: the gateway's own runtime or a Herdr pane. */
+object Backend {
+    const val DIRECT = "direct"
+    const val HERDR = "herdr"
+}
+
+/** When a pending model or effort change takes effect, as [SessionDto.settingsApply] reports it. */
+object SettingsApply {
+    /** Claude: from the agent's next model request, possibly inside the running turn. */
+    const val NEXT_REQUEST = "next_request"
+    /** Codex: from the next turn. */
+    const val NEXT_TURN = "next_turn"
 }
 
 /** How much of a session's context window its conversation currently fills. */
@@ -268,10 +293,16 @@ data class StartSessionRequest(
     val worktree: Boolean = false,
     /** Upload ids attached to the first prompt. */
     val uploads: List<String> = emptyList(),
+    /** Null lets the gateway choose where the session runs ([Backend]). */
+    val backend: String? = null,
 )
 
 @Serializable
-data class ResumeRequest(val trust: Boolean)
+data class ResumeRequest(val trust: Boolean, val backend: String? = null)
+
+/** Body of the direct-session model, effort and mode changes. */
+@Serializable
+data class SessionSettingRequest(val model: String? = null, val effort: String? = null, val mode: String? = null)
 
 /** A model or an effort the user can pick when starting a session. */
 interface CatalogOption {
@@ -319,11 +350,21 @@ data class ModelsResponse(
 @Serializable
 data class StartSessionResponse(
     val sessionId: String? = null,
-    val paneId: String,
+    /** The Herdr pane of a Herdr launch; a session the gateway runs directly has none. */
+    val paneId: String? = null,
+    /** Names a direct start waiting on the folder-trust answer. */
+    val launchId: String? = null,
+    val backend: String? = null,
     val warning: String? = null,
-    /** The agent is asking whether to trust the folder; answer with [GatewayApi.answerTrust]. */
+    /**
+     * The agent is asking whether to trust the folder; answer with
+     * [GatewayApi.answerTrust] for [trustTarget].
+     */
     val trustRequired: Boolean = false,
-)
+) {
+    /** The launch a trust answer goes to: the Herdr pane, or the direct start. */
+    val trustTarget: String? get() = paneId ?: launchId
+}
 
 @Serializable
 data class TrustAnswer(val trust: Boolean)

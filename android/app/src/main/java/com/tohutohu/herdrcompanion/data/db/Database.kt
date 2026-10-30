@@ -45,6 +45,14 @@ data class SessionEntity(
     /** Herdr's unread state, as the gateway last reported it. */
     @ColumnInfo(defaultValue = "0")
     val unread: Boolean = false,
+    /** Where the live session runs ("direct" or "herdr"); null when offline. */
+    val backend: String? = null,
+    /** A model / effort change the agent has not used yet, and when it will. */
+    val pendingModel: String? = null,
+    val pendingEffort: String? = null,
+    val settingsApply: String? = null,
+    /** Why a session the gateway runs directly failed. */
+    val error: String? = null,
 )
 
 /** Messages keep their blocks as JSON; they are only rendered, never queried. */
@@ -134,7 +142,7 @@ interface MessageDao {
 
 @Database(
     entities = [SessionEntity::class, MessageEntity::class],
-    version = 8,
+    version = 9,
     exportSchema = true,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
@@ -144,6 +152,7 @@ interface MessageDao {
         AutoMigration(from = 5, to = 6),
         AutoMigration(from = 6, to = 7),
         AutoMigration(from = 7, to = 8),
+        AutoMigration(from = 8, to = 9),
     ],
 )
 abstract class AppDatabase : RoomDatabase() {

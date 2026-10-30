@@ -28,6 +28,17 @@ class DesktopGatewayRepository(private val api: GatewayApi) {
 
     suspend fun cycleMode(id: String) = api.cycleMode(id)
 
+    suspend fun setMode(id: String, mode: String) = api.setMode(id, mode)
+
+    /** The session with the change pending, until the agent uses it. */
+    suspend fun setModel(id: String, model: String): SessionDto = api.setModel(id, model)
+
+    suspend fun setEffort(id: String, effort: String): SessionDto = api.setEffort(id, effort)
+
+    suspend fun interrupt(id: String) = api.interrupt(id)
+
+    suspend fun models(provider: String) = api.models(provider)
+
     /** The whole conversation read past the gateway's caches, with what it found missed. */
     suspend fun reload(id: String, shown: List<String>) = api.reload(id, shown)
 

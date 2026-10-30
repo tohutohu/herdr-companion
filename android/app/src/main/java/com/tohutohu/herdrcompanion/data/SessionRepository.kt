@@ -182,6 +182,23 @@ class SessionRepository(
 
     suspend fun cycleMode(sessionId: String) = api.cycleMode(sessionId)
 
+    suspend fun setMode(sessionId: String, mode: String) = api.setMode(sessionId, mode)
+
+    /** The returned session, with the change pending, is cached at once. */
+    suspend fun setModel(sessionId: String, model: String) = cacheSession(api.setModel(sessionId, model))
+
+    suspend fun setEffort(sessionId: String, effort: String) = cacheSession(api.setEffort(sessionId, effort))
+
+    suspend fun interrupt(sessionId: String) = api.interrupt(sessionId)
+
+    /** What the agent offers for a running session's model, effort and mode. */
+    suspend fun models(provider: String) = api.models(provider)
+
+    private suspend fun cacheSession(s: SessionDto) {
+        val listed = db.sessions().get(s.id)?.listed ?: (!s.archived || s.isLive)
+        db.sessions().upsert(listOf(s.toEntity(System.currentTimeMillis(), listed = listed)))
+    }
+
     private fun MessageDto.toEntity(sessionId: String, position: Int) = MessageEntity(
         sessionId = sessionId,
         id = id,
@@ -235,4 +252,9 @@ fun SessionDto.toEntity(now: Long, listed: Boolean) = SessionEntity(
     listed = listed,
     lastSyncedAt = now,
     unread = unread,
+    backend = backend,
+    pendingModel = pendingModel,
+    pendingEffort = pendingEffort,
+    settingsApply = settingsApply,
+    error = error,
 )

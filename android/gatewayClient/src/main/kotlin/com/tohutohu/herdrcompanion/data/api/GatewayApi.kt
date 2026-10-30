@@ -132,9 +132,12 @@ class GatewayApi(
     suspend fun unarchive(id: String): SessionDto =
         json.decodeFromString(execute(request(url("v1", "sessions", id, "archive")).delete().build()))
 
-    /** Reopens a stopped session in a new Herdr workspace. */
-    suspend fun resume(id: String, trust: Boolean): StartSessionResponse =
-        slowPost(url("v1", "sessions", id, "resume"), json.encodeToString(ResumeRequest(trust)))
+    /**
+     * Reopens a stopped session, in a new Herdr workspace or run by the
+     * gateway itself; a null [backend] lets the gateway choose.
+     */
+    suspend fun resume(id: String, trust: Boolean, backend: String? = null): StartSessionResponse =
+        slowPost(url("v1", "sessions", id, "resume"), json.encodeToString(ResumeRequest(trust, backend)))
 
     suspend fun messages(id: String, after: String? = null): MessagesResponse =
         get(url("v1", "sessions", id, "messages", query = mapOf("after" to after)))
@@ -204,6 +207,35 @@ class GatewayApi(
 
     suspend fun cycleMode(id: String) {
         post(url("v1", "sessions", id, "mode"), ByteArray(0).toRequestBody(jsonType))
+    }
+
+    /** Switches a session the gateway runs directly to the mode [mode] (a catalog mode id). */
+    suspend fun setMode(id: String, mode: String) {
+        post(url("v1", "sessions", id, "mode"), json.encodeToString(SessionSettingRequest(mode = mode)).toRequestBody(jsonType))
+    }
+
+    /**
+     * Changes the model of a session the gateway runs directly. The returned
+     * session reports it as [SessionDto.pendingModel] until the agent uses it;
+     * a model the agent does not offer is refused, never replaced.
+     */
+    suspend fun setModel(id: String, model: String): SessionDto =
+        json.decodeFromString(
+            post(url("v1", "sessions", id, "model"), json.encodeToString(SessionSettingRequest(model = model)).toRequestBody(jsonType)),
+        )
+
+    /** Like [setModel] for the effort; [model] names the model it is for when both change together. */
+    suspend fun setEffort(id: String, effort: String, model: String? = null): SessionDto =
+        json.decodeFromString(
+            post(
+                url("v1", "sessions", id, "effort"),
+                json.encodeToString(SessionSettingRequest(model = model, effort = effort)).toRequestBody(jsonType),
+            ),
+        )
+
+    /** Stops the running turn of a session the gateway runs directly; the session stays. */
+    suspend fun interrupt(id: String) {
+        post(url("v1", "sessions", id, "interrupt"), ByteArray(0).toRequestBody(jsonType))
     }
 
     /** Marks the session seen in Herdr, which clears its unread state. */
@@ -360,9 +392,12 @@ class GatewayApi(
     suspend fun startSession(body: StartSessionRequest): StartSessionResponse =
         slowPost(url("v1", "sessions"), json.encodeToString(body))
 
-    /** Continues (or, declined, cancels) a start that stopped at the folder-trust dialog. */
-    suspend fun answerTrust(paneId: String, trust: Boolean): StartSessionResponse =
-        slowPost(url("v1", "launches", paneId, "trust"), json.encodeToString(TrustAnswer(trust)))
+    /**
+     * Continues (or, declined, cancels) a start that stopped at the
+     * folder-trust dialog; [launch] is its [StartSessionResponse.trustTarget].
+     */
+    suspend fun answerTrust(launch: String, trust: Boolean): StartSessionResponse =
+        slowPost(url("v1", "launches", launch, "trust"), json.encodeToString(TrustAnswer(trust)))
 
     /** Starting an agent can take up to a minute (startup dialogs, session id). */
     private suspend inline fun <reified T> slowPost(url: HttpUrl, body: String): T = withContext(Dispatchers.IO) {

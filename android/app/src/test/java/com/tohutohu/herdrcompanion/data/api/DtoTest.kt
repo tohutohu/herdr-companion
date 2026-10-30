@@ -46,4 +46,29 @@ class DtoTest {
         assertEquals("plan-add-subtract.md", block.text)
         assertEquals("/Users/me/.claude/plans/plan-add-subtract.md", block.path)
     }
+    @Test
+    fun `直接実行のセッションは実行先と保留中の設定と失敗理由を読み込みペインを持たない`() {
+        val s = GatewayApi.json.decodeFromString<SessionDto>(
+            """{"id":"codex:t1","provider":"codex","status":"failed","updatedAt":"2026-10-30T10:00:00Z",
+               "backend":"direct","model":"gpt-6","pendingModel":"gpt-6-mini","pendingEffort":"low",
+               "settingsApply":"next_turn","error":"runtime exited: signal killed"}""",
+        )
+        assertEquals(Backend.DIRECT, s.backend)
+        assertNull(s.paneId)
+        assertEquals("gpt-6-mini", s.pendingModel)
+        assertEquals("low", s.pendingEffort)
+        assertEquals(SettingsApply.NEXT_TURN, s.settingsApply)
+        assertEquals("runtime exited: signal killed", s.error)
+    }
+
+    @Test
+    fun `停止中や古いゲートウェイのセッションは実行先も保留中の設定もない`() {
+        val s = GatewayApi.json.decodeFromString<SessionDto>(
+            """{"id":"claude:s1","provider":"claude","status":"offline","updatedAt":"2026-10-30T10:00:00Z"}""",
+        )
+        assertNull(s.backend)
+        assertNull(s.pendingModel)
+        assertNull(s.settingsApply)
+        assertNull(s.error)
+    }
 }

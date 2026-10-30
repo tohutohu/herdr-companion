@@ -140,11 +140,13 @@ fun DesktopNewSessionWindow(
     fun answerTrust(trust: Boolean) {
         val request = trustRequest ?: return
         trustRequest = null
+        // A Herdr pane, or the launch id of a start the gateway runs directly.
+        val launch = request.trustTarget ?: return
         starting = true
         scope.launch {
             try {
-                if (trust) finish(api.answerTrust(request.paneId, true))
-                else api.answerTrust(request.paneId, false)
+                if (trust) finish(api.answerTrust(launch, true))
+                else api.answerTrust(launch, false)
             } catch (cause: Exception) {
                 val mapped = cause.toDesktopGatewayError()
                 error = mapped.message

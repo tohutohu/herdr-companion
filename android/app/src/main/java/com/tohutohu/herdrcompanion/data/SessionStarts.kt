@@ -14,7 +14,9 @@ data class SessionStart(
     val id: String,
     val request: StartSessionRequest,
     val busy: Boolean = true,
+    /** Where the folder-trust answer goes: a Herdr pane, or a direct start's launch id. */
     val trustPane: String? = null,
+    /** The Herdr pane it started in; a session the gateway runs directly has none. */
     val paneId: String? = null,
     val sessionId: String? = null,
     val needsContinue: Boolean = false,
@@ -67,7 +69,7 @@ class SessionStarts(
         change(id) { it.copy(busy = true, trustPane = null, notice = null) }
         execute(id) {
             val result = answer(pane, trust)
-            if (!trust) result.copy(paneId = "", warning = "Session start cancelled.") else result
+            if (!trust) result.copy(paneId = null, launchId = null, warning = "Session start cancelled.") else result
         }
     }
 
@@ -81,10 +83,11 @@ class SessionStarts(
 
     /** Keep a partial resume reachable from the session list as well. */
     fun trackResume(request: StartSessionRequest, result: StartSessionResponse) {
+        val pane = result.herdrPane()
         val entry = SessionStart(UUID.randomUUID().toString(), request, busy = false,
-            paneId = result.paneId.takeIf { it.isNotEmpty() },
-            trustPane = result.paneId.takeIf { result.trustRequired },
-            sessionId = result.sessionId, needsContinue = result.sessionId == null, notice = result.warning)
+            paneId = pane,
+            trustPane = result.trustTarget.takeIf { result.trustRequired },
+            sessionId = result.sessionId, needsContinue = result.sessionId == null && pane != null, notice = result.warning)
         mutable.update { listOf(entry) + it }
     }
 
@@ -107,7 +110,9 @@ class SessionStarts(
         scope.launch {
             try {
                 val res = call()
-                change(id) { it.copy(busy = false, paneId = res.paneId.takeIf { it.isNotEmpty() }, trustPane = res.paneId.takeIf { res.trustRequired }, sessionId = res.sessionId, needsContinue = res.sessionId == null && res.warning != null && res.paneId.isNotEmpty(), notice = res.warning) }
+                val pane = res.herdrPane()
+                // Only a Herdr pane has a startup dialog to resolve in Terminal.
+                change(id) { it.copy(busy = false, paneId = pane, trustPane = res.trustTarget.takeIf { res.trustRequired }, sessionId = res.sessionId, needsContinue = res.sessionId == null && res.warning != null && pane != null, notice = res.warning) }
                 // A refresh failure must not turn a successful launch into a failed one.
                 try { refresh() } catch (e: CancellationException) { throw e } catch (_: Exception) { }
             } catch (e: CancellationException) {
@@ -119,6 +124,8 @@ class SessionStarts(
             }
         }
     }
+
+    private fun StartSessionResponse.herdrPane(): String? = paneId?.takeIf { it.isNotEmpty() }
 
     /** Nothing was sent to the gateway yet, so the session certainly did not start. */
     private class UploadFailed(cause: Exception) : Exception(cause)

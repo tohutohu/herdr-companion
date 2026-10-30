@@ -73,7 +73,7 @@ class SessionActions internal constructor(
 
     fun unarchive(s: SessionRef) = unarchive(listOf(s))
 
-    fun resume(s: SessionRef) = run(listOf(s), "Resumed in Herdr", "resumed") {
+    fun resume(s: SessionRef) = run(listOf(s), "Resumed", "resumed") {
         val session = context.container.api.session(it.id)
         val result = repo.resume(it.id)
         if (result.sessionId == null || result.trustRequired) {
