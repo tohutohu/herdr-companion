@@ -760,7 +760,7 @@ Run と会話のメッセージには `conversation`（`kept`: 昇格できる�
 - 作成に必要なのは `instruction`・`provider`・`cwd`・`schedule` だけ。`name` を省くと指示の 1 行目、`permissions` は
   `workspace_write`（ネットワークは常に可、`network` は無視）、`notify` は判断待ち・失敗も通知する既定、`limits` は 30 分・12 回。
 - `precheck`（省略可）: 自動起動の前に Gateway が実行するコマンド（[resident.md](resident.md#事前チェック)）。`command` は 4 KiB まで、
-  `timeoutSeconds` は 1–600（既定 60、`maxRunMinutes` 未満）。PATCH で `{"command": ""}` を送ると外す。対応していない古い Gateway は無視する。
+  `timeoutSeconds` は 1–600（既定 60、`maxRunMinutes` 未満）。PATCH で `{"command": ""}` を送ると外す。古い Gateway は未知の項目として 400 を返すので、アプリは設定・解除するときだけ送る。
 
 ### Run
 

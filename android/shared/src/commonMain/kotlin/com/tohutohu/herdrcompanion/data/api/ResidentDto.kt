@@ -73,6 +73,17 @@ data class LimitsDto(
     val expiresAt: String? = null,
 )
 
+/**
+ * A command the gateway runs in the task's folder before an automatic run:
+ * exit 0 starts the agent with its output, exit 1 ends the run without the
+ * agent, anything else fails the run. An empty command removes it.
+ */
+@Serializable
+data class PrecheckDto(
+    val command: String = "",
+    val timeoutSeconds: Int? = null,
+)
+
 @Serializable
 data class RunBriefDto(
     val id: String,
@@ -118,6 +129,7 @@ data class ResidentTaskDto(
     val permissions: PermissionsDto = PermissionsDto(),
     val notify: NotifyDto = NotifyDto(),
     val limits: LimitsDto = LimitsDto(),
+    val precheck: PrecheckDto? = null,
     val enabled: Boolean = true,
     /** When a paused task resumes on its own; null while enabled or paused until resumed. */
     val pausedUntil: String? = null,
@@ -300,6 +312,8 @@ data class ResidentTaskRequest(
     val permissions: PermissionsDto? = null,
     val notify: NotifyDto? = null,
     val limits: LimitsDto? = null,
+    /** Left out unless set or removed: gateways before prechecks refuse the field. */
+    val precheck: PrecheckDto? = null,
     val enabled: Boolean? = null,
     val trust: Boolean? = null,
     /** Create only: makes a retried create return the same task. */

@@ -604,7 +604,7 @@ private fun SettingsSummary(detail: ResidentTaskDetailDto, backend: ResidentBack
             if (t.notify.quietStart != null) append(" · 静穏時間 ${t.notify.quietStart}〜${t.notify.quietEnd}")
         },
         "上限" to "1回 ${t.limits.maxRunMinutes}分 · 1日 ${t.limits.maxRunsPerDay}回" + (t.limits.expiresAt?.let { " · 期限 ${backend.formatInstant(it)}" }.orEmpty()),
-    )
+    ) + listOfNotNull(t.precheck?.let { "事前チェック（${it.timeoutSeconds ?: 60}秒まで · 0 で起動 · 1 で見送り）" to it.command })
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Text("指示", style = MaterialTheme.typography.labelLarge)

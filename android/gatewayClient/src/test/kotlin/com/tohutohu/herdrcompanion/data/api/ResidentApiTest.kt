@@ -185,6 +185,19 @@ class ResidentApiTest {
     }
 
     @Test
+    fun `事前チェックは設定したときと外すときだけ送り、時間制限は元の値を保つ`() {
+        val plain = ResidentDraft(instruction = "x", cwd = "/w")
+        assertNull(plain.request(trust = false, requestId = "r1").precheck)
+        assertNull(plain.request(trust = false, expectedVersion = 2).precheck) // old gateways refuse the field
+        val task = ResidentTaskDto(id = "t", name = "物件", provider = "claude", precheck = PrecheckDto("python3 scrape.py", 120))
+        val edit = ResidentDraft.from(task)
+        assertEquals(PrecheckDto("python3 scrape.py", 120), edit.request(trust = false, expectedVersion = 2).precheck)
+        assertEquals(PrecheckDto("", null), edit.copy(precheck = " ").request(trust = false, expectedVersion = 2).precheck)
+        val body = GatewayApi.residentJson.encodeToString(ResidentTaskRequest.serializer(), edit.copy(precheck = "./check.sh").request(trust = false, expectedVersion = 2))
+        assertTrue(body.contains("\"precheck\":{\"command\":\"./check.sh\",\"timeoutSeconds\":120}"), body)
+    }
+
+    @Test
     fun `相対時刻は日本語で前後を表す`() {
         assertEquals("3分前", ResidentGatewayBackend.relativeText(Duration.ofMinutes(-3)))
         assertEquals("2時間後", ResidentGatewayBackend.relativeText(Duration.ofMinutes(125)))

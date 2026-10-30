@@ -45,9 +45,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.tohutohu.herdrcompanion.data.api.DirListingDto
 import com.tohutohu.herdrcompanion.data.api.ModelsResponse
+import com.tohutohu.herdrcompanion.data.api.PrecheckDto
 import com.tohutohu.herdrcompanion.data.api.ResidentTaskDto
 import com.tohutohu.herdrcompanion.data.api.ResidentTaskRequest
 import com.tohutohu.herdrcompanion.data.api.ScheduleDto
@@ -76,6 +78,11 @@ data class ResidentDraft(
     /** RFC 3339 for a one-off run. */
     val at: String = "",
     val timezone: String = "Asia/Tokyo",
+    /** Shell command run before automatic runs; blank for none. */
+    val precheck: String = "",
+    val precheckTimeoutSeconds: Int? = null,
+    /** The task being edited has a precheck, so a blank command removes it. */
+    val hadPrecheck: Boolean = false,
 ) {
     fun schedule() = ScheduleDto(
         kind = kind,
@@ -92,6 +99,11 @@ data class ResidentDraft(
         model = if (expectedVersion == null) model.ifBlank { null } else model,
         effort = if (expectedVersion == null) effort.ifBlank { null } else effort,
         cwd = cwd, schedule = schedule(), trust = trust.takeIf { it },
+        precheck = when {
+            precheck.isNotBlank() -> PrecheckDto(precheck.trim(), precheckTimeoutSeconds)
+            expectedVersion != null && hadPrecheck -> PrecheckDto("")
+            else -> null
+        },
         requestId = requestId, expectedVersion = expectedVersion,
     )
 
@@ -102,6 +114,7 @@ data class ResidentDraft(
             name = t.name, instruction = t.instruction, provider = t.provider, model = t.model.orEmpty(), effort = t.effort.orEmpty(),
             cwd = t.cwd, kind = t.schedule.kind, time = t.schedule.time ?: "07:00", days = t.schedule.days?.toSet() ?: emptySet(),
             cron = t.schedule.cron ?: "0 7 * * 1-5", at = t.schedule.at.orEmpty(), timezone = t.schedule.timezone ?: "Asia/Tokyo",
+            precheck = t.precheck?.command.orEmpty(), precheckTimeoutSeconds = t.precheck?.timeoutSeconds, hadPrecheck = t.precheck != null,
         )
     }
 }
@@ -269,6 +282,20 @@ fun ResidentTaskForm(
                 preview.isNotEmpty() -> Text("次の実行: " + preview.joinToString(" / ") { backend.formatInstant(it) }, style = MaterialTheme.typography.bodySmall)
                 else -> Text("予定された実行はありません", style = MaterialTheme.typography.bodySmall)
             }
+            Section("事前チェック（省略可）")
+            OutlinedTextField(
+                draft.precheck, { draft = draft.copy(precheck = it) },
+                label = { Text("コマンド") },
+                placeholder = { Text("例: python3 scrape.py") },
+                textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                modifier = Modifier.fillMaxWidth(), minLines = 1, maxLines = 6,
+            )
+            Text(
+                "自動実行の前にフォルダで実行します。終了コード 0 ならエージェントを起動して出力を渡し、1 なら起動せずに終えます" +
+                    "（1日の上限に数えません）。それ以外は失敗として知らせます。標準入力には記憶（JSON）が入ります。" +
+                    "コマンドは権限設定の対象外で、あなたの権限で動きます。",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             OutlinedTextField(
                 draft.name, { draft = draft.copy(name = it) },
                 label = { Text("タスク名（省略可）") },
