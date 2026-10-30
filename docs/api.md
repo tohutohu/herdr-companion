@@ -717,7 +717,7 @@ Run と会話のメッセージには `conversation`（`kept`: 昇格できる�
 | GET | `/v1/resident/tasks/{id}` | `{task, memory, wakeups[], upcoming[3], recentRuns[], pendingQuestion?}` |
 | PATCH | `/v1/resident/tasks/{id}` | 変更（作成と同じ項目、省略は維持）`{expectedVersion, …}` → Task |
 | DELETE | `/v1/resident/tasks/{id}` | 削除（以後起動しない、実行中の Run は停止） |
-| POST | `/v1/resident/tasks/{id}/pause` / `resume` | 自動起動の一時停止／再開 → Task |
+| POST | `/v1/resident/tasks/{id}/pause` / `resume` | 自動起動の一時停止／再開 → Task。pause に `{until}`（RFC 3339、未来かつ 366 日以内）を付けるとその時刻に自動で再開する。省略すると再開するまで止める |
 | GET | `/v1/resident/tasks/{id}/messages?before=&limit=` | 会話 `{messages[], more}`（古い順） |
 | POST | `/v1/resident/tasks/{id}/messages` | 追加指示 `{text, requestId?}` → 202 `{message, run, merged}` |
 | POST | `/v1/resident/tasks/{id}/read` | 既読 `{messageId?}`（省略で最新まで） |
@@ -745,7 +745,7 @@ Run と会話のメッセージには `conversation`（`kept`: 昇格できる�
   "permissions": {"profile": "workspace_write", "allowedTools": ["Bash(gh pr view:*)"]},
   "notify": {"mode": "changes", "onFailure": true, "onQuestion": true, "cooldownMinutes": 0, "quietStart": "23:00", "quietEnd": "07:00"},
   "limits": {"maxRunMinutes": 30, "maxRunsPerDay": 12, "expiresAt": null},
-  "enabled": true, "version": 3, "trustedAt": "…",
+  "enabled": true, "pausedUntil": null, "version": 3, "trustedAt": "…",
   "state": "idle", "nextRunAt": "…", "nextWakeReason": "schedule", "lastSuccessAt": "…",
   "lastRun": {"id": "run_…", "status": "completed", "outcome": "unchanged", "summary": "…"},
   "latestReport": {"runId": "run_…", "outcome": "changed", "summary": "…", "at": "…"},
@@ -755,6 +755,7 @@ Run と会話のメッセージには `conversation`（`kept`: 昇格できる�
 
 - `schedule.kind`: `manual` / `once`（`at`）/ `daily`（`time`）/ `weekly`（`days`, `time`）/ `cron`（`cron`）。`timezone` は IANA 名。
 - `state`: `idle`（稼働中）/ `queued` / `running` / `waiting_user` / `needs_attention` / `paused`。
+- `pausedUntil`: 期限付きで一時停止中のタスクが自動で再開する時刻（無期限の停止・稼働中は省略）。`pausedUntil` を返さない古い Gateway は `until` を無視して無期限で止める。
 - 作成に必要なのは `instruction`・`provider`・`cwd`・`schedule` だけ。`name` を省くと指示の 1 行目、`permissions` は
   `workspace_write`（ネットワークは常に可、`network` は無視）、`notify` は判断待ち・失敗も通知する既定、`limits` は 30 分・12 回。
 

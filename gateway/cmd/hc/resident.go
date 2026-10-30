@@ -34,6 +34,7 @@ type resTask struct {
 	Notify      json.RawMessage `json:"notify"`
 	Limits      json.RawMessage `json:"limits"`
 	Enabled     bool            `json:"enabled"`
+	PausedUntil *time.Time      `json:"pausedUntil"`
 	Version     int64           `json:"version"`
 	State       string          `json:"state"`
 	NextRunAt   *time.Time      `json:"nextRunAt"`
@@ -251,6 +252,9 @@ func (a *app) resShow(args []string) error {
 	}
 	fmt.Fprintf(a.out, "agent: %s %s %s  cwd: %s\n", d.Provider, firstNonEmpty(d.Model, "(default model)"), d.Effort, d.Cwd)
 	fmt.Fprintf(a.out, "schedule: %s  enabled: %v\n", d.Schedule, d.Enabled)
+	if d.PausedUntil != nil {
+		fmt.Fprintln(a.out, "paused until:", d.PausedUntil.Local().Format("2006-01-02 15:04"))
+	}
 	var next []string
 	for _, u := range detail.Upcoming {
 		next = append(next, u.Local().Format("01-02 15:04"))
@@ -585,12 +589,36 @@ func (a *app) resUpdate(args []string) error {
 
 func (a *app) resEnabled(enabled bool) func([]string) error {
 	return func(args []string) error {
-		pos, err := parseFlags(flag.NewFlagSet("resident pause", flag.ContinueOnError), args)
+		fs := flag.NewFlagSet("resident pause", flag.ContinueOnError)
+		var forDur *time.Duration
+		var until *string
+		if !enabled {
+			forDur = fs.Duration("for", 0, "")
+			until = fs.String("until", "", "")
+		}
+		pos, err := parseFlags(fs, args)
 		if err != nil {
 			return err
 		}
 		if len(pos) != 1 {
 			return usagef("needs a TASK")
+		}
+		body := map[string]any{}
+		if !enabled {
+			switch {
+			case *forDur != 0 && *until != "":
+				return usagef("use --for or --until, not both")
+			case *forDur < 0:
+				return usagef("--for must be positive")
+			case *forDur > 0:
+				body["until"] = time.Now().Add(*forDur).UTC().Format(time.RFC3339)
+			case *until != "":
+				at, err := time.Parse(time.RFC3339, *until)
+				if err != nil {
+					return usagef("--until needs an RFC 3339 time such as 2026-11-03T09:00:00+09:00")
+				}
+				body["until"] = at.Format(time.RFC3339)
+			}
 		}
 		ctx := context.Background()
 		t, err := a.resolveTask(ctx, pos[0])
@@ -602,11 +630,18 @@ func (a *app) resEnabled(enabled bool) func([]string) error {
 			path = "/v1/resident/tasks/" + url.PathEscape(t.ID) + "/resume"
 		}
 		var out resTask
-		if err := a.client.do(ctx, http.MethodPost, path, map[string]any{}, &out); err != nil {
+		if err := a.client.do(ctx, http.MethodPost, path, body, &out); err != nil {
 			return residentErr(err)
 		}
 		if a.json {
 			return a.printJSON(out)
+		}
+		if body["until"] != nil && out.PausedUntil == nil {
+			return fmt.Errorf("the gateway paused %s without an end: it predates timed pauses; resume it yourself with hc resident resume", shortTask(out.ID))
+		}
+		if out.PausedUntil != nil {
+			fmt.Fprintf(a.out, "%s %s until %s\n", shortTask(out.ID), out.State, out.PausedUntil.Local().Format("2006-01-02 15:04"))
+			return nil
 		}
 		fmt.Fprintf(a.out, "%s %s\n", shortTask(out.ID), out.State)
 		return nil

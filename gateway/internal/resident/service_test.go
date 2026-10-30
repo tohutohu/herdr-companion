@@ -386,16 +386,91 @@ func TestScheduleChanges(t *testing.T) {
 	t.Run("一時停止中は自動起動せず再開後は先の予定から", func(t *testing.T) {
 		h := newHarness(t)
 		task := h.create(nil)
-		h.svc.SetEnabled(bg, task.ID, false)
+		h.svc.SetEnabled(bg, task.ID, false, nil)
 		h.clock.Set(mustTime(t, "2026-10-30T07:30:00+09:00"))
 		h.settle()
 		got, _ := h.svc.GetTask(bg, task.ID)
 		if h.runner.callCount() != 0 || got.State != TaskPaused || got.NextRunAt != nil {
 			t.Fatalf("paused task ran or has a next run: %+v", got)
 		}
-		got, _ = h.svc.SetEnabled(bg, task.ID, true)
+		got, _ = h.svc.SetEnabled(bg, task.ID, true, nil)
 		if !got.NextRunAt.Equal(mustTime(t, "2026-10-31T07:00:00+09:00")) {
 			t.Errorf("next after resume = %v", got.NextRunAt)
+		}
+	})
+	t.Run("期限付きの一時停止は期限で自動的に再開しそこから予定を続ける", func(t *testing.T) {
+		h := newHarness(t)
+		task := h.create(nil)
+		until := mustTime(t, "2026-11-01T12:00:00+09:00")
+		got, err := h.svc.SetEnabled(bg, task.ID, false, &until)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.State != TaskPaused || got.PausedUntil == nil || !got.PausedUntil.Equal(until) || got.NextRunAt != nil {
+			t.Fatalf("paused task = %+v", got)
+		}
+		// 10/31 と 11/01 の 07:00 は停止中なので起動しない。
+		for _, at := range []string{"2026-10-31T07:30:00+09:00", "2026-11-01T07:30:00+09:00"} {
+			h.clock.Set(mustTime(t, at))
+			h.settle()
+		}
+		if h.runner.callCount() != 0 {
+			t.Fatal("a paused task ran")
+		}
+		h.clock.Set(mustTime(t, "2026-11-01T12:00:30+09:00"))
+		h.settle()
+		got, _ = h.svc.GetTask(bg, task.ID)
+		if !got.Enabled || got.PausedUntil != nil || got.State != TaskIdle {
+			t.Fatalf("not resumed: %+v", got)
+		}
+		if !got.NextRunAt.Equal(mustTime(t, "2026-11-02T07:00:00+09:00")) {
+			t.Errorf("next after the pause = %v", got.NextRunAt)
+		}
+		if h.runner.callCount() != 0 {
+			t.Error("a run started at the end of the pause")
+		}
+	})
+	t.Run("期限後にMacが眠っていた間の予定は再開後に補完する", func(t *testing.T) {
+		h := newHarness(t)
+		task := h.create(nil)
+		until := mustTime(t, "2026-10-31T06:30:00+09:00")
+		h.svc.SetEnabled(bg, task.ID, false, &until)
+		h.clock.Set(mustTime(t, "2026-10-31T09:00:00+09:00"))
+		h.settle()
+		if h.runner.callCount() != 1 {
+			t.Fatalf("the 07:00 occurrence after the pause ran %d times", h.runner.callCount())
+		}
+		if rs := h.runs(task.ID); len(rs) != 1 || !contains(rs[0].Triggers, TriggerCatchUp) {
+			t.Errorf("runs = %+v", rs)
+		}
+	})
+	t.Run("期限付きの一時停止は過去や長すぎる期限を拒否し手動の再開で解除される", func(t *testing.T) {
+		h := newHarness(t)
+		task := h.create(nil)
+		past := h.clock.Now().Add(-time.Minute)
+		if _, err := h.svc.SetEnabled(bg, task.ID, false, &past); !errors.Is(err, ErrInvalid) {
+			t.Errorf("past: %v", err)
+		}
+		far := h.clock.Now().Add(MaxPause + time.Hour)
+		if _, err := h.svc.SetEnabled(bg, task.ID, false, &far); !errors.Is(err, ErrInvalid) {
+			t.Errorf("too far: %v", err)
+		}
+		until := h.clock.Now().Add(48 * time.Hour)
+		h.svc.SetEnabled(bg, task.ID, false, &until)
+		got, _ := h.svc.SetEnabled(bg, task.ID, true, nil)
+		if !got.Enabled || got.PausedUntil != nil {
+			t.Fatalf("resume = %+v", got)
+		}
+		// 再開後に無期限で止めると、以前の期限では再開しない。
+		h.svc.SetEnabled(bg, task.ID, false, &until)
+		got, _ = h.svc.SetEnabled(bg, task.ID, false, nil)
+		if got.PausedUntil != nil {
+			t.Fatalf("indefinite pause kept the old end: %+v", got)
+		}
+		h.clock.Add(72 * time.Hour)
+		h.settle()
+		if got, _ = h.svc.GetTask(bg, task.ID); got.Enabled {
+			t.Error("an indefinite pause resumed on its own")
 		}
 	})
 	t.Run("削除すると以後起動せず実行中のRunは止まる", func(t *testing.T) {

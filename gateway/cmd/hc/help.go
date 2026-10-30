@@ -77,7 +77,8 @@ USAGE
                      [--notify changes|always|never] [--max-minutes N] [--max-runs-per-day N] [--file task.json]
   hc resident update TASK [the same flags] [--enable|--disable]
   hc resident preview --daily 07:00 [--tz ...]   the next 3 run times, nothing saved
-  hc resident pause TASK | resume TASK            stop / restart automatic runs
+  hc resident pause TASK [--for 3h | --until T]   stop automatic runs (until a time, or until resumed)
+  hc resident resume TASK                         restart automatic runs
   hc resident run TASK                            run now (joins a queued run if there is one)
   hc resident runs TASK [--limit N]               run history, including skipped runs
   hc resident log RUN                             one run: outcome, error, warnings, report

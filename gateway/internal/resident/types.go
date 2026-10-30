@@ -98,12 +98,15 @@ const (
 
 // Task is a resident task with its derived status.
 type Task struct {
-	ID        string    `json:"id"`
-	Settings            // flattened
-	Enabled   bool      `json:"enabled"`
-	Version   int64     `json:"version"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID       string `json:"id"`
+	Settings        // flattened
+	Enabled  bool   `json:"enabled"`
+	// PausedUntil is when a paused task resumes on its own; nil while
+	// enabled or paused until the user resumes it.
+	PausedUntil *time.Time `json:"pausedUntil,omitempty"`
+	Version     int64      `json:"version"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	UpdatedAt   time.Time  `json:"updatedAt"`
 	// TrustedAt records the user's confirmation that the folder's project
 	// settings (hooks, MCP servers) may run unattended.
 	TrustedAt *time.Time `json:"trustedAt,omitempty"`

@@ -487,8 +487,10 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req UpdateRequest) 
 		if req.Enabled != nil {
 			enabled = *req.Enabled
 		}
-		if _, err := tx.Exec(`UPDATE tasks SET settings = ?, enabled = ?, version = version + 1, updated_at = ?, trusted_at = COALESCE(trusted_at, ?) WHERE id = ?`,
-			mustJSON(st), enabled, ms(now), ms(now), id); err != nil {
+		// Setting enabled either way replaces a timed pause.
+		if _, err := tx.Exec(`UPDATE tasks SET settings = ?, enabled = ?, paused_until = CASE WHEN ? THEN NULL ELSE paused_until END,
+			version = version + 1, updated_at = ?, trusted_at = COALESCE(trusted_at, ?) WHERE id = ?`,
+			mustJSON(st), enabled, req.Enabled != nil, ms(now), ms(now), id); err != nil {
 			return err
 		}
 		return s.rescheduleTx(tx, id, now)
@@ -501,11 +503,27 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req UpdateRequest) 
 	return s.GetTask(ctx, id)
 }
 
-// SetEnabled pauses or resumes a task's automatic starts.
-func (s *Service) SetEnabled(ctx context.Context, id string, enabled bool) (*Task, error) {
+// MaxPause bounds a timed pause.
+const MaxPause = 366 * 24 * time.Hour
+
+// SetEnabled pauses or resumes a task's automatic starts. A pause with
+// until ends on its own at that time (see resumeDue); without it the task
+// stays paused until resumed.
+func (s *Service) SetEnabled(ctx context.Context, id string, enabled bool, until *time.Time) (*Task, error) {
 	now := s.clock()
+	var untilMs any
+	if until != nil && !enabled {
+		u := until.UTC().Truncate(time.Second)
+		switch {
+		case !u.After(now):
+			return nil, fmt.Errorf("%w: the pause must end in the future (%s)", ErrInvalid, u.Format(time.RFC3339))
+		case u.After(now.Add(MaxPause)):
+			return nil, fmt.Errorf("%w: a pause can last at most %d days", ErrInvalid, int(MaxPause.Hours()/24))
+		}
+		untilMs = ms(u)
+	}
 	err := s.store.tx(ctx, func(tx *sql.Tx) error {
-		res, err := tx.Exec(`UPDATE tasks SET enabled = ?, version = version + 1, updated_at = ? WHERE id = ? AND deleted_at IS NULL`, enabled, ms(now), id)
+		res, err := tx.Exec(`UPDATE tasks SET enabled = ?, paused_until = ?, version = version + 1, updated_at = ? WHERE id = ? AND deleted_at IS NULL`, enabled, untilMs, ms(now), id)
 		if err != nil {
 			return err
 		}
@@ -561,20 +579,20 @@ func (s *Service) changed() {
 
 // loadTask reads a task's stored fields (no derived status).
 func (s *Service) loadTask(ctx context.Context, id string) (*Task, error) {
-	row := s.store.db.QueryRowContext(ctx, `SELECT id, settings, enabled, version, created_at, updated_at, trusted_at FROM tasks WHERE id = ? AND deleted_at IS NULL`, id)
+	row := s.store.db.QueryRowContext(ctx, `SELECT id, settings, enabled, paused_until, version, created_at, updated_at, trusted_at FROM tasks WHERE id = ? AND deleted_at IS NULL`, id)
 	return scanTask(row)
 }
 
 func loadTaskTx(tx *sql.Tx, id string) (*Task, error) {
-	return scanTask(tx.QueryRow(`SELECT id, settings, enabled, version, created_at, updated_at, trusted_at FROM tasks WHERE id = ? AND deleted_at IS NULL`, id))
+	return scanTask(tx.QueryRow(`SELECT id, settings, enabled, paused_until, version, created_at, updated_at, trusted_at FROM tasks WHERE id = ? AND deleted_at IS NULL`, id))
 }
 
 func scanTask(row scanner) (*Task, error) {
 	var t Task
 	var settings string
 	var created, updated int64
-	var trusted sql.NullInt64
-	if err := row.Scan(&t.ID, &settings, &t.Enabled, &t.Version, &created, &updated, &trusted); err != nil {
+	var trusted, pausedUntil sql.NullInt64
+	if err := row.Scan(&t.ID, &settings, &t.Enabled, &pausedUntil, &t.Version, &created, &updated, &trusted); err != nil {
 		if isNoRows(err) {
 			return nil, ErrNotFound
 		}
@@ -587,12 +605,15 @@ func scanTask(row scanner) (*Task, error) {
 		t.Permissions.AllowedTools = []string{}
 	}
 	t.CreatedAt, t.UpdatedAt, t.TrustedAt = fromMs(created), fromMs(updated), fromNull(trusted)
+	if !t.Enabled {
+		t.PausedUntil = fromNull(pausedUntil)
+	}
 	return &t, nil
 }
 
 // ListTasks returns every task with its status.
 func (s *Service) ListTasks(ctx context.Context) ([]Task, error) {
-	rows, err := s.store.db.QueryContext(ctx, `SELECT id, settings, enabled, version, created_at, updated_at, trusted_at FROM tasks WHERE deleted_at IS NULL ORDER BY created_at`)
+	rows, err := s.store.db.QueryContext(ctx, `SELECT id, settings, enabled, paused_until, version, created_at, updated_at, trusted_at FROM tasks WHERE deleted_at IS NULL ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}

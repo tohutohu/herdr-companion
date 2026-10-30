@@ -17,7 +17,7 @@ import (
 
 // SchemaVersion is the database layout this build writes. Older layouts are
 // migrated forward on open; a newer one is refused rather than guessed at.
-const SchemaVersion = 2
+const SchemaVersion = 3
 
 var migrations = []string{
 	// 1: initial layout.
@@ -174,6 +174,10 @@ CREATE TABLE requests (
 	`
 ALTER TABLE runs ADD COLUMN conversation TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN session_id TEXT NOT NULL DEFAULT '';
+`,
+	// 3: a pause can end on its own at a set time.
+	`
+ALTER TABLE tasks ADD COLUMN paused_until INTEGER;
 `,
 }
 

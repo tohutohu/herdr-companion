@@ -188,7 +188,16 @@ func (s *Server) residentDelete(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) residentEnabled(enabled bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		t, err := s.Resident.SetEnabled(r.Context(), r.PathValue("id"), enabled)
+		var req struct {
+			Until *time.Time `json:"until,omitempty"`
+		}
+		if !enabled {
+			if err := decodeBody(r, &req); err != nil {
+				s.residentFail(w, r, "resident.enable", err)
+				return
+			}
+		}
+		t, err := s.Resident.SetEnabled(r.Context(), r.PathValue("id"), enabled, req.Until)
 		if err != nil {
 			s.residentFail(w, r, "resident.enable", err)
 			return

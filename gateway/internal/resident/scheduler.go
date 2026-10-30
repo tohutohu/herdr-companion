@@ -23,6 +23,9 @@ import (
 //     recorded as one skipped run.
 //   - Automatic starts beyond the task's MaxRunsPerDay are recorded as
 //     skipped (daily_limit).
+//   - A timed pause ends at its time: the task resumes and its schedule
+//     continues from that time, so an occurrence between the end of the
+//     pause and a late tick (the Mac slept) is caught up like any other.
 //   - No model is involved in any of this: wake-ups are plain timestamps.
 
 // rescheduleTx brings a task's pending wake-ups in line with its settings.
@@ -125,6 +128,9 @@ const maxCatchUpScan = 20000
 // clock.
 func (s *Service) Tick(ctx context.Context) {
 	now := s.clock()
+	if err := s.resumeDue(ctx, now); err != nil {
+		slog.Error("resident resume failed", "operation", "resident.resume", "error", err)
+	}
 	if err := s.fireDue(ctx, now); err != nil {
 		slog.Error("resident scheduler failed", "operation", "resident.tick", "error", err)
 	}
@@ -134,6 +140,43 @@ func (s *Service) Tick(ctx context.Context) {
 	if s.Notifier != nil {
 		s.Notifier.Deliver(ctx)
 	}
+}
+
+// resumeDue resumes the tasks whose timed pause has ended.
+func (s *Service) resumeDue(ctx context.Context, now time.Time) error {
+	rows, err := s.store.db.QueryContext(ctx, `SELECT id, paused_until FROM tasks WHERE deleted_at IS NULL AND enabled = 0 AND paused_until <= ?`, ms(now))
+	if err != nil {
+		return err
+	}
+	type due struct {
+		id    string
+		until time.Time
+	}
+	var tasks []due
+	for rows.Next() {
+		var d due
+		var until int64
+		rows.Scan(&d.id, &until)
+		d.until = fromMs(until)
+		tasks = append(tasks, d)
+	}
+	rows.Close()
+	for _, d := range tasks {
+		err := s.store.tx(ctx, func(tx *sql.Tx) error {
+			if _, err := tx.Exec(`UPDATE tasks SET enabled = 1, paused_until = NULL, version = version + 1, updated_at = ? WHERE id = ?`, ms(now), d.id); err != nil {
+				return err
+			}
+			return s.rescheduleTx(tx, d.id, d.until)
+		})
+		if err != nil {
+			return err
+		}
+		slog.Info("resident task resumed after a timed pause", "operation", "resident.resume", "task_id", d.id)
+	}
+	if len(tasks) > 0 && s.OnChange != nil {
+		s.OnChange()
+	}
+	return nil
 }
 
 func (s *Service) fireDue(ctx context.Context, now time.Time) error {

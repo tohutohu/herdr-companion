@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,15 +12,17 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // residentGateway fakes the resident endpoints and records requests.
 type residentGateway struct {
-	mu      sync.Mutex
-	tasks   []map[string]any
-	reqs    []postedRequest
-	methods []string
-	missing bool // an old Gateway without resident tasks
+	mu           sync.Mutex
+	tasks        []map[string]any
+	reqs         []postedRequest
+	methods      []string
+	missing      bool // an old Gateway without resident tasks
+	noPauseUntil bool // a Gateway from before timed pauses
 }
 
 func (g *residentGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -42,6 +45,12 @@ func (g *residentGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/v1/resident/tasks" && r.Method == http.MethodPost:
 		t := map[string]any{"id": "task_abc12345", "name": body["name"], "schedule": body["schedule"], "version": 1, "state": "idle"}
 		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(t)
+	case strings.HasSuffix(r.URL.Path, "/pause"):
+		t := map[string]any{"id": "task_aaaa1111", "name": "CI", "version": 5, "state": "paused"}
+		if body["until"] != nil && !g.noPauseUntil {
+			t["pausedUntil"] = body["until"]
+		}
 		json.NewEncoder(w).Encode(t)
 	case strings.HasSuffix(r.URL.Path, "/promote"):
 		json.NewEncoder(w).Encode(map[string]any{"sessionId": "claude:0b6c7a43-1f5e-4a3c-9d0e-2b8f4c1a7e55"})
@@ -133,6 +142,31 @@ func TestResidentCommands(t *testing.T) {
 		if g.methods[len(g.methods)-1] != http.MethodPost || last.Path != "/v1/resident/runs/run_r1/promote" ||
 			strings.TrimSpace(out) != "session claude:0b6c7a43-1f5e-4a3c-9d0e-2b8f4c1a7e55" {
 			t.Errorf("out = %q, request = %s %+v", out, g.methods[len(g.methods)-1], last)
+		}
+	})
+	t.Run("pauseの--forは終了時刻を送り--untilと同時には使えない", func(t *testing.T) {
+		g := &residentGateway{tasks: []map[string]any{{"id": "task_aaaa1111", "name": "CI", "state": "idle"}}}
+		a, _ := newResidentApp(t, g)
+		before := time.Now()
+		out := a.mustRun(t, "resident", "pause", "CI", "--for", "3h")
+		last := g.reqs[len(g.reqs)-1]
+		until, err := time.Parse(time.RFC3339, fmt.Sprint(last.Body["until"]))
+		if err != nil || last.Path != "/v1/resident/tasks/task_aaaa1111/pause" || until.Before(before.Add(3*time.Hour-time.Second)) || !strings.Contains(out, "paused until") {
+			t.Errorf("out = %q, request = %+v", out, last)
+		}
+		a.mustRun(t, "resident", "pause", "CI")
+		if last := g.reqs[len(g.reqs)-1]; last.Body["until"] != nil {
+			t.Errorf("an indefinite pause sent %v", last.Body)
+		}
+		if code := a.run([]string{"resident", "pause", "CI", "--for", "1h", "--until", "2026-11-03T09:00:00+09:00"}); code != 2 {
+			t.Errorf("both flags: exit %d", code)
+		}
+	})
+	t.Run("期限付き停止に未対応のGatewayが無期限で止めたら終了コード1で知らせる", func(t *testing.T) {
+		g := &residentGateway{tasks: []map[string]any{{"id": "task_aaaa1111", "name": "CI", "state": "idle"}}, noPauseUntil: true}
+		a, out := newResidentApp(t, g)
+		if code := a.run([]string{"resident", "pause", "CI", "--until", "2026-11-03T09:00:00+09:00"}); code != 1 || !strings.Contains(out.String(), "without an end") {
+			t.Errorf("exit %d: %s", code, out)
 		}
 	})
 	t.Run("常駐に対応しないGatewayでは更新を促して終了コード1", func(t *testing.T) {
