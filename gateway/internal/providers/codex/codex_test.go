@@ -227,6 +227,19 @@ func Test要約の末尾テキストは全メッセージ変換と一致する(t
 	}
 }
 
+func Test中断したターンはプロンプトで終わらず中断の知らせを置く(t *testing.T) {
+	th := &Thread{ID: "th1", Turns: []Turn{{ID: "turn1", Status: "interrupted", Items: []json.RawMessage{
+		json.RawMessage(`{"type":"userMessage","id":"u1","content":[{"type":"text","text":"sleep 30"}]}`)}}}}
+	msgs := ConvertThread(th, convertOptions{SessionID: "codex:th1"})
+	last := msgs[len(msgs)-1]
+	if len(msgs) != 2 || last.ID != "turn1#interrupted" || last.Role != model.RoleSystem || last.Blocks[0].Text != "Turn interrupted" {
+		t.Fatalf("messages = %+v", msgs)
+	}
+	if got := lastThreadText(th); got != "sleep 30" {
+		t.Errorf("the summary keeps the last spoken text: %q", got)
+	}
+}
+
 func TestCodexの多様なitemと失敗ターンと未知itemを変換できる(t *testing.T) {
 	th, ws := loadThread(t, "rich.json")
 	rec := &deadletter.Recorder{}

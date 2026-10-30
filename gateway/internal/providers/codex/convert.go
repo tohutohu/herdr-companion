@@ -169,6 +169,11 @@ func ConvertThread(th *Thread, opt convertOptions) []model.Message {
 			}
 			out = append(out, model.Message{ID: turn.ID + "#error", Role: model.RoleSystem, Timestamp: ts, Blocks: []model.Block{model.TextBlock(text)}})
 		}
+		// Like Claude Code's "[Request interrupted by user]": without it an
+		// interrupted turn ends on its prompt and reads as still unanswered.
+		if turn.Status == "interrupted" {
+			out = append(out, model.Message{ID: turn.ID + "#interrupted", Role: model.RoleSystem, Timestamp: ts, Blocks: []model.Block{model.TextBlock("Turn interrupted")}})
+		}
 		// Items carry no time of their own. The last one closes the turn, so
 		// it takes the completion time and clients can tell how long it ran.
 		if turn.CompletedAt != nil && len(out) > start {

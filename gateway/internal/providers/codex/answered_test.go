@@ -65,7 +65,7 @@ func Test回答後の発言がなければ質問はターンの最後に置く(t
 	for _, m := range msgs {
 		ids = append(ids, m.ID)
 	}
-	if got := strings.Join(ids, ","); got != "u1,codex-answered:call_1,u2" {
+	if got := strings.Join(ids, ","); got != "u1,codex-answered:call_1,turn1#interrupted,u2" {
 		t.Errorf("order = %s", got)
 	}
 }
