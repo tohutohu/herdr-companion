@@ -126,8 +126,7 @@ data class InteractionDto(
     val id: String,
     val type: String,
     /**
-     * Refines [type]; "plan" is a finished plan waiting for the go-ahead, and
-     * "trust" a running agent's folder-trust dialog.
+     * Refines [type]; "plan" is a finished plan waiting for the go-ahead.
      */
     val kind: String? = null,
     val state: String,
