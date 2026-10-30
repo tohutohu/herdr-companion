@@ -91,6 +91,20 @@ class ResidentApiTest {
     }
 
     @Test
+    fun `既定値と同じ設定も省略せずに送る`() = runBlocking {
+        MockWebServer().use { server ->
+            server.start()
+            server.enqueue(json(201, """{"id":"task_1","name":"CI","provider":"claude"}"""))
+            backend(server).create(ResidentTaskRequest(name = "CI", schedule = ScheduleDto(ScheduleKind.MANUAL), notify = NotifyDto(), limits = LimitsDto()))
+            val body = server.takeRequest().body!!.utf8()
+            for (want in listOf("\"kind\":\"manual\"", "\"onFailure\":true", "\"onQuestion\":true", "\"maxRunMinutes\":30", "\"mode\":\"changes\"")) {
+                assertTrue(body.contains(want), "$want missing from $body")
+            }
+            assertFalse(body.contains("\"model\""), body)
+        }
+    }
+
+    @Test
     fun `フォームの値から予定と権限を組み立てる`() {
         val d = ResidentDraft(kind = "weekly", time = "07:30", days = setOf("thu", "mon"), timezone = "Europe/London",
             provider = "codex", allowedTools = "Bash(ls:*)", network = true)

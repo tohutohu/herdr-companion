@@ -145,6 +145,7 @@ fun ResidentHomeScreen(
             if (state.support is ResidentSupport.Supported) {
                 ExtendedFloatingActionButton(
                     onClick = onCreate,
+                    modifier = Modifier.semantics { contentDescription = "新しいタスク" },
                     icon = { Icon(Icons.Default.Add, contentDescription = null) },
                     text = { Text("新しいタスク") },
                 )

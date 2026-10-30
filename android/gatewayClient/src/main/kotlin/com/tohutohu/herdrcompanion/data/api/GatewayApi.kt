@@ -399,15 +399,18 @@ class GatewayApi(
 
     private fun jsonBody(v: String) = v.toRequestBody(jsonType)
 
+    /** Resident requests carry every value, defaults included: the gateway does not share the app's defaults (e.g. a manual schedule, notify on failure). */
+    private inline fun <reified T> residentBody(v: T) = jsonBody(residentJson.encodeToString(v))
+
     suspend fun residentTasks(): List<ResidentTaskDto> = get<ResidentTasksResponse>(url("v1", "resident", "tasks")).tasks
 
     suspend fun residentTask(id: String): ResidentTaskDetailDto = get(url("v1", "resident", "tasks", id))
 
     suspend fun createResidentTask(body: ResidentTaskRequest): ResidentTaskDto =
-        json.decodeFromString(post(url("v1", "resident", "tasks"), jsonBody(json.encodeToString(body))))
+        json.decodeFromString(post(url("v1", "resident", "tasks"), residentBody(body)))
 
     suspend fun updateResidentTask(id: String, body: ResidentTaskRequest): ResidentTaskDto =
-        json.decodeFromString(execute(request(url("v1", "resident", "tasks", id)).patch(jsonBody(json.encodeToString(body))).build()))
+        json.decodeFromString(execute(request(url("v1", "resident", "tasks", id)).patch(residentBody(body)).build()))
 
     suspend fun deleteResidentTask(id: String) {
         execute(request(url("v1", "resident", "tasks", id)).delete().build())
@@ -448,7 +451,7 @@ class GatewayApi(
     suspend fun residentMemory(id: String): MemoryDto = get(url("v1", "resident", "tasks", id, "memory"))
 
     suspend fun putResidentMemory(id: String, body: MemoryUpdateRequest): MemoryDto =
-        json.decodeFromString(execute(request(url("v1", "resident", "tasks", id, "memory")).put(jsonBody(json.encodeToString(body))).build()))
+        json.decodeFromString(execute(request(url("v1", "resident", "tasks", id, "memory")).put(residentBody(body)).build()))
 
     suspend fun residentArtifacts(id: String): List<ArtifactDto> =
         get<ArtifactsResponse>(url("v1", "resident", "tasks", id, "artifacts")).artifacts
@@ -462,7 +465,7 @@ class GatewayApi(
         get<ResidentNotificationsResponse>(url("v1", "resident", "notifications", query = mapOf("limit" to "$limit"))).notifications
 
     suspend fun previewSchedule(schedule: ScheduleDto): SchedulePreviewDto =
-        json.decodeFromString(post(url("v1", "resident", "schedule", "preview"), jsonBody(json.encodeToString(SchedulePreviewRequest(schedule)))))
+        json.decodeFromString(post(url("v1", "resident", "schedule", "preview"), residentBody(SchedulePreviewRequest(schedule))))
 
     companion object {
         /** Percent-encodes a file name for the ext-value of Content-Disposition. */
@@ -474,5 +477,7 @@ class GatewayApi(
             explicitNulls = false
             coerceInputValues = true
         }
+
+        internal val residentJson = Json(json) { encodeDefaults = true }
     }
 }

@@ -755,7 +755,7 @@ func TestMemoryAndQuestions(t *testing.T) {
 		h.svc.PostMessage(bg, task.ID, "詳しく調べて", "")
 		h.settle()
 		p := h.runner.lastPrompt()
-		for _, want := range []string{"PR #5 のCIが失敗", "PR #5 を追跡中", `"failingPR": 5`, "詳しく調べて", "## 7. External data"} {
+		for _, want := range []string{"PR #5 のCIが失敗", "PR #5 を追跡中", `"failingPR": 5`, "詳しく調べて", "## 7. External data", "actually checked in this run"} {
 			if !strings.Contains(p, want) {
 				t.Errorf("prompt lacks %q", want)
 			}

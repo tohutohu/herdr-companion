@@ -47,6 +47,7 @@ dependencies {
 
     testImplementation(kotlin("test"))
     testImplementation(libs.okhttp.mockwebserver)
+    testImplementation(compose.desktop.uiTestJUnit4)
 }
 
 compose.desktop {

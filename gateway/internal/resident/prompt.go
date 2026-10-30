@@ -212,6 +212,7 @@ func BuildPrompt(pc PromptContext) string {
 	w("%s and at most %s ahead; a newer answer replaces an earlier request.\n", humanDuration(pc.MinSelfWake), humanDuration(pc.MaxSelfWake))
 	w(`- question: when outcome is "blocked" and you need a decision: {text, options[]}; otherwise null. Put what you found so far in report: the next run continues from it.
 - artifacts: files you created or that matter, as paths inside the working folder: [{"path": "reports/today.md", "title": "..."}]; [] when none.
+Base outcome only on what you actually checked in this run with your tools; memory and conversation say what was true before, not now. If you did not or could not read a source the instruction names, the outcome is "failed" (or "blocked" when a permission or login is missing), never "unchanged".
 On "failed" or "blocked", the memory state is not updated; do not report a failure as "unchanged".
 `)
 	return b.String()
