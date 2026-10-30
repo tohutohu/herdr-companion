@@ -47,6 +47,7 @@ hc resident runs CI監視 && hc resident log RUN       # 実行履歴と 1 件�
 hc resident cancel RUN                              # その Run だけを停止
 hc resident promote RUN                             # その Run の会話をセッションにして続ける（hc send で話しかける）
 hc resident memory CI監視 --set memory.json         # {summary?, state?} で Memory を置き換え
+hc resident update 物件 --precheck 'python3 scrape.py'  # 事前チェック: exit 0 のときだけエージェントを起動（'' で外す）
 ```
 
 - TASK はタスク ID、その一意な前方一致、または名前。`--file task.json` で API と同じ JSON を渡せ、フラグが上書きする。

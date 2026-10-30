@@ -360,7 +360,7 @@ func (s *Service) startNext(ctx context.Context, busy map[string]bool) (bool, er
 	var run *Run
 	var task *Task
 	var attemptID string
-	var prompt string
+	var pctx PromptContext
 	err := s.store.tx(ctx, func(tx *sql.Tx) error {
 		rows, err := tx.Query(`SELECT r.id, r.task_id FROM runs r JOIN tasks t ON t.id = r.task_id
 			WHERE r.status = 'queued' AND t.deleted_at IS NULL
@@ -397,11 +397,10 @@ func (s *Service) startNext(ctx context.Context, busy map[string]bool) (bool, er
 		if _, err := tx.Exec(`UPDATE messages SET handled_by = ? WHERE task_id = ? AND role = 'user' AND handled_by IS NULL`, r.ID, t.ID); err != nil {
 			return err
 		}
-		pctx, err := s.promptContextTx(tx, t, r, mem, now)
+		pctx, err = s.promptContextTx(tx, t, r, mem, now)
 		if err != nil {
 			return err
 		}
-		prompt = BuildPrompt(pctx)
 		deadline := now.Add(time.Duration(t.Limits.MaxRunMinutes) * time.Minute)
 		if _, err := tx.Exec(`UPDATE runs SET status = 'running', started_at = ?, deadline_at = ?, settings = ?, settings_version = ?, memory_version = ?, memory_snapshot = ?,
 			provider = ?, model = ?, effort = ? WHERE id = ?`,
@@ -427,11 +426,11 @@ func (s *Service) startNext(ctx context.Context, busy map[string]bool) (bool, er
 	s.mu.Unlock()
 	slog.Info("resident run started", "operation", "resident.run", "task_id", task.ID, "run_id", run.ID, "provider", task.Provider, "triggers", strings.Join(run.Triggers, ","))
 	s.changed()
-	go s.execute(actx, a, run, task, attemptID, prompt)
+	go s.execute(actx, a, run, task, attemptID, pctx)
 	return true, nil
 }
 
-func (s *Service) execute(ctx context.Context, a *activeRun, run *Run, task *Task, attemptID, prompt string) {
+func (s *Service) execute(ctx context.Context, a *activeRun, run *Run, task *Task, attemptID string, pctx PromptContext) {
 	defer func() {
 		s.mu.Lock()
 		delete(s.active, run.ID)
@@ -453,9 +452,22 @@ func (s *Service) execute(ctx context.Context, a *activeRun, run *Run, task *Tas
 			err = fmt.Errorf("%w: %v", errNotSent, cerr)
 			break
 		}
+		if task.Precheck != nil {
+			var pr *PrecheckResult
+			pr, err = s.Precheck(tctx, PrecheckRequest{TaskID: task.ID, RunID: run.ID, Cwd: task.Cwd, Triggers: run.Triggers,
+				Precheck: *task.Precheck, Memory: pctx.Memory})
+			if err != nil {
+				break
+			}
+			if !pr.Matched() && !run.Interactive {
+				s.skipByPrecheck(run.ID, attemptID, pr, s.clock())
+				return
+			}
+			pctx.Precheck = pr
+		}
 		out, err = runner.Run(tctx, RunRequest{
 			RunID: run.ID, AttemptID: attemptID, Cwd: task.Cwd, Model: task.Model, Effort: task.Effort,
-			Prompt: prompt, Schema: ResultSchema, Permissions: task.Permissions,
+			Prompt: BuildPrompt(pctx), Schema: ResultSchema, Permissions: task.Permissions,
 		}, RunHooks{
 			BeforeSend: func(nativeID, model string) error {
 				if cause := context.Cause(tctx); cause != nil {
@@ -510,6 +522,8 @@ func (s *Service) execute(ctx context.Context, a *activeRun, run *Run, task *Tas
 			status, kind, msg = RunCancelled, "", errTaskDeleted.Error()
 		case errors.Is(cause, errRunTimeout):
 			status, kind, msg = RunTimedOut, ErrKindTimeout, fmt.Sprintf("1回の上限 %d 分を超えたため停止しました", task.Limits.MaxRunMinutes)
+		case errors.Is(err, errPrecheck):
+			kind = ErrKindPrecheck
 		case errors.Is(err, errNotSent) || !sent:
 			kind = ErrKindConfig
 		}
@@ -539,6 +553,33 @@ func (s *Service) checkRunnable(t *Task) error {
 		return fmt.Errorf("the folder %s is not trusted for %s", cwd, t.Provider)
 	}
 	return nil
+}
+
+// skipByPrecheck ends a run whose precheck found nothing to do (exit 1)
+// without starting the agent. Like other skipped runs it does not count
+// toward the daily limit and shows in the history only.
+func (s *Service) skipByPrecheck(runID, attemptID string, pr *PrecheckResult, now time.Time) {
+	err := s.store.tx(context.Background(), func(tx *sql.Tx) error {
+		r, err := loadRunTx(tx, runID)
+		if err != nil || r.Status != RunRunning {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE runs SET status = 'skipped', ended_at = ?, summary = ?, report = ? WHERE id = ?`,
+			ms(now), "事前チェックの条件に合わないため、エージェントを起動しませんでした", truncateBytes(strings.TrimSpace(pr.Output), 4000), runID); err != nil {
+			return err
+		}
+		tx.Exec(`UPDATE attempts SET phase = 'abandoned', ended_at = ?, error = 'precheck: no match (exit 1)' WHERE id = ?`, ms(now), attemptID)
+		// Nothing handled the messages: the next run takes them.
+		tx.Exec(`UPDATE messages SET handled_by = NULL WHERE handled_by = ?`, runID)
+		// The check works again: a later failure is news.
+		tx.Exec(`DELETE FROM notified_keys WHERE task_id = ? AND key = 'failure-streak'`, r.TaskID)
+		return nil
+	})
+	if err != nil {
+		slog.Error("recording resident precheck skip failed", "operation", "resident.run", "run_id", runID, "error", err)
+		return
+	}
+	slog.Info("resident run skipped by its precheck", "operation", "resident.run", "run_id", runID, "duration", pr.Duration)
 }
 
 // fail ends a run that produced no result.
@@ -589,6 +630,8 @@ func failureText(status, kind, msg string) string {
 		return "設定のため実行できませんでした: " + msg
 	case ErrKindPermission:
 		return "必要な権限がないため完了できませんでした: " + msg
+	case ErrKindPrecheck:
+		return "事前チェックのコマンドが失敗したため、エージェントを起動しませんでした: " + msg
 	}
 	return "実行に失敗しました: " + msg
 }

@@ -713,7 +713,7 @@ Run と会話のメッセージには `conversation`（`kept`: 昇格できる�
 | メソッド | パス | 概要 |
 |---|---|---|
 | GET | `/v1/resident/tasks` | タスク一覧 `{tasks[]}`（ETag 対応） |
-| POST | `/v1/resident/tasks` | 作成 `{name, instruction, provider, model?, effort?, cwd, schedule, permissions?, notify?, limits?, enabled?, trust?, requestId?}` → Task（201） |
+| POST | `/v1/resident/tasks` | 作成 `{name, instruction, provider, model?, effort?, cwd, schedule, permissions?, notify?, limits?, precheck?, enabled?, trust?, requestId?}` → Task（201） |
 | GET | `/v1/resident/tasks/{id}` | `{task, memory, wakeups[], upcoming[3], recentRuns[], pendingQuestion?}` |
 | PATCH | `/v1/resident/tasks/{id}` | 変更（作成と同じ項目、省略は維持）`{expectedVersion, …}` → Task |
 | DELETE | `/v1/resident/tasks/{id}` | 削除（以後起動しない、実行中の Run は停止） |
@@ -745,6 +745,7 @@ Run と会話のメッセージには `conversation`（`kept`: 昇格できる�
   "permissions": {"profile": "workspace_write", "allowedTools": ["Bash(gh pr view:*)"]},
   "notify": {"mode": "changes", "onFailure": true, "onQuestion": true, "cooldownMinutes": 0, "quietStart": "23:00", "quietEnd": "07:00"},
   "limits": {"maxRunMinutes": 30, "maxRunsPerDay": 12, "expiresAt": null},
+  "precheck": {"command": "python3 scrape.py", "timeoutSeconds": 60},
   "enabled": true, "pausedUntil": null, "version": 3, "trustedAt": "…",
   "state": "idle", "nextRunAt": "…", "nextWakeReason": "schedule", "lastSuccessAt": "…",
   "lastRun": {"id": "run_…", "status": "completed", "outcome": "unchanged", "summary": "…"},
@@ -758,12 +759,15 @@ Run と会話のメッセージには `conversation`（`kept`: 昇格できる�
 - `pausedUntil`: 期限付きで一時停止中のタスクが自動で再開する時刻（無期限の停止・稼働中は省略）。`pausedUntil` を返さない古い Gateway は `until` を無視して無期限で止める。
 - 作成に必要なのは `instruction`・`provider`・`cwd`・`schedule` だけ。`name` を省くと指示の 1 行目、`permissions` は
   `workspace_write`（ネットワークは常に可、`network` は無視）、`notify` は判断待ち・失敗も通知する既定、`limits` は 30 分・12 回。
+- `precheck`（省略可）: 自動起動の前に Gateway が実行するコマンド（[resident.md](resident.md#事前チェック)）。`command` は 4 KiB まで、
+  `timeoutSeconds` は 1–600（既定 60、`maxRunMinutes` 未満）。PATCH で `{"command": ""}` を送ると外す。対応していない古い Gateway は無視する。
 
 ### Run
 
 `status`: `queued` / `running` / `completed` / `waiting_user` / `failed` / `cancelled` / `timed_out` / `needs_reconciliation` /
 `skipped` / `dismissed`。`outcome`: `changed` / `unchanged` / `blocked` / `failed`。`errorKind`: `contract`（結果契約違反）/
-`provider` / `permission` / `timeout` / `interrupted` / `config` / `agent`。`triggers`: `schedule` / `catch_up` / `self_wake` /
+`provider` / `permission` / `timeout` / `interrupted` / `config` / `agent` / `precheck`（事前チェックのコマンドが失敗）。
+事前チェックが条件なし（exit 1）で終えた Run は `skipped` で、`startedAt` があり、`summary` に理由、`report` にコマンドの出力が入る。`triggers`: `schedule` / `catch_up` / `self_wake` /
 `manual` / `follow_up` / `answer`。そのほか `settings`（開始時に固定した設定）、`model`、`effort`、`usage`、`warnings`、
 `notifyDecision`、`nextWakeAt`、`attempts[]`（`phase`: `preparing` / `sending` / `running` / `finished` / `failed` /
 `cancelled` / `unknown` / `abandoned`）。

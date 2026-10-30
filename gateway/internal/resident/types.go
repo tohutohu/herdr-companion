@@ -84,6 +84,8 @@ type Settings struct {
 	Permissions Permissions `json:"permissions"`
 	Notify      Notify      `json:"notify"`
 	Limits      Limits      `json:"limits"`
+	// Precheck, when set, decides whether an automatic run needs the agent.
+	Precheck *Precheck `json:"precheck,omitempty"`
 }
 
 // Task states shown in the list.
@@ -238,6 +240,7 @@ const (
 	ErrKindInterrupted = "interrupted" // the gateway stopped during the run
 	ErrKindConfig      = "config"      // the task cannot run as configured
 	ErrKindAgent       = "agent"       // the agent reported outcome failed
+	ErrKindPrecheck    = "precheck"    // the precheck command failed
 )
 
 // Run is one execution of a task.

@@ -111,6 +111,8 @@ type Service struct {
 	kick       chan struct{}
 	// OnChange is called after any change apps may want to refresh for.
 	OnChange func()
+	// Precheck runs tasks' precheck commands (RunPrecheck by default).
+	Precheck PrecheckRunner
 }
 
 // New creates the service. now may be nil (time.Now).
@@ -119,7 +121,7 @@ func New(store *Store, env Environment, runners map[string]Runner, cfg Config, n
 		now = time.Now
 	}
 	return &Service{store: store, env: env, runners: runners, cfg: cfg.withDefaults(), now: now,
-		active: map[string]*activeRun{}, kick: make(chan struct{}, 1)}
+		active: map[string]*activeRun{}, kick: make(chan struct{}, 1), Precheck: RunPrecheck}
 }
 
 func (s *Service) clock() time.Time { return s.now().UTC() }
@@ -249,6 +251,9 @@ func normalize(in Settings) (Settings, error) {
 	}
 	if s.Limits.MaxRunsPerDay < 1 || s.Limits.MaxRunsPerDay > maxRunsPerDayLimit {
 		return s, invalid("maxRunsPerDay must be between 1 and %d", maxRunsPerDayLimit)
+	}
+	if s.Precheck, err = normalizePrecheck(s.Precheck, s.Limits.MaxRunMinutes); err != nil {
+		return s, err
 	}
 	return s, nil
 }
@@ -426,8 +431,10 @@ type UpdateRequest struct {
 	Permissions     *Permissions `json:"permissions,omitempty"`
 	Notify          *Notify      `json:"notify,omitempty"`
 	Limits          *Limits      `json:"limits,omitempty"`
-	Enabled         *bool        `json:"enabled,omitempty"`
-	Trust           bool         `json:"trust,omitempty"`
+	// Precheck replaces the task's precheck; an empty command removes it.
+	Precheck *Precheck `json:"precheck,omitempty"`
+	Enabled  *bool     `json:"enabled,omitempty"`
+	Trust    bool      `json:"trust,omitempty"`
 }
 
 func (s *Service) UpdateTask(ctx context.Context, id string, req UpdateRequest) (*Task, error) {
@@ -458,6 +465,9 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req UpdateRequest) 
 	}
 	if req.Limits != nil {
 		st.Limits = *req.Limits
+	}
+	if req.Precheck != nil {
+		st.Precheck = req.Precheck
 	}
 	st, err = normalize(st)
 	if err != nil {
@@ -707,7 +717,7 @@ func (s *Service) decorate(ctx context.Context, t *Task) error {
 		return err
 	}
 	start, end := dayBounds(now, t.Schedule.Timezone)
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE task_id = ? AND started_at >= ? AND started_at < ?`, t.ID, ms(start), ms(end)).Scan(&t.RunsToday); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE task_id = ? AND status <> 'skipped' AND started_at >= ? AND started_at < ?`, t.ID, ms(start), ms(end)).Scan(&t.RunsToday); err != nil {
 		return err
 	}
 	// State.
@@ -740,7 +750,7 @@ func (s *Service) lastRun(ctx context.Context, taskID string) (*RunBrief, error)
 	var b RunBrief
 	var started, ended sql.NullInt64
 	err := s.store.db.QueryRowContext(ctx, `SELECT id, status, outcome, summary, error, started_at, ended_at FROM runs
-		WHERE task_id = ? AND status NOT IN ('skipped', 'queued') ORDER BY seq DESC LIMIT 1`, taskID).
+		WHERE task_id = ? AND status <> 'queued' AND (status <> 'skipped' OR started_at IS NOT NULL) ORDER BY seq DESC LIMIT 1`, taskID).
 		Scan(&b.ID, &b.Status, &b.Outcome, &b.Summary, &b.Error, &started, &ended)
 	if isNoRows(err) {
 		return nil, nil

@@ -75,6 +75,7 @@ USAGE
                      [--name N] [--tz Asia/Tokyo] [--model M] [--effort E] [--trust]
                      rarely needed: [--profile read_only|workspace_write] [--allow 'Bash(gh pr view:*)']...
                      [--notify changes|always|never] [--max-minutes N] [--max-runs-per-day N] [--file task.json]
+                     [--precheck 'CMD' [--precheck-timeout SEC]]   a command run before the agent; see NOTES
   hc resident update TASK [the same flags] [--enable|--disable]
   hc resident preview --daily 07:00 [--tz ...]   the next 3 run times, nothing saved
   hc resident pause TASK [--for 3h | --until T]   stop automatic runs (until a time, or until resumed)
@@ -104,6 +105,12 @@ NOTES
   - The agent can only use integrations the user configured (CLIs, MCP servers). hc itself
     gives no mail or web access.
   - A run cut off by a Gateway restart is never re-sent: it shows needs_reconciliation.
+  - --precheck runs CMD with /bin/sh -c in the folder before each automatic run (default
+    60 s limit). Exit 0 starts the agent with CMD's stdout in its prompt; exit 1 ends the run
+    as skipped without the agent (not counted in --max-runs-per-day); anything else fails the
+    run. stdin is the task's memory as JSON {summary, state}. Manual runs, follow-ups and
+    answers always start the agent. CMD runs as the user, outside --profile and the sandbox.
+    --precheck '' removes it.
   - Every run keeps its agent conversation, as a session does. promote turns it into an
     ordinary session, resumed and listed by hc ls, so hc send can ask about what the run found.
 

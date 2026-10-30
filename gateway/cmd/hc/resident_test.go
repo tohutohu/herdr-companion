@@ -125,6 +125,18 @@ func TestResidentCommands(t *testing.T) {
 			t.Errorf("request = %s %+v", g.methods[len(g.methods)-1], last)
 		}
 	})
+	t.Run("updateの--precheckは事前チェックのコマンドと時間制限を送り、時間制限だけでは使い方の誤り", func(t *testing.T) {
+		g := &residentGateway{tasks: []map[string]any{{"id": "task_aaaa1111", "name": "CI", "state": "idle", "version": 3}}}
+		a, out := newResidentApp(t, g)
+		a.mustRun(t, "resident", "update", "CI", "--precheck", "python3 scrape.py", "--precheck-timeout", "120")
+		pre, _ := g.reqs[len(g.reqs)-1].Body["precheck"].(map[string]any)
+		if pre["command"] != "python3 scrape.py" || pre["timeoutSeconds"] != float64(120) {
+			t.Errorf("precheck = %v", pre)
+		}
+		if code := a.run([]string{"resident", "update", "CI", "--precheck-timeout", "30"}); code != 2 {
+			t.Errorf("exit %d: %s", code, out)
+		}
+	})
 	t.Run("runは手動実行を送り再試行用のrequestIdを付ける", func(t *testing.T) {
 		g := &residentGateway{tasks: []map[string]any{{"id": "task_aaaa1111", "name": "CI", "state": "idle"}}}
 		a, _ := newResidentApp(t, g)

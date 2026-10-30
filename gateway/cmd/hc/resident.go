@@ -33,14 +33,18 @@ type resTask struct {
 	Permissions json.RawMessage `json:"permissions"`
 	Notify      json.RawMessage `json:"notify"`
 	Limits      json.RawMessage `json:"limits"`
-	Enabled     bool            `json:"enabled"`
-	PausedUntil *time.Time      `json:"pausedUntil"`
-	Version     int64           `json:"version"`
-	State       string          `json:"state"`
-	NextRunAt   *time.Time      `json:"nextRunAt"`
-	LastSuccess *time.Time      `json:"lastSuccessAt"`
-	Unread      int             `json:"unread"`
-	Attention   string          `json:"attention"`
+	Precheck    *struct {
+		Command        string `json:"command"`
+		TimeoutSeconds int    `json:"timeoutSeconds"`
+	} `json:"precheck"`
+	Enabled     bool       `json:"enabled"`
+	PausedUntil *time.Time `json:"pausedUntil"`
+	Version     int64      `json:"version"`
+	State       string     `json:"state"`
+	NextRunAt   *time.Time `json:"nextRunAt"`
+	LastSuccess *time.Time `json:"lastSuccessAt"`
+	Unread      int        `json:"unread"`
+	Attention   string     `json:"attention"`
 	LastRun     *struct {
 		ID, Status, Outcome, Summary, Error string
 	} `json:"lastRun"`
@@ -263,6 +267,9 @@ func (a *app) resShow(args []string) error {
 		fmt.Fprintln(a.out, "next:", strings.Join(next, ", "))
 	}
 	fmt.Fprintf(a.out, "permissions: %s  notify: %s  limits: %s\n", d.Permissions, d.Notify, d.Limits)
+	if p := d.Precheck; p != nil {
+		fmt.Fprintf(a.out, "precheck (%ds; exit 0 = run the agent, 1 = skip):\n  %s\n", p.TimeoutSeconds, strings.ReplaceAll(p.Command, "\n", "\n  "))
+	}
 	fmt.Fprintf(a.out, "instruction:\n  %s\n", strings.ReplaceAll(d.Instruction, "\n", "\n  "))
 	if detail.Memory.Summary != "" || len(detail.Memory.State) > 0 {
 		fmt.Fprintf(a.out, "memory (v%d): %s\n", detail.Memory.Version, detail.Memory.Summary)
@@ -317,8 +324,8 @@ type taskFlags struct {
 	instrFile, daily, weekly, cron, once, tz, profile *string
 	manual, trust, enable, disable                    *bool
 	allow                                             *multiFlag
-	notify                                            *string
-	maxMinutes, maxRuns                               *int
+	notify, precheck                                  *string
+	maxMinutes, maxRuns, precheckTimeout              *int
 }
 
 type multiFlag []string
@@ -350,6 +357,8 @@ func newTaskFlags(name string) *taskFlags {
 	f.disable = fs.Bool("disable", false, "")
 	f.maxMinutes = fs.Int("max-minutes", 0, "")
 	f.maxRuns = fs.Int("max-runs-per-day", 0, "")
+	f.precheck = fs.String("precheck", "", "")
+	f.precheckTimeout = fs.Int("precheck-timeout", 0, "")
 	fs.Var(f.allow, "allow", "")
 	return f
 }
@@ -461,6 +470,22 @@ func (f *taskFlags) body(set map[string]bool) (map[string]any, error) {
 			lim["maxRunsPerDay"] = *f.maxRuns
 		}
 		m["limits"] = lim
+	}
+	if set["precheck"] || set["precheck-timeout"] {
+		pre, _ := m["precheck"].(map[string]any)
+		if pre == nil {
+			if !set["precheck"] {
+				return nil, usagef("--precheck-timeout needs --precheck CMD too")
+			}
+			pre = map[string]any{}
+		}
+		if set["precheck"] {
+			pre["command"] = *f.precheck
+		}
+		if set["precheck-timeout"] {
+			pre["timeoutSeconds"] = *f.precheckTimeout
+		}
+		m["precheck"] = pre
 	}
 	if set["trust"] {
 		m["trust"] = true
