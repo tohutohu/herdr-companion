@@ -1,6 +1,7 @@
 package com.tohutohu.herdrcompanion.ui.resident
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -28,14 +29,13 @@ fun ResidentHomeEntry(onOpenTask: (String) -> Unit, onCreate: () -> Unit) {
 fun ResidentTaskEntry(taskId: String, fromNotification: Boolean, onBack: () -> Unit, onEdit: (String) -> Unit, onDeleted: () -> Unit) {
     val context = LocalContext.current
     val backend = remember(context.container.settings.current.connectionId) { context.container.residentBackend() }
-    remember(taskId) { Notifications.cancelResident(context, taskId) }
+    LaunchedEffect(taskId) { Notifications.cancelResident(context, taskId) }
     ResidentTaskScreen(
         backend = backend,
         taskId = taskId,
         onBack = onBack,
         onEdit = onEdit,
         onDeleted = onDeleted,
-        initialTab = 0.takeIf { fromNotification } ?: 0,
     )
 }
 
