@@ -21,7 +21,8 @@ import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
-class GatewayException(val code: Int, message: String) : IOException(message)
+/** [reason] is the gateway's error code when it sends one (resident API: invalid, conflict, trust_required, …). */
+class GatewayException(val code: Int, message: String, val reason: String? = null) : IOException(message)
 
 data class DownloadMetadata(
     val mimeType: String,
@@ -77,9 +78,8 @@ class GatewayApi(
     private fun bodyOrThrow(resp: Response): String {
         val body = resp.body.string()
         if (!resp.isSuccessful) {
-            val msg = runCatching { json.decodeFromString<ErrorResponse>(body).error }.getOrNull()
-                ?: "HTTP ${resp.code}"
-            throw GatewayException(resp.code, msg)
+            val err = runCatching { json.decodeFromString<ResidentErrorResponse>(body) }.getOrNull()
+            throw GatewayException(resp.code, err?.error?.takeIf { it.isNotEmpty() } ?: "HTTP ${resp.code}", err?.code)
         }
         return body
     }
@@ -387,6 +387,78 @@ class GatewayApi(
     suspend fun unregisterDevice(token: String) {
         execute(request(url("v1", "devices", query = mapOf("fcmToken" to token))).delete().build())
     }
+
+    // --- resident tasks (常駐) ---
+
+    /** What the gateway offers; a gateway too old to answer offers nothing beyond sessions. */
+    suspend fun capabilities(): CapabilitiesDto = try {
+        get(url("v1", "capabilities"))
+    } catch (error: GatewayException) {
+        if (error.code == 404) CapabilitiesDto() else throw error
+    }
+
+    private fun jsonBody(v: String) = v.toRequestBody(jsonType)
+
+    suspend fun residentTasks(): List<ResidentTaskDto> = get<ResidentTasksResponse>(url("v1", "resident", "tasks")).tasks
+
+    suspend fun residentTask(id: String): ResidentTaskDetailDto = get(url("v1", "resident", "tasks", id))
+
+    suspend fun createResidentTask(body: ResidentTaskRequest): ResidentTaskDto =
+        json.decodeFromString(post(url("v1", "resident", "tasks"), jsonBody(json.encodeToString(body))))
+
+    suspend fun updateResidentTask(id: String, body: ResidentTaskRequest): ResidentTaskDto =
+        json.decodeFromString(execute(request(url("v1", "resident", "tasks", id)).patch(jsonBody(json.encodeToString(body))).build()))
+
+    suspend fun deleteResidentTask(id: String) {
+        execute(request(url("v1", "resident", "tasks", id)).delete().build())
+    }
+
+    suspend fun setResidentEnabled(id: String, enabled: Boolean): ResidentTaskDto =
+        json.decodeFromString(post(url("v1", "resident", "tasks", id, if (enabled) "resume" else "pause"), jsonBody("{}")))
+
+    suspend fun runResidentNow(id: String, requestId: String): ResidentPostResultDto =
+        json.decodeFromString(post(url("v1", "resident", "tasks", id, "runs"), jsonBody(json.encodeToString(ResidentRequestId(requestId)))))
+
+    suspend fun residentMessages(id: String, limit: Int = 100): ResidentMessagesResponse =
+        get(url("v1", "resident", "tasks", id, "messages", query = mapOf("limit" to "$limit")))
+
+    suspend fun postResidentMessage(id: String, text: String, requestId: String): ResidentPostResultDto =
+        json.decodeFromString(post(url("v1", "resident", "tasks", id, "messages"), jsonBody(json.encodeToString(ResidentTextRequest(text, requestId)))))
+
+    suspend fun markResidentRead(id: String) {
+        post(url("v1", "resident", "tasks", id, "read"), jsonBody(json.encodeToString(ResidentReadRequest())))
+    }
+
+    suspend fun residentRuns(id: String, limit: Int = 50): ResidentRunsResponse =
+        get(url("v1", "resident", "tasks", id, "runs", query = mapOf("limit" to "$limit")))
+
+    suspend fun residentRun(runId: String): ResidentRunDto = get(url("v1", "resident", "runs", runId))
+
+    /** [action] is cancel (stop that run only) or dismiss (close a run whose outcome is unknown). */
+    suspend fun residentRunAction(runId: String, action: String): ResidentRunDto = withContext(Dispatchers.IO) {
+        // Stopping waits for the agent to end; allow for it.
+        val req = request(url("v1", "resident", "runs", runId, action)).post(jsonBody("{}")).build()
+        val slow = http.newBuilder().readTimeout(70, TimeUnit.SECONDS).callTimeout(80, TimeUnit.SECONDS).build()
+        slow.newCall(req).awaitBody { resp -> json.decodeFromString(bodyOrThrow(resp)) }
+    }
+
+    suspend fun answerResidentQuestion(questionId: String, text: String, requestId: String): ResidentPostResultDto =
+        json.decodeFromString(post(url("v1", "resident", "questions", questionId, "answers"), jsonBody(json.encodeToString(ResidentTextRequest(text, requestId)))))
+
+    suspend fun residentMemory(id: String): MemoryDto = get(url("v1", "resident", "tasks", id, "memory"))
+
+    suspend fun putResidentMemory(id: String, body: MemoryUpdateRequest): MemoryDto =
+        json.decodeFromString(execute(request(url("v1", "resident", "tasks", id, "memory")).put(jsonBody(json.encodeToString(body))).build()))
+
+    suspend fun residentArtifacts(id: String): List<ArtifactDto> =
+        get<ArtifactsResponse>(url("v1", "resident", "tasks", id, "artifacts")).artifacts
+
+    /** An artifact's content as text (files the gateway serves inline, up to its size limit). */
+    suspend fun residentArtifactText(artifactId: String): String =
+        execute(request(url("v1", "resident", "artifacts", artifactId, "content")).get().build())
+
+    suspend fun previewSchedule(schedule: ScheduleDto): SchedulePreviewDto =
+        json.decodeFromString(post(url("v1", "resident", "schedule", "preview"), jsonBody(json.encodeToString(SchedulePreviewRequest(schedule)))))
 
     companion object {
         /** Percent-encodes a file name for the ext-value of Content-Disposition. */

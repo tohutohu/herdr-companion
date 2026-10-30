@@ -25,6 +25,9 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.tasks.await
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import com.tohutohu.herdrcompanion.data.api.GatewayApi
+import com.tohutohu.herdrcompanion.data.api.ResidentGatewayBackend
+import com.tohutohu.herdrcompanion.ui.resident.ResidentBackend
+import com.tohutohu.herdrcompanion.ui.resident.ResidentHomeState
 import com.tohutohu.herdrcompanion.data.db.AppDatabase
 import com.tohutohu.herdrcompanion.data.db.SessionEntity
 import com.tohutohu.herdrcompanion.push.Notifications
@@ -32,6 +35,7 @@ import com.tohutohu.herdrcompanion.push.PushRegistration
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -92,6 +96,25 @@ class AppContainer(private val app: Application) {
     val sessions: StateFlow<List<SessionEntity>?> =
         repository.observeSessions().stateIn(scope, SharingStarted.WhileSubscribed(5_000), null)
     val pushRegistration = PushRegistration(app, api, scope)
+
+    private var resident: Pair<String, ResidentGatewayBackend>? = null
+
+    /**
+     * The resident (常駐) tab's backend and list state for the current
+     * connection. A different connection gets a new backend and an empty
+     * state, so tasks of two gateways never mix.
+     */
+    @Synchronized
+    fun residentBackend(): ResidentBackend {
+        val s = settings.current
+        val key = s.connectionId + "|" + s.gatewayUrl.trim()
+        resident?.takeIf { it.first == key }?.let { return it.second }
+        residentHome.value = ResidentHomeState()
+        return ResidentGatewayBackend(GatewayApi(baseHttp) { s }, key).also { resident = key to it }
+    }
+
+    /** The task list as last loaded, kept while the app lives so the tab renders at once. */
+    val residentHome = MutableStateFlow(ResidentHomeState())
     val downloads = FileDownloads(app, api, scope)
 
     /** Existing connections change only after a process restart, preventing mixed caches/jobs/FCM. */

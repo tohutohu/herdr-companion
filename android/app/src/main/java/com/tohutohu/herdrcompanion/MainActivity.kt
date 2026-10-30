@@ -20,6 +20,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 class MainActivity : ComponentActivity() {
     /** Session to open, set from notification taps. */
     private val pendingSession = MutableStateFlow<String?>(null)
+    /** Resident task to open, set from notification taps. */
+    private val pendingResident = MutableStateFlow<String?>(null)
 
     private val notificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -42,10 +44,13 @@ class MainActivity : ComponentActivity() {
             val themeMode by settings.themeMode.collectAsState()
             HerdrTheme(themeMode) {
                 val open by pendingSession.collectAsState()
+                val openResident by pendingResident.collectAsState()
                 AppNavigation(
                     start = if (settings.current.isConfigured) SessionsRoute else SettingsRoute,
                     openSession = open,
                     onSessionOpened = { pendingSession.value = null },
+                    openResidentTask = openResident,
+                    onResidentTaskOpened = { pendingResident.value = null },
                 )
             }
         }
@@ -59,6 +64,12 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIntent(intent: Intent?) {
         if (intent?.getStringExtra("connection_id").orEmpty() != container.settings.current.connectionId) return
+        intent?.getStringExtra(Notifications.EXTRA_RESIDENT_TASK)?.let { task ->
+            intent.removeExtra(Notifications.EXTRA_RESIDENT_TASK)
+            Notifications.cancelResident(this, task)
+            pendingResident.value = task
+            return
+        }
         val id = intent?.getStringExtra(Notifications.EXTRA_SESSION_ID) ?: return
         intent.removeExtra(Notifications.EXTRA_SESSION_ID)
         Notifications.cancel(this, id)

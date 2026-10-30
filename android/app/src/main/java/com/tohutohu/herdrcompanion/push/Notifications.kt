@@ -25,6 +25,12 @@ object Notifications {
     const val CHANNEL_ERRORS = "errors"
     /** Background syncing: must never interrupt, unlike the session channels. */
     const val CHANNEL_SYNC = "sync"
+    /** Reports of resident tasks (常駐); questions and failures use the attention and error channels. */
+    const val CHANNEL_RESIDENT = "resident"
+    const val EXTRA_RESIDENT_TASK = "resident_task_id"
+    private const val TAG_RESIDENT = "resident"
+    private const val SEEN_PREFS = "resident_notifications"
+    private const val SEEN_KEEP = 64
     const val EXTRA_SESSION_ID = "session_id"
     const val EXTRA_STATUS = "status"
     const val EXTRA_TITLE = "title"
@@ -44,6 +50,7 @@ object Notifications {
                 NotificationChannel(CHANNEL_ATTENTION, "Needs attention", NotificationManager.IMPORTANCE_HIGH),
                 NotificationChannel(CHANNEL_ERRORS, "Errors", NotificationManager.IMPORTANCE_HIGH),
                 NotificationChannel(CHANNEL_SYNC, "Syncing", NotificationManager.IMPORTANCE_LOW),
+                NotificationChannel(CHANNEL_RESIDENT, "常駐タスクの報告", NotificationManager.IMPORTANCE_HIGH),
             ),
         )
         RETIRED_CHANNELS.forEach { nm.deleteNotificationChannel(it) }
@@ -156,6 +163,65 @@ object Notifications {
 
     fun cancel(context: Context, sessionId: String) {
         NotificationManagerCompat.from(context).cancel(sessionId.hashCode())
+    }
+
+    fun residentChannel(kind: String): String = when (kind) {
+        "question" -> CHANNEL_ATTENTION
+        "failure" -> CHANNEL_ERRORS
+        else -> CHANNEL_RESIDENT
+    }
+
+    fun residentIntent(context: Context, taskId: String): PendingIntent {
+        val intent = Intent(context, MainActivity::class.java)
+            .setAction(Intent.ACTION_VIEW)
+            .putExtra(EXTRA_RESIDENT_TASK, taskId)
+            .putExtra("connection_id", context.container.settings.current.connectionId)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        return PendingIntent.getActivity(
+            context,
+            ("resident:$taskId").hashCode(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
+    /**
+     * Shows a resident task's report. One notification per task (a newer
+     * one replaces it); an entry the gateway delivers again with the same
+     * [notificationId] is not shown a second time. The task's conversation in
+     * the app is the record, not the notification.
+     */
+    fun showResident(context: Context, taskId: String, notificationId: String, kind: String, title: String, body: String): Boolean {
+        if (!markShown(context, notificationId)) return false
+        val n = NotificationCompat.Builder(context, residentChannel(kind))
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setAutoCancel(true)
+            .setCategory(if (kind == "question") NotificationCompat.CATEGORY_REMINDER else NotificationCompat.CATEGORY_STATUS)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(residentIntent(context, taskId))
+            .build()
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            return true
+        }
+        NotificationManagerCompat.from(context).notify(TAG_RESIDENT, taskId.hashCode(), n)
+        return true
+    }
+
+    fun cancelResident(context: Context, taskId: String) {
+        NotificationManagerCompat.from(context).cancel(TAG_RESIDENT, taskId.hashCode())
+    }
+
+    /** Records [notificationId] as shown; false when it already was. */
+    @Synchronized
+    internal fun markShown(context: Context, notificationId: String): Boolean {
+        val prefs = context.getSharedPreferences(SEEN_PREFS, Context.MODE_PRIVATE)
+        val seen = prefs.getString("ids", "").orEmpty().split('\n').filter { it.isNotEmpty() }
+        if (notificationId in seen) return false
+        prefs.edit().putString("ids", (seen + notificationId).takeLast(SEEN_KEEP).joinToString("\n")).apply()
+        return true
     }
 }
 

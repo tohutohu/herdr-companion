@@ -38,3 +38,18 @@ data object ArchivedRoute : Route
 
 @Serializable
 data class StartingRoute(val startId: String) : Route
+
+/** The 常駐 tab's home: the resident task list. */
+@Serializable
+data object ResidentHomeRoute : Route
+
+@Serializable
+data class ResidentTaskRoute(
+    val taskId: String,
+    /** Opened from a notification: show the conversation. */
+    val fromNotification: Boolean = false,
+) : Route
+
+/** Creates a task (null) or edits one. */
+@Serializable
+data class ResidentFormRoute(val taskId: String? = null) : Route

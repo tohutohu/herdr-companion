@@ -36,6 +36,10 @@ class PushService : FirebaseMessagingService() {
         val data = message.data
         val configured = container.settings.current
         if (configured.gatewayId.isNotEmpty() && data["gatewayId"] != configured.gatewayId) return
+        if (data["type"] == "resident") {
+            showResidentPush(data)
+            return
+        }
         val sessionId = data["sessionId"] ?: return
         val status = data["status"].orEmpty()
         Notifications.show(
@@ -54,6 +58,20 @@ class PushService : FirebaseMessagingService() {
             }
         }
         PrefetchWorker.enqueue(this, sessionId)
+    }
+
+    /** A resident task's report: {type: resident, taskId, runId, notificationId, kind, title, body}. */
+    private fun showResidentPush(data: Map<String, String>) {
+        val taskId = data["taskId"] ?: return
+        val notificationId = data["notificationId"] ?: return
+        Notifications.showResident(
+            this,
+            taskId = taskId,
+            notificationId = notificationId,
+            kind = data["kind"].orEmpty(),
+            title = data["title"] ?: "常駐タスク",
+            body = data["body"].orEmpty(),
+        )
     }
 
     override fun onNewToken(token: String) {
