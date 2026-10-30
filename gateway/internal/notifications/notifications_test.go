@@ -535,3 +535,61 @@ func TestFCMのHTTPv1APIへデータメッセージを送る(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+type lockedSessions struct {
+	mu   sync.Mutex
+	list []model.Session
+}
+
+func (f *lockedSessions) LiveSessions(context.Context) ([]model.Session, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]model.Session(nil), f.list...), nil
+}
+
+func (f *lockedSessions) set(s model.Session) {
+	f.mu.Lock()
+	f.list = []model.Session{s}
+	f.mu.Unlock()
+}
+
+func TestHerdrがなくても直接管理の変化で再評価し完了を一度だけ通知する(t *testing.T) {
+	ls := &lockedSessions{}
+	sender := &fakeSender{}
+	store, _ := config.Load(filepath.Join(t.TempDir(), "config.json"))
+	store.UpsertDevice("Pixel", "tok-1")
+	// Resync is long: only Kick can trigger the evaluations below.
+	w := &Watcher{Sessions: ls, Sender: sender, Config: store, Sink: deadletter.Nop{}, Debounce: time.Millisecond, Resync: time.Hour}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	direct := func(st model.Status, rev string) model.Session {
+		s := sess(st)
+		s.Backend, s.CompletionRevision = model.BackendDirect, rev
+		return s
+	}
+	ls.set(direct(model.StatusIdle, "r#0"))
+	go w.Run(ctx)
+	pushed := func() int {
+		sender.mu.Lock()
+		defer sender.mu.Unlock()
+		return len(sender.sent)
+	}
+	step := func(s model.Session) {
+		ls.set(s)
+		w.Kick()
+		time.Sleep(50 * time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond)
+	step(direct(model.StatusRunning, "r#0"))
+	step(direct(model.StatusCompleted, "r#1"))
+	step(direct(model.StatusCompleted, "r#1")) // 同じ完了の再評価
+	step(direct(model.StatusIdle, "r#1"))      // 既読
+	if n := pushed(); n != 1 {
+		t.Fatalf("pushes = %d, want 1", n)
+	}
+	// 実行中の観測が抜けても新しいターンの完了は通知する
+	step(direct(model.StatusCompleted, "r#2"))
+	if n := pushed(); n != 2 {
+		t.Fatalf("pushes = %d, want 2", n)
+	}
+}

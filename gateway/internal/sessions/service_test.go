@@ -3,13 +3,17 @@ package sessions
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/herdr"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/runtime"
 )
+
+func str(s string) *string { return &s }
 
 func TestHerdrの状態を共通ステータスに正規化する(t *testing.T) {
 	live := func(s string) *providers.Live { return &providers.Live{PaneID: "w1:p1", HerdrStatus: s} }
@@ -268,4 +272,78 @@ func Test一覧は稼働中セッションの要約と最近のセッション�
 	if r.err != nil || len(r.list) != 3 {
 		t.Fatalf("list=%v err=%v", r.list, r.err)
 	}
+}
+
+func Test稼働中の直接管理と休眠中の記録が重なるときは動いている側を選ぶ(t *testing.T) {
+	snap := &herdr.Snapshot{Panes: []herdr.Pane{{
+		PaneID: "w1:p1", Agent: str("claude"), AgentStatus: herdr.StatusIdle,
+		AgentSession: &herdr.AgentSession{Agent: "claude", Kind: "id", Value: "s1"},
+	}}}
+	rt := &directStub{infos: map[string]providers.DirectInfo{}}
+	svc := New(fixedSnapshot{snap}, time.Hour, rt)
+	m, err := runtime.New(filepath.Join(t.TempDir(), "d.json"), time.Hour, rt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.Direct = m
+	ctx := context.Background()
+	m.Start(ctx, "claude", providers.DirectStart{Cwd: "/w"})
+
+	// 直接管理のプロセスが動いていればそちらを操作対象にする
+	r, _ := svc.Resolve(ctx, "claude:s1")
+	if !r.Live.IsDirect() || r.Live.Dormant {
+		t.Fatalf("live = %+v", r.Live)
+	}
+	// 止まった記録よりHerdrのペインで動いている方を選ぶ
+	m.Stop(ctx, "claude:s1")
+	r, _ = svc.Resolve(ctx, "claude:s1")
+	if r.Live.IsDirect() || r.Live.PaneID != "w1:p1" {
+		t.Fatalf("live = %+v", r.Live)
+	}
+	// Herdrが止まっていても直接管理のセッションは一覧に出る
+	svc = New(failingSnapshot{}, time.Hour, rt)
+	svc.Direct = m
+	list, err := svc.LiveSessions(ctx)
+	if err != nil || len(list) != 1 || list[0].Backend != model.BackendDirect || !list[0].CanSend {
+		t.Fatalf("live sessions = %+v, %v", list, err)
+	}
+}
+
+type failingSnapshot struct{}
+
+func (failingSnapshot) Snapshot(context.Context) (*herdr.Snapshot, error) {
+	return nil, errors.New("herdr is not running")
+}
+
+// directStub is a claude provider with a direct runtime.
+type directStub struct {
+	stubProvider
+	infos map[string]providers.DirectInfo
+}
+
+func (d *directStub) Summary(_ context.Context, id string, live *providers.Live) (*providers.Summary, error) {
+	return &providers.Summary{NativeID: id, Cwd: "/w"}, nil
+}
+func (d *directStub) DirectStart(_ context.Context, o providers.DirectStart) (string, error) {
+	d.infos["s1"] = providers.DirectInfo{NativeID: "s1", Cwd: o.Cwd, Alive: true}
+	return "s1", nil
+}
+func (d *directStub) DirectStop(context.Context, string) error {
+	in := d.infos["s1"]
+	in.Alive = false
+	d.infos["s1"] = in
+	return nil
+}
+func (d *directStub) DirectInterrupt(context.Context, string) error         { return nil }
+func (d *directStub) DirectSetModel(context.Context, string, string) error  { return nil }
+func (d *directStub) DirectSetEffort(context.Context, string, string) error { return nil }
+func (d *directStub) DirectSetMode(context.Context, string, string) error   { return nil }
+func (d *directStub) SettingsApply() string                                 { return providers.ApplyNextTurn }
+func (d *directStub) SetDirectListener(func(string))                        {}
+func (d *directStub) DirectSessions() []providers.DirectInfo {
+	var out []providers.DirectInfo
+	for _, in := range d.infos {
+		out = append(out, in)
+	}
+	return out
 }
