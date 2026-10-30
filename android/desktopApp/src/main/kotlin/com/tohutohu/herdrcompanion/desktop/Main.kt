@@ -953,6 +953,7 @@ internal fun DesktopSessionContent(
                 onPasteImage = { state.addClipboardImage(sessionId) },
                 headerModifier = headerModifier,
                 extraMenuItems = extraMenuItems,
+                drafts = desktopComposerDrafts,
                 onAction = { action -> handleDetailAction(state, api, window, sessionId, action) },
             )
         }

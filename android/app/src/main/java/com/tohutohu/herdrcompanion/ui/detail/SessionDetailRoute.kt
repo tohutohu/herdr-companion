@@ -122,6 +122,7 @@ fun SessionDetailRoute(
                 DateUtils.formatDateTime(context, at, DateUtils.FORMAT_SHOW_TIME or date)
             },
             resolveAttachmentPreview = { id -> id.toUri() },
+            drafts = context.container.composerDrafts,
             onAction = { action ->
                 when (action) {
                     SessionDetailAction.Back -> onBack()

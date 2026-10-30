@@ -135,6 +135,8 @@ fun SessionDetailScreen(
      * With them the menu is shown even before the session has loaded.
      */
     extraMenuItems: (@Composable ColumnScope.(dismiss: () -> Unit) -> Unit)? = null,
+    /** Unsent composer text per session, kept while the session is closed. */
+    drafts: ComposerDrafts = remember { ComposerDrafts() },
     onAction: (SessionDetailAction) -> Unit,
 ) {
     val session = state.session
@@ -394,6 +396,8 @@ fun SessionDetailScreen(
                     ResumeBar(busy = state.actionBusy, onResume = { onAction(SessionDetailAction.Resume) })
                 } else {
                     Composer(
+                        sessionId = state.sessionId,
+                        drafts = drafts,
                         enabled = session?.canSend == true && !answering,
                         busy = answering,
                         attachments = state.attachments,
@@ -602,6 +606,8 @@ private suspend fun LazyListState.showNewestFromStart(index: Int, panelHeight: (
 
 @Composable
 private fun Composer(
+    sessionId: String,
+    drafts: ComposerDrafts,
     enabled: Boolean,
     busy: Boolean,
     attachments: List<AttachmentUiState>,
@@ -614,7 +620,13 @@ private fun Composer(
     onPasteImage: (() -> Boolean)?,
     onAction: (SessionDetailAction) -> Unit,
 ) {
-    var text by rememberSaveable { mutableStateOf("") }
+    // Read back from the drafts, so it survives the session being left, going
+    // offline (the resume bar replaces the composer) or the app restarting.
+    var text by remember(sessionId, drafts) { mutableStateOf(drafts[sessionId]) }
+    fun edit(value: String) {
+        text = value
+        drafts[sessionId] = value
+    }
     // No bar of its own: the field floats on the conversation's background as
     // one filled pill, with attach and send inside it.
     Surface(
@@ -655,7 +667,7 @@ private fun Composer(
                 val clear = Color.Transparent
                 TextField(
                     value = text,
-                    onValueChange = { text = it },
+                    onValueChange = { edit(it) },
                     enabled = enabled,
                     textStyle = MaterialTheme.typography.bodyMedium.copy(letterSpacing = 0.sp),
                     placeholder = {
@@ -689,7 +701,7 @@ private fun Composer(
                                 false
                             } else if (enabled && (text.isNotBlank() || attachments.isNotEmpty())) {
                                 onAction(SessionDetailAction.Send(text))
-                                text = ""
+                                edit("")
                                 true
                             } else {
                                 false
@@ -705,7 +717,7 @@ private fun Composer(
                             enabled = enabled && (text.isNotBlank() || attachments.isNotEmpty()),
                             onClick = {
                                 onAction(SessionDetailAction.Send(text))
-                                text = ""
+                                edit("")
                             },
                         ) { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send") }
                     }

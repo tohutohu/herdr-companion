@@ -12,6 +12,7 @@ import com.tohutohu.herdrcompanion.data.Outbox
 import com.tohutohu.herdrcompanion.data.SessionRepository
 import com.tohutohu.herdrcompanion.data.SettingsStore
 import com.tohutohu.herdrcompanion.data.Settings
+import com.tohutohu.herdrcompanion.data.fileComposerDrafts
 import com.tohutohu.herdrcompanion.dictate.DictateContextHandler
 import com.tohutohu.herdrcompanion.dictate.DictateFieldRegistry
 import com.tohutohu.herdrcompanion.dictate.ProjectVocabularyStore
@@ -49,6 +50,7 @@ class AppContainer(private val app: Application) {
     val directoryShortcuts = DirectoryShortcutsStore(app)
     val agentPresets = AgentPresetsStore(app)
     val projectVocabulary = ProjectVocabularyStore(java.io.File(app.filesDir, "dictate/project-vocabulary.json"))
+    val composerDrafts = fileComposerDrafts(java.io.File(app.filesDir, "composer-drafts.json"), scope)
     val dictateFields = DictateFieldRegistry()
     val dictateContexts = DictateContextHandler(projectVocabulary, dictateFields)
 
