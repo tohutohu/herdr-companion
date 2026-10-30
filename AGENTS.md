@@ -77,7 +77,10 @@ Screens are shown with Navigation 3 (`ui/AppNavigation.kt`): the back stack is a
 
 ```bash
 launchctl list | grep herdr-mobile
-# Gateway updates (quit the menu-bar app before replacing its signed bundle):
+# Build and install both Mac apps; the Gateway swap waits until no session is running or waiting
+# (it would end their turns, including an agent running this from the production Gateway):
+scripts/update-local-apps.sh            # --gateway / --ui for one app; log: /tmp/herdr-gateway-swap.log
+# The manual steps for a Gateway update (quit the menu-bar app before replacing its signed bundle):
 osascript -e 'tell application id "com.tohutohu.herdrcompanion.gateway" to quit'
 bash macos/scripts/build-dmg.sh
 ditto "macos/build/Herdr Companion Gateway.app" "/Applications/Herdr Companion Gateway.app"
