@@ -66,6 +66,11 @@ jobs:
         with:
           go-version: "1.27.x"
 
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+
       - name: Run Android and shared regression checks
         working-directory: android
         run: ./gradlew --console=plain test assembleDebug
@@ -75,6 +80,12 @@ jobs:
         run: |
           env -u GOROOT go test ./...
           env -u GOROOT go vet ./...
+
+      - name: Check Claude sidecar
+        working-directory: gateway/claude-sidecar
+        run: |
+          bun install --frozen-lockfile
+          bun run typecheck
 
       - name: Run Gateway Manager checks
         working-directory: macos

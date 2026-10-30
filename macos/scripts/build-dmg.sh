@@ -45,6 +45,20 @@ cp "$ROOT/macos/assets/Herdr.icns" "$APP/Contents/Resources/Herdr.icns"
   env -u GOROOT go build -trimpath -o "$APP/Contents/Resources/herdr-mobile-gateway" ./cmd/herdr-mobile-gateway
 )
 
+# The gateway runs Claude Code sessions through the Agent SDK in this sidecar.
+# Bun compiles it into one executable with its own runtime, so the app needs
+# no Node.js; the gateway finds it next to its own executable. Claude Code
+# itself is the user's installed CLI (~/.local/bin/claude), not bundled.
+if ! command -v bun >/dev/null; then
+  echo "bun is required to build herdr-claude-sidecar (https://bun.sh)" >&2
+  exit 1
+fi
+(
+  cd "$ROOT/gateway/claude-sidecar"
+  bun install --frozen-lockfile
+  bun build --compile --minify src/main.ts --outfile "$APP/Contents/Resources/herdr-claude-sidecar"
+)
+
 # The UI app is signed by Compose/jpackage. The SwiftUI companion and its Go
 # helper are signed here in the required nested-code order.
 IDENTITY="${MACOS_SIGNING_IDENTITY:-${SIGNING_IDENTITY:--}}"
@@ -57,6 +71,8 @@ if [[ -n "$KEYCHAIN" ]]; then
   sign_args+=(--keychain "$KEYCHAIN")
 fi
 codesign "${sign_args[@]}" --sign "$IDENTITY" "$APP/Contents/Resources/herdr-mobile-gateway"
+codesign "${sign_args[@]}" --entitlements "$ROOT/macos/assets/claude-sidecar.entitlements" \
+  --sign "$IDENTITY" "$APP/Contents/Resources/herdr-claude-sidecar"
 codesign "${sign_args[@]}" --sign "$IDENTITY" "$APP"
 codesign --verify --deep --strict "$APP"
 
