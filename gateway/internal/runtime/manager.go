@@ -331,7 +331,18 @@ func (m *Manager) Resume(ctx context.Context, id string, opts providers.DirectSt
 	lock := m.resumeLock(id)
 	lock.Lock()
 	defer lock.Unlock()
+	m.mu.Lock()
+	_, recorded := m.records[id]
+	m.mu.Unlock()
+	if !recorded {
+		// A session forgotten just now (archived) may still be closing: its
+		// input is shut, so wait for it to go before starting it again.
+		m.waitClosed(ctx, id)
+	}
 	if in, ok := m.info(id); ok && in.Alive {
+		if !recorded {
+			m.record(id, opts)
+		}
 		return nil
 	}
 	m.mu.Lock()
@@ -357,6 +368,23 @@ func (m *Manager) Resume(ctx context.Context, id string, opts providers.DirectSt
 	m.record(id, opts)
 	slog.Info("direct session resumed", "session_id", id, "operation", "runtime.resume", "cwd", opts.Cwd)
 	return nil
+}
+
+// closeWait bounds how long Resume waits for a stopping session to close.
+var closeWait = 10 * time.Second
+
+func (m *Manager) waitClosed(ctx context.Context, id string) {
+	deadline := time.Now().Add(closeWait)
+	for {
+		if in, ok := m.info(id); !ok || !in.Alive || time.Now().After(deadline) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
 }
 
 func (m *Manager) resumeLock(id string) *sync.Mutex {

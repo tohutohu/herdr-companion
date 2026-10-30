@@ -18,6 +18,9 @@ type fakeRuntime struct {
 	starts   []providers.DirectStart
 	models   []string
 	listener func(string)
+	// stopLate keeps a stopped session alive, as the sidecar does until it
+	// has closed it.
+	stopLate bool
 }
 
 func (f *fakeRuntime) Name() string        { return "claude" }
@@ -56,6 +59,9 @@ func (f *fakeRuntime) DirectStart(_ context.Context, opts providers.DirectStart)
 }
 
 func (f *fakeRuntime) DirectStop(_ context.Context, id string) error {
+	if f.stopLate {
+		return nil
+	}
 	f.set(id, func(in *providers.DirectInfo) { in.Alive = false })
 	return nil
 }
@@ -232,5 +238,42 @@ func Testモードを巡回しても再開用の記録には表示名を残さ�
 	m.EnsureRunning(ctx, id)
 	if last := rt.starts[len(rt.starts)-1]; last.Mode != "acceptEdits" {
 		t.Errorf("resume mode = %q", last.Mode)
+	}
+}
+
+func Testアーカイブ直後でまだ閉じていないセッションは閉じるのを待って再開する(t *testing.T) {
+	rt := &fakeRuntime{}
+	m, err := New(filepath.Join(t.TempDir(), "d.json"), time.Hour, rt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	id, _ := m.Start(ctx, "claude", providers.DirectStart{Cwd: "/w"})
+	// The sidecar closes a stopped session asynchronously: it still reports
+	// it alive right after Forget.
+	rt.stopLate = true
+	if err := m.Forget(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if m.Owns(id) {
+		t.Fatal("forgotten session still recorded")
+	}
+	// The old process goes a moment later.
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		rt.set("s1", func(in *providers.DirectInfo) { in.Alive = false })
+	}()
+	if err := m.Resume(ctx, id, providers.DirectStart{Cwd: "/w"}); err != nil {
+		t.Fatal(err)
+	}
+	if !m.Owns(id) {
+		t.Fatal("resumed session is not recorded")
+	}
+	if s, ok := m.Sessions()[id]; !ok || s.Live.Dormant {
+		t.Fatalf("resumed session is not running: %+v", s)
+	}
+	// A new process was started after the old one closed.
+	if n := len(rt.starts); n != 2 || rt.starts[1].Resume != "s1" {
+		t.Fatalf("starts = %+v", rt.starts)
 	}
 }
