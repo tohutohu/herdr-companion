@@ -2,7 +2,8 @@
 
 Herdr Companion: Go gateway on the Mac (`gateway/`) + native Android app (`android/`).
 The gateway runs Claude Code (Agent SDK sidecar, `gateway/claude-sidecar/`) and Codex (its own
-`codex app-server`) directly; Herdr is optional and only needed for its panes, OpenCode and Devin.
+`codex app-server`) directly. Since 2.0 these are the only agents and the only way sessions run:
+Herdr panes, OpenCode and Devin are no longer supported (agents may still use Herdr as a tool).
 Design: `docs/architecture.md`. Setup for humans: `README.md`.
 
 用語: 「Mac UI」はCompose Desktop版の`Herdr Companion.app`
@@ -66,7 +67,7 @@ Screens are shown with Navigation 3 (`ui/AppNavigation.kt`): the back stack is a
 
 | What | How | Notes |
 |---|---|---|
-| Herdr server | LaunchAgent `com.herdr-mobile.herdr-server` | from `gateway/deploy/*.plist` (placeholders replaced with `sed`, see README) |
+| Herdr server | LaunchAgent `com.herdr-mobile.herdr-server` | the user's own Herdr; the Gateway no longer uses it (2.0+) |
 | Gateway | `/Applications/Herdr Companion Gateway.app` (menu-bar app, login item) | bundled child process; `100.99.15.34:8765` |
 | Cloudflare tunnel | LaunchAgent `com.herdr-mobile.cloudflare-tunnel` | HTTPS route to the Gateway from outside the tailnet (`docs/api.md`) |
 
@@ -79,7 +80,6 @@ ditto "macos/build/Herdr Companion Gateway.app" "/Applications/Herdr Companion G
 open "/Applications/Herdr Companion Gateway.app"
 ```
 
-- Keep the Herdr server plist `PATH` minimal (`/usr/bin:/bin:/usr/sbin:/sbin`). With a long PATH, pane login shells put `/opt/homebrew/bin` first and start an old Homebrew `claude` (2.1.1), which rejects `~/.claude/settings.json`.
 - Restarting the Herdr server (`bootout`/`bootstrap`) kills the user's panes. Don't do it without asking.
 - Gateway LaunchAgent is retired; do not bootstrap it or update the old standalone binary for production. The menu-bar app auto-starts its bundled Gateway.
 - Gateway logs: `~/.local/state/herdr-mobile/desktop/gateway.log`. Dead letters: `~/.local/state/herdr-mobile/desktop/errors/*.jsonl`.
@@ -89,40 +89,30 @@ open "/Applications/Herdr Companion Gateway.app"
 - Active config: `~/.config/herdr-mobile/desktop/config.json`: auth token, FCM device tokens, optional `workspaceRoots` etc. Mode 600. For CLI diagnostics set `HERDR_MOBILE_CONFIG` to this path and use the app-bundled executable. The old root config is a migration backup, not active state.
 - FCM key (Firebase project `herdr-client-android`, SA `firebase-adminsdk-fbsvc`): the file named by `fcmCredentialsFile` in the active config (`~/.config/herdr-mobile/desktop/firebase-credentials-*.json`, written by `import-firebase`). The bundled Gateway is started without `GOOGLE_APPLICATION_CREDENTIALS`, so `desktop/firebase-service-account.json` is not what it reads.
 - `android/app/google-services.json`: gitignored. Shared APKs use Firebase settings received at QR pairing; only `-PbundleFirebase=true` embeds this file in a personal build.
-- Mac menu-bar app uses separate `~/.config/herdr-mobile/desktop/config.json` and `~/.local/state/herdr-mobile/desktop/`, port 8766 by default (this Mac retains 8765 after migration). It manages only its own bundled Gateway; never stops Herdr. Firebase and Jev keys are optional. See `macos/README.md`.
+- Mac menu-bar app uses separate `~/.config/herdr-mobile/desktop/config.json` and `~/.local/state/herdr-mobile/desktop/`, port 8766 by default (this Mac retains 8765 after migration). It manages only its own bundled Gateway. Firebase and Jev keys are optional. See `macos/README.md`.
 - Recreate them with `firebase` / `gcloud`. gcloud's default account is a work account, so always pass `--account tohu.soy@gmail.com --project herdr-client-android`. Don't change the gcloud config.
-- Herdr integrations are installed in `~/.claude/settings.json` and `~/.codex/hooks.json`. Codex needs the Herdr `SessionStart` hook marked trusted (Hooks review screen → `t`) or no session id is reported.
+- Old 1.x config keys (`herdrSocket`, `opencode`, `devin`, `codexDaemonSocket`) are ignored. The Herdr integrations in `~/.claude/settings.json` / `~/.codex/hooks.json` belong to the user's Herdr; leave them.
 
 ## Testing against real agents safely
 
-- Direct sessions need no Herdr: run a throwaway gateway with its own config/state
-  (`HERDR_MOBILE_CONFIG=…`, `HERDR_MOBILE_STATE_DIR=…`, `serve --listen 127.0.0.1:18799 --log-file …`),
-  `HERDR_CLAUDE_SIDECAR=gateway/claude-sidecar/dist/herdr-claude-sidecar`, and
-  `HERDR_SOCKET_PATH=<a path that does not exist>` to check behavior with Herdr stopped. Put
-  `workspaceRoots` on a scratch git repo. Remove the Claude Code env vars (list below) from the
-  gateway's environment; it also strips them for the agents it starts. Direct Claude sessions write
-  real transcripts under `~/.claude/projects/` for the scratch path, and Codex threads go to
-  `~/.codex/sessions`; use `claude` model `haiku` and a small Codex model with tiny prompts.
-- A direct start in a folder the agent never trusted returns `trustRequired`; pass `trust: true`.
-  It does not write any trust entry.
-- Use a separate Herdr session. Never experiment on the user's default session.
-- Start it with the Claude Code env vars removed. Otherwise the spawned Claude inherits `CLAUDE_CODE_CHILD_SESSION` and doesn't save transcripts.
+- Run a throwaway gateway with its own config/state
+  (`HERDR_MOBILE_CONFIG=…`, `HERDR_MOBILE_STATE_DIR=…`, `serve --listen 127.0.0.1:18799 --log-file …`)
+  and `HERDR_CLAUDE_SIDECAR=gateway/claude-sidecar/dist/herdr-claude-sidecar`. Put
+  `workspaceRoots` on a scratch git repo. Another session may already be using a port; pick your own.
+- Start it with the Claude Code env vars removed (the gateway also strips them for the agents it
+  starts; a Claude that inherits `CLAUDE_CODE_CHILD_SESSION` doesn't save transcripts):
   ```bash
   env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION \
       -u CLAUDE_CODE_EXECPATH -u CLAUDE_CODE_MESSAGING_SOCKET -u CLAUDE_CODE_MESSAGING_TOKEN \
-      herdr --session hmtest server          # run in background
-  HERDR_SESSION=hmtest herdr ...             # CLI against it
+      herdr-mobile-gateway serve --listen 127.0.0.1:18799 --log-file ""
   ```
-- Run a throwaway gateway with its own config/state (`HERDR_MOBILE_CONFIG=…`, `HERDR_MOBILE_STATE_DIR=…`, `HERDR_SESSION=hmtest`, `serve --listen 127.0.0.1:18765 --log-file ""`). Point `workspaceRoots` / `codexDaemonSocket` at scratch paths.
-- Inside a Herdr pane `HERDR_SOCKET_PATH` is already set and wins over `HERDR_SESSION`, so the gateway would silently attach to the user's default session. Pass `HERDR_SOCKET_PATH=~/.config/herdr/sessions/hmtest/herdr.sock` explicitly and check the `herdr_socket` field in the startup log. The CLI needs `herdr --session hmtest …` for the same reason.
-- Another session may already be using port 18765 or the `hmtest` name; pick your own when they are taken.
-- Use `claude --model haiku` for cheap runs.
-- Codex structured features need a shared app-server. For tests run `codex app-server --listen unix:///private/tmp/<dir>/cx.sock` and start the TUI with `codex --remote unix://…`. The socket's parent must be a real directory, not `/tmp` (a symlink). `-a untrusted` isn't accepted with `--remote`; use `-a on-request -s read-only` to force approvals. `request_user_input` only appears in Plan mode (`shift+tab` in the TUI).
-- Pane state inspection: `herdr pane read <pane> --source visible`, `herdr pane send-keys <pane> <keys>`.
-- Herdr's raw socket rejects JSON `null` for array params (the connection just closes). Send `[]`.
+- Claude sessions write real transcripts under `~/.claude/projects/` for the scratch path, and Codex
+  threads go to `~/.codex/sessions`; use `claude` model `haiku` and a small Codex model with tiny prompts.
+- A start in a folder the agent never trusted returns `trustRequired`; pass `trust: true`.
+  It does not write any trust entry.
+- `request_user_input` only appears in Codex's Plan mode (start with `mode: "plan"`).
 - Clean up afterwards:
-  - `herdr --session hmtest server stop`
-  - test workspaces
+  - the scratch config/state directories and test sessions (archive them)
   - folders created in `~/workspace`
   - `[projects."…"] trust_level` entries Codex adds to `~/.codex/config.toml`
 
@@ -141,14 +131,12 @@ open "/Applications/Herdr Companion Gateway.app"
 
 ## Conventions
 
-- Herdr API changes: run `herdr api schema --output /private/tmp/herdr-api-schema.json` and check request/response types and `protocol` before editing the client. `herdr api snapshot` reports live runtime state; do not rely only on CLI help or an older client struct.
-- Test names are in Japanese. Parser tests use fixtures in `gateway/testdata/{claude,codex,opencode}` (anonymized real data) with golden JSON.
+- Test names are in Japanese. Parser tests use fixtures in `gateway/testdata/{claude,codex}` (anonymized real data) with golden JSON.
 - New agent output formats: add the raw payload from dead letters as a fixture, then update the adapter.
 - Session costs are priced by `gateway/internal/pricing` from list rates as of
   2026-09; add a row when an agent starts using a new model (an unknown model
   is left unpriced, so the app then shows no cost).
 - Subscription limits come from the CodexBar CLI (`brew install --cask codexbar`); neither agent reports them itself. `herdr-mobile-gateway usage` prints one read.
-- Claude dialog key sequences and trust-dialog texts were verified against Claude Code 2.1.274 and Codex 0.154. Re-verify with a test session when those versions change.
 - Commit at each logical step. Commit messages end with the Co-Authored-By trailer; no "Generated with Claude Code" line.
 
 ## Android skills

@@ -220,7 +220,7 @@ struct SetupError: LocalizedError {
         for path in candidates where fm.isExecutableFile(atPath: path) {
             if let value = try? await Self.run(URL(fileURLWithPath: path), ["ip", "-4"], environment), validAddress(value) {
                 if address.isEmpty { address = value }
-                diagnostics = "Tailscale: \(value)（推奨）\nHerdrの起動とClaude/Codex integrationの設定を確認してください。"
+                diagnostics = "Tailscale: \(value)（推奨）\nClaude Code と Codex が Mac にインストールされログイン済みか確認してください。"
                 return
             }
         }
