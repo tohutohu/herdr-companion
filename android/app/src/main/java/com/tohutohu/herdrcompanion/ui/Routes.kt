@@ -31,9 +31,6 @@ data class FileRoute(val sessionId: String, val path: String, val line: Int = 0)
 data class ImageRoute(val url: String) : Route
 
 @Serializable
-data class TerminalRoute(val sessionId: String = "", val paneId: String? = null) : Route
-
-@Serializable
 data object NewSessionRoute : Route
 
 @Serializable

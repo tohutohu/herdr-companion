@@ -119,7 +119,6 @@ fun InteractionCard(
     interaction: InteractionDto,
     enabled: Boolean,
     onRespond: (InteractionResponseDto) -> Unit,
-    onOpenTerminal: () -> Unit,
 ) {
     val pending = interaction.isPending
     // An accepted answer keeps the card busy until the transcript reports it
@@ -164,10 +163,10 @@ fun InteractionCard(
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         when {
                             !open -> AnsweredSummary(interaction)
-                            !interaction.supported -> Unsupported(interaction, onOpenTerminal)
+                            !interaction.supported -> Unsupported(interaction)
                             interaction.type == "approval" -> Approval(interaction, active, if (responding) submitted?.decision else null, respond)
                             interaction.type == "questions" -> Questions(interaction, active, responding, respond)
-                            else -> Unsupported(interaction, onOpenTerminal)
+                            else -> Unsupported(interaction)
                         }
                     }
                 }
@@ -192,16 +191,15 @@ private fun AnsweredSummary(interaction: InteractionDto) {
     Text(summary, style = MaterialTheme.typography.bodySmall, color = Muted)
 }
 
+/** A prompt the app cannot answer, shown read-only. */
 @Composable
-private fun Unsupported(interaction: InteractionDto, onOpenTerminal: () -> Unit) {
+private fun Unsupported(interaction: InteractionDto) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("This interaction needs to be completed in the terminal.")
+        interaction.questions.forEach { Text("• ${it.question}", style = MaterialTheme.typography.bodySmall) }
         interaction.detail?.takeIf { it.isNotBlank() }?.let {
             Text(it, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
         }
-        OutlinedButton(onClick = onOpenTerminal, colors = outlinedButtonColors()) {
-            Text("Open Terminal to continue")
-        }
+        Text("This prompt can't be answered from the app.", style = MaterialTheme.typography.bodySmall, color = Muted)
     }
 }
 
@@ -227,7 +225,7 @@ private fun Approval(
     onRespond: (InteractionResponseDto) -> Unit,
 ) {
     val trust = interaction.kind == "trust"
-    if (trust) Text("Allow the agent to access the files in this folder? Stopping closes its pane.")
+    if (trust) Text("Allow the agent to access the files in this folder?")
     interaction.detail?.let {
         Text(it, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
     }

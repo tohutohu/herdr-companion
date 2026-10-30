@@ -66,7 +66,7 @@ class DesktopSessionSettingsTest {
         private fun session(): String {
             val pending = pendingModel?.let { ""","pendingModel":"$it","settingsApply":"next_request"""" }.orEmpty()
             return """{"id":"$SESSION_ID","provider":"claude","status":"running","updatedAt":"2026-10-30T00:00:00Z",""" +
-                """"canSend":true,"backend":"direct","model":"opus"$pending}"""
+                """"canSend":true,"model":"opus"$pending}"""
         }
 
         init {

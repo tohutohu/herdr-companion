@@ -58,7 +58,7 @@ data class SessionDetailUiState(
     val showBackButton: Boolean = true,
     val sendOnEnter: Boolean = false,
     val sendWithModifier: Boolean = false,
-    /** Model / effort changes for a session the gateway runs directly. */
+    /** Model / effort changes for a running session. */
     val settings: SessionSettingsUiState = SessionSettingsUiState(),
 )
 
@@ -84,7 +84,6 @@ sealed interface SessionDetailAction {
     data class OpenFile(val path: String, val line: Int) : SessionDetailAction
     data class OpenImage(val url: String) : SessionDetailAction
     data class OpenSession(val sessionId: String) : SessionDetailAction
-    data object OpenTerminal : SessionDetailAction
     data object PickImage : SessionDetailAction
     data object PickFile : SessionDetailAction
     data class RemoveAttachment(val id: String) : SessionDetailAction
@@ -98,7 +97,7 @@ sealed interface SessionDetailAction {
     data class SetModel(val model: String) : SessionDetailAction
     data class SetEffort(val effort: String) : SessionDetailAction
     data class SetMode(val mode: String) : SessionDetailAction
-    /** Stops the running turn of a session the gateway runs directly. */
+    /** Stops the running turn; the session stays. */
     data object Interrupt : SessionDetailAction
     data object Reload : SessionDetailAction
     data object PullRefresh : SessionDetailAction

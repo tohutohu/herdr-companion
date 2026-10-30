@@ -90,7 +90,7 @@ class PrefetchWorker(context: Context, params: WorkerParameters) : CoroutineWork
         val repo = applicationContext.container.repository
         return try {
             repo.refreshMessages(sessionId)
-            // Also brings Herdr's unread state for the session list.
+            // Also brings the unread state for the session list.
             runCatching { repo.refreshSessions() }
             Result.success()
         } catch (e: GatewayException) {

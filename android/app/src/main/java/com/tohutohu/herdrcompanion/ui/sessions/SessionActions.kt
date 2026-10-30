@@ -199,9 +199,9 @@ class SessionActions internal constructor(
             text = {
                 Text(
                     if (targets.size == 1) {
-                        "The agent is running. Its Herdr pane will be closed. You can resume the session later."
+                        "The agent is running and will be stopped. You can resume the session later."
                     } else {
-                        "$live of them are running. Their Herdr panes will be closed. " +
+                        "$live of them are running and will be stopped. " +
                             "You can resume the sessions later."
                     },
                 )

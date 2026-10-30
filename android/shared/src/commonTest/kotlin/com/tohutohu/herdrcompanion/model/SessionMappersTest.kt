@@ -29,7 +29,7 @@ class SessionMappersTest {
     }
 
     @Test
-    fun `Herdrの未読状態を一覧表示モデルへ引き継ぐ`() {
+    fun `未読状態を一覧表示モデルへ引き継ぐ`() {
         val model = SessionDto(
             id = "claude:1",
             provider = "claude",
@@ -41,32 +41,28 @@ class SessionMappersTest {
         assertTrue(model.unread)
     }
     @Test
-    fun `直接実行の実行先と保留中の設定と失敗理由を表示モデルへ引き継ぐ`() {
+    fun `保留中の設定と失敗理由を表示モデルへ引き継ぐ`() {
         val model = SessionDto(
             id = "codex:1",
             provider = "codex",
             status = "running",
             updatedAt = "2026-10-30T00:00:00Z",
-            backend = "direct",
             pendingModel = "gpt-6-mini",
             pendingEffort = "low",
             settingsApply = "next_turn",
             error = "runtime exited",
         ).toUiModel()
 
-        assertEquals("direct", model.backend)
         assertEquals("gpt-6-mini", model.pendingModel)
         assertEquals("low", model.pendingEffort)
         assertEquals("next_turn", model.settingsApply)
         assertEquals("runtime exited", model.error)
-        assertTrue(model.direct)
+        assertTrue(model.live)
     }
 
     @Test
-    fun `Herdrで動くセッションと停止中のセッションは直接実行として扱わない`() {
-        val herdr = SessionDto(id = "claude:1", provider = "claude", status = "running", updatedAt = "", backend = "herdr", paneId = "w1:p1")
-        assertFalse(herdr.toUiModel().direct)
-        val offline = SessionDto(id = "claude:1", provider = "claude", status = "offline", updatedAt = "", backend = "direct")
-        assertFalse(offline.toUiModel().direct)
+    fun `停止中のセッションは稼働中として扱わない`() {
+        val offline = SessionDto(id = "claude:1", provider = "claude", status = "offline", updatedAt = "")
+        assertFalse(offline.toUiModel().live)
     }
 }

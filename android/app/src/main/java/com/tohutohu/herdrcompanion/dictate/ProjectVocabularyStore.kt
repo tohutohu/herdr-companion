@@ -8,7 +8,7 @@ import kotlinx.serialization.json.Json
 import java.io.File
 import java.util.UUID
 
-/** Dictation hints for one Herdr project (workspace). */
+/** Dictation hints for one project (workspace). */
 @Serializable
 data class ProjectVocabulary(
     val vocabulary: List<String> = emptyList(),

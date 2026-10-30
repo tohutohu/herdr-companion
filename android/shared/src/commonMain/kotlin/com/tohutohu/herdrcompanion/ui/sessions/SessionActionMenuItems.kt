@@ -20,7 +20,7 @@ fun SessionActionMenuItems(
 ) {
     if (!s.live) {
         DropdownMenuItem(
-            text = { Text("Resume in Herdr") },
+            text = { Text("Resume") },
             leadingIcon = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
             onClick = { onDismiss(); onResume() },
         )

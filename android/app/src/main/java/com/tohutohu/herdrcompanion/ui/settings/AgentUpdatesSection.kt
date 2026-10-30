@@ -48,7 +48,6 @@ fun AgentUpdatesSection() {
     HorizontalDivider()
     Text("Agent updates on Mac", style = MaterialTheme.typography.titleMedium)
     Text("Check for updates and install them on the connected Mac. Updates continue if you leave this screen. Running sessions stay open.", style = MaterialTheme.typography.bodySmall)
-    Text("Codex / OpenCode v2: an already-running shared server keeps its current version. After your sessions finish, restart that server on the Mac to use the updated version.", style = MaterialTheme.typography.bodySmall)
     error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     agents.forEach { agent ->
         val running = agent.state == "running" || submitting == agent.provider

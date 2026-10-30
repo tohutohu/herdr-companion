@@ -26,14 +26,12 @@ class ReloadNoticeTest {
     fun `取りこぼしがなければその旨だけを知らせる`() {
         val notice = reloadNotice(emptyList())
         assertFalse(notice.missed)
-        assertFalse(notice.openTerminal)
     }
 
     @Test
-    fun `質問を捕捉できていなければターミナルへの導線を付ける`() {
+    fun `質問を捕捉できていなければその旨を知らせる`() {
         val notice = reloadNotice(listOf(ReloadFindingDto("not_shown"), ReloadFindingDto("uncaptured")))
         assertTrue(notice.missed)
-        assertTrue(notice.openTerminal)
         assertTrue("not showing" in notice.text && "not captured" in notice.text)
     }
 

@@ -23,18 +23,6 @@ import java.util.concurrent.TimeUnit
 
 class GatewayException(val code: Int, message: String) : IOException(message)
 
-private val HERDR_CODE = Regex("""herdr: ([a-z_]+):""")
-
-/**
- * Replaces the Herdr errors the gateway passes through ("send message: herdr:
- * agent_blocked: agent w1:p1 is blocked ...") with what the user can do.
- */
-internal fun readableError(message: String): String = when (HERDR_CODE.find(message)?.groupValues?.get(1)) {
-    "agent_blocked" -> "The agent is waiting for an answer to a prompt. Answer it, then send again."
-    "agent_pane_busy" -> "The pane is already running another program, so the agent could not start there."
-    else -> message
-}
-
 data class DownloadMetadata(
     val mimeType: String,
     val contentLength: Long,
@@ -91,7 +79,7 @@ class GatewayApi(
         if (!resp.isSuccessful) {
             val msg = runCatching { json.decodeFromString<ErrorResponse>(body).error }.getOrNull()
                 ?: "HTTP ${resp.code}"
-            throw GatewayException(resp.code, readableError(msg))
+            throw GatewayException(resp.code, msg)
         }
         return body
     }
@@ -116,8 +104,8 @@ class GatewayApi(
         get(url("v1", "sessions", query = mapOf("archived" to "true", "offset" to "$offset", "limit" to "$limit")))
 
     /**
-     * Archiving a running session closes its Herdr pane and removes the
-     * worktree it ran in; [SessionDto.warning] says why one was kept.
+     * Archiving a running session stops its agent and removes the worktree it
+     * ran in; [SessionDto.warning] says why one was kept.
      */
     suspend fun archive(id: String): SessionDto =
         json.decodeFromString(post(url("v1", "sessions", id, "archive"), ByteArray(0).toRequestBody(jsonType)))
@@ -132,12 +120,9 @@ class GatewayApi(
     suspend fun unarchive(id: String): SessionDto =
         json.decodeFromString(execute(request(url("v1", "sessions", id, "archive")).delete().build()))
 
-    /**
-     * Reopens a stopped session, in a new Herdr workspace or run by the
-     * gateway itself; a null [backend] lets the gateway choose.
-     */
-    suspend fun resume(id: String, trust: Boolean, backend: String? = null): StartSessionResponse =
-        slowPost(url("v1", "sessions", id, "resume"), json.encodeToString(ResumeRequest(trust, backend)))
+    /** Reopens a stopped session. */
+    suspend fun resume(id: String, trust: Boolean): StartSessionResponse =
+        slowPost(url("v1", "sessions", id, "resume"), json.encodeToString(ResumeRequest(trust)))
 
     suspend fun messages(id: String, after: String? = null): MessagesResponse =
         get(url("v1", "sessions", id, "messages", query = mapOf("after" to after)))
@@ -209,13 +194,13 @@ class GatewayApi(
         post(url("v1", "sessions", id, "mode"), ByteArray(0).toRequestBody(jsonType))
     }
 
-    /** Switches a session the gateway runs directly to the mode [mode] (a catalog mode id). */
+    /** Switches a session to the mode [mode] (a catalog mode id). */
     suspend fun setMode(id: String, mode: String) {
         post(url("v1", "sessions", id, "mode"), json.encodeToString(SessionSettingRequest(mode = mode)).toRequestBody(jsonType))
     }
 
     /**
-     * Changes the model of a session the gateway runs directly. The returned
+     * Changes the model of a running session. The returned
      * session reports it as [SessionDto.pendingModel] until the agent uses it;
      * a model the agent does not offer is refused, never replaced.
      */
@@ -233,12 +218,12 @@ class GatewayApi(
             ),
         )
 
-    /** Stops the running turn of a session the gateway runs directly; the session stays. */
+    /** Stops the session's running turn; the session stays. */
     suspend fun interrupt(id: String) {
         post(url("v1", "sessions", id, "interrupt"), ByteArray(0).toRequestBody(jsonType))
     }
 
-    /** Marks the session seen in Herdr, which clears its unread state. */
+    /** Marks the session seen, which clears its unread state. */
     suspend fun markSeen(id: String) {
         post(url("v1", "sessions", id, "seen"), ByteArray(0).toRequestBody(jsonType))
     }
@@ -260,23 +245,6 @@ class GatewayApi(
             .build()
         return uploads.newCall(req).awaitBody { resp -> json.decodeFromString<UploadResponse>(bodyOrThrow(resp)).id }
     }
-
-    suspend fun terminal(id: String, lines: Int = 300): TerminalResponse =
-        get(url("v1", "sessions", id, "terminal", query = mapOf("lines" to lines.toString())))
-
-    suspend fun terminalInput(id: String, input: TerminalInput) {
-        post(url("v1", "sessions", id, "terminal"), json.encodeToString(input).toRequestBody(jsonType))
-    }
-
-    suspend fun launchTerminal(paneId: String): TerminalResponse =
-        get(url("v1", "launches", paneId, "terminal"))
-
-    suspend fun launchTerminalInput(paneId: String, input: TerminalInput) {
-        post(url("v1", "launches", paneId, "terminal"), json.encodeToString(input).toRequestBody(jsonType))
-    }
-
-    suspend fun continueLaunch(paneId: String): StartSessionResponse =
-        slowPost(url("v1", "launches", paneId, "continue"), "{}")
 
     suspend fun agentUpdates(): AgentUpdatesResponse = get(url("v1", "agents"))
 
@@ -394,7 +362,7 @@ class GatewayApi(
 
     /**
      * Continues (or, declined, cancels) a start that stopped at the
-     * folder-trust dialog; [launch] is its [StartSessionResponse.trustTarget].
+     * folder-trust dialog; [launch] is its [StartSessionResponse.launchId].
      */
     suspend fun answerTrust(launch: String, trust: Boolean): StartSessionResponse =
         slowPost(url("v1", "launches", launch, "trust"), json.encodeToString(TrustAnswer(trust)))

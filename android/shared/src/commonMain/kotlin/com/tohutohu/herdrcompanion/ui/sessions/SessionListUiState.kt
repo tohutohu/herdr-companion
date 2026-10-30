@@ -17,7 +17,7 @@ data class SessionListUiState(
     val isLoaded: Boolean = false,
     val isRefreshing: Boolean = false,
     val error: String? = null,
-    val emptyMessage: String = "No sessions. Start Claude Code, Codex, OpenCode, or Devin inside Herdr on your Mac.",
+    val emptyMessage: String = "No sessions. Start Claude Code or Codex with New session.",
     val busySessionIds: Set<String> = emptySet(),
     val engagedSessionIds: Set<String> = emptySet(),
     /** More rows exist beyond the loaded ones; see SessionListScreen's onLoadMore. */

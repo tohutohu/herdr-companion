@@ -37,7 +37,7 @@ class SwipeActionTest {
     @Test
     fun `単独の成功でも警告があれば警告を優先する`() {
         val outcome = BatchOutcome(total = 1, failed = 0, warning = "Started without trust")
-        assertEquals("Started without trust", outcome.message("Resumed in Herdr", "resumed"))
+        assertEquals("Started without trust", outcome.message("Resumed", "resumed"))
     }
 
     @Test

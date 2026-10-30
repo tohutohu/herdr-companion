@@ -106,7 +106,7 @@ class DesktopDeliveryTest {
         val state: DesktopAppState
 
         init {
-            val session = """{"id":"$SESSION_ID","provider":"claude","status":"running","updatedAt":"2026-10-15T00:00:00Z","canSend":true,"paneId":"w1:p1"}"""
+            val session = """{"id":"$SESSION_ID","provider":"claude","status":"running","updatedAt":"2026-10-15T00:00:00Z","canSend":true}"""
             server.dispatcher = object : Dispatcher() {
                 override fun dispatch(request: RecordedRequest): MockResponse {
                     val path = request.url.encodedPath

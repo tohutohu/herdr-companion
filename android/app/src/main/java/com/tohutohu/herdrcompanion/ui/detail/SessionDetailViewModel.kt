@@ -332,7 +332,7 @@ class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidV
 
     /**
      * Sends one model / effort / mode change at a time. The gateway's reason
-     * for refusing one (an unknown model, a Herdr session) is shown as it is.
+     * for refusing one (such as an unknown model) is shown as it is.
      */
     private fun changeSetting(change: suspend () -> Unit) {
         if (_settings.value.changing) return
@@ -353,7 +353,7 @@ class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidV
     private val _interrupting = MutableStateFlow(false)
     val interrupting = _interrupting.asStateFlow()
 
-    /** Stops the turn a session the gateway runs directly is in. */
+    /** Stops the session's running turn. */
     fun interrupt() {
         if (_interrupting.value) return
         viewModelScope.launch {

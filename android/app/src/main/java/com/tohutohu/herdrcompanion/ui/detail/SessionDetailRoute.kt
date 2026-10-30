@@ -44,7 +44,6 @@ fun SessionDetailRoute(
     onBack: () -> Unit,
     onOpenFile: (String, Int) -> Unit,
     onOpenImage: (String) -> Unit,
-    onOpenTerminal: () -> Unit,
     onOpenSession: (String) -> Unit,
 ) {
     val context = LocalContext.current
@@ -129,7 +128,6 @@ fun SessionDetailRoute(
                     is SessionDetailAction.OpenSession -> onOpenSession(action.sessionId)
                     is SessionDetailAction.OpenFile -> onOpenFile(action.path, action.line)
                     is SessionDetailAction.OpenImage -> onOpenImage(api.absolute(action.url))
-                    SessionDetailAction.OpenTerminal -> onOpenTerminal()
                     SessionDetailAction.PickImage -> imagePicker.launch(
                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
                     )

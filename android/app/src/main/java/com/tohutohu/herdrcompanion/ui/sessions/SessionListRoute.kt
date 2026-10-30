@@ -42,10 +42,7 @@ fun SessionListRoute(
     val starts by container.sessionStarts.entries.collectAsState()
     val pendingStarts = starts.filter { entry -> !entry.listed && sessions.none { it.id == entry.sessionId } }
     LaunchedEffect(sessions, starts) {
-        container.sessionStarts.reconcile(
-            sessions.map { it.id }.toSet(),
-            sessions.mapNotNull { s -> s.paneId?.let { it to s.id } }.toMap(),
-        )
+        container.sessionStarts.reconcile(sessions.map { it.id }.toSet())
     }
     var error by remember { mutableStateOf<String?>(null) }
     var refreshing by remember { mutableStateOf(false) }

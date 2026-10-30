@@ -1,6 +1,5 @@
 package com.tohutohu.herdrcompanion.desktop
 
-import java.io.File
 import java.nio.file.Path
 import java.nio.file.Paths
 
@@ -40,37 +39,4 @@ internal fun systemOpenCommand(target: String, os: DesktopOs = DesktopOs.current
     DesktopOs.MAC -> listOf("/usr/bin/open", target)
     DesktopOs.WINDOWS -> listOf("rundll32", "url.dll,FileProtocolHandler", target)
     DesktopOs.LINUX -> listOf("xdg-open", target)
-}
-
-/** GUI launches on Linux usually inherit the session PATH, unlike macOS apps. */
-internal fun findOnPath(name: String, path: String? = System.getenv("PATH")): Path? =
-    path.orEmpty().split(File.pathSeparatorChar)
-        .filter { it.isNotBlank() }
-        .map { Paths.get(it, name) }
-        .firstOrNull { it.toFile().canExecute() }
-
-/**
- * Terminal emulators that can run a script, most specific first. `$TERMINAL`
- * is the de facto user override; `x-terminal-emulator` is Debian's default.
- */
-internal fun linuxTerminalCommand(
-    script: String,
-    environment: Map<String, String> = System.getenv(),
-    find: (String) -> Path? = { findOnPath(it, environment["PATH"]) },
-): List<String>? {
-    environment["TERMINAL"]?.trim()?.takeIf { it.isNotEmpty() }?.let { terminal ->
-        val executable = if (terminal.contains('/')) Paths.get(terminal).takeIf { it.toFile().canExecute() } else find(terminal)
-        if (executable != null) return listOf(executable.toString(), "-e", script)
-    }
-    return listOf(
-        "x-terminal-emulator" to listOf("-e"),
-        "gnome-terminal" to listOf("--"),
-        "konsole" to listOf("-e"),
-        "xfce4-terminal" to listOf("-x"),
-        "kitty" to emptyList(),
-        "alacritty" to listOf("-e"),
-        "xterm" to listOf("-e"),
-    ).firstNotNullOfOrNull { (name, flags) ->
-        find(name)?.let { listOf(it.toString()) + flags + script }
-    }
 }

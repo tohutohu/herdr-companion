@@ -36,10 +36,9 @@ class SessionRepository(
     fun observeSession(id: String): Flow<SessionEntity?> = db.sessions().observe(id)
 
     /**
-     * Read state lives in Herdr: the gateway reports it with each session and
-     * marking it seen focuses the pane there. The cached row is cleared first
-     * so the list does not wait for the next sync; a failed call leaves the
-     * next sync to bring the unread state back.
+     * Read state lives on the gateway, which reports it with each session.
+     * The cached row is cleared first so the list does not wait for the next
+     * sync; a failed call leaves the next sync to bring the unread state back.
      */
     suspend fun markSeenIfUnread(sessionId: String) {
         if (db.sessions().get(sessionId)?.unread != true) return
@@ -118,7 +117,6 @@ class SessionRepository(
                         status = push.status,
                         updatedAt = reportedAt,
                         lastMessage = null,
-                        paneId = null,
                         canSend = push.canSend,
                         listed = true,
                         lastSyncedAt = System.currentTimeMillis(),
@@ -167,7 +165,6 @@ class SessionRepository(
         db.sessions().upsert(listOf(s.toEntity(System.currentTimeMillis(), listed = true)))
     }
 
-    /** Keeps the pane id available when resuming stops at a startup dialog. */
     suspend fun resume(sessionId: String, trust: Boolean = true): com.tohutohu.herdrcompanion.data.api.StartSessionResponse {
         val res = api.resume(sessionId, trust)
         runCatching { refreshSessions() }
@@ -238,7 +235,6 @@ fun SessionDto.toEntity(now: Long, listed: Boolean) = SessionEntity(
     status = status,
     updatedAt = SessionRepository.parseTime(updatedAt),
     lastMessage = lastMessage,
-    paneId = paneId,
     canSend = canSend,
     model = model,
     effort = effort,
@@ -252,7 +248,6 @@ fun SessionDto.toEntity(now: Long, listed: Boolean) = SessionEntity(
     listed = listed,
     lastSyncedAt = now,
     unread = unread,
-    backend = backend,
     pendingModel = pendingModel,
     pendingEffort = pendingEffort,
     settingsApply = settingsApply,

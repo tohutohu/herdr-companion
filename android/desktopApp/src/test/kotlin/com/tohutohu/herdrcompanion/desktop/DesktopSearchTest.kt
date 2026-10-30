@@ -51,7 +51,6 @@ class DesktopSearchTest {
             cwd = "/Users/test/$project",
             status = "running",
             lastMessage = "working",
-            paneId = null,
             canSend = true,
             model = model,
             effort = null,

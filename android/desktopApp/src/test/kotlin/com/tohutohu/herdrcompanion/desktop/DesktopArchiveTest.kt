@@ -70,8 +70,7 @@ class DesktopArchiveTest {
             fun session(id: String): String {
                 val running = id in live
                 val status = if (running) "running" else "offline"
-                val pane = if (running) ""","paneId":"w1:$id"""" else ""
-                return """{"id":"$id","provider":"claude","status":"$status","updatedAt":"2026-10-15T00:00:00Z","canSend":$running$pane}"""
+                return """{"id":"$id","provider":"claude","status":"$status","updatedAt":"2026-10-15T00:00:00Z","canSend":$running}"""
             }
             server.dispatcher = object : Dispatcher() {
                 override fun dispatch(request: RecordedRequest): MockResponse {

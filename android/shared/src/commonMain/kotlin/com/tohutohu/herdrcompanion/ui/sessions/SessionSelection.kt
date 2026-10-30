@@ -104,10 +104,10 @@ fun SelectionTopBar(
                     Icon(Icons.Default.MoreVert, contentDescription = "More actions")
                 }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    // Resuming spawns a Herdr pane each, so keep it single.
+                    // Resuming starts an agent each, so keep it single.
                     selected.singleOrNull()?.takeIf { !it.live }?.let { s ->
                         DropdownMenuItem(
-                            text = { Text("Resume in Herdr") },
+                            text = { Text("Resume") },
                             leadingIcon = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
                             onClick = {
                                 menu = false

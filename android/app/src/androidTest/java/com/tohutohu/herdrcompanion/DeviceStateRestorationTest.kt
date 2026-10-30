@@ -64,7 +64,7 @@ class DeviceStateRestorationTest {
                 questions = listOf(
                     QuestionDto("features", "multiselect", question = "Choose features", options = listOf(OptionDto("Logs"), OptionDto("Images"))),
                     QuestionDto("notes", "text", question = "Add instructions"),
-                )), enabled = true, onRespond = response::set, onOpenTerminal = {})
+                )), enabled = true, onRespond = response::set)
         }
         launch()
         rule.onNodeWithText("Logs").performClick()

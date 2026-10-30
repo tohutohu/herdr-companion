@@ -42,8 +42,7 @@ fun DictateContextScope(project: String?, content: @Composable () -> Unit) {
 }
 
 /**
- * The project a directory belongs to, as Herdr labels the workspace it opens
- * there: its folder name. A session's own project name wins once it has one.
+ * The project a directory belongs to: its folder name. A session's own project name wins once it has one.
  */
 fun dictateProject(project: String?, cwd: String?): String? =
     project?.takeIf { it.isNotBlank() } ?: cwd?.trimEnd('/')?.substringAfterLast('/')?.takeIf { it.isNotBlank() }

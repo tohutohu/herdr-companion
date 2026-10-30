@@ -320,7 +320,7 @@ fun LazyItemScope.SessionItem(
 
 /**
  * While selecting, a row shows only whether it is checked; the list's own
- * highlight (e.g. the panes open on the Mac) would otherwise look checked.
+ * highlight (e.g. the sessions open in Mac UI panes) would otherwise look checked.
  */
 internal fun rowShownSelected(highlighted: Boolean, selecting: Boolean, checked: Boolean): Boolean =
     if (selecting) checked else highlighted

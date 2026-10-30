@@ -41,7 +41,6 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.foundation.BorderStroke
@@ -93,7 +92,6 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tohutohu.herdrcompanion.data.SendState
-import com.tohutohu.herdrcompanion.data.api.Backend
 import com.tohutohu.herdrcompanion.data.api.InteractionResponseDto
 import com.tohutohu.herdrcompanion.data.api.Status
 import com.tohutohu.herdrcompanion.model.headline
@@ -328,18 +326,7 @@ fun SessionDetailScreen(
                             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                                 session?.let { s ->
                                     val modeChangeSupported = s.provider == "claude" || s.provider == "codex"
-                                    // A session the gateway runs directly has no terminal.
-                                    if (s.paneId != null) {
-                                        DropdownMenuItem(
-                                            text = { Text("Terminal") },
-                                            leadingIcon = { Icon(Icons.Default.Terminal, contentDescription = null) },
-                                            onClick = {
-                                                menu = false
-                                                onAction(SessionDetailAction.OpenTerminal)
-                                            },
-                                        )
-                                    }
-                                    if (s.direct && s.status in WORKING_STATUSES) {
+                                    if (s.live && s.status in WORKING_STATUSES) {
                                         DropdownMenuItem(
                                             text = { Text("Interrupt") },
                                             leadingIcon = { Icon(Icons.Default.Stop, contentDescription = null) },
@@ -362,8 +349,7 @@ fun SessionDetailScreen(
                                     if (modeChangeSupported) {
                                         DropdownMenuItem(
                                             text = { Text("Change mode") },
-                                            enabled = s.live && (s.paneId != null || s.backend == Backend.DIRECT) &&
-                                                !state.actionBusy && !state.modeChanging,
+                                            enabled = s.live && !state.actionBusy && !state.modeChanging,
                                             onClick = {
                                                 menu = false
                                                 onAction(SessionDetailAction.CycleMode)
@@ -460,11 +446,7 @@ fun SessionDetailScreen(
                 )
             }
             ExpandingContent(value = state.reloadNotice) {
-                ReloadNoticeRow(
-                    it,
-                    onOpenTerminal = { onAction(SessionDetailAction.OpenTerminal) },
-                    onDismiss = { onAction(SessionDetailAction.DismissReloadNotice) },
-                )
+                ReloadNoticeRow(it, onDismiss = { onAction(SessionDetailAction.DismissReloadNotice) })
             }
             SyncIndicator(
                 visible = state.reloading || (state.loading && session == null && messages.isEmpty()),
@@ -494,7 +476,6 @@ fun SessionDetailScreen(
                             val placement = if (pausePlacement) null else tween<IntOffset>(ITEM_ANIMATION_MS)
                             val onOpenFile = { path: String, line: Int -> onAction(SessionDetailAction.OpenFile(path, line)) }
                             val onOpenImage = { url: String -> onAction(SessionDetailAction.OpenImage(url)) }
-                            val onOpenTerminal = { onAction(SessionDetailAction.OpenTerminal) }
                             val onOpenSession = { id: String -> onAction(SessionDetailAction.OpenSession(id)) }
                             val onRespond = { it: InteractionResponseDto -> onAction(SessionDetailAction.Respond(it)) }
                             if (sent != null || userMessage != null) {
@@ -514,7 +495,7 @@ fun SessionDetailScreen(
                                         PendingMessageBody(sent, resolveAttachmentPreview)
                                     } else if (userMessage != null) {
                                         MessageBlocks(
-                                            userMessage, resolveUrl, formatFileSize, onOpenFile, onOpenImage, onOpenTerminal,
+                                            userMessage, resolveUrl, formatFileSize, onOpenFile, onOpenImage,
                                             interactionsEnabled = !answering, onRespond = onRespond,
                                             onOpenSession = onOpenSession,
                                         )
@@ -531,7 +512,6 @@ fun SessionDetailScreen(
                                     formatFileSize = formatFileSize,
                                     onOpenFile = onOpenFile,
                                     onOpenImage = onOpenImage,
-                                    onOpenTerminal = onOpenTerminal,
                                     interactionsEnabled = !answering,
                                     onRespond = onRespond,
                                     onOpenSession = onOpenSession,
@@ -769,17 +749,12 @@ private fun ResumeBar(busy: Boolean, onResume: () -> Unit) {
  * it is the case the reload exists to catch.
  */
 @Composable
-private fun ReloadNoticeRow(notice: ReloadNotice, onOpenTerminal: () -> Unit, onDismiss: () -> Unit) {
+private fun ReloadNoticeRow(notice: ReloadNotice, onDismiss: () -> Unit) {
     val color = if (notice.missed) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant
     Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 4.dp)) {
         Text(notice.text, color = color, style = MaterialTheme.typography.bodySmall)
         if (notice.missed) {
-            Row(Modifier.align(Alignment.End)) {
-                if (notice.openTerminal) {
-                    TextButton(onClick = onOpenTerminal) { Text("Terminal") }
-                }
-                TextButton(onClick = onDismiss) { Text("Dismiss") }
-            }
+            TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) { Text("Dismiss") }
         }
     }
 }

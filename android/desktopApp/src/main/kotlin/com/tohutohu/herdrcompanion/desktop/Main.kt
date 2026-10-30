@@ -442,7 +442,7 @@ private fun FrameWindowScope.DesktopShell(
                                 isRefreshing = state.listRefreshing,
                                 error = state.listError,
                                 emptyMessage = if (query.isBlank()) {
-                                    "No sessions. Start Claude Code, Codex, OpenCode, or Devin inside Herdr on your Mac."
+                                    "No sessions. Start Claude Code or Codex with New Session."
                                 } else {
                                     "No sessions match \"$query\"."
                                 },
@@ -872,9 +872,9 @@ internal fun ArchiveConfirmationDialog(state: DesktopAppState) {
         text = {
             Text(
                 if (targets.size == 1) {
-                    "The running agent pane will be closed. You can resume the session later."
+                    "The running agent will be stopped. You can resume the session later."
                 } else {
-                    "$live of them are running. Their agent panes will be closed. You can resume the sessions later."
+                    "$live of them are running and will be stopped. You can resume the sessions later."
                 },
             )
         },
@@ -1281,10 +1281,6 @@ private fun handleDetailAction(
         }
         is SessionDetailAction.OpenImage -> {
             if (!DesktopPlatformActions.openUrl(api.absolute(action.url))) state.reportError("Could not open the image in the browser.")
-        }
-        SessionDetailAction.OpenTerminal -> {
-            val paneId = state.detailFor(sessionId)?.session?.paneId
-            if (paneId == null) state.reportError("This session has no Herdr pane.") else state.attachTerminal(paneId)
         }
     }
 }

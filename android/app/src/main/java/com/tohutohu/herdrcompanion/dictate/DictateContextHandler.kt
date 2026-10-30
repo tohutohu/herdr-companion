@@ -16,7 +16,7 @@ data class DictateReply(val action: String, val payloadJson: String)
 
 /**
  * Dictate protocol v1 on top of [ProjectVocabularyStore]: one context per
- * Herdr project, so every session of a project shares its words and rules.
+ * project, so every session of a project shares its words and rules.
  */
 class DictateContextHandler(
     private val store: ProjectVocabularyStore,

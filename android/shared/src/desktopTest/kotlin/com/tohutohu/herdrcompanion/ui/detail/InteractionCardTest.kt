@@ -74,7 +74,6 @@ class InteractionCardTest {
                                 ),
                                 enabled = true,
                                 onRespond = { response = it },
-                                onOpenTerminal = {},
                             )
                         }
                     }
@@ -141,7 +140,6 @@ class InteractionCardTest {
                     ),
                     enabled = true,
                     onRespond = { response = it },
-                    onOpenTerminal = {},
                 )
             }
         }
@@ -149,6 +147,28 @@ class InteractionCardTest {
         rule.onNodeWithText("Stop").assertIsEnabled()
         rule.onNodeWithText("Trust").performClick()
         assertEquals(InteractionResponseDto(interactionId = "trust:w1:p1", decision = "approve"), response)
+    }
+
+    @Test
+    fun アプリで答えられない確認は操作なしで内容だけを表示する() {
+        rule.setContent {
+            MaterialTheme {
+                InteractionCard(
+                    interaction = InteractionDto(
+                        id = "elicitation-1", type = "approval", state = "pending", supported = false,
+                        title = "MCP server request", detail = "Sign in to continue",
+                        decisions = listOf("approve", "deny"),
+                    ),
+                    enabled = true,
+                    onRespond = { response = it },
+                )
+            }
+        }
+        rule.onNodeWithText("Sign in to continue").assertExists()
+        rule.onNodeWithText("This prompt can't be answered from the app.").assertExists()
+        rule.onNodeWithText("Approve").assertDoesNotExist()
+        rule.onNode(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button)).assertDoesNotExist()
+        rule.runOnIdle { assertNull(response) }
     }
 
     @Test
@@ -183,7 +203,6 @@ class InteractionCardTest {
                             sent++
                             enabled = false
                         },
-                        onOpenTerminal = {},
                     )
                 }
             }

@@ -53,20 +53,4 @@ class DesktopPlatformTest {
         )
         assertNull(notificationCommand(event, DesktopOs.WINDOWS))
     }
-
-    @Test
-    fun `端末はTERMINALの指定を優先しなければ見つかったものを順に使う`() {
-        val installed = setOf("gnome-terminal", "xterm", "foot")
-        val find = { name: String -> if (name in installed) Paths.get("/usr/bin", name) else null }
-
-        assertEquals(
-            listOf("/usr/bin/foot", "-e", "/tmp/s"),
-            linuxTerminalCommand("/tmp/s", mapOf("TERMINAL" to "foot"), find),
-        )
-        assertEquals(
-            listOf("/usr/bin/gnome-terminal", "--", "/tmp/s"),
-            linuxTerminalCommand("/tmp/s", emptyMap(), find),
-        )
-        assertNull(linuxTerminalCommand("/tmp/s", emptyMap()) { null })
-    }
 }

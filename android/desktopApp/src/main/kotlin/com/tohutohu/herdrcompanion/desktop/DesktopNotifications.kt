@@ -29,7 +29,7 @@ fun notificationForStatusTransition(
     return DesktopNotificationEvent(
         id = "$sessionId:$next:${System.nanoTime()}",
         sessionId = sessionId,
-        title = project.ifBlank { "Herdr session" },
+        title = project.ifBlank { "Agent session" },
         body = body,
     )
 }

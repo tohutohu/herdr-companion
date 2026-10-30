@@ -417,9 +417,8 @@ class DesktopAppState(
     }
 
     /**
-     * Read state lives in Herdr, where marking a session seen focuses its
-     * pane. Only a session the user opens or selects is marked, never one that
-     * merely stays open, so the Herdr view does not move behind their back.
+     * Read state lives on the gateway. Only a session the user opens or
+     * selects is marked, never one that merely stays open.
      */
     private fun markSeen(id: String) {
         if (sessions.none { it.session.id == id && it.session.unread }) return
@@ -945,7 +944,7 @@ class DesktopAppState(
 
     /**
      * One model / effort / mode change at a time. The gateway's reason for
-     * refusing one (an unknown model, a Herdr session) is shown as it is.
+     * refusing one (such as an unknown model) is shown as it is.
      */
     private fun changeSetting(id: String, change: suspend () -> Unit) {
         val detail = detailsBySession[id] ?: return
@@ -973,7 +972,7 @@ class DesktopAppState(
         updateDetail(id) { it.copy(session = session.toUiModel()) }
     }
 
-    /** Stops the running turn of a session the gateway runs directly. */
+    /** Stops the session's running turn; the session stays. */
     fun interrupt(id: String) {
         if (id in busySessionIds) return
         setBusy(id, true)
@@ -1088,13 +1087,6 @@ class DesktopAppState(
             } finally {
                 setBusy(ref.id, false)
             }
-        }
-    }
-
-    /** Opens the default terminal app attached to the session's Herdr pane. */
-    fun attachTerminal(paneId: String) {
-        scope.launch(Dispatchers.IO) {
-            DesktopHerdrTerminal.attach(paneId)?.let(::reportError)
         }
     }
 

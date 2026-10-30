@@ -61,7 +61,6 @@ fun TranscriptRowItem(
     formatFileSize: (Long) -> String,
     onOpenFile: (String, Int) -> Unit,
     onOpenImage: (String) -> Unit,
-    onOpenTerminal: () -> Unit,
     interactionsEnabled: Boolean,
     onRespond: (InteractionResponseDto) -> Unit,
     onOpenSession: (String) -> Unit = {},
@@ -74,7 +73,6 @@ fun TranscriptRowItem(
                 formatFileSize = formatFileSize,
                 onOpenFile = onOpenFile,
                 onOpenImage = onOpenImage,
-                onOpenTerminal = onOpenTerminal,
                 interactionsEnabled = interactionsEnabled,
                 onRespond = onRespond,
                 onOpenSession = onOpenSession,
@@ -85,7 +83,6 @@ fun TranscriptRowItem(
                 formatFileSize = formatFileSize,
                 onOpenFile = onOpenFile,
                 onOpenImage = onOpenImage,
-                onOpenTerminal = onOpenTerminal,
                 interactionsEnabled = interactionsEnabled,
                 onRespond = onRespond,
                 onOpenSession = onOpenSession,
@@ -98,7 +95,6 @@ fun TranscriptRowItem(
                     formatFileSize = formatFileSize,
                     onOpenFile = onOpenFile,
                     onOpenImage = onOpenImage,
-                    onOpenTerminal = onOpenTerminal,
                     interactionsEnabled = interactionsEnabled,
                     onRespond = onRespond,
                     onOpenSession = onOpenSession,
@@ -117,13 +113,12 @@ fun MessageItem(
     formatFileSize: (Long) -> String,
     onOpenFile: (String, Int) -> Unit,
     onOpenImage: (String) -> Unit,
-    onOpenTerminal: () -> Unit,
     interactionsEnabled: Boolean,
     onRespond: (InteractionResponseDto) -> Unit,
     onOpenSession: (String) -> Unit = {},
 ) {
     val content: @Composable () -> Unit = {
-        MessageBlocks(message, resolveUrl, formatFileSize, onOpenFile, onOpenImage, onOpenTerminal, interactionsEnabled, onRespond, onOpenSession)
+        MessageBlocks(message, resolveUrl, formatFileSize, onOpenFile, onOpenImage, interactionsEnabled, onRespond, onOpenSession)
     }
     if (message.role == "user") {
         UserBubble(pending = false, delivery = if (message.queued) Delivery.Queued else null, modifier = modifier, content = content)
@@ -144,7 +139,6 @@ fun MessageBlocks(
     formatFileSize: (Long) -> String,
     onOpenFile: (String, Int) -> Unit,
     onOpenImage: (String) -> Unit,
-    onOpenTerminal: () -> Unit,
     interactionsEnabled: Boolean,
     onRespond: (InteractionResponseDto) -> Unit,
     onOpenSession: (String) -> Unit = {},
@@ -152,7 +146,7 @@ fun MessageBlocks(
     SelectionContainer {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             message.blocks.forEach { block ->
-                BlockView(message.role, block, resolveUrl, formatFileSize, onOpenFile, onOpenImage, onOpenTerminal, interactionsEnabled, onRespond, onOpenSession)
+                BlockView(message.role, block, resolveUrl, formatFileSize, onOpenFile, onOpenImage, interactionsEnabled, onRespond, onOpenSession)
             }
         }
     }
@@ -260,7 +254,6 @@ fun ActivityGroupItem(
     formatFileSize: (Long) -> String,
     onOpenFile: (String, Int) -> Unit,
     onOpenImage: (String) -> Unit,
-    onOpenTerminal: () -> Unit,
     interactionsEnabled: Boolean,
     onRespond: (InteractionResponseDto) -> Unit,
     onOpenSession: (String) -> Unit = {},
@@ -284,7 +277,7 @@ fun ActivityGroupItem(
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(vertical = 4.dp)) {
                     row.parts.forEach { part ->
                         part.blocks.forEach { block ->
-                            BlockView(part.role, block, resolveUrl, formatFileSize, onOpenFile, onOpenImage, onOpenTerminal, interactionsEnabled, onRespond, onOpenSession)
+                            BlockView(part.role, block, resolveUrl, formatFileSize, onOpenFile, onOpenImage, interactionsEnabled, onRespond, onOpenSession)
                         }
                     }
                 }
@@ -360,7 +353,6 @@ private fun BlockView(
     formatFileSize: (Long) -> String,
     onOpenFile: (String, Int) -> Unit,
     onOpenImage: (String) -> Unit,
-    onOpenTerminal: () -> Unit,
     interactionsEnabled: Boolean,
     onRespond: (InteractionResponseDto) -> Unit,
     onOpenSession: (String) -> Unit = {},
@@ -430,7 +422,7 @@ private fun BlockView(
             )
         }
         "interaction" -> block.interaction?.let {
-            InteractionCard(it, interactionsEnabled, onRespond, onOpenTerminal)
+            InteractionCard(it, interactionsEnabled, onRespond)
         }
         // Future block kinds degrade to their text.
         else -> Text(block.text ?: "Unsupported block: ${block.type}", style = MaterialTheme.typography.bodySmall)

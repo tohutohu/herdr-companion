@@ -5,12 +5,14 @@ import androidx.room.AutoMigration
 import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Database
+import androidx.room.DeleteColumn
 import androidx.room.Entity
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Transaction
 import androidx.room.Upsert
+import androidx.room.migration.AutoMigrationSpec
 import kotlinx.coroutines.flow.Flow
 
 /** Cached copy of the gateway's session list. */
@@ -25,7 +27,6 @@ data class SessionEntity(
     val status: String,
     val updatedAt: Long,
     val lastMessage: String?,
-    val paneId: String?,
     val canSend: Boolean,
     val model: String? = null,
     val effort: String? = null,
@@ -42,16 +43,14 @@ data class SessionEntity(
     /** Whether the gateway still lists it; stale rows are kept for deep links. */
     val listed: Boolean,
     val lastSyncedAt: Long,
-    /** Herdr's unread state, as the gateway last reported it. */
+    /** The unread state, as the gateway last reported it. */
     @ColumnInfo(defaultValue = "0")
     val unread: Boolean = false,
-    /** Where the live session runs ("direct" or "herdr"); null when offline. */
-    val backend: String? = null,
     /** A model / effort change the agent has not used yet, and when it will. */
     val pendingModel: String? = null,
     val pendingEffort: String? = null,
     val settingsApply: String? = null,
-    /** Why a session the gateway runs directly failed. */
+    /** Why the session failed. */
     val error: String? = null,
 )
 
@@ -140,9 +139,19 @@ interface MessageDao {
     }
 }
 
+/**
+ * Gateway v2 runs every session itself, so a session no longer has a Herdr
+ * pane or a backend to tell apart.
+ */
+@DeleteColumn.Entries(
+    DeleteColumn(tableName = "sessions", columnName = "paneId"),
+    DeleteColumn(tableName = "sessions", columnName = "backend"),
+)
+class DropHerdrColumns : AutoMigrationSpec
+
 @Database(
     entities = [SessionEntity::class, MessageEntity::class],
-    version = 9,
+    version = 10,
     exportSchema = true,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
@@ -153,6 +162,7 @@ interface MessageDao {
         AutoMigration(from = 6, to = 7),
         AutoMigration(from = 7, to = 8),
         AutoMigration(from = 8, to = 9),
+        AutoMigration(from = 9, to = 10, spec = DropHerdrColumns::class),
     ],
 )
 abstract class AppDatabase : RoomDatabase() {

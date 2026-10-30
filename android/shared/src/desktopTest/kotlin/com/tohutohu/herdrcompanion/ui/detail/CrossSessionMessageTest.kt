@@ -42,7 +42,7 @@ class CrossSessionMessageTest {
             MaterialTheme {
                 MessageItem(
                     message = message(null), resolveUrl = { it }, formatFileSize = { "$it bytes" },
-                    onOpenFile = { _, _ -> }, onOpenImage = {}, onOpenTerminal = {},
+                    onOpenFile = { _, _ -> }, onOpenImage = {},
                     interactionsEnabled = true, onRespond = {},
                 )
             }

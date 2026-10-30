@@ -61,7 +61,7 @@ fun StartingSessionScreen(
                 if (entry.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 Text(entry.label)
                 entry.notice?.takeIf { it != entry.label }?.let { Text(it) }
-                if (entry.trustPane != null && !entry.busy) {
+                if (entry.trustLaunch != null && !entry.busy) {
                     Text("Trust this folder and allow the agent to access its files?")
                     Row {
                         TextButton(onClick = { onAction(StartingSessionAction.AnswerTrust(true)) }) {
@@ -72,22 +72,6 @@ fun StartingSessionScreen(
                         }
                     }
                 } else if (!entry.busy && entry.sessionId == null) {
-                    if (entry.needsContinue) {
-                        entry.paneId?.let { pane ->
-                            Text("Resolve the startup dialog in Terminal, then continue here. Your initial prompt is kept until the agent is ready.")
-                            Row {
-                                TextButton(onClick = { onAction(StartingSessionAction.OpenTerminal(pane)) }) {
-                                    Text("Open terminal")
-                                }
-                                TextButton(onClick = { onAction(StartingSessionAction.Continue) }) {
-                                    Text("Continue start")
-                                }
-                            }
-                        }
-                    } else if (entry.paneId != null) {
-                        // A Herdr Codex pane reports its session id only after the first prompt.
-                        Text("Codex is ready. Enter your first prompt in the terminal, and this session will appear in the list when its ID is available.")
-                    }
                     TextButton(onClick = { onAction(StartingSessionAction.Dismiss) }) { Text("Dismiss") }
                 }
             }

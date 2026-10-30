@@ -19,12 +19,12 @@ import com.tohutohu.herdrcompanion.model.SessionUiModel
 import com.tohutohu.herdrcompanion.ui.newsession.OptionPicker
 import com.tohutohu.herdrcompanion.ui.newsession.effortsFor
 
-/** Agents whose sessions the gateway can run directly, and so reconfigure while they run. */
+/** Agents whose sessions can be reconfigured while they run. */
 private val CONFIGURABLE_PROVIDERS = setOf("claude", "codex")
 
 /** Whether the details panel offers model and effort pickers for [session]. */
 fun settingsChangeable(session: SessionUiModel): Boolean =
-    session.direct && session.provider in CONFIGURABLE_PROVIDERS
+    session.live && session.provider in CONFIGURABLE_PROVIDERS
 
 /**
  * A change the agent has not picked up yet, e.g. "→ Sonnet, from the next
@@ -46,7 +46,7 @@ fun currentModeId(catalog: ModelsResponse, mode: String?): String {
 private fun nameOf(options: List<CatalogOption>, id: String) = options.firstOrNull { it.id == id }?.name ?: id
 
 /**
- * Model, effort and mode of a running session the gateway runs directly.
+ * Model, effort and mode of a running session.
  * The pickers show what the agent uses now; a requested change is listed
  * under them until the agent reports it. A refused change is shown as the
  * gateway worded it: nothing falls back to another model.

@@ -18,7 +18,6 @@ class SessionUiModelMappersTest {
             status = "completed",
             updatedAt = 1L,
             lastMessage = "done",
-            paneId = "pane",
             canSend = true,
             listed = true,
             lastSyncedAt = 1L,
@@ -28,7 +27,7 @@ class SessionUiModelMappersTest {
         assertTrue(session.toUiModel().unread)
     }
     @Test
-    fun `キャッシュした直接実行の実行先と保留中の設定を一覧モデルへ引き継ぐ`() {
+    fun `キャッシュした保留中の設定と失敗理由を一覧モデルへ引き継ぐ`() {
         val session = SessionEntity(
             id = "claude:session",
             provider = "claude",
@@ -39,11 +38,9 @@ class SessionUiModelMappersTest {
             status = "running",
             updatedAt = 1L,
             lastMessage = null,
-            paneId = null,
             canSend = true,
             listed = true,
             lastSyncedAt = 1L,
-            backend = "direct",
             pendingModel = "sonnet",
             pendingEffort = "high",
             settingsApply = "next_request",
@@ -51,7 +48,7 @@ class SessionUiModelMappersTest {
         )
 
         val model = session.toUiModel()
-        assertTrue(model.direct)
+        assertTrue(model.live)
         assertEquals("sonnet", model.pendingModel)
         assertEquals("high", model.pendingEffort)
         assertEquals("next_request", model.settingsApply)

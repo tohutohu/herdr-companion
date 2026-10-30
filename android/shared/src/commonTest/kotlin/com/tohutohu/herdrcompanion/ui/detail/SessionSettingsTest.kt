@@ -10,16 +10,15 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class SessionSettingsTest {
-    private fun session(provider: String, status: String = "running", backend: String? = "direct", paneId: String? = null) =
-        SessionDto(id = "$provider:1", provider = provider, status = status, updatedAt = "", backend = backend, paneId = paneId).toUiModel()
+    private fun session(provider: String, status: String = "running") =
+        SessionDto(id = "$provider:1", provider = provider, status = status, updatedAt = "").toUiModel()
 
     @Test
-    fun `直接実行中のClaudeとCodexだけがモデルとエフォートを変更できる`() {
+    fun `稼働中のClaudeとCodexだけがモデルとエフォートを変更できる`() {
         assertTrue(settingsChangeable(session("claude")))
         assertTrue(settingsChangeable(session("codex")))
-        assertFalse(settingsChangeable(session("opencode")))
-        assertFalse(settingsChangeable(session("claude", backend = "herdr", paneId = "w1:p1")))
-        assertFalse(settingsChangeable(session("codex", status = "offline", backend = null)))
+        assertFalse(settingsChangeable(session("unknown")))
+        assertFalse(settingsChangeable(session("codex", status = "offline")))
     }
 
     @Test

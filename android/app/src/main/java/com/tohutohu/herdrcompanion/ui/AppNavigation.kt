@@ -20,7 +20,6 @@ import com.tohutohu.herdrcompanion.ui.newsession.NewSessionRoute
 import com.tohutohu.herdrcompanion.ui.sessions.ArchivedSessionsScreen
 import com.tohutohu.herdrcompanion.ui.sessions.SessionListRoute
 import com.tohutohu.herdrcompanion.ui.settings.SettingsScreen
-import com.tohutohu.herdrcompanion.ui.terminal.TerminalScreen
 
 /**
  * The app's screens, shown by Navigation 3 from a back stack that survives
@@ -83,7 +82,6 @@ fun AppNavigation(start: Route, openSession: String?, onSessionOpened: () -> Uni
             entry<StartingRoute> { route ->
                 com.tohutohu.herdrcompanion.ui.newsession.StartingSessionRoute(
                     route.startId,
-                    onOpenTerminal = { pane -> nav.push(TerminalRoute(paneId = pane)) },
                     onBack = { nav.back(orReplaceWith = SessionsRoute) },
                     onReady = { id ->
                         val at = backStack.indexOf(route)
@@ -103,7 +101,6 @@ fun AppNavigation(start: Route, openSession: String?, onSessionOpened: () -> Uni
                     onBack = { lifecycle.ifResumed { nav.back(orReplaceWith = SessionsRoute) } },
                     onOpenFile = { path, line -> lifecycle.ifResumed { nav.push(FileRoute(route.sessionId, path, line)) } },
                     onOpenImage = { url -> lifecycle.ifResumed { nav.push(ImageRoute(url)) } },
-                    onOpenTerminal = { lifecycle.ifResumed { nav.push(TerminalRoute(route.sessionId)) } },
                 )
             }
             entry<FileRoute> { route ->
@@ -113,10 +110,6 @@ fun AppNavigation(start: Route, openSession: String?, onSessionOpened: () -> Uni
             entry<ImageRoute>(metadata = ScreenMotion.zoom) { route ->
                 val lifecycle = LocalLifecycleOwner.current.lifecycle
                 ImageViewerRoute(route.url, onBack = { lifecycle.ifResumed { nav.back() } })
-            }
-            entry<TerminalRoute> { route ->
-                val lifecycle = LocalLifecycleOwner.current.lifecycle
-                TerminalScreen(route.sessionId, onBack = { lifecycle.ifResumed { nav.back() } }, paneId = route.paneId)
             }
         },
     )

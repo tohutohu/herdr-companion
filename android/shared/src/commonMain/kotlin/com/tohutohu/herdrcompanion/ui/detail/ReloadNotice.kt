@@ -10,8 +10,6 @@ import com.tohutohu.herdrcompanion.data.api.ReloadFindingDto
 data class ReloadNotice(
     val text: String,
     val missed: Boolean,
-    /** The agent waits on its screen for something the app cannot answer. */
-    val openTerminal: Boolean = false,
 )
 
 /** The pending interactions [messages] show, as the gateway's reload checks them. */
@@ -24,13 +22,12 @@ fun reloadNotice(findings: List<ReloadFindingDto>): ReloadNotice {
         when (kind) {
             "not_shown" -> "Reload found a question this screen was not showing."
             "stale_cache" -> "Reload found a question the gateway's cached read missed."
-            "uncaptured" -> "The agent is waiting, but its question was not captured. Answer it in the terminal."
+            "uncaptured" -> "The agent is waiting, but its question was not captured."
             else -> findings.first { it.kind == kind }.message.ifEmpty { kind }
         }
     }
     return ReloadNotice(
         text = "$text\nRecorded on the gateway for diagnosis.",
         missed = true,
-        openTerminal = findings.any { it.kind == "uncaptured" },
     )
 }
