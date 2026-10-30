@@ -89,16 +89,29 @@ func parseUntilTarget(specs []string) (untilTarget, error) {
 // the agent starts working on it.
 const freshPrompt = time.Minute
 
+// interruptMarker starts the user entry Claude Code writes when a turn is
+// interrupted ("[Request interrupted by user]", "… for tool use]").
+const interruptMarker = "[Request interrupted by user"
+
 // promptUnanswered reports whether the newest message is a recent prompt,
 // so the idle status is from before the turn that prompt starts. An old one
-// (an interrupted turn) does not hold the wait forever.
+// (an interrupted turn) does not hold the wait forever, and the marker of an
+// interrupt ends the turn rather than starting one.
 func (a *app) promptUnanswered(ctx context.Context, id string) bool {
 	_, msgs, err := a.client.messages(ctx, id)
 	if err != nil || len(msgs) == 0 {
 		return false
 	}
 	last := msgs[len(msgs)-1]
-	return last.Role == model.RoleUser && time.Since(last.Timestamp) < freshPrompt
+	if last.Role != model.RoleUser || time.Since(last.Timestamp) >= freshPrompt {
+		return false
+	}
+	for _, b := range last.Blocks {
+		if b.Type == model.BlockText && strings.HasPrefix(strings.TrimSpace(b.Text), interruptMarker) {
+			return false
+		}
+	}
+	return true
 }
 
 func (a *app) untilReached(ctx context.Context, s model.Session, tg untilTarget) bool {

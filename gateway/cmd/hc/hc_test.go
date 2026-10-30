@@ -601,6 +601,19 @@ func Test送ったばかりの指示に応答していないidleは完了とみ�
 	}
 }
 
+func Test割り込みで終わったターンは待たずに完了とみなす(t *testing.T) {
+	g := sampleGateway()
+	a, _ := newTestApp(t, g)
+	id := "claude:aaaa1111-0000"
+	g.messages[id] = append(g.messages[id],
+		model.Message{ID: "u", Role: model.RoleUser, Timestamp: time.Now(), Blocks: []model.Block{model.TextBlock("60秒待って")}},
+		model.Message{ID: "i", Role: model.RoleUser, Timestamp: time.Now(), Blocks: []model.Block{model.TextBlock("[Request interrupted by user]")}})
+	got := a.mustRun(t, "until", "aaaa1111", "--for", "done", "--timeout", "5s")
+	if !strings.Contains(got, "already there:") {
+		t.Fatalf("an interrupted turn is over, got:\n%s", got)
+	}
+}
+
 func Test全員を待つ指定では全セッションが揃うまで返らない(t *testing.T) {
 	g := sampleGateway()
 	a, _ := newTestApp(t, g)
