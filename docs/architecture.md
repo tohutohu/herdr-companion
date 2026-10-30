@@ -14,6 +14,9 @@ Herdr Companion Gateway (Go, on the Mac)
    │    ├─ Claude ── herdr-claude-sidecar (Bun, Claude Agent SDK, stdio JSON lines)
    │    │            └─ the user's `claude` CLI, one query() per session
    │    └─ Codex ─── the gateway's own `codex app-server` (stdio JSON-RPC)
+   ├─ Resident tasks (internal/resident) ── resident.db (SQLite)
+   │    ├─ Claude ── a herdr-claude-sidecar per run (persistSession: false, outputFormat)
+   │    └─ Codex ─── a codex app-server per run (ephemeral thread, outputSchema)
    ├─ Claude adapter ──── ~/.claude/projects/*/<session>.jsonl (history)
    ├─ Codex adapter ───── thread/read, thread/list on the same app-server, rollout files
    └─ FCM HTTP v1 ─────── data-only pushes on status transitions
@@ -30,8 +33,9 @@ it in the gateway under the same id.
 
 ## Principles
 
-- **Providers are the source of truth.** The gateway keeps no session,
-  message, event or attachment database. Every request reads the agents'
+- **Providers are the source of truth** for sessions. The gateway keeps no session,
+  message, event or attachment database. Resident tasks are the exception by design:
+  they are not sessions, and `resident.db` is their source of truth (see Resident tasks below). Every request reads the agents'
   own storage (Claude's transcript JSONL, Codex's rollouts through
   app-server) and the live runtime state, reusing bounded in-memory
   projections when their source is unchanged. Restarting the gateway loses
@@ -47,6 +51,8 @@ it in the gateway under the same id.
   The menu-bar manager uses the separate
   `desktop/` config/state directories; `HERDR_MOBILE_STATE_DIR` selects the
   gateway state root. Delivery receipts contain hashes and status, never text.
+  `resident.db` holds the resident tasks (settings, conversation, memory, wake-ups,
+  runs, notification outbox).
 - **In-memory only:** last seen status and completion revision per session
   (push de-duplication), bounded Codex display and rollout projections,
   the FCM access token, and the pending approvals and questions of running
@@ -503,6 +509,38 @@ client that hangs up does not cancel it. A failed read keeps the last good
 providers and reports the error next to them. `usageCommand: "off"` turns the
 whole thing off, and `herdr-mobile-gateway usage` prints one read.
 
+## Resident tasks
+
+Standing tasks ("常駐") the gateway runs on a schedule or on request, each with its own
+instruction, conversation, memory, wake-ups and run history. Full description (Japanese):
+[resident.md](resident.md).
+
+- `internal/resident` owns them in `resident.db` (SQLite through `modernc.org/sqlite`, pure Go,
+  WAL, mode 600, schema version in `PRAGMA user_version`). It is independent of
+  `internal/runtime`: runs are identified by run id and never appear in `direct-sessions.json`,
+  the session list (offline entries of resident attempts are filtered out too), the watcher or
+  its pushes.
+- Each run is a fresh agent conversation built from the instruction, the task's memory, the
+  recent conversation, pending follow-ups and the reason it started, and must end with a JSON
+  result (`resident.ResultSchema`: outcome, summary, report, notification request and key,
+  memory patch, optional `nextWakeAt`, question, artifacts). A turn without a valid result is a
+  contract failure, never a success.
+- Claude: a sidecar started for the run, `query()` with `persistSession: false`,
+  `outputFormat` and permission mode / tool rules from the task's profile; other permission
+  requests are denied and reported. Codex: an app-server started for the run, an ephemeral
+  thread with `approvalPolicy: "never"` and the profile's sandbox, `outputSchema` on
+  `turn/start`. When a run ends, is stopped or times out, its runtime and every process it
+  started (including commands in their own process groups) are ended; nothing shared with
+  sessions is touched. Login, CLI path and the API-key billing guard are the sessions'.
+- Scheduling (once / daily / weekly / cron in an IANA timezone), catch-up after sleep, one
+  queued run per task, global concurrency, daily caps, self wake-ups and the notification
+  outbox are plain database state driven by a 30 s tick; no model is involved in waiting.
+- Restarts: a run whose prompt was not sent is queued again; one with a saved result is
+  finalized from it; any other cut-off run becomes `needs_reconciliation` and is never re-sent.
+- Pushes are `{type: "resident", taskId, runId, notificationId, kind, title, body}`, decided
+  by the gateway (agent request, task rules, keys already sent, cooldown, quiet hours) and
+  delivered from a retrying outbox with a stable id.
+
 ## HTTP API
 
 Full request and response shapes, auth and connection details: [api.md](api.md).
@@ -540,6 +578,8 @@ Full request and response shapes, auth and connection details: [api.md](api.md).
 | GET | `/v1/usage` | cached subscription limits `{providers[{provider, displayName, plan?, account?, windows[{key, label, scope?, usedPercent, windowMinutes?, resetsAt?}], updatedAt?, error?}], fetchedAt?, error?}` |
 | POST | `/v1/usage/refresh` | re-read the limits now (takes ~10 s) → same shape |
 | POST / DELETE | `/v1/devices` | FCM token registration |
+| GET | `/v1/capabilities` | `{messageIdempotency, resident?}`: what the gateway offers |
+| * | `/v1/resident/…` | resident tasks (see api.md) |
 
 ## Advisory directory check
 

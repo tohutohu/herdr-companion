@@ -188,6 +188,8 @@ Gateway が動かすセッションは、プロセスが無い間（Gateway の�
 | GET | `/v1/usage` | 要 | サブスクリプション利用枠（キャッシュ） |
 | POST | `/v1/usage/refresh` | 要 | 利用枠を今すぐ読み直す |
 | POST / DELETE | `/v1/devices` | 要 | FCM トークンの登録／解除 |
+| GET | `/v1/capabilities` | 要 | 対応機能（常駐タスクの有無と版） |
+| * | `/v1/resident/…` | 要 | 常駐タスク（[下記](#常駐タスク)） |
 
 ## ペアリング
 
@@ -675,3 +677,97 @@ UUID のみを渡す。長文を Data の10KB制限で失わず、同じセッ�
 メッセージ JSON。FCM の data 上限 4096 バイトに収まるよう、ペイロード全体が 3800 バイト以下になるまで
 本文を切り詰め、末尾に `…` を付ける。会話を読めないときや報告がないときは省く。
 アプリは会話を取得する前でもこれを画面に出し、取得した会話で置き換える。
+
+常駐タスクの通知は別の形（`type: "resident"`）で、`sessionId` を含まない。[常駐タスク](#常駐タスク)を参照。
+
+## 常駐タスク
+
+継続して任せるタスク（常駐）の API。動作の詳細（予定、実行、復旧、権限、通知）は [resident.md](resident.md)。
+すべて Bearer 認証。`/v1/sessions` とは独立していて、常駐の実行はセッション一覧に現れない。
+
+### 対応の判別: `GET /v1/capabilities`
+
+```json
+{"messageIdempotency": true, "resident": {"version": 1, "providers": ["claude", "codex"], "defaultTimezone": "Asia/Tokyo"}}
+```
+
+`resident` がない（または `/v1/capabilities` が 404 の）Gateway は常駐タスクに対応していない。アプリは 404 や通信エラーを
+「タスク 0 件」として扱わない。
+
+### エラー
+
+`{"error": "理由", "code": "…"}`。`code` は `invalid`（400、理由付き。無効な cron・timezone・モデル・effort・範囲外の cwd など）、
+`not_found`（404）、`conflict`（409。版の不一致、状態が合わない操作、requestId を別内容で再利用）、
+`trust_required`（409。エージェントが信頼していないフォルダ。`trust: true` で再送）、`forbidden`、`too_large`、`internal`。
+
+### 冪等性と競合
+
+- タスク作成・手動実行・追加指示・回答は `requestId`（8–100 文字の `[A-Za-z0-9._:-]`）を受け付ける。同じ ID の再送は最初の結果を返し、
+  同じ ID で内容が違えば 409。通信の再試行で Run や追加指示が増えない。
+- 更新（PATCH）と Memory の保存は `expectedVersion` が現在の版と一致したときだけ成功する（不一致は 409）。
+
+### エンドポイント
+
+| メソッド | パス | 概要 |
+|---|---|---|
+| GET | `/v1/resident/tasks` | タスク一覧 `{tasks[]}`（ETag 対応） |
+| POST | `/v1/resident/tasks` | 作成 `{name, instruction, provider, model?, effort?, cwd, schedule, permissions?, notify?, limits?, enabled?, trust?, requestId?}` → Task（201） |
+| GET | `/v1/resident/tasks/{id}` | `{task, memory, wakeups[], upcoming[3], recentRuns[], pendingQuestion?}` |
+| PATCH | `/v1/resident/tasks/{id}` | 変更（作成と同じ項目、省略は維持）`{expectedVersion, …}` → Task |
+| DELETE | `/v1/resident/tasks/{id}` | 削除（以後起動しない、実行中の Run は停止） |
+| POST | `/v1/resident/tasks/{id}/pause` / `resume` | 自動起動の一時停止／再開 → Task |
+| GET | `/v1/resident/tasks/{id}/messages?before=&limit=` | 会話 `{messages[], more}`（古い順） |
+| POST | `/v1/resident/tasks/{id}/messages` | 追加指示 `{text, requestId?}` → 202 `{message, run, merged}` |
+| POST | `/v1/resident/tasks/{id}/read` | 既読 `{messageId?}`（省略で最新まで） |
+| GET | `/v1/resident/tasks/{id}/runs?before=&limit=` | 実行履歴 `{runs[], more}`（新しい順、skipped を含む） |
+| POST | `/v1/resident/tasks/{id}/runs` | 今すぐ実行 `{requestId?}` → 202 `{run, merged}` |
+| GET / PUT | `/v1/resident/tasks/{id}/memory` | Memory の取得／保存 `{expectedVersion, summary?, state?}` |
+| GET | `/v1/resident/tasks/{id}/artifacts` | 成果物 `{artifacts[]}` |
+| GET | `/v1/resident/tasks/{id}/notifications` | このタスクの通知 Outbox |
+| GET | `/v1/resident/notifications?limit=` | 全タスクの新しい通知（Mac UI が自前で通知を出すのに使う） |
+| GET | `/v1/resident/artifacts/{id}/content[?download=1]` | 成果物の内容（タスクのフォルダ内だけ。配信時にも再検証） |
+| GET | `/v1/resident/runs/{id}` | Run 1 件（attempts, artifacts, question を含む） |
+| POST | `/v1/resident/runs/{id}/cancel` | その Run だけを停止（待機中なら取り消し、実行中なら中断して終了を待つ） |
+| POST | `/v1/resident/runs/{id}/dismiss` | 成否不明（`needs_reconciliation`）の Run を確認済みにする。再送はしない |
+| POST | `/v1/resident/questions/{id}/answers` | 判断待ちへの回答 `{text, requestId?}` → 202 `{message, run}`。期限切れ・回答済みは 409 |
+| POST | `/v1/resident/schedule/preview` | `{schedule, count?}` → `{next[], schedule}`（保存しない） |
+
+### Task
+
+```json
+{
+  "id": "task_…", "name": "CI監視", "instruction": "…", "provider": "claude", "model": "haiku", "effort": "low",
+  "cwd": "/Users/me/workspace/app",
+  "schedule": {"kind": "weekly", "time": "07:00", "days": ["mon", "thu"], "timezone": "Asia/Tokyo"},
+  "permissions": {"profile": "read_only", "network": false, "allowedTools": ["Bash(gh pr view:*)"]},
+  "notify": {"mode": "changes", "onFailure": true, "onQuestion": true, "cooldownMinutes": 0, "quietStart": "23:00", "quietEnd": "07:00"},
+  "limits": {"maxRunMinutes": 30, "maxRunsPerDay": 12, "expiresAt": null},
+  "enabled": true, "version": 3, "trustedAt": "…",
+  "state": "idle", "nextRunAt": "…", "nextWakeReason": "schedule", "lastSuccessAt": "…",
+  "lastRun": {"id": "run_…", "status": "completed", "outcome": "unchanged", "summary": "…"},
+  "latestReport": {"runId": "run_…", "outcome": "changed", "summary": "…", "at": "…"},
+  "pendingQuestion": null, "unread": 1, "runsToday": 2, "attention": null
+}
+```
+
+- `schedule.kind`: `manual` / `once`（`at`）/ `daily`（`time`）/ `weekly`（`days`, `time`）/ `cron`（`cron`）。`timezone` は IANA 名。
+- `state`: `idle`（稼働中）/ `queued` / `running` / `waiting_user` / `needs_attention` / `paused`。
+- 作成時、未指定の `notify` は判断待ち・失敗も通知する既定、`limits` は 30 分・12 回。
+
+### Run
+
+`status`: `queued` / `running` / `completed` / `waiting_user` / `failed` / `cancelled` / `timed_out` / `needs_reconciliation` /
+`skipped` / `dismissed`。`outcome`: `changed` / `unchanged` / `blocked` / `failed`。`errorKind`: `contract`（結果契約違反）/
+`provider` / `permission` / `timeout` / `interrupted` / `config` / `agent`。`triggers`: `schedule` / `catch_up` / `self_wake` /
+`manual` / `follow_up` / `answer`。そのほか `settings`（開始時に固定した設定）、`model`、`effort`、`usage`、`warnings`、
+`notifyDecision`、`nextWakeAt`、`attempts[]`（`phase`: `preparing` / `sending` / `running` / `finished` / `failed` /
+`cancelled` / `unknown` / `abandoned`）。
+
+### 常駐の通知
+
+```json
+{"type": "resident", "taskId": "task_…", "runId": "run_…", "notificationId": "ntf_…",
+ "kind": "change", "title": "CI監視", "body": "CIが復旧しました", "gatewayId": "…"}
+```
+
+`kind` は `change` / `question` / `failure`。同じ `notificationId` は同じ通知の再送で、アプリは二度表示しない。

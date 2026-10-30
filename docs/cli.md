@@ -21,6 +21,7 @@
 | 待つ | `until` `wait` `changes` |
 | 操作 | `send` `answer` `start` `archive` `resume` |
 | 設定 | `model` `effort` `mode` `interrupt` |
+| 常駐 | `resident`（`ls` `show` `create` `update` `preview` `pause` `resume` `run` `runs` `log` `cancel` `dismiss` `send` `answer` `messages` `memory` `delete`） |
 | その他 | `usage` `guide` `version` |
 
 - `hc start` は Gateway が起動し、すぐにセッション ID を返す（`started claude:<id>`）。`--provider` は `claude`（既定）か `codex`。
@@ -28,6 +29,32 @@
 - `hc mode ID [MODE]` は巡回、または直接指定。`hc interrupt ID` は実行中のターンだけを止める。
 - `hc resume ID` は停止中（offline）・アーカイブ済みのセッションを、どこで始めたものでも同じ ID のまま新しいプロセスで再開する。Gateway が一覧で動作中と出すセッションはプロセスが止まっていても `hc send` だけで再開する。
 - `hc answer` で答えられない要求（`not supported here`）は、`hc interrupt` でターンを止めて次の指示を送る。
+
+### 常駐タスク（`hc resident`）
+
+Gateway が予定どおり実行する常駐タスク（[resident.md](resident.md)）を管理する。セッションではないので `hc ls` には出ない。
+詳細は `hc help resident`。
+
+```bash
+hc resident create --name "CI監視" --provider claude --model haiku --cwd ~/workspace/app \
+  --instruction-file ci.md --weekly mon,thu@07:00 --tz Asia/Tokyo \
+  --allow 'Bash(gh run list:*)' --network --trust   # 信頼していないフォルダは --trust が必要
+hc resident preview --cron "0 7 * * 1-5"            # 次の3回（保存しない）
+hc resident ls                                      # "!" は判断待ち・要確認
+hc resident run CI監視                              # 今すぐ実行（待機中の Run があればまとめる）
+hc resident send CI監視 "詳しく調べて"               # 追加指示（新しい Run が答える）
+hc resident answer CI監視 "マージしないで報告だけ"   # 判断待ちへの回答
+hc resident runs CI監視 && hc resident log RUN       # 実行履歴と 1 件の詳細
+hc resident cancel RUN                              # その Run だけを停止
+hc resident memory CI監視 --set memory.json         # {summary?, state?} で Memory を置き換え
+```
+
+- TASK はタスク ID、その一意な前方一致、または名前。`--file task.json` で API と同じ JSON を渡せ、フラグが上書きする。
+- 作成・手動実行・追加指示・回答は requestId を付けて送る（`--request-id` で固定すれば再試行しても増えない）。
+- 更新は現在の版（`expectedVersion`）を自動で付ける。ほかで変更されていれば `conflict` で失敗する。
+- `--json` は API の JSON をそのまま出す。終了コードは 0 成功、1 拒否・失敗（理由を stderr に出す）、2 コマンドラインの誤り。
+- 常駐に対応しない Gateway では「update the Gateway」と出て終了コード 1。
+- エージェントが使える外部連携は、この Mac で設定済みの CLI / MCP だけ。hc 自体はメールや Web 検索を提供しない。
 
 2.0 で `term` / `keys`（Herdr のペインの画面とキー入力）、`migrate`（Herdr → Gateway）、`--backend` とペイン ID での指定はなくなった。
 

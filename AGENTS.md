@@ -50,6 +50,10 @@ bash macos/scripts/build-dmg.sh                 # native-architecture DMG, ad-ho
 swift test --package-path macos                 # updater logic tests
 ```
 
+Resident tasks (常駐, `gateway/internal/resident`, `docs/resident.md`) keep their own state in `resident.db`; their runs never go
+through `internal/runtime`. The opt-in Mac UI flow test against a throwaway gateway is
+`HERDR_RESIDENT_E2E_URL=… HERDR_RESIDENT_E2E_TOKEN=… HERDR_RESIDENT_E2E_CWD=… ./gradlew :desktopApp:test --tests '*DesktopResidentFlowTest*' --rerun`.
+
 Both Mac apps update themselves from the latest GitHub Release (`docs/macos-release.md#アプリ内アップデート`); keep the release asset names stable.
 
 ### APK build requests
