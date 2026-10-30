@@ -18,8 +18,9 @@ import (
 )
 
 // Runner executes one resident run with a provider. Implementations start
-// a fresh, unpersisted agent conversation for every call, never touch the
-// session runtime, and end everything they started before returning.
+// a fresh agent conversation for every call, never touch the session
+// runtime, and end everything they started before returning. A runner that
+// saves the conversation also implements ConversationKeeper.
 type Runner interface {
 	Run(ctx context.Context, req RunRequest, hooks RunHooks) (*RunOutput, error)
 }

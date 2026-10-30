@@ -683,7 +683,9 @@ UUID のみを渡す。長文を Data の10KB制限で失わず、同じセッ�
 ## 常駐タスク
 
 継続して任せるタスク（常駐）の API。動作の詳細（予定、実行、復旧、権限、通知）は [resident.md](resident.md)。
-すべて Bearer 認証。`/v1/sessions` とは独立していて、常駐の実行はセッション一覧に現れない。
+すべて Bearer 認証。`/v1/sessions` とは独立していて、常駐の実行はセッション一覧に現れない（昇格した Run を除く）。
+Run と会話のメッセージには `conversation`（`kept`: 昇格できる、`promoted`: `sessionId` のセッションになった、`discarded`、
+または省略）が付く。
 
 ### 対応の判別: `GET /v1/capabilities`
 
@@ -729,6 +731,7 @@ UUID のみを渡す。長文を Data の10KB制限で失わず、同じセッ�
 | GET | `/v1/resident/runs/{id}` | Run 1 件（attempts, artifacts, question を含む） |
 | POST | `/v1/resident/runs/{id}/cancel` | その Run だけを停止（待機中なら取り消し、実行中なら中断して終了を待つ） |
 | POST | `/v1/resident/runs/{id}/dismiss` | 成否不明（`needs_reconciliation`）の Run を確認済みにする。再送はしない |
+| POST | `/v1/resident/runs/{id}/promote` | Run の会話を通常のセッションにして再開する → `{sessionId}`。終わっていない Run は 409、会話を残していない Run は 400（[resident.md](resident.md#セッションへの昇格)） |
 | POST | `/v1/resident/questions/{id}/answers` | 判断待ちへの回答 `{text, requestId?}` → 202 `{message, run}`。期限切れ・回答済みは 409 |
 | POST | `/v1/resident/schedule/preview` | `{schedule, count?}` → `{next[], schedule}`（保存しない） |
 

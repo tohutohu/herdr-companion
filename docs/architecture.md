@@ -15,8 +15,8 @@ Herdr Companion Gateway (Go, on the Mac)
    │    │            └─ the user's `claude` CLI, one query() per session
    │    └─ Codex ─── the gateway's own `codex app-server` (stdio JSON-RPC)
    ├─ Resident tasks (internal/resident) ── resident.db (SQLite)
-   │    ├─ Claude ── a herdr-claude-sidecar per run (persistSession: false, outputFormat)
-   │    └─ Codex ─── a codex app-server per run (ephemeral thread, outputSchema)
+   │    ├─ Claude ── a herdr-claude-sidecar per run (outputFormat; transcript kept for promotion)
+   │    └─ Codex ─── a codex app-server per run (saved thread, outputSchema)
    ├─ Claude adapter ──── ~/.claude/projects/*/<session>.jsonl (history)
    ├─ Codex adapter ───── thread/read, thread/list on the same app-server, rollout files
    └─ FCM HTTP v1 ─────── data-only pushes on status transitions
@@ -519,16 +519,18 @@ instruction, conversation, memory, wake-ups and run history. Full description (J
   WAL, mode 600, schema version in `PRAGMA user_version`). It is independent of
   `internal/runtime`: runs are identified by run id and never appear in `direct-sessions.json`,
   the session list (offline entries of resident attempts are filtered out too), the watcher or
-  its pushes.
+  its pushes. A run that reported something keeps its agent conversation for 14 days; the user
+  can promote it (`POST /v1/resident/runs/{id}/promote`) to an ordinary session, which is then
+  listed and resumed. Conversations not promoted are removed (`docs/resident.md`).
 - Each run is a fresh agent conversation built from the instruction, the task's memory, the
   recent conversation, pending follow-ups and the reason it started, and must end with a JSON
   result (`resident.ResultSchema`: outcome, summary, report, notification request and key,
   memory patch, optional `nextWakeAt`, question, artifacts). A turn without a valid result is a
   contract failure, never a success.
-- Claude: a sidecar started for the run, `query()` with `persistSession: false`,
+- Claude: a sidecar started for the run, `query()` with `persistSession: true`,
   `outputFormat` and permission mode / tool rules from the task's profile; other permission
-  requests are denied and reported. Codex: an app-server started for the run, an ephemeral
-  thread with `approvalPolicy: "never"` and the profile's sandbox, `outputSchema` on
+  requests are denied and reported. Codex: an app-server started for the run, a saved
+  (not ephemeral) thread with `approvalPolicy: "never"` and the profile's sandbox, `outputSchema` on
   `turn/start`. When a run ends, is stopped or times out, its runtime and every process it
   started (including commands in their own process groups) are ended; nothing shared with
   sessions is touched. Login, CLI path and the API-key billing guard are the sessions'.

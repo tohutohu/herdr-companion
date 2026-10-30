@@ -21,7 +21,7 @@
 | 待つ | `until` `wait` `changes` |
 | 操作 | `send` `answer` `start` `archive` `resume` |
 | 設定 | `model` `effort` `mode` `interrupt` |
-| 常駐 | `resident`（`ls` `show` `create` `update` `preview` `pause` `resume` `run` `runs` `log` `cancel` `dismiss` `send` `answer` `messages` `memory` `delete`） |
+| 常駐 | `resident`（`ls` `show` `create` `update` `preview` `pause` `resume` `run` `runs` `log` `cancel` `dismiss` `promote` `send` `answer` `messages` `memory` `delete`） |
 | その他 | `usage` `guide` `version` |
 
 - `hc start` は Gateway が起動し、すぐにセッション ID を返す（`started claude:<id>`）。`--provider` は `claude`（既定）か `codex`。
@@ -32,7 +32,7 @@
 
 ### 常駐タスク（`hc resident`）
 
-Gateway が予定どおり実行する常駐タスク（[resident.md](resident.md)）を管理する。セッションではないので `hc ls` には出ない。
+Gateway が予定どおり実行する常駐タスク（[resident.md](resident.md)）を管理する。セッションではないので `hc ls` には出ない（`promote` した Run を除く）。
 詳細は `hc help resident`。
 
 ```bash
@@ -45,6 +45,7 @@ hc resident send CI監視 "詳しく調べて"               # 追加指示（�
 hc resident answer CI監視 "マージしないで報告だけ"   # 判断待ちへの回答
 hc resident runs CI監視 && hc resident log RUN       # 実行履歴と 1 件の詳細
 hc resident cancel RUN                              # その Run だけを停止
+hc resident promote RUN                             # その Run の会話をセッションにして続ける（hc send で話しかける）
 hc resident memory CI監視 --set memory.json         # {summary?, state?} で Memory を置き換え
 ```
 

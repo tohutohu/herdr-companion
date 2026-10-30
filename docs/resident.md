@@ -13,13 +13,13 @@ API は [api.md](api.md#常駐タスク)。実装は `gateway/internal/resident`
 |---|---|---|
 | 正本 | エージェントの履歴（Claude transcript / Codex rollout） | Gateway の `resident.db` |
 | 実行 | `internal/runtime.Manager`、`direct-sessions.json` | `internal/resident`（Run ごとに runId） |
-| Claude | 共有 sidecar の `query()`（`persistSession: true`） | **Run ごとに起動する sidecar** の `query()`（`persistSession: false`, `outputFormat`） |
-| Codex | Gateway の app-server のスレッド | **Run ごとに起動する app-server** の一時スレッド（`ephemeral: true`, `outputSchema`） |
+| Claude | 共有 sidecar の `query()`（`persistSession: true`） | **Run ごとに起動する sidecar** の `query()`（`persistSession: true`, `outputFormat`） |
+| Codex | Gateway の app-server のスレッド | **Run ごとに起動する app-server** のスレッド（`ephemeral: false`, `outputSchema`） |
 | 通知 | Watcher が状態遷移から送る | 結果確定時に Outbox へ入れ、Outbox から送る |
 
-- 常駐の Run は Manager・`direct-sessions.json`・Watcher・セッション listener に登録されない。Claude は transcript を書かず
-  （`~/.claude/projects` には Claude Code 自身が空の `memory/` を作ることがある）、Codex は rollout を残さない。
-  念のため `/v1/sessions` の offline 一覧は常駐の Attempt の native id を除外する（`hc ls` も同じ一覧を使う）。
+- 常駐の Run は Manager・`direct-sessions.json`・Watcher・セッション listener に登録されない。Run の会話（Claude transcript /
+  Codex rollout）は[セッションに昇格](#セッションへの昇格)できるように残すが、`/v1/sessions` の offline 一覧は昇格していない
+  Run の native id を除外する（`hc ls` も同じ一覧を使う）。
 - 共有しているのは低層部分だけ: sidecar の stdio プロトコル（`startSidecar`）、Codex の JSON-RPC クライアントと stdio transport、
   Claude CLI のパス・ログイン・課金ガード（`billingProblem`、API キーの除去）、環境変数の整理（`ChildEnv`）、
   モデルカタログ（`/v1/models` と同じ）、workspaceRoots と信頼確認、FCM 送信部品、ファイルのパス検証。
@@ -34,14 +34,14 @@ API は [api.md](api.md#常駐タスク)。実装は `gateway/internal/resident`
 
 `config.StateDir()/resident.db`（既定 `~/.local/state/herdr-mobile/resident.db`、メニューバー版は `desktop/` 配下）。
 SQLite（`modernc.org/sqlite`、純 Go で cgo 不要）、WAL、`synchronous=FULL`、ファイルは mode 600、接続は 1 本で直列化。
-スキーマ版は `PRAGMA user_version`（現在 1）。起動時に古い版から順に移行し、新しすぎる版は開かずにエラーにする。
+スキーマ版は `PRAGMA user_version`（現在 2）。起動時に古い版から順に移行し、新しすぎる版は開かずにエラーにする。
 
 | テーブル | 内容 |
 |---|---|
 | `tasks` | 設定（JSON）、有効/一時停止、版、信頼確認日時、削除日時、既読位置 |
 | `memory` | 要約（≤8KiB）と構造化状態（JSON オブジェクト ≤64KiB, ≤256 キー）、版、更新者 |
 | `messages` | タスクの会話（追加指示・回答・報告・質問・お知らせ）、処理した Run |
-| `runs` | 状態、起動理由、開始時に固定した設定と Memory のスナップショット、結果、エラー種別、使用量、通知判断 |
+| `runs` | 状態、起動理由、開始時に固定した設定と Memory のスナップショット、結果、エラー種別、使用量、通知判断、会話の保持（`conversation`, `keep_until`, `session_id`） |
 | `attempts` | Provider 呼び出し（段階、native id、保存済みの生の結果） |
 | `wakeups` | 予定と自己予約（pending/fired/skipped/cancelled/merged） |
 | `questions` / `artifacts` | 判断待ちの質問（期限付き）と成果物 |
@@ -171,12 +171,31 @@ SQLite（`modernc.org/sqlite`、純 Go で cgo 不要）、WAL、`synchronous=FU
 - Mac UI: `GET /v1/resident/notifications` を 15 秒ごとに読み、新しいものをシステム通知とアプリ内バナー（「開く」で該当タスク）で出す。
 - 未読数は報告メッセージだけを数える（変化のない定期実行は数えない）。会話を開くと既読になる。
 
+## セッションへの昇格
+
+「毎時調べて、変化があったらその場で相談する」ための仕組み。Run は調査したときの会話をそのまま残し、
+ユーザーが選んだ Run を通常のセッションにできる。
+
+- プロンプトを送る直前に Run の `conversation` を `kept` にする（`keep_until` = 14 日後、`Config.KeepConversations`）。
+  変化のない定期実行（会話に出さない Run）は確定時に `keep_until` を現在にし、タスクを削除すると昇格していない会話も同様にする。
+- スケジューラの Tick が期限の来た会話を消す: Claude は transcript（`<id>.jsonl` とサブエージェントの `<id>/`）を削除、
+  Codex は Gateway の app-server で `thread/delete`。消す前に `discarding` にして昇格と競合しないようにし、失敗したら 1 時間後に再試行する。
+- `POST /v1/resident/runs/{id}/promote` が昇格する: 終わった Run で `kept` のときだけ。題名「タスク名（常駐 MM/DD HH:MM）」を付け
+  （Claude は transcript に `custom-title`、Codex は `thread/name/set`）、`promoted` にしてセッション一覧に出し、
+  通常セッションとして再開する（`Launcher.Resume`）。以後は普通のセッションで、承認はアプリに来る。2 回目以降は同じセッションを返す
+  （止まっていれば再開する）。
+- 昇格したセッションの先頭は常駐のプロンプト、最後の応答は結果契約の JSON（Claude は StructuredOutput ツール）になる。
+  続けて話しかけると通常の文章で答える。
+- 残している会話は Claude Code の `claude --resume` 一覧や `~/.codex/sessions` にも現れる（変化のない定期実行の分はすぐ消える）。
+
 ## 画面
 
 - 常駐ホーム: タスク名、状態（稼働中・待機中・実行中・判断待ち・要確認・一時停止）、次回予定、最終成功、最新の重要報告、判断待ち、未読数。
   空状態・取得エラー（前回の内容を残す）・通信断・未対応 Gateway（`/v1/capabilities` に `resident` がない）を区別する。
 - タスク詳細: 状態と次の 3 回・自己予約、今すぐ実行／今回の実行を停止／一時停止・再開、判断待ちへの回答、
   タブ「会話」（追加指示）・「実行履歴」（停止、成否不明の確認、詳細・使用量・警告・成果物）・「記憶」（要約と状態の編集）・「設定」。
+  会話を残している Run の報告と実行履歴には「セッションで続ける」（昇格済みなら「セッションを開く」）があり、
+  Android は Sessions タブ、Mac UI はフォーカス中のペインでそのセッションを開く。
 - 作成・編集: 名前、指示、フォルダ（選択ダイアログ）、エージェント・モデル・effort、予定（一回限り/毎日/毎週/cron/手動）と timezone、
   保存前に次の 3 回を表示、権限、通知（モード・判断待ち・失敗・クールダウン・静穏時間）、上限、有効。Gateway の拒否理由をそのまま表示する。
   予定・権限の変更はこのフォームでのみ行う（会話の自然文では変わらない）。
