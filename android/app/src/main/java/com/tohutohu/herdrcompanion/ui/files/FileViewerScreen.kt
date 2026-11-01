@@ -58,7 +58,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import coil3.compose.AsyncImage
 import com.tohutohu.herdrcompanion.container
 import com.tohutohu.herdrcompanion.data.DownloadState
 import com.tohutohu.herdrcompanion.data.FileDownloads
@@ -159,7 +158,7 @@ fun FileViewerScreen(sessionId: String, path: String, line: Int, onBack: () -> U
                 when (s) {
                     FileState.Loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
                     is FileState.Error -> Text(s.message, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp))
-                    is FileState.Image -> AsyncImage(model = s.bytes, contentDescription = path, modifier = Modifier.padding(bottom = bottom).fillMaxSize())
+                    is FileState.Image -> ZoomableImage(model = s.bytes, contentDescription = path, modifier = Modifier.padding(bottom = bottom).fillMaxSize())
                     is FileState.Text -> TextFileView(sessionId, path, s.lines, s.markdown, s.htmlInfo, line, bottom)
                     is FileState.Media -> Box(Modifier.padding(bottom = bottom)) { MediaFileView(sessionId, s.info) { state = FileState.Download(s.info) } }
                     is FileState.Download -> Box(Modifier.padding(bottom = bottom)) { DownloadView(sessionId, s.info) }

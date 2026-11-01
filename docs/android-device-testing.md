@@ -7,7 +7,7 @@ export JAVA_HOME=$HOME/Library/Java/JavaVirtualMachines/jbr-17.0.14/Contents/Hom
 HERDR_DEVICE_TEST_SERIAL=emulator-XXXX bash scripts/run-android-device-tests.sh
 ```
 
-8件を実行する。質問回答・添付メタデータ・履歴位置のActivity再生成、SDKへの合成push→Service→PrefetchWorker→Room→通知タップ、長文RemoteInput→実WorkManager→HTTP、503のbackoff再試行、先行400が後続返信を阻害しないこと、常駐タスクの合成push→通知→タップで常駐タブの該当タスク→同じnotificationIdを再表示しないことを確認する。HTTPは端末内MockWebServerであり、実Herdr/providerに送信しない。
+9件を実行する。画像ビューアの実マルチタッチ（ピンチした場所を中心に拡大、ダブルタップで戻す・拡大）、質問回答・添付メタデータ・履歴位置のActivity再生成、SDKへの合成push→Service→PrefetchWorker→Room→通知タップ、長文RemoteInput→実WorkManager→HTTP、503のbackoff再試行、先行400が後続返信を阻害しないこと、常駐タスクの合成push→通知→タップで常駐タブの該当タスク→同じnotificationIdを再表示しないことを確認する。HTTPは端末内MockWebServerであり、実Herdr/providerに送信しない。
 
 `ActivityScenario.recreate()`はOSのプロセスkillとは異なる。503は回線断とは異なり、SDKへの合成pushはGoogleからの配送確認ではない。スクリーンショットは `android/app/build/reports/device-tests/` に回収する。標準CIはJVM/Lintと、この専用APK/テストのコンパイルを行う。エミュレータ実行は上の明示コマンドで行う。
 
