@@ -476,6 +476,26 @@ func (m *Manager) Interrupt(ctx context.Context, id string) error {
 	return rt.DirectInterrupt(ctx, native)
 }
 
+// SideQuestion asks a side question (Claude Code's /btw) about the session's
+// conversation. A session without a process is resumed first, as a message
+// would resume it.
+func (m *Manager) SideQuestion(ctx context.Context, id, question string, history []providers.SideTurn) (providers.SideAnswer, error) {
+	rt, native, err := m.runtime(id)
+	if err != nil {
+		return providers.SideAnswer{}, err
+	}
+	sq, ok := rt.(providers.SideQuestioner)
+	if !ok {
+		return providers.SideAnswer{}, providers.ErrUnsupported
+	}
+	if !m.Alive(id) {
+		if err := m.EnsureRunning(ctx, id); err != nil {
+			return providers.SideAnswer{}, err
+		}
+	}
+	return sq.DirectSideQuestion(ctx, native, question, history)
+}
+
 // SetModel changes the model. A session without a process keeps the choice
 // for the process that resumes it.
 func (m *Manager) SetModel(ctx context.Context, id, model string) error {

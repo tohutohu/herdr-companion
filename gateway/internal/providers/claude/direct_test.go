@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -95,6 +97,17 @@ func fakeSidecar() {
 		case "respond":
 			reply(map[string]any{})
 			emit(sid, "permissionResolved", map[string]any{"requestId": req.Params["requestId"]})
+		case "sideQuestion":
+			q, _ := req.Params["question"].(string)
+			history, _ := req.Params["history"].([]any)
+			switch {
+			case strings.Contains(q, "hang"):
+				// Left unanswered, as a model call that does not finish.
+			case strings.Contains(q, "empty"):
+				reply(map[string]any{"answer": nil, "synthetic": false})
+			default:
+				reply(map[string]any{"answer": fmt.Sprintf("re: %s (%d)", q, len(history)), "synthetic": false})
+			}
 		case "stop":
 			reply(map[string]any{})
 			emit(sid, "exit", map[string]any{"error": nil})
@@ -383,4 +396,45 @@ func findInteraction(msgs []model.Message, id string) *model.Interaction {
 		}
 	}
 	return nil
+}
+
+func Test脇道の質問は履歴を付けてサイドカーに聞き答えを返す(t *testing.T) {
+	p, log := newSidecarProvider(t)
+	ctx := context.Background()
+	id, err := p.DirectStart(ctx, providers.DirectStart{Cwd: "/w"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	history := []providers.SideTurn{{Question: "いま何してる？", Answer: "読んでいます"}}
+	got, err := p.DirectSideQuestion(ctx, id, "なぜ？", history)
+	if err != nil || got.Answer != "re: なぜ？ (1)" || got.Synthetic {
+		t.Fatalf("answer = %+v, %v", got, err)
+	}
+	req := sidecarRequests(t, log, "sideQuestion")[0]
+	h, _ := req["history"].([]any)
+	first, _ := h[0].(map[string]any)
+	if req["sessionId"] != id || req["requestId"] == "" || first["question"] != "いま何してる？" || first["answer"] != "読んでいます" {
+		t.Errorf("params = %v", req)
+	}
+	if _, err := p.DirectSideQuestion(ctx, id, "empty", nil); !errors.Is(err, providers.ErrNoConversation) {
+		t.Errorf("no conversation = %v", err)
+	}
+}
+
+func Test呼び出し元が去った脇道の質問はサイドカーで取り消す(t *testing.T) {
+	p, log := newSidecarProvider(t)
+	id, err := p.DirectStart(context.Background(), providers.DirectStart{Cwd: "/w"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := p.DirectSideQuestion(ctx, id, "hang", nil); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v", err)
+	}
+	asked := sidecarRequests(t, log, "sideQuestion")[0]["requestId"]
+	eventually(t, "cancel", func() bool {
+		c := sidecarRequests(t, log, "cancelSideQuestion")
+		return len(c) == 1 && c[0]["requestId"] == asked
+	})
 }

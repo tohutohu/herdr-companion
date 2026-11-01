@@ -320,6 +320,38 @@ async function start(p: Json) {
   };
 }
 
+// Side questions (Claude Code's /btw) are answered from the session's
+// conversation without tools, alongside a running turn, and are not added to
+// the transcript. The SDK has the call but leaves it out of its types.
+type SideAnswer = { response: string; synthetic: boolean } | null;
+type SideQuestionQuery = {
+  askSideQuestion?: (
+    question: string,
+    options: { history?: { question: string; response: string }[]; signal?: AbortSignal },
+  ) => Promise<SideAnswer>;
+};
+
+// In-flight side questions by the gateway's request id, so a caller that
+// went away can cancel its question.
+const sideQuestions = new Map<string, AbortController>();
+
+async function sideQuestion(p: Json) {
+  const s = session(p.sessionId);
+  const ask = (s.q as unknown as SideQuestionQuery).askSideQuestion;
+  if (typeof ask !== "function") throw new Error("this Claude Agent SDK cannot answer side questions");
+  const history = ((p.history as Json[]) ?? []).map((t) => ({ question: String(t.question ?? ""), response: String(t.answer ?? "") }));
+  const requestId = String(p.requestId ?? "");
+  const abort = new AbortController();
+  if (requestId) sideQuestions.set(requestId, abort);
+  try {
+    const answer = await ask.call(s.q, String(p.question ?? ""), { history, signal: abort.signal });
+    // null: the session has no conversation to answer from yet.
+    return { answer: answer?.response ?? null, synthetic: answer?.synthetic ?? false };
+  } finally {
+    if (requestId) sideQuestions.delete(requestId);
+  }
+}
+
 function respond(p: Json) {
   const s = session(p.sessionId);
   const req = s.pending.get(String(p.requestId));
@@ -365,6 +397,11 @@ async function handle(method: string, p: Json): Promise<unknown> {
       return {};
     case "respond":
       return respond(p);
+    case "sideQuestion":
+      return sideQuestion(p);
+    case "cancelSideQuestion":
+      sideQuestions.get(String(p.requestId))?.abort();
+      return {};
     case "stop": {
       const s = sessions.get(String(p.sessionId));
       if (s && !s.closed) {

@@ -83,6 +83,30 @@ type DirectRuntime interface {
 	SetDirectListener(func(nativeID string))
 }
 
+// SideTurn is an earlier question and answer of a side conversation.
+type SideTurn struct {
+	Question string `json:"question"`
+	Answer   string `json:"answer"`
+}
+
+// SideAnswer answers a side question. Synthetic marks an answer the agent
+// made up without the model, e.g. to say why it could not answer.
+type SideAnswer struct {
+	Answer    string `json:"answer"`
+	Synthetic bool   `json:"synthetic"`
+}
+
+// ErrNoConversation means a side question has no conversation to be
+// answered from yet.
+var ErrNoConversation = errors.New("the session has no conversation to ask about yet")
+
+// SideQuestioner is a DirectRuntime that answers side questions (Claude
+// Code's /btw): from the session's conversation, without tools, alongside a
+// running turn, and without adding them to the session's history.
+type SideQuestioner interface {
+	DirectSideQuestion(ctx context.Context, nativeID, question string, history []SideTurn) (SideAnswer, error)
+}
+
 // Runtime states of a live session.
 const (
 	StateIdle    = "idle"    // no turn yet, or the finished turn was seen

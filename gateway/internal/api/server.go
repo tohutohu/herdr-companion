@@ -89,6 +89,7 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("POST /v1/sessions/{id}/model", s.setModel)
 	api.HandleFunc("POST /v1/sessions/{id}/effort", s.setEffort)
 	api.HandleFunc("POST /v1/sessions/{id}/interrupt", s.interrupt)
+	api.HandleFunc("POST /v1/sessions/{id}/side-question", s.sideQuestion)
 	api.HandleFunc("POST /v1/sessions/{id}/seen", s.markSeen)
 	api.HandleFunc("POST /v1/sessions/{id}/reload", s.reloadSession)
 	api.HandleFunc("GET /v1/sessions/{id}/messages/{mid}/images/{n}", s.getImage)
@@ -212,7 +213,7 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, sessionID, op stri
 		status = http.StatusConflict
 	case errors.Is(err, errInvalidSetting):
 		status = http.StatusBadRequest
-	case errors.Is(err, providers.ErrNotLive), errors.Is(err, providers.ErrInteractionGone),
+	case errors.Is(err, providers.ErrNotLive), errors.Is(err, providers.ErrInteractionGone), errors.Is(err, providers.ErrNoConversation),
 		errors.Is(err, errAlreadyLive), errors.Is(err, launcher.ErrNoCwd), errors.Is(err, launcher.ErrCwdGone):
 		status = http.StatusConflict
 	case errors.Is(err, providers.ErrUnsupported):

@@ -165,6 +165,47 @@ func (s *Server) interrupt(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
 }
 
+// Limits of a side question request.
+const (
+	maxSideQuestionBody    = 1 << 20
+	maxSideQuestionHistory = 50
+)
+
+type sideQuestionRequest struct {
+	Question string               `json:"question"`
+	History  []providers.SideTurn `json:"history"`
+}
+
+// sideQuestion answers a question asked on the side of a session (Claude
+// Code's /btw): from its conversation, without tools, while a turn may run.
+// Nothing is added to the session's history; the caller keeps the earlier
+// questions and answers and sends them back as history for a follow-up.
+func (s *Server) sideQuestion(w http.ResponseWriter, r *http.Request) {
+	id, _, ok := s.liveSession(w, r, "side_question")
+	if !ok {
+		return
+	}
+	var req sideQuestionRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, maxSideQuestionBody)).Decode(&req); err != nil {
+		s.fail(w, r, id, "side_question", badRequest("invalid json"))
+		return
+	}
+	req.Question = strings.TrimSpace(req.Question)
+	if req.Question == "" {
+		s.fail(w, r, id, "side_question", badRequest("question is empty"))
+		return
+	}
+	if len(req.History) > maxSideQuestionHistory {
+		req.History = req.History[len(req.History)-maxSideQuestionHistory:]
+	}
+	answer, err := s.Direct.SideQuestion(r.Context(), id, req.Question, req.History)
+	if err != nil {
+		s.fail(w, r, id, "side_question", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, answer)
+}
+
 func (s *Server) writeSession(w http.ResponseWriter, r *http.Request, id string) {
 	sess, _, err := s.Sessions.Get(r.Context(), id)
 	if err != nil {

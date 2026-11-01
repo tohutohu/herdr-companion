@@ -33,6 +33,8 @@ type DirectConfig struct {
 const (
 	startTimeout   = 2 * time.Minute
 	controlTimeout = 30 * time.Second
+	// sideQuestionTimeout bounds a side question, which waits on the model.
+	sideQuestionTimeout = 3 * time.Minute
 	// maxPartial bounds the streamed text kept for a reply in progress.
 	maxPartial = 64 << 10
 	// streamingPrefix marks the in-progress reply, shown until the
@@ -357,6 +359,41 @@ func (p *Provider) DirectStop(ctx context.Context, id string) error {
 
 func (p *Provider) DirectInterrupt(ctx context.Context, id string) error {
 	return p.control(ctx, id, "interrupt", map[string]any{})
+}
+
+// DirectSideQuestion asks Claude Code a side question (/btw). Its answer
+// comes from a model call of its own, so it takes as long as a short reply.
+func (p *Provider) DirectSideQuestion(ctx context.Context, id, question string, history []providers.SideTurn) (providers.SideAnswer, error) {
+	sc, err := p.liveDirect(id)
+	if err != nil {
+		return providers.SideAnswer{}, err
+	}
+	if history == nil {
+		history = []providers.SideTurn{}
+	}
+	requestID := newSessionID()
+	cctx, cancel := context.WithTimeout(ctx, sideQuestionTimeout)
+	defer cancel()
+	var out struct {
+		Answer    *string `json:"answer"`
+		Synthetic bool    `json:"synthetic"`
+	}
+	err = sc.call(cctx, "sideQuestion", map[string]any{
+		"sessionId": id, "requestId": requestID, "question": question, "history": history,
+	}, &out)
+	if cctx.Err() != nil {
+		// The caller left or the answer took too long: stop the model call.
+		stop, cancelStop := context.WithTimeout(context.Background(), controlTimeout)
+		defer cancelStop()
+		_ = sc.call(stop, "cancelSideQuestion", map[string]any{"requestId": requestID}, nil)
+	}
+	if err != nil {
+		return providers.SideAnswer{}, err
+	}
+	if out.Answer == nil {
+		return providers.SideAnswer{}, providers.ErrNoConversation
+	}
+	return providers.SideAnswer{Answer: *out.Answer, Synthetic: out.Synthetic}, nil
 }
 
 func (p *Provider) DirectSetModel(ctx context.Context, id, m string) error {

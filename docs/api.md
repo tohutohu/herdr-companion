@@ -169,6 +169,7 @@ Gateway が動かすセッションは、プロセスが無い間（Gateway の�
 | POST | `/v1/sessions/{id}/model` | 要 | 実行中セッションのモデルを変更 |
 | POST | `/v1/sessions/{id}/effort` | 要 | 実行中セッションの推論強度を変更 |
 | POST | `/v1/sessions/{id}/interrupt` | 要 | 実行中のターンを中断 |
+| POST | `/v1/sessions/{id}/side-question` | 要 | 脇道の質問（btw、Claude のみ） |
 | POST | `/v1/sessions/{id}/seen` | 要 | 既読にする |
 | POST | `/v1/sessions/{id}/reload` | 要 | キャッシュを捨てて読み直し、質問の取りこぼしを診断 |
 | POST / DELETE | `/v1/sessions/{id}/archive` | 要 | アーカイブ／解除 |
@@ -489,6 +490,21 @@ receipt は `HERDR_MOBILE_STATE_DIR/message-delivery/`（Mac メニューバー�
 
 実行中ターンを中断する（Claude: `Query.interrupt()`、Codex: `turn/interrupt`）。セッションは残る。`202`。
 プロセスが無いセッションと `offline` のセッションは `409`。
+
+### `POST /v1/sessions/{id}/side-question`
+
+```json
+{ "question": "なぜ receipts.go を読んだ？", "history": [{ "question": "いま何してる？", "answer": "…" }] }
+```
+
+Claude Code の `/btw` と同じ脇道の質問。セッションの会話を文脈に、ツールを使わずに答える。実行中のターンは止めず、
+質問も答えもセッションの履歴に残らない（SDK の `Query.askSideQuestion`）。Gateway も何も保存しないので、続けて聞くときは
+それまでの問答をクライアントが `history`（新しいものが後、最大 50 件）で送り返す。
+
+- 答えが出るまで待って `200 {"answer": "…", "synthetic": false}` を返す（最長 3 分）。`synthetic` はモデルを使わずに
+  エージェントが作った答え（答えられない理由など）。接続が切れると問い合わせを取り消す。
+- プロセスが無いセッションは、メッセージと同じく再開してから聞く。
+- 空の質問は `400`。会話がまだ無いセッションと `offline` のセッションは `409`。Codex のセッションは `422`。
 
 ### `POST /v1/sessions/{id}/seen`
 

@@ -34,6 +34,9 @@ type directFake struct {
 	modes    []string
 	trusted  bool
 	listener func(string)
+	// asked records side questions; sideAnswer answers them (nil: no conversation yet).
+	asked      []sideAsk
+	sideAnswer *string
 	// m is the runtime manager the server uses.
 	m *runtime.Manager
 }
@@ -90,6 +93,24 @@ func (d *directFake) DirectStop(_ context.Context, id string) error {
 	return nil
 }
 func (d *directFake) DirectInterrupt(context.Context, string) error { return nil }
+
+type sideAsk struct {
+	id, question string
+	history      []providers.SideTurn
+}
+
+func (d *directFake) DirectSideQuestion(_ context.Context, id, question string, history []providers.SideTurn) (providers.SideAnswer, error) {
+	if !d.alive(id) {
+		return providers.SideAnswer{}, providers.ErrNotLive
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.asked = append(d.asked, sideAsk{id, question, history})
+	if d.sideAnswer == nil {
+		return providers.SideAnswer{}, providers.ErrNoConversation
+	}
+	return providers.SideAnswer{Answer: *d.sideAnswer}, nil
+}
 func (d *directFake) DirectSetModel(_ context.Context, id, m string) error {
 	d.mu.Lock()
 	d.models = append(d.models, m)
@@ -283,5 +304,53 @@ func Test止まっているセッションのモードとモデルを変えら�
 	}
 	if code, res := call(t, srv, token, "POST", "/v1/sessions/fake:s1/model", map[string]any{"model": "fake-large"}); code != http.StatusOK {
 		t.Fatalf("model = %d %v", code, res)
+	}
+}
+
+func Test脇道の質問は履歴付きで聞き会話には何も送らない(t *testing.T) {
+	srv, dp, token := newDirectServer(t)
+	call(t, srv, token, "POST", "/v1/sessions", map[string]any{"provider": "fake", "cwd": dp.root})
+	answer := "受信確認を見ています"
+	dp.sideAnswer = &answer
+	history := []map[string]any{{"question": "いま何してる？", "answer": "テストを読んでいます"}}
+	code, res := call(t, srv, token, "POST", "/v1/sessions/fake:s1/side-question", map[string]any{"question": "  なぜ？  ", "history": history})
+	if code != http.StatusOK || res["answer"] != answer || res["synthetic"] != false {
+		t.Fatalf("side question = %d %v", code, res)
+	}
+	if len(dp.asked) != 1 || dp.asked[0].id != "s1" || dp.asked[0].question != "なぜ？" {
+		t.Fatalf("asked = %+v", dp.asked)
+	}
+	if h := dp.asked[0].history; len(h) != 1 || h[0].Question != "いま何してる？" || h[0].Answer != "テストを読んでいます" {
+		t.Errorf("history = %+v", h)
+	}
+	if len(dp.sent) != 0 {
+		t.Errorf("sent = %+v", dp.sent)
+	}
+}
+
+func Test止まったセッションへの脇道の質問は再開してから答える(t *testing.T) {
+	srv, dp, token := newDirectServer(t)
+	call(t, srv, token, "POST", "/v1/sessions", map[string]any{"provider": "fake", "cwd": dp.root})
+	dp.DirectStop(context.Background(), "s1")
+	answer := "ok"
+	dp.sideAnswer = &answer
+	code, res := call(t, srv, token, "POST", "/v1/sessions/fake:s1/side-question", map[string]any{"question": "まだある？"})
+	if code != http.StatusOK || res["answer"] != "ok" {
+		t.Fatalf("side question = %d %v", code, res)
+	}
+	if len(dp.starts) != 2 || dp.starts[1].Resume != "s1" || !dp.starts[1].Prompt.Empty() {
+		t.Errorf("starts = %+v", dp.starts)
+	}
+}
+
+func Test空の脇道の質問や会話のないセッションへの質問は理由を付けて断る(t *testing.T) {
+	srv, dp, token := newDirectServer(t)
+	call(t, srv, token, "POST", "/v1/sessions", map[string]any{"provider": "fake", "cwd": dp.root})
+	if code, res := call(t, srv, token, "POST", "/v1/sessions/fake:s1/side-question", map[string]any{"question": " "}); code != http.StatusBadRequest {
+		t.Errorf("empty = %d %v", code, res)
+	}
+	code, res := call(t, srv, token, "POST", "/v1/sessions/fake:s1/side-question", map[string]any{"question": "何してる？"})
+	if code != http.StatusConflict || !strings.Contains(res["error"].(string), "no conversation") {
+		t.Errorf("no conversation = %d %v", code, res)
 	}
 }

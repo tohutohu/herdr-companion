@@ -443,6 +443,7 @@ func Testアーカイブするとオフラインになり再開すると戻る(t
 				{"mode", `{"mode":"plan"}`},
 				{"model", `{"model":"fake-large"}`},
 				{"interrupt", ``},
+				{"side-question", `{"question":"いま何してる？"}`},
 			} {
 				resp, body = do(t, ts, tok, "POST", "/v1/sessions/fake:s1/"+action.path, []byte(action.payload), "application/json")
 				if resp.StatusCode != http.StatusConflict || len(fp.sent) != 0 || len(fp.resp) != 0 {
