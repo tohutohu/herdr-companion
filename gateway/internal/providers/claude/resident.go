@@ -181,7 +181,7 @@ func (r *ResidentRunner) Run(ctx context.Context, req resident.RunRequest, hooks
 	params := map[string]any{
 		"sessionId": id, "resume": false, "cwd": req.Cwd,
 		"model": req.Model, "effort": req.Effort, "permissionMode": mode,
-		"claudePath": cfg.Claude, "env": envMap,
+		"claudePath": cfg.Claude, "env": envMap, "plugins": cfg.plugins(),
 		"resident": true, "persist": true,
 		"outputFormat": map[string]any{"type": "json_schema", "schema": req.Schema},
 		"allowedTools": allowed, "disallowedTools": disallowed,

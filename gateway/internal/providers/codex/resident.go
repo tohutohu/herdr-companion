@@ -169,7 +169,7 @@ func (r *ResidentRunner) open(ctx context.Context) (*residentConn, func(), error
 	}
 	ictx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
-	if err := h.c.initialize(ictx); err != nil {
+	if err := h.c.initialize(ictx, r.p.currentSkillRoots()); err != nil {
 		end()
 		return nil, nil, fmt.Errorf("%w: codex app-server initialize: %v", providers.ErrRuntimeUnavailable, err)
 	}

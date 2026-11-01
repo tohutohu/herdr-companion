@@ -269,6 +269,8 @@ async function start(p: Json) {
       // permission rules) and Claude Code's own system prompt.
       settingSources: ["user", "project", "local"],
       systemPrompt: { type: "preset", preset: "claude_code" },
+      // The gateway's own skills (herdr-companion:hc, herdr-companion:app).
+      ...(Array.isArray(p.plugins) ? { plugins: (p.plugins as string[]).map((path) => ({ type: "local" as const, path })) } : {}),
       // Sessions keep their transcript, the history the gateway reads.
       // A resident run keeps one only when the gateway asks (persist), so
       // that the user can continue it as a session; the gateway hides it

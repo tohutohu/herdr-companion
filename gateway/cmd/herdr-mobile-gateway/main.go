@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/agentupdate"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/agentplugin"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/api"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/archive"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/config"
@@ -145,7 +146,15 @@ func serve(args []string) error {
 	claudeProvider := claude.New(cfg.ClaudeConfigDir, sink)
 	codexProvider := codex.New(cfg.CodexBinary, sink)
 	claudeProvider.SetCacheBytes(int64(cfg.HistoryCacheMB) << 20)
-	claudeProvider.SetDirect(claude.DirectConfig{Sidecar: sidecarPath(cfg.ClaudeSidecar), Claude: claudePath(cfg.ClaudeBinary), AllowAPIKey: cfg.ClaudeAllowAPIKey})
+	// The Gateway's own skills, for the agents it starts. Without them the
+	// agents still run.
+	plugin, err := agentplugin.Install(filepath.Join(config.StateDir(), "agent-plugin"))
+	if err != nil {
+		slog.Warn("agent skills are not installed", "operation", "agent_plugin.install", "error", err)
+	} else {
+		codexProvider.SetSkillRoots([]string{agentplugin.SkillsDir(plugin)})
+	}
+	claudeProvider.SetDirect(claude.DirectConfig{Sidecar: sidecarPath(cfg.ClaudeSidecar), Claude: claudePath(cfg.ClaudeBinary), AllowAPIKey: cfg.ClaudeAllowAPIKey, Plugin: plugin})
 	codexProvider.SetCacheBytes(cfg.HistoryCacheMB << 20)
 	go codexProvider.Run(ctx)
 	svc := sessions.New(time.Duration(cfg.OfflineSessionDays)*24*time.Hour, claudeProvider, codexProvider)

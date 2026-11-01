@@ -203,7 +203,10 @@ func (c *rpcClient) respondError(ctx context.Context, id json.RawMessage, code i
 	return c.t.write(ctx, b)
 }
 
-func (c *rpcClient) initialize(ctx context.Context) error {
+// initialize opens the connection and adds skillRoots (the Gateway's own
+// skills) to the skills the app-server's threads see. A Codex without
+// skills/extraRoots/set still serves, just without them.
+func (c *rpcClient) initialize(ctx context.Context, skillRoots []string) error {
 	params := map[string]any{
 		"clientInfo":   map[string]string{"name": "herdr_companion_gateway", "title": "Herdr Companion Gateway", "version": "0.1.0"},
 		"capabilities": map[string]any{"experimentalApi": true},
@@ -211,7 +214,15 @@ func (c *rpcClient) initialize(ctx context.Context) error {
 	if err := c.call(ctx, "initialize", params, nil); err != nil {
 		return err
 	}
-	return c.notify(ctx, "initialized", map[string]any{})
+	if err := c.notify(ctx, "initialized", map[string]any{}); err != nil {
+		return err
+	}
+	if len(skillRoots) > 0 {
+		if err := c.call(ctx, "skills/extraRoots/set", map[string]any{"extraRoots": skillRoots}, nil); err != nil {
+			slog.Warn("codex app-server did not take the gateway's skills", "provider", providerName, "operation", "skills.extra_roots", "error", err)
+		}
+	}
+	return nil
 }
 
 func (c *rpcClient) close() { c.t.close() }

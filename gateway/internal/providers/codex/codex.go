@@ -42,6 +42,7 @@ type Provider struct {
 
 	mu              sync.Mutex
 	owned           *serverConn
+	skillRoots      []string
 	readMu          sync.Mutex
 	reads           map[threadReadKey]*threadReadFlight
 	displayMu       sync.Mutex
@@ -92,6 +93,20 @@ func New(bin string, sink deadletter.Sink) *Provider {
 	return &Provider{bin: bin, sink: sink}
 }
 
+// SetSkillRoots gives every thread the skills in these directories, in
+// addition to the user's own; app-servers started afterwards get them.
+func (p *Provider) SetSkillRoots(roots []string) {
+	p.mu.Lock()
+	p.skillRoots = roots
+	p.mu.Unlock()
+}
+
+func (p *Provider) currentSkillRoots() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.skillRoots
+}
+
 func (p *Provider) Name() string        { return providerName }
 func (p *Provider) DisplayName() string { return "Codex" }
 
@@ -127,7 +142,7 @@ func (p *Provider) ownedConn(ctx context.Context) (*serverConn, error) {
 	d.c = newRPCClient(t, d)
 	ictx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
-	if err := d.c.initialize(ictx); err != nil {
+	if err := d.c.initialize(ictx, p.skillRoots); err != nil {
 		d.c.close()
 		return nil, fmt.Errorf("%w: codex app-server initialize: %v", providers.ErrRuntimeUnavailable, err)
 	}
