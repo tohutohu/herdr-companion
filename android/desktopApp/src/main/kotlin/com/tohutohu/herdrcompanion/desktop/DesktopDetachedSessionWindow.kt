@@ -92,6 +92,15 @@ fun DesktopDetachedSessionWindow(
                     onClick = { state.closeSession(sessionId) },
                 )
             }
+            Menu("Session", mnemonic = 'S') {
+                val session = state.detailFor(sessionId)?.session
+                Item(
+                    "Ask on the Side (btw)",
+                    shortcut = KeyShortcut(Key.B, ctrl = true),
+                    enabled = session?.provider == "claude" && session.canSend,
+                    onClick = { state.sideQuestions.toggle(sessionId) },
+                )
+            }
         }
         SharedTheme {
             Surface(

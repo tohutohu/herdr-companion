@@ -223,6 +223,18 @@ class GatewayApi(
         post(url("v1", "sessions", id, "interrupt"), ByteArray(0).toRequestBody(jsonType))
     }
 
+    /**
+     * Asks a side question (btw) about a Claude session: answered from its
+     * conversation while a turn may run, and kept out of its history.
+     */
+    suspend fun sideQuestion(id: String, question: String, history: List<SideTurnDto>): SideAnswerDto = withContext(Dispatchers.IO) {
+        val body = json.encodeToString(SideQuestionRequest(question, history)).toRequestBody(jsonType)
+        val req = request(url("v1", "sessions", id, "side-question")).post(body).build()
+        // The answer is a model call of its own; the gateway gives it up to three minutes.
+        val slow = http.newBuilder().readTimeout(190, TimeUnit.SECONDS).callTimeout(200, TimeUnit.SECONDS).build()
+        slow.newCall(req).awaitBody { resp -> json.decodeFromString(bodyOrThrow(resp)) }
+    }
+
     /** Marks the session seen, which clears its unread state. */
     suspend fun markSeen(id: String) {
         post(url("v1", "sessions", id, "seen"), ByteArray(0).toRequestBody(jsonType))

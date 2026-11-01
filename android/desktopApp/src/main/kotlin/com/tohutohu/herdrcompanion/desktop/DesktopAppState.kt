@@ -18,6 +18,7 @@ import com.tohutohu.herdrcompanion.model.toUiModel
 import com.tohutohu.herdrcompanion.ui.detail.AttachmentUiState
 import com.tohutohu.herdrcompanion.ui.detail.PendingMessageUiState
 import com.tohutohu.herdrcompanion.ui.detail.ReloadNotice
+import com.tohutohu.herdrcompanion.ui.detail.SideQuestions
 import com.tohutohu.herdrcompanion.ui.detail.SessionDetailUiState
 import com.tohutohu.herdrcompanion.ui.detail.SessionSettingsUiState
 import com.tohutohu.herdrcompanion.ui.detail.pendingInteractionIds
@@ -133,6 +134,8 @@ class DesktopAppState(
     var archivedError by mutableStateOf<String?>(null)
         private set
     val archivedLoaded: Boolean get() = archivedPager.sessions != null
+    /** btw conversations, kept while the app runs; each pane shows its session's. */
+    val sideQuestions = SideQuestions(scope) { id, question, history -> api.sideQuestion(id, question, history) }
     val archivedHasMore: Boolean get() = archivedPager.hasMore
     var newSessionOpen by mutableStateOf(false)
         private set

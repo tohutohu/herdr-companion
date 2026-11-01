@@ -64,6 +64,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -77,6 +78,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
@@ -137,6 +139,13 @@ fun SessionDetailScreen(
     extraMenuItems: (@Composable ColumnScope.(dismiss: () -> Unit) -> Unit)? = null,
     /** Unsent composer text per session, kept while the session is closed. */
     drafts: ComposerDrafts = remember { ComposerDrafts() },
+    /** Questions asked on the side (btw); null leaves the feature out. */
+    sideQuestions: SideQuestions? = null,
+    /**
+     * Docks the side conversation under the conversation, in place of the
+     * composer (a desktop pane), instead of a modal sheet over the screen.
+     */
+    sideQuestionsInPane: Boolean = false,
     onAction: (SessionDetailAction) -> Unit,
 ) {
     val session = state.session
@@ -276,7 +285,26 @@ fun SessionDetailScreen(
     val pendingResized = pausePlacementOnChange(pending) { a, b -> changedInPlace(a, b) { it.localId } }
     val pausePlacement = resizing || rowsResized || pendingResized
 
+    // btw: Claude answers questions on the side of a session it can be sent to.
+    val sideAvailable = sideQuestions != null && session != null && session.provider == "claude" && session.canSend
+    val conversations = sideQuestions?.conversations?.collectAsState()
+    val conversation = conversations?.value?.get(state.sessionId) ?: SideConversation()
+    val sideOpen = sideAvailable && conversation.open
+    var screenHeight by remember { mutableStateOf(0.dp) }
+    val density = LocalDensity.current
+    if (sideOpen && !sideQuestionsInPane && sideQuestions != null) {
+        SideQuestionSheet(
+            sessionId = state.sessionId,
+            conversation = conversation,
+            onAsk = { sideQuestions.ask(state.sessionId, it) },
+            onRetry = { sideQuestions.retry(state.sessionId, it) },
+            onClear = { sideQuestions.clear(state.sessionId) },
+            onClose = { sideQuestions.setOpen(state.sessionId, false) },
+        )
+    }
+
     Scaffold(
+        modifier = Modifier.onSizeChanged { screenHeight = with(density) { it.height.toDp() } },
         topBar = {
             TopAppBar(
                 modifier = headerModifier,
@@ -380,7 +408,11 @@ fun SessionDetailScreen(
             // The composer gives way to the resume bar when the agent stops,
             // and comes back when it runs again: slide the newcomer up.
             AnimatedContent(
-                targetState = session != null && session.status == Status.OFFLINE,
+                targetState = when {
+                    session != null && session.status == Status.OFFLINE -> BottomBar.RESUME
+                    sideOpen && sideQuestionsInPane -> BottomBar.SIDE_QUESTIONS
+                    else -> BottomBar.COMPOSER
+                },
                 transitionSpec = {
                     if (settled) {
                         (fadeIn(tween(200, delayMillis = 60)) + slideInVertically(tween(260)) { it / 3 })
@@ -391,9 +423,19 @@ fun SessionDetailScreen(
                     }
                 },
                 label = "bottomBar",
-            ) { offline ->
-                if (offline) {
+            ) { bar ->
+                if (bar == BottomBar.RESUME) {
                     ResumeBar(busy = state.actionBusy, onResume = { onAction(SessionDetailAction.Resume) })
+                } else if (bar == BottomBar.SIDE_QUESTIONS && sideQuestions != null) {
+                    SideQuestionPane(
+                        sessionId = state.sessionId,
+                        conversation = conversation,
+                        paneHeight = screenHeight,
+                        onAsk = { sideQuestions.ask(state.sessionId, it) },
+                        onRetry = { sideQuestions.retry(state.sessionId, it) },
+                        onClear = { sideQuestions.clear(state.sessionId) },
+                        onClose = { sideQuestions.setOpen(state.sessionId, false) },
+                    )
                 } else {
                     Composer(
                         sessionId = state.sessionId,
@@ -408,6 +450,11 @@ fun SessionDetailScreen(
                         composerModifier = composerModifier,
                         attachmentDropActive = attachmentDropActive,
                         onPasteImage = onPasteImage,
+                        sideQuestion = if (sideAvailable && sideQuestions != null) {
+                            { SideQuestionButton(conversation, onClick = { sideQuestions.toggle(state.sessionId) }) }
+                        } else {
+                            null
+                        },
                         onAction = onAction,
                     )
                 }
@@ -547,6 +594,8 @@ fun SessionDetailScreen(
 
 private const val SETTLE_MS = 400L
 
+private enum class BottomBar { COMPOSER, RESUME, SIDE_QUESTIONS }
+
 /** The agent is in a turn, which a direct session can interrupt. */
 private val WORKING_STATUSES = setOf(Status.RUNNING, Status.WAITING_INPUT, Status.WAITING_APPROVAL)
 
@@ -618,6 +667,8 @@ private fun Composer(
     composerModifier: Modifier,
     attachmentDropActive: Boolean,
     onPasteImage: (() -> Boolean)?,
+    /** The btw button, beside send. */
+    sideQuestion: (@Composable () -> Unit)?,
     onAction: (SessionDetailAction) -> Unit,
 ) {
     // Read back from the drafts, so it survives the session being left, going
@@ -709,6 +760,7 @@ private fun Composer(
                         }
                     },
                 )
+                sideQuestion?.let { Box(Modifier.padding(bottom = 4.dp)) { it() } }
                 SwapContent(busy, modifier = Modifier.padding(bottom = 4.dp).size(48.dp), iconOnly = true) { spinning ->
                     if (spinning) {
                         CircularProgressIndicator(Modifier.padding(12.dp).size(24.dp))

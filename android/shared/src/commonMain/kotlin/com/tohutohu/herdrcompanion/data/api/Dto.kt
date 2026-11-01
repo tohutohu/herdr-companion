@@ -286,6 +286,18 @@ data class ResumeRequest(val trust: Boolean)
 @Serializable
 data class SessionSettingRequest(val model: String? = null, val effort: String? = null, val mode: String? = null)
 
+/** An earlier question and answer of a side conversation (btw). */
+@Serializable
+data class SideTurnDto(val question: String, val answer: String)
+
+/** Body of `POST /v1/sessions/{id}/side-question`; [history] is oldest first. */
+@Serializable
+data class SideQuestionRequest(val question: String, val history: List<SideTurnDto> = emptyList())
+
+/** [synthetic] marks an answer the agent made without the model, e.g. why it could not answer. */
+@Serializable
+data class SideAnswerDto(val answer: String, val synthetic: Boolean = false)
+
 /** A model or an effort the user can pick when starting a session. */
 interface CatalogOption {
     val id: String

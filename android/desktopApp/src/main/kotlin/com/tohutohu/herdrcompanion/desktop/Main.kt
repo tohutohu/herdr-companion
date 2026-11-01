@@ -954,6 +954,8 @@ internal fun DesktopSessionContent(
                 headerModifier = headerModifier,
                 extraMenuItems = extraMenuItems,
                 drafts = desktopComposerDrafts,
+                sideQuestions = state.sideQuestions,
+                sideQuestionsInPane = true,
                 onAction = { action -> handleDetailAction(state, api, window, sessionId, action) },
             )
         }
@@ -985,6 +987,8 @@ private class DesktopActions(
         if (id == null || !DesktopPlatformActions.copyText(id)) state.reportError("Nothing is selected to copy.")
     }
     fun hasSelectedSession() = state.selectedSessionId != null
+    fun canAskOnTheSide() = state.detail?.session?.let { it.provider == "claude" && it.canSend } == true
+    fun toggleSideQuestions() = state.selectedSessionId?.let { if (canAskOnTheSide()) state.sideQuestions.toggle(it) }
     fun openSelectedInWindow() = state.selectedSessionId?.let(state::openSessionInWindow)
     fun hasProjectDirectory() = state.detail?.session?.let { !it.cwd.isNullOrBlank() || it.project.isNotBlank() } == true
     fun openProjectDirectory() {
@@ -1022,6 +1026,7 @@ private fun FrameWindowScope.DesktopMenuBar(actions: DesktopActions) {
         }
         Menu("Session", mnemonic = 'S') {
             Item("Open in New Window", enabled = actions.hasSelectedSession(), onClick = actions::openSelectedInWindow)
+            Item("Ask on the Side (btw)", shortcut = KeyShortcut(Key.B, ctrl = true), enabled = actions.canAskOnTheSide(), onClick = actions::toggleSideQuestions)
             Separator()
             Item("Archive", enabled = actions.hasSelectedSession(), onClick = actions::archive)
             Item("Copy Session ID", enabled = actions.hasSelectedSession(), onClick = actions::copySelectedSessionId)

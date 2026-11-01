@@ -27,6 +27,7 @@ import kotlinx.coroutines.tasks.await
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import com.tohutohu.herdrcompanion.data.api.GatewayApi
 import com.tohutohu.herdrcompanion.data.api.ResidentGatewayBackend
+import com.tohutohu.herdrcompanion.ui.detail.SideQuestions
 import com.tohutohu.herdrcompanion.ui.resident.ResidentBackend
 import com.tohutohu.herdrcompanion.ui.resident.ResidentHomeState
 import com.tohutohu.herdrcompanion.data.db.AppDatabase
@@ -75,6 +76,8 @@ class AppContainer(private val app: Application) {
         .build()
 
     val api = GatewayApi(baseHttp) { settings.current }
+    /** btw conversations, kept while the app runs. */
+    val sideQuestions = SideQuestions(scope) { id, question, history -> api.sideQuestion(id, question, history) }
     val db = AppDatabase.create(app)
     init {
         runBlocking {
