@@ -28,6 +28,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material3.Button
@@ -350,25 +351,40 @@ private fun HtmlSourceView(
         downloadState is DownloadState.Failed -> (downloadState as DownloadState.Failed).message
         else -> null
     }
+    // A line target means the user came to read the source there.
+    var rendered by rememberSaveable(sessionId, path) { mutableStateOf(target <= 0) }
     Column(Modifier.fillMaxSize()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            when (val state = downloadState) {
-                DownloadState.Idle, is DownloadState.Done, is DownloadState.Failed ->
-                    Button(onClick = { openInBrowser() }) {
-                        Text(if (state is DownloadState.Failed) "Retry in browser" else "Open in browser")
-                    }
-                is DownloadState.Running -> {
-                    if (state.total > 0) {
+            SingleChoiceSegmentedButtonRow(Modifier.weight(1f)) {
+                SegmentedButton(
+                    selected = rendered,
+                    onClick = { rendered = true },
+                    shape = SegmentedButtonDefaults.itemShape(0, 2),
+                ) { Text("Page") }
+                SegmentedButton(
+                    selected = !rendered,
+                    onClick = { rendered = false },
+                    shape = SegmentedButtonDefaults.itemShape(1, 2),
+                ) { Text("Source") }
+            }
+            Box(Modifier.padding(start = 8.dp).size(48.dp), contentAlignment = Alignment.Center) {
+                when (val state = downloadState) {
+                    DownloadState.Idle, is DownloadState.Done, is DownloadState.Failed ->
+                        IconButton(onClick = { openInBrowser() }) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.OpenInNew,
+                                contentDescription = if (state is DownloadState.Failed) "Retry in browser" else "Open in browser",
+                            )
+                        }
+                    is DownloadState.Running -> if (state.total > 0) {
                         val progress by animateFloatAsState(state.bytes.toFloat() / state.total, label = "htmlDownloadProgress")
-                        LinearProgressIndicator(progress = { progress }, modifier = Modifier.width(180.dp))
+                        CircularProgressIndicator(progress = { progress }, modifier = Modifier.size(24.dp))
                     } else {
-                        LinearProgressIndicator(Modifier.width(180.dp))
+                        CircularProgressIndicator(Modifier.size(24.dp))
                     }
-                    Text("Preparing browser…", modifier = Modifier.padding(start = 12.dp))
                 }
             }
         }
@@ -376,7 +392,11 @@ private fun HtmlSourceView(
             Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp))
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            CodeView(path, lines, target, bottom)
+            if (rendered) {
+                HtmlPageView(sessionId, info.path, bottom)
+            } else {
+                CodeView(path, lines, target, bottom)
+            }
         }
     }
 }
