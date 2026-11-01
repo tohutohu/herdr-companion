@@ -31,6 +31,7 @@ import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.AddComment
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.outlined.AddComment
 import androidx.compose.material3.Button
@@ -61,6 +62,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.tohutohu.herdrcompanion.container
 import com.tohutohu.herdrcompanion.data.DownloadState
@@ -110,6 +112,11 @@ fun FileViewerScreen(
     val downloadState by remember(sessionId, path) { downloads.state(sessionId, path) }.collectAsState()
     var info by remember(sessionId, path) { mutableStateOf<FileInfoDto?>(null) }
     var state by remember(sessionId, path) { mutableStateOf<FileState>(FileState.Loading) }
+    // An HTML file's controls sit in the top bar. A line target means the user came to read the
+    // source there.
+    var htmlRendered by rememberSaveable(sessionId, path) { mutableStateOf(line <= 0) }
+    var commentMode by rememberSaveable(sessionId, path) { mutableStateOf(false) }
+    var browserError by remember(sessionId, path) { mutableStateOf<String?>(null) }
     LaunchedEffect(sessionId, path) {
         state = try {
             val loaded = api.fileStat(sessionId, path)
@@ -144,9 +151,29 @@ fun FileViewerScreen(
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                 },
                 title = {
-                    Text(path.substringAfterLast('/'), maxLines = 1)
+                    Text(path.substringAfterLast('/'), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 },
                 actions = {
+                    val html = (state as? FileState.Text)?.htmlInfo
+                    if (html != null) {
+                        IconToggleButton(checked = !htmlRendered, onCheckedChange = { htmlRendered = !it }) {
+                            Icon(
+                                Icons.Default.Code,
+                                contentDescription = if (htmlRendered) "Show source" else "Show page",
+                                tint = if (htmlRendered) LocalContentColor.current else MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                        if (htmlRendered) {
+                            IconToggleButton(checked = commentMode, onCheckedChange = { commentMode = it }) {
+                                Icon(
+                                    if (commentMode) Icons.Filled.AddComment else Icons.Outlined.AddComment,
+                                    contentDescription = if (commentMode) "Stop commenting" else "Comment on elements",
+                                    tint = if (commentMode) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+                                )
+                            }
+                        }
+                        OpenInBrowserAction(sessionId, html, onError = { browserError = it })
+                    }
                     FileDownloadAction(
                         available = info != null,
                         state = downloadState,
@@ -170,7 +197,23 @@ fun FileViewerScreen(
                     FileState.Loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
                     is FileState.Error -> Text(s.message, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp))
                     is FileState.Image -> ZoomableImage(model = s.bytes, contentDescription = path, modifier = Modifier.padding(bottom = bottom).fillMaxSize())
-                    is FileState.Text -> TextFileView(sessionId, path, s.lines, s.markdown, s.htmlInfo, line, bottom, onOpenSession)
+                    is FileState.Text -> if (s.htmlInfo != null) {
+                        HtmlFileView(
+                            sessionId = sessionId,
+                            path = path,
+                            lines = s.lines,
+                            target = line,
+                            bottom = bottom,
+                            info = s.htmlInfo,
+                            rendered = htmlRendered,
+                            commentMode = commentMode,
+                            onCommentModeChange = { commentMode = it },
+                            error = browserError,
+                            onOpenSession = onOpenSession,
+                        )
+                    } else {
+                        TextFileView(sessionId, path, s.lines, s.markdown, line, bottom)
+                    }
                     is FileState.Media -> Box(Modifier.padding(bottom = bottom)) { MediaFileView(sessionId, s.info) { state = FileState.Download(s.info) } }
                     is FileState.Download -> Box(Modifier.padding(bottom = bottom)) { DownloadView(sessionId, s.info) }
                 }
@@ -277,15 +320,9 @@ private fun TextFileView(
     path: String,
     lines: List<String>,
     markdown: Boolean,
-    htmlInfo: FileInfoDto?,
     target: Int,
     bottom: Dp,
-    onOpenSession: () -> Unit,
 ) {
-    if (htmlInfo != null) {
-        HtmlSourceView(sessionId, path, lines, target, bottom, htmlInfo, onOpenSession)
-        return
-    }
     if (!markdown) {
         CodeView(path, lines, target, bottom)
         return
@@ -318,17 +355,9 @@ private fun TextFileView(
     }
 }
 
-/** Keeps HTML source inspection available while offering a rendered browser view. */
+/** Opens the HTML file in a real browser, downloading it first. */
 @Composable
-private fun HtmlSourceView(
-    sessionId: String,
-    path: String,
-    lines: List<String>,
-    target: Int,
-    bottom: Dp,
-    info: FileInfoDto,
-    onOpenSession: () -> Unit,
-) {
+private fun OpenInBrowserAction(sessionId: String, info: FileInfoDto, onError: (String?) -> Unit) {
     val context = LocalContext.current
     val downloads = context.container.downloads
     val downloadState by remember(sessionId, info.path) { downloads.state(sessionId, info.path) }.collectAsState()
@@ -345,78 +374,65 @@ private fun HtmlSourceView(
             else -> Unit
         }
     }
-
-    fun openInBrowser() {
-        openFailed = false
-        when (val state = downloadState) {
-            is DownloadState.Done -> openFailed = !downloads.open(state)
-            DownloadState.Idle, is DownloadState.Failed -> {
-                openAfterDownload = true
-                downloads.start(sessionId, info.path, info.name, info.size)
-            }
-            is DownloadState.Running -> openAfterDownload = true
-        }
-    }
-
     val error = when {
         openFailed -> "No app can open this file"
         downloadState is DownloadState.Failed -> (downloadState as DownloadState.Failed).message
         else -> null
     }
-    // A line target means the user came to read the source there.
-    var rendered by rememberSaveable(sessionId, path) { mutableStateOf(target <= 0) }
-    var commentMode by rememberSaveable(sessionId, path) { mutableStateOf(false) }
+    LaunchedEffect(error) { onError(error) }
+
+    Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+        when (val state = downloadState) {
+            DownloadState.Idle, is DownloadState.Done, is DownloadState.Failed ->
+                IconButton(onClick = {
+                    openFailed = false
+                    when (state) {
+                        is DownloadState.Done -> openFailed = !downloads.open(state)
+                        else -> {
+                            openAfterDownload = true
+                            downloads.start(sessionId, info.path, info.name, info.size)
+                        }
+                    }
+                }) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.OpenInNew,
+                        contentDescription = if (state is DownloadState.Failed) "Retry in browser" else "Open in browser",
+                    )
+                }
+            is DownloadState.Running -> if (state.total > 0) {
+                val progress by animateFloatAsState(state.bytes.toFloat() / state.total, label = "htmlDownloadProgress")
+                CircularProgressIndicator(progress = { progress }, modifier = Modifier.size(24.dp))
+            } else {
+                CircularProgressIndicator(Modifier.size(24.dp))
+            }
+        }
+    }
+}
+
+/** An HTML file: the rendered page (with element comments) or its source, as the top bar chooses. */
+@Composable
+private fun HtmlFileView(
+    sessionId: String,
+    path: String,
+    lines: List<String>,
+    target: Int,
+    bottom: Dp,
+    info: FileInfoDto,
+    rendered: Boolean,
+    commentMode: Boolean,
+    onCommentModeChange: (Boolean) -> Unit,
+    error: String?,
+    onOpenSession: () -> Unit,
+) {
+    val context = LocalContext.current
     var comments by remember(sessionId, info.path) { mutableStateOf(PendingPageComments[sessionId, info.path]) }
     fun updateComments(value: List<PageComment>) {
         comments = value
         PendingPageComments[sessionId, info.path] = value
     }
     Column(Modifier.fillMaxSize()) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            SingleChoiceSegmentedButtonRow(Modifier.weight(1f)) {
-                SegmentedButton(
-                    selected = rendered,
-                    onClick = { rendered = true },
-                    shape = SegmentedButtonDefaults.itemShape(0, 2),
-                ) { Text("Page") }
-                SegmentedButton(
-                    selected = !rendered,
-                    onClick = { rendered = false },
-                    shape = SegmentedButtonDefaults.itemShape(1, 2),
-                ) { Text("Source") }
-            }
-            if (rendered) {
-                IconToggleButton(checked = commentMode, onCheckedChange = { commentMode = it }, modifier = Modifier.padding(start = 8.dp)) {
-                    Icon(
-                        if (commentMode) Icons.Filled.AddComment else Icons.Outlined.AddComment,
-                        contentDescription = if (commentMode) "Stop commenting" else "Comment on elements",
-                        tint = if (commentMode) MaterialTheme.colorScheme.primary else LocalContentColor.current,
-                    )
-                }
-            }
-            Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-                when (val state = downloadState) {
-                    DownloadState.Idle, is DownloadState.Done, is DownloadState.Failed ->
-                        IconButton(onClick = { openInBrowser() }) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.OpenInNew,
-                                contentDescription = if (state is DownloadState.Failed) "Retry in browser" else "Open in browser",
-                            )
-                        }
-                    is DownloadState.Running -> if (state.total > 0) {
-                        val progress by animateFloatAsState(state.bytes.toFloat() / state.total, label = "htmlDownloadProgress")
-                        CircularProgressIndicator(progress = { progress }, modifier = Modifier.size(24.dp))
-                    } else {
-                        CircularProgressIndicator(Modifier.size(24.dp))
-                    }
-                }
-            }
-        }
         ExpandingContent(value = error) {
-            Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp))
+            Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (rendered) {
@@ -427,11 +443,11 @@ private fun HtmlSourceView(
                     commentMode = commentMode,
                     comments = comments,
                     onCommentsChange = ::updateComments,
-                    onCommentModeChange = { commentMode = it },
+                    onCommentModeChange = onCommentModeChange,
                     onSend = {
                         context.container.composerDrafts.append(sessionId, formatPageComments(comments))
                         updateComments(emptyList())
-                        commentMode = false
+                        onCommentModeChange(false)
                         onOpenSession()
                     },
                 )
