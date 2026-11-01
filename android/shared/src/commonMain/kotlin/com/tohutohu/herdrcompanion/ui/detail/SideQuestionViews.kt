@@ -61,6 +61,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -89,12 +90,17 @@ import com.tohutohu.herdrcompanion.ui.markdown.proseStyle
 private data class SideColors(val accent: Color, val container: Color, val onContainer: Color)
 
 @Composable
-private fun sideColors(): SideColors =
-    if (MaterialTheme.colorScheme.background.luminance() < 0.5f) {
-        SideColors(accent = Color(0xFFA9ABF5), container = Color(0xFF2E3060), onContainer = Color(0xFFE2E3FF))
+private fun sideColors(): SideColors {
+    val scheme = MaterialTheme.colorScheme
+    return if (scheme.background.luminance() < 0.5f) {
+        // In the dark a saturated slab outshines the answers: the field only
+        // leans toward the accent from the surfaces around it.
+        val accent = Color(0xFFA9ABF5)
+        SideColors(accent = accent, container = accent.copy(alpha = 0.12f).compositeOver(scheme.surfaceContainerHigh), onContainer = scheme.onSurface)
     } else {
         SideColors(accent = Color(0xFF5B5FC7), container = Color(0xFFECECFA), onContainer = Color(0xFF22246A))
     }
+}
 
 /** The composer's way into the sheet; it counts the questions kept while the sheet is shut. */
 @Composable
@@ -244,7 +250,7 @@ private fun SideQuestionContent(
                 modifier = Modifier.padding(start = 10.dp).weight(1f),
             )
             if (entries.isNotEmpty()) {
-                TextButton(onClick = onClear) { Text("Clear", style = MaterialTheme.typography.labelMedium) }
+                TextButton(onClick = onClear) { Text("Clear", color = colors.accent, style = MaterialTheme.typography.labelMedium) }
             }
             IconButton(onClick = onClose) { Icon(Icons.Default.Close, contentDescription = "Close btw") }
         }

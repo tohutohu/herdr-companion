@@ -450,7 +450,13 @@ fun SessionDetailScreen(
                         composerModifier = composerModifier,
                         attachmentDropActive = attachmentDropActive,
                         onPasteImage = onPasteImage,
-                        sideQuestion = if (sideAvailable && sideQuestions != null) {
+                        onAskOnTheSide = if (sideAvailable && sideQuestions != null) {
+                            { sideQuestions.setOpen(state.sessionId, true) }
+                        } else {
+                            null
+                        },
+                        // Only a side conversation with something in it gets a way back beside send.
+                        sideQuestion = if (sideAvailable && sideQuestions != null && conversation.entries.isNotEmpty()) {
                             { SideQuestionButton(conversation, onClick = { sideQuestions.toggle(state.sessionId) }) }
                         } else {
                             null
@@ -667,7 +673,9 @@ private fun Composer(
     composerModifier: Modifier,
     attachmentDropActive: Boolean,
     onPasteImage: (() -> Boolean)?,
-    /** The btw button, beside send. */
+    /** Opens the side conversation (btw) from the attach menu. */
+    onAskOnTheSide: (() -> Unit)?,
+    /** The way back to a side conversation, beside send. */
     sideQuestion: (@Composable () -> Unit)?,
     onAction: (SessionDetailAction) -> Unit,
 ) {
@@ -713,6 +721,7 @@ private fun Composer(
                         enabled = enabled && attachmentsEnabled,
                         onPickImage = { onAction(SessionDetailAction.PickImage) },
                         onPickFile = { onAction(SessionDetailAction.PickFile) },
+                        onAskOnTheSide = onAskOnTheSide,
                     )
                 }
                 val clear = Color.Transparent

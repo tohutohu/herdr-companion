@@ -75,7 +75,7 @@ class SideQuestionsTest {
     }
 
     @Test
-    fun ペインではbtwを開くと入力欄の代わりに脇道の会話が出て質問できる() {
+    fun ペインでは添付メニューからbtwを開くと入力欄の代わりに脇道の会話が出て質問できる() {
         rule.setContent {
             MaterialTheme {
                 SessionDetailScreen(
@@ -87,7 +87,10 @@ class SideQuestionsTest {
                 )
             }
         }
-        rule.onNodeWithText("btw").performClick()
+        // Until something is asked, btw is only in the attach menu.
+        rule.onNodeWithText("btw").assertDoesNotExist()
+        rule.onNodeWithContentDescription("Attach").performClick()
+        rule.onNodeWithText("Ask on the side (btw)").performClick()
         rule.onNodeWithText("Not added to the conversation").assertExists()
         rule.onNodeWithContentDescription("Send").assertDoesNotExist()
         rule.onNode(hasSetTextAction()).performTextInput("receipts.go を読んだのはなぜ？")
@@ -97,8 +100,10 @@ class SideQuestionsTest {
 
         rule.onNodeWithContentDescription("Close btw").performClick()
         rule.onNodeWithContentDescription("Send").assertExists()
-        // Closed, the button counts what is kept.
+        // Closed, a button beside send counts what is kept and opens it again.
         rule.onNodeWithText("1").assertExists()
+        rule.onNodeWithText("btw").performClick()
+        rule.onNodeWithText("受信確認を見るためです").assertExists()
     }
 
     @Test
@@ -114,7 +119,8 @@ class SideQuestionsTest {
                 )
             }
         }
-        rule.onNodeWithContentDescription("Send").assertExists()
-        rule.onNodeWithText("btw").assertDoesNotExist()
+        rule.onNodeWithContentDescription("Attach").performClick()
+        rule.onNodeWithText("File").assertExists()
+        rule.onNodeWithText("Ask on the side (btw)").assertDoesNotExist()
     }
 }

@@ -14,8 +14,10 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.outlined.QuestionAnswer
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -71,15 +73,20 @@ fun AttachButton(
     enabled: Boolean,
     onPickImage: () -> Unit,
     onPickFile: () -> Unit,
+    /** Opens the side conversation (btw); null leaves it out of the menu. */
+    onAskOnTheSide: (() -> Unit)? = null,
 ) {
+    // btw keeps the menu open to a session that takes no attachments.
+    val menuEnabled = enabled || onAskOnTheSide != null
     Box {
         var menuOpen by remember { mutableStateOf(false) }
-        IconButton(enabled = enabled, onClick = { menuOpen = true }) {
+        IconButton(enabled = menuEnabled, onClick = { menuOpen = true }) {
             Icon(Icons.Default.Add, contentDescription = "Attach")
         }
-        DropdownMenu(expanded = menuOpen && enabled, onDismissRequest = { menuOpen = false }) {
+        DropdownMenu(expanded = menuOpen && menuEnabled, onDismissRequest = { menuOpen = false }) {
             DropdownMenuItem(
                 text = { Text("Image") },
+                enabled = enabled,
                 leadingIcon = { Icon(Icons.Default.Image, contentDescription = null) },
                 onClick = {
                     menuOpen = false
@@ -88,12 +95,24 @@ fun AttachButton(
             )
             DropdownMenuItem(
                 text = { Text("File") },
+                enabled = enabled,
                 leadingIcon = { Icon(Icons.Default.AttachFile, contentDescription = null) },
                 onClick = {
                     menuOpen = false
                     onPickFile()
                 },
             )
+            onAskOnTheSide?.let { ask ->
+                HorizontalDivider()
+                DropdownMenuItem(
+                    text = { Text("Ask on the side (btw)") },
+                    leadingIcon = { Icon(Icons.Outlined.QuestionAnswer, contentDescription = null) },
+                    onClick = {
+                        menuOpen = false
+                        ask()
+                    },
+                )
+            }
         }
     }
 }
