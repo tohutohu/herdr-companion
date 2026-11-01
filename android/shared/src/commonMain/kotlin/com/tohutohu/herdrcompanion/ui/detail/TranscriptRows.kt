@@ -117,6 +117,13 @@ private data class Piece(val index: Int, val start: Int, val activity: Boolean, 
     val isReport get() = !activity && message.role == "assistant" && message.blocks.none { it.type == "interaction" }
 
     val asksReader get() = message.blocks.any { it.interaction?.isPending == true }
+
+    /**
+     * Kept in view when the work around it is folded: a notice (an error, a
+     * compaction, a finished background task), or an image a tool brought
+     * back (a file the agent viewed, a screenshot).
+     */
+    val keptInView get() = message.role == "system" || (message.role == "tool" && !activity)
 }
 
 private fun turnRows(
@@ -134,9 +141,9 @@ private fun turnRows(
     val split = listOf(work.indexOfLast { it.isReport }, work.indexOfFirst { it.asksReader })
         .filter { it >= 0 }
         .minOrNull() ?: if (over) work.size else 0
-    // Notices (errors, a compaction, a finished background task) are kept
-    // in view: they come from the tool, not the agent's work, and are rare.
-    val (notices, folded) = work.subList(0, split).partition { it.message.role == "system" }
+    // Notices and images from tools are kept in view (see Piece.keptInView):
+    // they are for the reader rather than the agent's work, and are rare.
+    val (notices, folded) = work.subList(0, split).partition { it.keptInView }
     val shown = work.subList(split, work.size)
 
     val rows = mutableListOf<TranscriptRow>()
@@ -242,8 +249,8 @@ private fun activityRuns(message: Message): List<Run> {
 }
 
 private fun isActivity(role: String, block: BlockDto): Boolean = when {
-    // Questions and approvals are for the reader; never fold them into a tool line.
-    block.type == "interaction" -> false
+    // Questions, approvals and images are for the reader; never fold them into a tool line.
+    block.type == "interaction" || block.type == "image" -> false
     role == "tool" -> true
     role == "assistant" -> block.type == "text" && isToolCallText(block.text.orEmpty())
     else -> false

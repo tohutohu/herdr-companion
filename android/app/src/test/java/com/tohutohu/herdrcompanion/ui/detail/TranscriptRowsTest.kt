@@ -129,6 +129,41 @@ class TranscriptRowsTest {
     }
 
     @Test
+    fun `ツールが返した画像は畳まずに作業の行の後に表示し出力の文章は畳む`() {
+        val shot = BlockDto(type = "image", url = "/v1/sessions/s/messages/t1/images/0")
+        val rows = transcriptRows(
+            listOf(
+                msg("u1", "user", text("画面を見て"), at = 1_000),
+                msg("a1", "assistant", text("Read shot.png"), file("shot.png"), at = 2_000),
+                msg("t1", "tool", text("1 image"), shot, at = 3_000),
+                msg("a2", "assistant", text("$ go test ./..."), at = 4_000),
+                msg("a3", "assistant", text("見ました。"), at = 9_000),
+            ),
+            lastTurn = LastTurn.DONE,
+        )
+        assertEquals(listOf("message:u1", "work:u1#0", "message:t1#1", "message:a3"), rows.map { it.key })
+        assertEquals(listOf(shot), (rows[2] as MessageRow).message.blocks)
+        val tools = (rows[1] as WorkRow).rows.single() as ActivityRow
+        assertEquals(listOf(listOf(text("Read shot.png"), file("shot.png")), listOf(text("1 image")), listOf(text("$ go test ./..."))), tools.parts.map { it.blocks })
+        assertEquals(2, tools.callCount)
+    }
+
+    @Test
+    fun `作業中のターンではツールが返した画像を呼び出しの行の間に表示する`() {
+        val view = BlockDto(type = "image", url = "/v1/sessions/s/files/content?path=shot.png")
+        val rows = transcriptRows(
+            listOf(
+                msg("u1", "user", text("画面を見て")),
+                msg("a1", "assistant", text("▸ view_image shot.png")),
+                msg("t1", "tool", view),
+                msg("a2", "assistant", text("$ ls")),
+            ),
+            lastTurn = LastTurn.WORKING,
+        )
+        assertEquals(listOf("message:u1", "tools:a1#0", "message:t1", "tools:a2#0"), rows.map { it.key })
+    }
+
+    @Test
     fun `すぐ答えたターンは畳むものがなくても所要時間の行を出す`() {
         val rows = transcriptRows(
             listOf(msg("u1", "user", text("今何時?"), at = 1_000), msg("a1", "assistant", text("19時です。"), at = 4_000)),
