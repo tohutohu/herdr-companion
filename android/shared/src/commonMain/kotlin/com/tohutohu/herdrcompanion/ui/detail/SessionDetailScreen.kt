@@ -293,14 +293,7 @@ fun SessionDetailScreen(
     var screenHeight by remember { mutableStateOf(0.dp) }
     val density = LocalDensity.current
     if (sideOpen && !sideQuestionsInPane && sideQuestions != null) {
-        SideQuestionSheet(
-            sessionId = state.sessionId,
-            conversation = conversation,
-            onAsk = { sideQuestions.ask(state.sessionId, it) },
-            onRetry = { sideQuestions.retry(state.sessionId, it) },
-            onClear = { sideQuestions.clear(state.sessionId) },
-            onClose = { sideQuestions.setOpen(state.sessionId, false) },
-        )
+        SideQuestionSheet(state.sessionId, conversation, sideQuestions)
     }
 
     Scaffold(
@@ -427,15 +420,7 @@ fun SessionDetailScreen(
                 if (bar == BottomBar.RESUME) {
                     ResumeBar(busy = state.actionBusy, onResume = { onAction(SessionDetailAction.Resume) })
                 } else if (bar == BottomBar.SIDE_QUESTIONS && sideQuestions != null) {
-                    SideQuestionPane(
-                        sessionId = state.sessionId,
-                        conversation = conversation,
-                        paneHeight = screenHeight,
-                        onAsk = { sideQuestions.ask(state.sessionId, it) },
-                        onRetry = { sideQuestions.retry(state.sessionId, it) },
-                        onClear = { sideQuestions.clear(state.sessionId) },
-                        onClose = { sideQuestions.setOpen(state.sessionId, false) },
-                    )
+                    SideQuestionPane(state.sessionId, conversation, sideQuestions, paneHeight = screenHeight)
                 } else {
                     Composer(
                         sessionId = state.sessionId,
@@ -456,7 +441,7 @@ fun SessionDetailScreen(
                             null
                         },
                         // Only a side conversation with something in it gets a way back beside send.
-                        sideQuestion = if (sideAvailable && sideQuestions != null && conversation.entries.isNotEmpty()) {
+                        sideQuestion = if (sideAvailable && sideQuestions != null && conversation.lanes.isNotEmpty()) {
                             { SideQuestionButton(conversation, onClick = { sideQuestions.toggle(state.sessionId) }) }
                         } else {
                             null

@@ -21,19 +21,35 @@ data class SideQuestionEntry(
     val pending: Boolean get() = answer == null && error == null
 }
 
-/** A session's side conversation, and whether its sheet is open. */
+/** One line of questions on the side: each follow-up has only its own lane's answers as context. */
+data class SideLane(val id: Long, val entries: List<SideQuestionEntry>) {
+    /** A lane is named by its first question. */
+    val title: String get() = entries.first().question
+    val pending: Boolean get() = entries.any { it.pending }
+}
+
+/**
+ * A session's side conversations (lanes), the one shown, and whether the
+ * sheet is open. A null [activeLane] is a new lane, which exists only once
+ * something is asked in it.
+ */
 data class SideConversation(
-    val entries: List<SideQuestionEntry> = emptyList(),
+    val lanes: List<SideLane> = emptyList(),
+    val activeLane: Long? = null,
     val open: Boolean = false,
 ) {
-    val pending: Boolean get() = entries.any { it.pending }
+    val active: SideLane? get() = lanes.firstOrNull { it.id == activeLane }
+
+    /** The shown lane's questions. */
+    val entries: List<SideQuestionEntry> get() = active?.entries.orEmpty()
 }
 
 /**
  * Questions asked on the side of a session (Claude Code's /btw). They are
  * answered from the session's conversation and never become part of it, so
  * they live only here, for as long as the app runs: the gateway keeps none,
- * and a follow-up sends the earlier answered questions as its history.
+ * and a follow-up sends the earlier answered questions of its lane as its
+ * history. Lanes are asked independently, at the same time if need be.
  *
  * Questions are asked on [scope], so an answer still arrives after its sheet
  * was closed or the session left.
@@ -53,28 +69,49 @@ class SideQuestions(
 
     fun toggle(sessionId: String) = edit(sessionId) { it.copy(open = !it.open) }
 
+    fun selectLane(sessionId: String, laneId: Long) = edit(sessionId) { c ->
+        if (c.lanes.any { it.id == laneId }) c.copy(activeLane = laneId) else c
+    }
+
+    /** Shows a new, empty lane; the others keep going. */
+    fun newLane(sessionId: String) = edit(sessionId) { it.copy(activeLane = null) }
+
+    /** Asks in the shown lane, starting one if it is new. */
     fun ask(sessionId: String, question: String) {
         val text = question.trim()
         if (text.isEmpty()) return
         val id = nextId.getAndUpdate { it + 1 }
+        val lane = get(sessionId).active
         // Earlier questions are its context; one still waiting or failed has nothing to add.
-        val history = get(sessionId).entries.mapNotNull { e -> e.answer?.let { SideTurnDto(e.question, it) } }
-        edit(sessionId) { it.copy(entries = it.entries + SideQuestionEntry(id, text)) }
+        val history = lane?.entries.orEmpty().history()
+        val entry = SideQuestionEntry(id, text)
+        edit(sessionId) { c ->
+            if (lane == null) {
+                // A lane takes the id of its first question.
+                c.copy(lanes = c.lanes + SideLane(id, listOf(entry)), activeLane = id)
+            } else {
+                c.copy(lanes = c.lanes.map { if (it.id == lane.id) it.copy(entries = it.entries + entry) else it })
+            }
+        }
         run(sessionId, id, text, history)
     }
 
     /** Asks a failed question again, with the history it had. */
     fun retry(sessionId: String, entryId: Long) {
-        val entries = get(sessionId).entries
+        val entries = get(sessionId).lanes.firstOrNull { lane -> lane.entries.any { it.id == entryId } }?.entries ?: return
         val index = entries.indexOfFirst { it.id == entryId }
-        val entry = entries.getOrNull(index)?.takeIf { it.error != null } ?: return
-        val history = entries.take(index).mapNotNull { e -> e.answer?.let { SideTurnDto(e.question, it) } }
+        val entry = entries[index].takeIf { it.error != null } ?: return
         update(sessionId, entryId) { it.copy(error = null) }
-        run(sessionId, entryId, entry.question, history)
+        run(sessionId, entryId, entry.question, entries.take(index).history())
     }
 
-    /** Starts the side conversation over; the sheet stays as it is. */
-    fun clear(sessionId: String) = edit(sessionId) { it.copy(entries = emptyList()) }
+    /** Drops the shown lane and shows the newest one left; the sheet stays as it is. */
+    fun clear(sessionId: String) = edit(sessionId) { c ->
+        val left = c.lanes.filter { it.id != c.activeLane }
+        c.copy(lanes = left, activeLane = left.lastOrNull()?.id)
+    }
+
+    private fun List<SideQuestionEntry>.history() = mapNotNull { e -> e.answer?.let { SideTurnDto(e.question, it) } }
 
     private fun run(sessionId: String, entryId: Long, question: String, history: List<SideTurnDto>) {
         scope.launch {
@@ -94,9 +131,11 @@ class SideQuestions(
         }
     }
 
-    /** A cleared conversation drops the answer of a question still out. */
+    /** A cleared lane drops the answer of a question still out. */
     private fun update(sessionId: String, entryId: Long, change: (SideQuestionEntry) -> SideQuestionEntry) =
-        edit(sessionId) { c -> c.copy(entries = c.entries.map { if (it.id == entryId) change(it) else it }) }
+        edit(sessionId) { c ->
+            c.copy(lanes = c.lanes.map { lane -> lane.copy(entries = lane.entries.map { if (it.id == entryId) change(it) else it }) })
+        }
 
     private fun edit(sessionId: String, change: (SideConversation) -> SideConversation) {
         state.update { all ->

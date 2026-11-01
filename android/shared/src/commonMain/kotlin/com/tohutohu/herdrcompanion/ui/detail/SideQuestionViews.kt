@@ -79,6 +79,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.material3.ProvideTextStyle
+import androidx.compose.runtime.key
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.style.TextOverflow
 import com.tohutohu.herdrcompanion.ui.markdown.MarkdownText
 import com.tohutohu.herdrcompanion.ui.markdown.proseStyle
 
@@ -102,11 +114,11 @@ private fun sideColors(): SideColors {
     }
 }
 
-/** The composer's way into the sheet; it counts the questions kept while the sheet is shut. */
+/** The composer's way back into the sheet; it counts the lanes kept while the sheet is shut. */
 @Composable
 internal fun SideQuestionButton(conversation: SideConversation, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val colors = sideColors()
-    val count = conversation.entries.size
+    val count = conversation.lanes.size
     Row(
         modifier
             .height(48.dp)
@@ -129,27 +141,17 @@ internal fun SideQuestionButton(conversation: SideConversation, onClick: () -> U
 /** Phone: the side conversation in a modal sheet over the session. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun SideQuestionSheet(
-    sessionId: String,
-    conversation: SideConversation,
-    onAsk: (String) -> Unit,
-    onRetry: (Long) -> Unit,
-    onClear: () -> Unit,
-    onClose: () -> Unit,
-) {
+internal fun SideQuestionSheet(sessionId: String, conversation: SideConversation, questions: SideQuestions) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(
-        onDismissRequest = onClose,
+        onDismissRequest = { questions.setOpen(sessionId, false) },
         sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.surface,
     ) {
         SideQuestionContent(
             sessionId = sessionId,
             conversation = conversation,
-            onAsk = onAsk,
-            onRetry = onRetry,
-            onClear = onClear,
-            onClose = onClose,
+            questions = questions,
             modifier = Modifier.fillMaxHeight(0.62f).navigationBarsPadding().imePadding(),
         )
     }
@@ -160,15 +162,7 @@ internal fun SideQuestionSheet(
  * keeps running above it. The grip at its top sets its height.
  */
 @Composable
-internal fun SideQuestionPane(
-    sessionId: String,
-    conversation: SideConversation,
-    paneHeight: Dp,
-    onAsk: (String) -> Unit,
-    onRetry: (Long) -> Unit,
-    onClear: () -> Unit,
-    onClose: () -> Unit,
-) {
+internal fun SideQuestionPane(sessionId: String, conversation: SideConversation, questions: SideQuestions, paneHeight: Dp) {
     val density = LocalDensity.current
     var fraction by rememberSaveable(sessionId) { mutableFloatStateOf(0.46f) }
     val dragState = rememberDraggableState { delta ->
@@ -200,10 +194,7 @@ internal fun SideQuestionPane(
             SideQuestionContent(
                 sessionId = sessionId,
                 conversation = conversation,
-                onAsk = onAsk,
-                onRetry = onRetry,
-                onClear = onClear,
-                onClose = onClose,
+                questions = questions,
                 desktopKeys = true,
                 modifier = Modifier.fillMaxHeight(),
             )
@@ -215,19 +206,18 @@ internal fun SideQuestionPane(
 private fun SideQuestionContent(
     sessionId: String,
     conversation: SideConversation,
-    onAsk: (String) -> Unit,
-    onRetry: (Long) -> Unit,
-    onClear: () -> Unit,
-    onClose: () -> Unit,
+    questions: SideQuestions,
     modifier: Modifier = Modifier,
     desktopKeys: Boolean = false,
 ) {
     val colors = sideColors()
     val entries = conversation.entries
-    val listState = rememberLazyListState()
+    val onClose = { questions.setOpen(sessionId, false) }
+    // Each lane scrolls on its own.
+    val listState = key(conversation.activeLane) { rememberLazyListState() }
     // A new question, or the answer to the last one, comes into view.
     val lastAnswered = entries.lastOrNull()?.pending == false
-    LaunchedEffect(entries.size, lastAnswered) {
+    LaunchedEffect(conversation.activeLane, entries.size, lastAnswered) {
         if (entries.isNotEmpty()) listState.animateScrollToItem(entries.lastIndex)
     }
     Column(modifier) {
@@ -249,10 +239,20 @@ private fun SideQuestionContent(
                 maxLines = 1,
                 modifier = Modifier.padding(start = 10.dp).weight(1f),
             )
-            if (entries.isNotEmpty()) {
-                TextButton(onClick = onClear) { Text("Clear", color = colors.accent, style = MaterialTheme.typography.labelMedium) }
+            if (conversation.active != null) {
+                TextButton(onClick = { questions.clear(sessionId) }) {
+                    Text("Clear", color = colors.accent, style = MaterialTheme.typography.labelMedium)
+                }
             }
             IconButton(onClick = onClose) { Icon(Icons.Default.Close, contentDescription = "Close btw") }
+        }
+        if (conversation.lanes.isNotEmpty()) {
+            LaneChips(
+                conversation = conversation,
+                colors = colors,
+                onSelect = { questions.selectLane(sessionId, it) },
+                onNew = { questions.newLane(sessionId) },
+            )
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (entries.isEmpty()) {
@@ -270,7 +270,7 @@ private fun SideQuestionContent(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         items(entries, key = { it.id }) { entry ->
-                            SideQuestionItem(entry, isLast = entry.id == entries.last().id, onRetry = { onRetry(entry.id) })
+                            SideQuestionItem(entry, isLast = entry.id == entries.last().id, onRetry = { questions.retry(sessionId, entry.id) })
                         }
                     }
                 }
@@ -278,12 +278,93 @@ private fun SideQuestionContent(
         }
         SideQuestionInput(
             sessionId = sessionId,
+            lane = conversation.activeLane,
             followUp = entries.isNotEmpty(),
             colors = colors,
             desktopKeys = desktopKeys,
-            onAsk = onAsk,
+            onAsk = { questions.ask(sessionId, it) },
             onClose = onClose,
         )
+    }
+}
+
+/** The lanes, named by their first question, and a way to start another. One still waiting shows dots. */
+@Composable
+private fun LaneChips(conversation: SideConversation, colors: SideColors, onSelect: (Long) -> Unit, onNew: () -> Unit) {
+    val rowState = rememberLazyListState()
+    // The lane shown, often one just started, comes into view.
+    LaunchedEffect(conversation.lanes.size, conversation.activeLane) {
+        val index = conversation.lanes.indexOfFirst { it.id == conversation.activeLane }
+        rowState.animateScrollToItem(if (index >= 0) index else conversation.lanes.lastIndex)
+    }
+    // New stays in reach at the end however many lanes scroll beside it.
+    Row(
+        Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        LazyRow(
+            state = rowState,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.weight(1f, fill = false),
+        ) {
+            items(conversation.lanes, key = { it.id }) { lane ->
+                LaneChip(selected = lane.id == conversation.activeLane, colors = colors, onClick = { onSelect(lane.id) }) {
+                    Text(
+                        lane.title,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 150.dp),
+                    )
+                    if (lane.pending) ThinkingDots(Modifier.padding(start = 6.dp), dot = 4.dp)
+                }
+            }
+        }
+        val fresh = conversation.activeLane == null
+        LaneChip(selected = fresh, colors = colors, dashed = !fresh, onClick = onNew, modifier = Modifier.padding(start = 6.dp)) {
+            Text(if (fresh) "New" else "+ New", color = if (fresh) Color.Unspecified else colors.accent)
+        }
+    }
+}
+
+@Composable
+private fun LaneChip(
+    selected: Boolean,
+    colors: SideColors,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    dashed: Boolean = false,
+    content: @Composable RowScope.() -> Unit,
+) {
+    val shape = CircleShape
+    val outline = MaterialTheme.colorScheme.outlineVariant
+    Row(
+        modifier
+            .height(32.dp)
+            .clip(shape)
+            .then(
+                when {
+                    selected -> Modifier.background(colors.container)
+                    dashed -> Modifier.drawBehind {
+                        drawRoundRect(
+                            color = outline,
+                            cornerRadius = CornerRadius(size.height / 2),
+                            style = Stroke(width = 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx()))),
+                        )
+                    }
+                    else -> Modifier.border(1.dp, outline, shape)
+                },
+            )
+            .selectable(selected = selected, role = Role.Tab, onClick = onClick)
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ProvideTextStyle(
+            MaterialTheme.typography.labelLarge.copy(
+                letterSpacing = 0.sp,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (selected) colors.onContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+            ),
+        ) { content() }
     }
 }
 
@@ -309,7 +390,7 @@ private fun SideQuestionItem(entry: SideQuestionEntry, isLast: Boolean, onRetry:
 }
 
 @Composable
-private fun ThinkingDots(modifier: Modifier = Modifier) {
+private fun ThinkingDots(modifier: Modifier = Modifier, dot: Dp = 6.dp) {
     val accent = sideColors().accent
     val transition = rememberInfiniteTransition(label = "btwThinking")
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -320,7 +401,7 @@ private fun ThinkingDots(modifier: Modifier = Modifier) {
                 animationSpec = infiniteRepeatable(tween(600, delayMillis = i * 200), RepeatMode.Reverse),
                 label = "dot$i",
             )
-            Box(Modifier.size(6.dp).alpha(alpha).clip(CircleShape).background(accent))
+            Box(Modifier.size(dot).alpha(alpha).clip(CircleShape).background(accent))
         }
     }
 }
@@ -328,6 +409,7 @@ private fun ThinkingDots(modifier: Modifier = Modifier) {
 @Composable
 private fun SideQuestionInput(
     sessionId: String,
+    lane: Long?,
     followUp: Boolean,
     colors: SideColors,
     desktopKeys: Boolean,
@@ -337,7 +419,7 @@ private fun SideQuestionInput(
     var text by rememberSaveable(sessionId) { mutableStateOf("") }
     val focus = remember { FocusRequester() }
     // On a phone the keyboard would cover the answers, so it comes up only for a first question.
-    LaunchedEffect(sessionId) { if (desktopKeys || !followUp) runCatching { focus.requestFocus() } }
+    LaunchedEffect(sessionId, lane) { if (desktopKeys || !followUp) runCatching { focus.requestFocus() } }
     fun submit() {
         if (text.isBlank()) return
         onAsk(text)
