@@ -136,7 +136,13 @@ fun AppNavigation(
             }
             entry<FileRoute> { route ->
                 val lifecycle = LocalLifecycleOwner.current.lifecycle
-                FileViewerScreen(route.sessionId, route.path, route.line, onBack = { lifecycle.ifResumed { nav.back() } })
+                FileViewerScreen(
+                    route.sessionId,
+                    route.path,
+                    route.line,
+                    onBack = { lifecycle.ifResumed { nav.back() } },
+                    onOpenSession = { lifecycle.ifResumed { nav.openLinkedSession(route.sessionId) } },
+                )
             }
             entry<ImageRoute>(metadata = ScreenMotion.zoom) { route ->
                 val lifecycle = LocalLifecycleOwner.current.lifecycle

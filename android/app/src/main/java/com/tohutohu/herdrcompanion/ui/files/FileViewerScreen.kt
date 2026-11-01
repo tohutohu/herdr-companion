@@ -29,13 +29,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.AddComment
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.outlined.AddComment
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconToggleButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
@@ -92,7 +96,14 @@ private val HTML_EXTENSIONS = setOf("htm", "html")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FileViewerScreen(sessionId: String, path: String, line: Int, onBack: () -> Unit) {
+fun FileViewerScreen(
+    sessionId: String,
+    path: String,
+    line: Int,
+    onBack: () -> Unit,
+    /** Back to the session, whose composer now holds comments made here. */
+    onOpenSession: () -> Unit = onBack,
+) {
     val context = LocalContext.current
     val api = context.container.api
     val downloads = context.container.downloads
@@ -159,7 +170,7 @@ fun FileViewerScreen(sessionId: String, path: String, line: Int, onBack: () -> U
                     FileState.Loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
                     is FileState.Error -> Text(s.message, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp))
                     is FileState.Image -> ZoomableImage(model = s.bytes, contentDescription = path, modifier = Modifier.padding(bottom = bottom).fillMaxSize())
-                    is FileState.Text -> TextFileView(sessionId, path, s.lines, s.markdown, s.htmlInfo, line, bottom)
+                    is FileState.Text -> TextFileView(sessionId, path, s.lines, s.markdown, s.htmlInfo, line, bottom, onOpenSession)
                     is FileState.Media -> Box(Modifier.padding(bottom = bottom)) { MediaFileView(sessionId, s.info) { state = FileState.Download(s.info) } }
                     is FileState.Download -> Box(Modifier.padding(bottom = bottom)) { DownloadView(sessionId, s.info) }
                 }
@@ -269,9 +280,10 @@ private fun TextFileView(
     htmlInfo: FileInfoDto?,
     target: Int,
     bottom: Dp,
+    onOpenSession: () -> Unit,
 ) {
     if (htmlInfo != null) {
-        HtmlSourceView(sessionId, path, lines, target, bottom, htmlInfo)
+        HtmlSourceView(sessionId, path, lines, target, bottom, htmlInfo, onOpenSession)
         return
     }
     if (!markdown) {
@@ -315,6 +327,7 @@ private fun HtmlSourceView(
     target: Int,
     bottom: Dp,
     info: FileInfoDto,
+    onOpenSession: () -> Unit,
 ) {
     val context = LocalContext.current
     val downloads = context.container.downloads
@@ -352,6 +365,12 @@ private fun HtmlSourceView(
     }
     // A line target means the user came to read the source there.
     var rendered by rememberSaveable(sessionId, path) { mutableStateOf(target <= 0) }
+    var commentMode by rememberSaveable(sessionId, path) { mutableStateOf(false) }
+    var comments by remember(sessionId, info.path) { mutableStateOf(PendingPageComments[sessionId, info.path]) }
+    fun updateComments(value: List<PageComment>) {
+        comments = value
+        PendingPageComments[sessionId, info.path] = value
+    }
     Column(Modifier.fillMaxSize()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
@@ -369,7 +388,16 @@ private fun HtmlSourceView(
                     shape = SegmentedButtonDefaults.itemShape(1, 2),
                 ) { Text("Source") }
             }
-            Box(Modifier.padding(start = 8.dp).size(48.dp), contentAlignment = Alignment.Center) {
+            if (rendered) {
+                IconToggleButton(checked = commentMode, onCheckedChange = { commentMode = it }, modifier = Modifier.padding(start = 8.dp)) {
+                    Icon(
+                        if (commentMode) Icons.Filled.AddComment else Icons.Outlined.AddComment,
+                        contentDescription = if (commentMode) "Stop commenting" else "Comment on elements",
+                        tint = if (commentMode) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+                    )
+                }
+            }
+            Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
                 when (val state = downloadState) {
                     DownloadState.Idle, is DownloadState.Done, is DownloadState.Failed ->
                         IconButton(onClick = { openInBrowser() }) {
@@ -392,7 +420,21 @@ private fun HtmlSourceView(
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (rendered) {
-                HtmlPageView(sessionId, info.path, bottom)
+                HtmlReviewPage(
+                    sessionId = sessionId,
+                    path = info.path,
+                    bottom = bottom,
+                    commentMode = commentMode,
+                    comments = comments,
+                    onCommentsChange = ::updateComments,
+                    onCommentModeChange = { commentMode = it },
+                    onSend = {
+                        context.container.composerDrafts.append(sessionId, formatPageComments(comments))
+                        updateComments(emptyList())
+                        commentMode = false
+                        onOpenSession()
+                    },
+                )
             } else {
                 CodeView(path, lines, target, bottom)
             }

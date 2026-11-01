@@ -33,4 +33,16 @@ class ComposerDraftsTest {
         assertEquals(emptyMap(), ComposerDrafts.decode("{broken"))
         assertEquals("", ComposerDrafts(mapOf("claude:a" to ""))["claude:a"])
     }
+
+    @Test
+    fun 外から足した文は下書きの後ろに空行を挟んで付く() {
+        val drafts = ComposerDrafts()
+        drafts.append("claude:a", "コメント1")
+        assertEquals("コメント1", drafts["claude:a"])
+        drafts["claude:a"] = "途中まで\n"
+        drafts.append("claude:a", "コメント2")
+        assertEquals("途中まで\n\nコメント2", drafts["claude:a"])
+        drafts.append("claude:a", "  ")
+        assertEquals("途中まで\n\nコメント2", drafts["claude:a"])
+    }
 }

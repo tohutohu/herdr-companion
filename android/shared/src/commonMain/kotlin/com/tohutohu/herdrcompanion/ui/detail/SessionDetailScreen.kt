@@ -671,6 +671,10 @@ private fun Composer(
         text = value
         drafts[sessionId] = value
     }
+    // Text can arrive from elsewhere too (comments on an HTML page).
+    LaunchedEffect(sessionId, drafts) {
+        drafts.observe(sessionId).collect { if (it != text) text = it }
+    }
     // No bar of its own: the field floats on the conversation's background as
     // one filled pill, with attach and send inside it.
     Surface(

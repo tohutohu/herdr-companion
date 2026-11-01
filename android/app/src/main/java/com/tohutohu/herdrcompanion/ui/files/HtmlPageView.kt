@@ -3,6 +3,7 @@ package com.tohutohu.herdrcompanion.ui.files
 import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
@@ -14,10 +15,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -30,6 +33,9 @@ import androidx.navigationevent.compose.rememberNavigationEventState
 import com.tohutohu.herdrcompanion.container
 import com.tohutohu.herdrcompanion.data.FileDownloads
 import com.tohutohu.herdrcompanion.data.api.GatewayApi
+import kotlinx.serialization.json.addJsonObject
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.put
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
@@ -86,22 +92,58 @@ internal fun htmlResourceMimeType(path: String, served: String?): String {
     }
 }
 
-/** Renders an HTML file from the session's workspace, with its relative CSS, scripts and images. */
-@SuppressLint("SetJavaScriptEnabled")
+/** Lets the screen around the page act on the element picked for a comment. */
+internal class HtmlPageController {
+    internal var webView: WebView? = null
+
+    fun selectParent() = run("parent()")
+
+    fun clearSelection() = run("clear()")
+
+    private fun run(call: String) {
+        webView?.evaluateJavascript("window.__herdrComment && window.__herdrComment.$call", null)
+    }
+}
+
+/**
+ * Renders an HTML file from the session's workspace, with its relative CSS, scripts and images.
+ * In [commentMode] a tap picks an element instead; [comments] made on the shown page are boxed.
+ */
+@SuppressLint("SetJavaScriptEnabled", "JavascriptInterface")
 @Composable
-internal fun HtmlPageView(sessionId: String, path: String, bottom: Dp) {
+internal fun HtmlPageView(
+    sessionId: String,
+    path: String,
+    bottom: Dp,
+    commentMode: Boolean = false,
+    comments: List<PageComment> = emptyList(),
+    controller: HtmlPageController = remember { HtmlPageController() },
+    onPick: (page: String, element: ElementPick) -> Unit = { _, _ -> },
+) {
     val context = LocalContext.current
     val api = context.container.api
     val http = context.container.authedHttp
     var progress by remember(sessionId, path) { mutableIntStateOf(0) }
     var canGoBack by remember(sessionId, path) { mutableStateOf(false) }
     var webView by remember(sessionId, path) { mutableStateOf<WebView?>(null) }
+    // Set once the comment script is in the page that finished loading.
+    var shownPage by remember(sessionId, path) { mutableStateOf<String?>(null) }
+    var pageLoads by remember(sessionId, path) { mutableIntStateOf(0) }
+    val picking by rememberUpdatedState(commentMode)
+    val pick by rememberUpdatedState(onPick)
 
     NavigationBackHandler(
         state = rememberNavigationEventState(currentInfo = NavigationEventInfo.None),
         isBackEnabled = canGoBack,
         onBackCompleted = { webView?.goBack() },
     )
+
+    LaunchedEffect(webView, shownPage, pageLoads, commentMode, comments) {
+        val view = webView ?: return@LaunchedEffect
+        val page = shownPage ?: return@LaunchedEffect
+        view.evaluateJavascript("window.__herdrComment && window.__herdrComment.setMode($commentMode)", null)
+        view.evaluateJavascript("window.__herdrComment && window.__herdrComment.mark(${commentMarksJson(comments, page)})", null)
+    }
 
     Box(Modifier.fillMaxSize().padding(bottom = bottom)) {
         AndroidView(
@@ -121,7 +163,29 @@ internal fun HtmlPageView(sessionId: String, path: String, bottom: Dp) {
                         builtInZoomControls = true
                         displayZoomControls = false
                     }
-                    webViewClient = WorkspacePageClient(sessionId, api, http) { canGoBack = it }
+                    // The page's own scripts can call this too; all it can do is offer an
+                    // element for a comment the user still has to write and add.
+                    addJavascriptInterface(
+                        CommentBridge { json ->
+                            post {
+                                val page = url?.let(::gatewayPathForPageUrl)
+                                val element = parseElementPick(json)
+                                if (picking && page != null && element != null) pick(page, element)
+                            }
+                        },
+                        "HerdrComment",
+                    )
+                    webViewClient = WorkspacePageClient(
+                        sessionId,
+                        api,
+                        http,
+                        onHistoryChanged = { canGoBack = it },
+                        onPageFinished = { view, url ->
+                            view.evaluateJavascript(HTML_COMMENT_SCRIPT, null)
+                            shownPage = gatewayPathForPageUrl(url)
+                            pageLoads++
+                        },
+                    )
                     webChromeClient = object : android.webkit.WebChromeClient() {
                         override fun onProgressChanged(view: WebView, newProgress: Int) {
                             progress = newProgress
@@ -129,9 +193,13 @@ internal fun HtmlPageView(sessionId: String, path: String, bottom: Dp) {
                     }
                     loadUrl(htmlPageUrl(path))
                     webView = this
+                    controller.webView = this
                 }
             },
-            onRelease = { it.destroy() },
+            onRelease = {
+                if (controller.webView === it) controller.webView = null
+                it.destroy()
+            },
         )
         if (progress in 0..99) {
             LinearProgressIndicator(
@@ -142,11 +210,27 @@ internal fun HtmlPageView(sessionId: String, path: String, bottom: Dp) {
     }
 }
 
+/** The boxes to draw on [page]: its comments' selectors, numbered as in the whole list. */
+internal fun commentMarksJson(comments: List<PageComment>, page: String): String = buildJsonArray {
+    comments.forEachIndexed { i, c ->
+        if (c.page == page) addJsonObject {
+            put("s", c.element.selector)
+            put("n", i + 1)
+        }
+    }
+}.toString()
+
+private class CommentBridge(private val onSelect: (String) -> Unit) {
+    @JavascriptInterface
+    fun onSelect(json: String) = onSelect.invoke(json)
+}
+
 private class WorkspacePageClient(
     private val sessionId: String,
     private val api: GatewayApi,
     private val http: OkHttpClient,
     private val onHistoryChanged: (canGoBack: Boolean) -> Unit,
+    private val onPageFinished: (WebView, String) -> Unit,
 ) : WebViewClient() {
     override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
         val url = request.url.toString()
@@ -178,6 +262,10 @@ private class WorkspacePageClient(
             }
         }
         return true
+    }
+
+    override fun onPageFinished(view: WebView, url: String) {
+        onPageFinished.invoke(view, url)
     }
 
     override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
