@@ -1,6 +1,5 @@
 package com.tohutohu.herdrcompanion.ui.forward
 
-import com.tohutohu.herdrcompanion.data.api.LocalPortDto
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -31,15 +30,4 @@ class LocalhostUrlsTest {
         assertNull(proxyRuleFor(""))
     }
 
-    @Test
-    fun `セッションのフォルダで起動したサーバーを先に並べる`() {
-        val vite = LocalPortDto(5173, 1, "node", "/Users/me/work/app/web")
-        val api = LocalPortDto(8000, 2, "python3", "/Users/me/work/app")
-        val other = LocalPortDto(3000, 3, "node", "/Users/me/work/application")
-        val system = LocalPortDto(7000, 4, "ControlCenter", null)
-        val (inSession, others) = sessionPortsFirst(listOf(system, api, other, vite), "/Users/me/work/app/")
-        assertEquals(listOf(vite, api), inSession)
-        assertEquals(listOf(other, system), others)
-        assertEquals(emptyList<LocalPortDto>() to listOf(other, vite, system, api), sessionPortsFirst(listOf(system, api, other, vite), null))
-    }
 }

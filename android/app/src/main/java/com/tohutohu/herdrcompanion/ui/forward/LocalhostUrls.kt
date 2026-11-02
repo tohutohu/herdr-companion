@@ -1,6 +1,5 @@
 package com.tohutohu.herdrcompanion.ui.forward
 
-import com.tohutohu.herdrcompanion.data.api.LocalPortDto
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 /** Hosts that name the Mac itself in a URL an agent prints. 0.0.0.0 is what some servers log. */
@@ -21,15 +20,4 @@ internal fun proxyRuleFor(gatewayUrl: String): String? {
     val parsed = gatewayUrl.trim().toHttpUrlOrNull() ?: return null
     if (parsed.scheme != "http") return null
     return "http://${parsed.host}:${parsed.port}"
-}
-
-/** Servers started inside [sessionCwd] first, then the rest, each by port. */
-internal fun sessionPortsFirst(ports: List<LocalPortDto>, sessionCwd: String?): Pair<List<LocalPortDto>, List<LocalPortDto>> {
-    val root = sessionCwd?.trimEnd('/')?.takeIf { it.isNotEmpty() }
-        ?: return emptyList<LocalPortDto>() to ports.sortedBy { it.port }
-    val (inSession, others) = ports.sortedBy { it.port }.partition { p ->
-        val cwd = p.cwd ?: return@partition false
-        cwd == root || cwd.startsWith("$root/")
-    }
-    return inSession to others
 }

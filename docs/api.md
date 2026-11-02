@@ -179,7 +179,6 @@ Gateway が動かすセッションは、プロセスが無い間（Gateway の�
 | GET | `/v1/sessions/{id}/files` | 要 | ディレクトリ一覧 |
 | GET | `/v1/sessions/{id}/files/content` | 要 | ファイル本体 |
 | GET | `/v1/sessions/{id}/files/stat` | 要 | ファイル情報 |
-| GET | `/v1/ports` | 要 | Mac の localhost で待ち受けている TCP ポート |
 | (プロキシ) | `http://localhost:<port>/…`、`CONNECT localhost:<port>` | 要（`Proxy-Authorization`） | Mac の localhost への転送（[下記](#localhost-の転送)） |
 | POST | `/v1/launches/{launchId}/trust` | 要 | 起動時のフォルダ信頼の確認に回答 |
 | GET | `/v1/models` | 要 | 起動時に選べるモデル・effort・モード |
@@ -557,17 +556,8 @@ Gateway は **Mac のループバック宛てに限った HTTP プロキシ**と
 - プロキシなので、Gateway に直接届く経路（Tailscale）でだけ使える。Cloudflare Tunnel は絶対形式の
   URL と `CONNECT` を通さない。
 - Android アプリは WebView の localhost 宛て通信だけを Gateway に向ける（androidx.webkit の
-  `ProxyController`、reverse bypass）。チャットの `http://localhost:…` のリンクはこの画面で開く。
-
-### `GET /v1/ports`
-
-`lsof` で読んだ、localhost から届く（ループバックか全インターフェイスで待ち受ける）TCP ポート。Gateway 自身は除く。
-
-```json
-{"ports": [{"port": 5173, "pid": 4242, "command": "node", "cwd": "/Users/…/project"}]}
-```
-
-`cwd` は待ち受けているプロセスの作業フォルダ（読めたときだけ）。アプリはセッションのフォルダ配下のものを先に並べる。
+  `ProxyController`、reverse bypass）。入口はチャットの `http://localhost:…` のリンクだけで、
+  Mac で待ち受けているポートの一覧は出さない（セッションと関係のないものまで見えるため）。
 
 ## 起動の準備
 

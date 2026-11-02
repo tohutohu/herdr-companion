@@ -280,9 +280,6 @@ class GatewayApi(
         }
     }
 
-    /** What listens on the Mac's localhost, for opening it through the Gateway's proxy. */
-    suspend fun localPorts(): LocalPortsResponse = get(url("v1", "ports"))
-
     suspend fun fileStat(id: String, path: String): FileInfoDto =
         get(url("v1", "sessions", id, "files", "stat", query = mapOf("path" to path)))
 

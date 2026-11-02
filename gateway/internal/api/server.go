@@ -98,7 +98,6 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("GET /v1/sessions/{id}/files/content", s.fileContent)
 	api.HandleFunc("GET /v1/sessions/{id}/files/stat", s.fileStat)
 	api.HandleFunc("POST /v1/uploads", s.upload)
-	api.HandleFunc("GET /v1/ports", s.listPorts)
 	api.HandleFunc("GET /v1/usage", s.getUsage)
 	api.HandleFunc("POST /v1/usage/refresh", s.refreshUsage)
 	s.residentRoutes(api)
@@ -121,17 +120,6 @@ func (s *Server) Handler() http.Handler {
 		}
 		logged.ServeHTTP(w, r)
 	})
-}
-
-func (s *Server) listPorts(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-	defer cancel()
-	ports, err := forward.ListPorts(ctx)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ports": ports})
 }
 
 func (s *Server) auth(next http.Handler) http.Handler {

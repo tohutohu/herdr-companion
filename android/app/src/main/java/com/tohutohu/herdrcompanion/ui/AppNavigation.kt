@@ -35,7 +35,6 @@ import androidx.navigation3.runtime.serialization.NavBackStackSerializer
 import androidx.navigation3.ui.NavDisplay
 import com.tohutohu.herdrcompanion.ui.detail.SessionDetailRoute
 import com.tohutohu.herdrcompanion.ui.files.FileViewerScreen
-import com.tohutohu.herdrcompanion.ui.forward.LocalPortsScreen
 import com.tohutohu.herdrcompanion.ui.forward.LocalhostBrowserScreen
 import com.tohutohu.herdrcompanion.ui.forward.localhostTarget
 import com.tohutohu.herdrcompanion.ui.files.ImageViewerRoute
@@ -138,15 +137,6 @@ fun AppNavigation(
                     onBack = { lifecycle.ifResumed { nav.back(orReplaceWith = SessionsRoute) } },
                     onOpenFile = { path, line -> lifecycle.ifResumed { nav.push(FileRoute(route.sessionId, path, line)) } },
                     onOpenImage = { url -> lifecycle.ifResumed { nav.push(ImageRoute(url)) } },
-                    onOpenLocalhost = { cwd -> lifecycle.ifResumed { nav.push(LocalPortsRoute(cwd)) } },
-                )
-            }
-            entry<LocalPortsRoute> { route ->
-                val lifecycle = LocalLifecycleOwner.current.lifecycle
-                LocalPortsScreen(
-                    sessionCwd = route.cwd,
-                    onOpen = { url -> lifecycle.ifResumed { nav.push(LocalhostRoute(url)) } },
-                    onBack = { lifecycle.ifResumed { nav.back() } },
                 )
             }
             entry<LocalhostRoute> { route ->
