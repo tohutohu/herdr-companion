@@ -30,9 +30,9 @@ data class FileRoute(val sessionId: String, val path: String, val line: Int = 0)
 @Serializable
 data class ImageRoute(val url: String) : Route
 
-/** A page on the Mac's localhost, opened through the Gateway's proxy. */
+/** A page on the Mac's localhost, opened through the Gateway's proxy from [sessionId]'s conversation. */
 @Serializable
-data class LocalhostRoute(val url: String) : Route
+data class LocalhostRoute(val url: String, val sessionId: String? = null) : Route
 
 @Serializable
 data object NewSessionRoute : Route

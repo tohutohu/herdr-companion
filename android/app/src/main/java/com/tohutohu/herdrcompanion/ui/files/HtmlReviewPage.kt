@@ -13,13 +13,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AddComment
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.outlined.AddComment
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconToggleButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -59,9 +63,46 @@ internal fun HtmlReviewPage(
     onCommentModeChange: (Boolean) -> Unit,
     onSend: () -> Unit,
 ) {
-    val controller = remember(sessionId, path) { HtmlPageController() }
-    var pick by remember(sessionId, path) { mutableStateOf<Pair<String, ElementPick>?>(null) }
-    var body by rememberSaveable(sessionId, path) { mutableStateOf("") }
+    CommentablePage(
+        key = sessionId to path,
+        bottom = bottom,
+        commentMode = commentMode,
+        comments = comments,
+        onCommentsChange = onCommentsChange,
+        onCommentModeChange = onCommentModeChange,
+        onSend = onSend,
+    ) { pageBottom, controller, onPick ->
+        HtmlPageView(
+            sessionId = sessionId,
+            path = path,
+            bottom = pageBottom,
+            commentMode = commentMode,
+            comments = comments,
+            controller = controller,
+            onPick = onPick,
+        )
+    }
+}
+
+/**
+ * A web page with element comments around it: [page] draws the page (leaving [bottom] for the
+ * system bar when no tray is shown) and reports picks; the tray, the pick and back while
+ * commenting are handled here. [key] tells one page's state from another's.
+ */
+@Composable
+internal fun CommentablePage(
+    key: Any,
+    bottom: Dp,
+    commentMode: Boolean,
+    comments: List<PageComment>,
+    onCommentsChange: (List<PageComment>) -> Unit,
+    onCommentModeChange: (Boolean) -> Unit,
+    onSend: () -> Unit,
+    page: @Composable (bottom: Dp, controller: HtmlPageController, onPick: (page: String, element: ElementPick) -> Unit) -> Unit,
+) {
+    val controller = remember(key) { HtmlPageController() }
+    var pick by remember(key) { mutableStateOf<Pair<String, ElementPick>?>(null) }
+    var body by rememberSaveable(key.toString()) { mutableStateOf("") }
     LaunchedEffect(commentMode) {
         if (!commentMode) pick = null
     }
@@ -69,15 +110,7 @@ internal fun HtmlReviewPage(
 
     Column(Modifier.fillMaxSize()) {
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            HtmlPageView(
-                sessionId = sessionId,
-                path = path,
-                bottom = if (trayShown) 0.dp else bottom,
-                commentMode = commentMode,
-                comments = comments,
-                controller = controller,
-                onPick = { page, element -> pick = page to element },
-            )
+            page(if (trayShown) 0.dp else bottom, controller) { p, element -> pick = p to element }
         }
         if (trayShown) {
             CommentTray(
@@ -93,8 +126,8 @@ internal fun HtmlReviewPage(
                     controller.clearSelection()
                 },
                 onAdd = {
-                    val (page, element) = pick ?: return@CommentTray
-                    onCommentsChange(comments + PageComment(page, element, body.trim()))
+                    val (pickedPage, element) = pick ?: return@CommentTray
+                    onCommentsChange(comments + PageComment(pickedPage, element, body.trim()))
                     body = ""
                     pick = null
                     controller.clearSelection()
@@ -118,6 +151,18 @@ internal fun HtmlReviewPage(
             }
         },
     )
+}
+
+/** The top-bar toggle for comment mode. */
+@Composable
+internal fun CommentModeToggle(commentMode: Boolean, onChange: (Boolean) -> Unit) {
+    IconToggleButton(checked = commentMode, onCheckedChange = onChange) {
+        Icon(
+            if (commentMode) Icons.Filled.AddComment else Icons.Outlined.AddComment,
+            contentDescription = if (commentMode) "Stop commenting" else "Comment on elements",
+            tint = if (commentMode) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+        )
+    }
 }
 
 @Composable

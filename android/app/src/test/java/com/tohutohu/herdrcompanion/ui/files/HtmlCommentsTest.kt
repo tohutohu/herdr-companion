@@ -26,7 +26,7 @@ class HtmlCommentsTest {
         )
         assertEquals(
             """
-            Comments on the HTML page:
+            Comments on the page:
 
             /w/report/index.html
             1. `body > section:nth-of-type(2) > h2` <h2> "今週のトークン数"

@@ -39,7 +39,7 @@ internal object PendingPageComments {
 
 /** The comments as one message for the agent: grouped by page, each tied to its element. */
 internal fun formatPageComments(comments: List<PageComment>): String = buildString {
-    append("Comments on the HTML page:")
+    append("Comments on the page:")
     var n = 0
     comments.groupBy { it.page }.forEach { (page, onPage) ->
         append("\n\n").append(page)

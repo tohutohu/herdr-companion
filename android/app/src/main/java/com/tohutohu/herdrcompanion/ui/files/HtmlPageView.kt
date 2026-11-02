@@ -138,12 +138,7 @@ internal fun HtmlPageView(
         onBackCompleted = { webView?.goBack() },
     )
 
-    LaunchedEffect(webView, shownPage, pageLoads, commentMode, comments) {
-        val view = webView ?: return@LaunchedEffect
-        val page = shownPage ?: return@LaunchedEffect
-        view.evaluateJavascript("window.__herdrComment && window.__herdrComment.setMode($commentMode)", null)
-        view.evaluateJavascript("window.__herdrComment && window.__herdrComment.mark(${commentMarksJson(comments, page)})", null)
-    }
+    SyncCommentMarks(webView, shownPage, pageLoads, commentMode, comments)
 
     Box(Modifier.fillMaxSize().padding(bottom = bottom)) {
         AndroidView(
@@ -163,25 +158,17 @@ internal fun HtmlPageView(
                         builtInZoomControls = true
                         displayZoomControls = false
                     }
-                    // The page's own scripts can call this too; all it can do is offer an
-                    // element for a comment the user still has to write and add.
-                    addJavascriptInterface(
-                        CommentBridge { json ->
-                            post {
-                                val page = url?.let(::gatewayPathForPageUrl)
-                                val element = parseElementPick(json)
-                                if (picking && page != null && element != null) pick(page, element)
-                            }
-                        },
-                        "HerdrComment",
-                    )
+                    installCommentBridge { element ->
+                        val page = url?.let(::gatewayPathForPageUrl)
+                        if (picking && page != null) pick(page, element)
+                    }
                     webViewClient = WorkspacePageClient(
                         sessionId,
                         api,
                         http,
                         onHistoryChanged = { canGoBack = it },
                         onPageFinished = { view, url ->
-                            view.evaluateJavascript(HTML_COMMENT_SCRIPT, null)
+                            view.injectCommentScript()
                             shownPage = gatewayPathForPageUrl(url)
                             pageLoads++
                         },
@@ -223,6 +210,33 @@ internal fun commentMarksJson(comments: List<PageComment>, page: String): String
 private class CommentBridge(private val onSelect: (String) -> Unit) {
     @JavascriptInterface
     fun onSelect(json: String) = onSelect.invoke(json)
+}
+
+/**
+ * Lets the comment script report the element tapped in comment mode; [onPick] runs on the main
+ * thread. The page's own scripts can call the bridge too; all they can do is offer an element for
+ * a comment the user still has to write and add.
+ */
+@SuppressLint("JavascriptInterface")
+internal fun WebView.installCommentBridge(onPick: (ElementPick) -> Unit) {
+    addJavascriptInterface(
+        CommentBridge { json -> post { parseElementPick(json)?.let(onPick) } },
+        "HerdrComment",
+    )
+}
+
+/** Puts the comment script into the page that just finished loading. */
+internal fun WebView.injectCommentScript() = evaluateJavascript(HTML_COMMENT_SCRIPT, null)
+
+/** Keeps the page's comment mode and its numbered boxes in step, again after every load of [page]. */
+@Composable
+internal fun SyncCommentMarks(webView: WebView?, page: String?, loads: Int, commentMode: Boolean, comments: List<PageComment>) {
+    LaunchedEffect(webView, page, loads, commentMode, comments) {
+        val view = webView ?: return@LaunchedEffect
+        val shown = page ?: return@LaunchedEffect
+        view.evaluateJavascript("window.__herdrComment && window.__herdrComment.setMode($commentMode)", null)
+        view.evaluateJavascript("window.__herdrComment && window.__herdrComment.mark(${commentMarksJson(comments, shown)})", null)
+    }
 }
 
 private class WorkspacePageClient(

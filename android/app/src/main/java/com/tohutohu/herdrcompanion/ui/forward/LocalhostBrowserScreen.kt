@@ -33,6 +33,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,6 +51,14 @@ import androidx.webkit.ProxyController
 import androidx.webkit.WebViewFeature
 import com.tohutohu.herdrcompanion.container
 import com.tohutohu.herdrcompanion.ui.exceptBottom
+import com.tohutohu.herdrcompanion.ui.files.CommentModeToggle
+import com.tohutohu.herdrcompanion.ui.files.CommentablePage
+import com.tohutohu.herdrcompanion.ui.files.PageComment
+import com.tohutohu.herdrcompanion.ui.files.PendingPageComments
+import com.tohutohu.herdrcompanion.ui.files.SyncCommentMarks
+import com.tohutohu.herdrcompanion.ui.files.formatPageComments
+import com.tohutohu.herdrcompanion.ui.files.injectCommentScript
+import com.tohutohu.herdrcompanion.ui.files.installCommentBridge
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 /**
@@ -85,11 +95,20 @@ private object LocalhostProxy {
     }
 }
 
-/** A small browser for a server on the Mac's localhost, reached through the Gateway. */
+/**
+ * A small browser for a server on the Mac's localhost, reached through the Gateway. Opened from
+ * [sessionId]'s conversation, its elements take comments that go into that session's draft.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun LocalhostBrowserScreen(url: String, onBack: () -> Unit) {
+fun LocalhostBrowserScreen(
+    url: String,
+    sessionId: String?,
+    onBack: () -> Unit,
+    /** Back to the session, whose composer now holds the comments made here. */
+    onOpenSession: () -> Unit = onBack,
+) {
     val context = LocalContext.current
     val gatewayUrl = context.container.settings.current.gatewayUrl
     // An http:// Gateway is the proxy itself. Behind the HTTPS tunnel, which carries no proxy
@@ -116,6 +135,15 @@ fun LocalhostBrowserScreen(url: String, onBack: () -> Unit) {
     var current by remember { mutableStateOf(url) }
     var canGoBack by remember { mutableStateOf(false) }
     var webView by remember { mutableStateOf<WebView?>(null) }
+    // Counts loads that finished with the comment script in place.
+    var pageLoads by remember { mutableIntStateOf(0) }
+    var commentMode by rememberSaveable { mutableStateOf(false) }
+    var comments by remember(sessionId, url) { mutableStateOf(sessionId?.let { PendingPageComments[it, url] }.orEmpty()) }
+    fun updateComments(value: List<PageComment>) {
+        comments = value
+        if (sessionId != null) PendingPageComments[sessionId, url] = value
+    }
+    val shownPage = current.substringBefore('#').takeIf { pageLoads > 0 }
 
     val rule = proxyRule
     if (supported && rule != null) {
@@ -151,6 +179,7 @@ fun LocalhostBrowserScreen(url: String, onBack: () -> Unit) {
                     }
                 },
                 actions = {
+                    if (sessionId != null && ready) CommentModeToggle(commentMode) { commentMode = it }
                     IconButton(
                         onClick = {
                             unreachable = false
@@ -175,46 +204,76 @@ fun LocalhostBrowserScreen(url: String, onBack: () -> Unit) {
                 return@Box
             }
             if (ready) {
-                AndroidView(
-                    modifier = Modifier.fillMaxSize().padding(bottom = padding.calculateBottomPadding()),
-                    factory = { ctx ->
-                        WebView(ctx).apply {
-                            settings.apply {
-                                javaScriptEnabled = true
-                                domStorageEnabled = true
-                                allowFileAccess = false
-                                allowContentAccess = false
-                                useWideViewPort = true
-                                loadWithOverviewMode = true
-                                builtInZoomControls = true
-                                displayZoomControls = false
-                                // A dev server rebuilds between loads.
-                                cacheMode = WebSettings.LOAD_NO_CACHE
-                            }
-                            webViewClient = ProxyAuthClient(
-                                proxyHost = proxyHost,
-                                token = { context.container.settings.current.token.trim() },
-                                onPage = { u, back ->
-                                    current = u
-                                    canGoBack = back
-                                },
-                                onProxyUnreachable = { unreachable = true },
-                            )
-                            webChromeClient = object : WebChromeClient() {
-                                override fun onProgressChanged(view: WebView, newProgress: Int) {
-                                    progress = newProgress
-                                }
-
-                                override fun onReceivedTitle(view: WebView, t: String?) {
-                                    title = t.orEmpty()
-                                }
-                            }
-                            loadUrl(url)
-                            webView = this
-                        }
+                CommentablePage(
+                    key = url,
+                    bottom = padding.calculateBottomPadding(),
+                    commentMode = commentMode,
+                    comments = comments,
+                    onCommentsChange = ::updateComments,
+                    onCommentModeChange = { commentMode = it },
+                    onSend = {
+                        if (sessionId != null) context.container.composerDrafts.append(sessionId, formatPageComments(comments))
+                        updateComments(emptyList())
+                        commentMode = false
+                        onOpenSession()
                     },
-                    onRelease = { it.destroy() },
-                )
+                ) { pageBottom, controller, onPick ->
+                    val picking by rememberUpdatedState(commentMode)
+                    val pick by rememberUpdatedState(onPick)
+                    SyncCommentMarks(webView, shownPage, pageLoads, commentMode, comments)
+                    AndroidView(
+                        modifier = Modifier.fillMaxSize().padding(bottom = pageBottom),
+                        factory = { ctx ->
+                            WebView(ctx).apply {
+                                settings.apply {
+                                    javaScriptEnabled = true
+                                    domStorageEnabled = true
+                                    allowFileAccess = false
+                                    allowContentAccess = false
+                                    useWideViewPort = true
+                                    loadWithOverviewMode = true
+                                    builtInZoomControls = true
+                                    displayZoomControls = false
+                                    // A dev server rebuilds between loads.
+                                    cacheMode = WebSettings.LOAD_NO_CACHE
+                                }
+                                installCommentBridge { element ->
+                                    val page = this.url?.substringBefore('#')
+                                    if (picking && page != null) pick(page, element)
+                                }
+                                webViewClient = ProxyAuthClient(
+                                    proxyHost = proxyHost,
+                                    token = { context.container.settings.current.token.trim() },
+                                    onPage = { u, back ->
+                                        current = u
+                                        canGoBack = back
+                                    },
+                                    onLoaded = { view ->
+                                        view.injectCommentScript()
+                                        pageLoads++
+                                    },
+                                    onProxyUnreachable = { unreachable = true },
+                                )
+                                webChromeClient = object : WebChromeClient() {
+                                    override fun onProgressChanged(view: WebView, newProgress: Int) {
+                                        progress = newProgress
+                                    }
+
+                                    override fun onReceivedTitle(view: WebView, t: String?) {
+                                        title = t.orEmpty()
+                                    }
+                                }
+                                loadUrl(url)
+                                webView = this
+                                controller.webView = this
+                            }
+                        },
+                        onRelease = {
+                            if (controller.webView === it) controller.webView = null
+                            it.destroy()
+                        },
+                    )
+                }
             }
             if (unreachable) {
                 Text(
@@ -244,6 +303,7 @@ private class ProxyAuthClient(
     private val proxyHost: String?,
     private val token: () -> String,
     private val onPage: (url: String, canGoBack: Boolean) -> Unit,
+    private val onLoaded: (WebView) -> Unit,
     private val onProxyUnreachable: () -> Unit,
 ) : WebViewClient() {
     private var attempts = 0
@@ -266,6 +326,7 @@ private class ProxyAuthClient(
 
     override fun onPageFinished(view: WebView, url: String) {
         attempts = 0
+        onLoaded(view)
     }
 
     override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {

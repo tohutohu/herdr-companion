@@ -141,7 +141,12 @@ fun AppNavigation(
             }
             entry<LocalhostRoute> { route ->
                 val lifecycle = LocalLifecycleOwner.current.lifecycle
-                LocalhostBrowserScreen(route.url, onBack = { lifecycle.ifResumed { nav.back() } })
+                LocalhostBrowserScreen(
+                    url = route.url,
+                    sessionId = route.sessionId,
+                    onBack = { lifecycle.ifResumed { nav.back() } },
+                    onOpenSession = { route.sessionId?.let { id -> lifecycle.ifResumed { nav.openLinkedSession(id) } } },
+                )
             }
             entry<FileRoute> { route ->
                 val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -233,7 +238,9 @@ fun AppNavigation(
             object : UriHandler {
                 override fun openUri(uri: String) {
                     val local = localhostTarget(uri)
-                    if (local != null) nav.push(LocalhostRoute(local)) else defaultUris.openUri(uri)
+                    // Comments on the page go to the session the link was in.
+                    val session = backStack.lastOrNull { it is DetailRoute } as DetailRoute?
+                    if (local != null) nav.push(LocalhostRoute(local, session?.sessionId)) else defaultUris.openUri(uri)
                 }
             }
         }
