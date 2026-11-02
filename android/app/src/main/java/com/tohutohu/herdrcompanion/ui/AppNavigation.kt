@@ -19,9 +19,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.navigation3.runtime.rememberDecoratedNavEntries
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSerializable
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.UriHandler
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
@@ -32,6 +35,9 @@ import androidx.navigation3.runtime.serialization.NavBackStackSerializer
 import androidx.navigation3.ui.NavDisplay
 import com.tohutohu.herdrcompanion.ui.detail.SessionDetailRoute
 import com.tohutohu.herdrcompanion.ui.files.FileViewerScreen
+import com.tohutohu.herdrcompanion.ui.forward.LocalPortsScreen
+import com.tohutohu.herdrcompanion.ui.forward.LocalhostBrowserScreen
+import com.tohutohu.herdrcompanion.ui.forward.localhostTarget
 import com.tohutohu.herdrcompanion.ui.files.ImageViewerRoute
 import com.tohutohu.herdrcompanion.ui.resident.ResidentFormEntry
 import com.tohutohu.herdrcompanion.ui.resident.ResidentHomeEntry
@@ -132,7 +138,20 @@ fun AppNavigation(
                     onBack = { lifecycle.ifResumed { nav.back(orReplaceWith = SessionsRoute) } },
                     onOpenFile = { path, line -> lifecycle.ifResumed { nav.push(FileRoute(route.sessionId, path, line)) } },
                     onOpenImage = { url -> lifecycle.ifResumed { nav.push(ImageRoute(url)) } },
+                    onOpenLocalhost = { cwd -> lifecycle.ifResumed { nav.push(LocalPortsRoute(cwd)) } },
                 )
+            }
+            entry<LocalPortsRoute> { route ->
+                val lifecycle = LocalLifecycleOwner.current.lifecycle
+                LocalPortsScreen(
+                    sessionCwd = route.cwd,
+                    onOpen = { url -> lifecycle.ifResumed { nav.push(LocalhostRoute(url)) } },
+                    onBack = { lifecycle.ifResumed { nav.back() } },
+                )
+            }
+            entry<LocalhostRoute> { route ->
+                val lifecycle = LocalLifecycleOwner.current.lifecycle
+                LocalhostBrowserScreen(route.url, onBack = { lifecycle.ifResumed { nav.back() } })
             }
             entry<FileRoute> { route ->
                 val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -218,20 +237,32 @@ fun AppNavigation(
             }
         },
     ) { padding ->
-        NavDisplay(
-            entries = if (residentTab) sessionEntries + residentEntries else sessionEntries,
-            modifier = Modifier.padding(padding).consumeWindowInsets(padding),
-            onBack = {
-                when {
-                    !residentTab -> nav.back()
-                    residentStack.size > 1 -> resident.back()
-                    else -> residentTab = false
+        // A localhost link in a message means the Mac's localhost: open it through the Gateway.
+        val defaultUris = LocalUriHandler.current
+        val uris = remember(defaultUris) {
+            object : UriHandler {
+                override fun openUri(uri: String) {
+                    val local = localhostTarget(uri)
+                    if (local != null) nav.push(LocalhostRoute(local)) else defaultUris.openUri(uri)
                 }
-            },
-            transitionSpec = motion.push,
-            popTransitionSpec = motion.pop,
-            predictivePopTransitionSpec = motion.predictivePop,
-        )
+            }
+        }
+        CompositionLocalProvider(LocalUriHandler provides uris) {
+            NavDisplay(
+                entries = if (residentTab) sessionEntries + residentEntries else sessionEntries,
+                modifier = Modifier.padding(padding).consumeWindowInsets(padding),
+                onBack = {
+                    when {
+                        !residentTab -> nav.back()
+                        residentStack.size > 1 -> resident.back()
+                        else -> residentTab = false
+                    }
+                },
+                transitionSpec = motion.push,
+                popTransitionSpec = motion.pop,
+                predictivePopTransitionSpec = motion.predictivePop,
+            )
+        }
     }
 }
 

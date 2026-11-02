@@ -194,6 +194,13 @@ data class FileInfoDto(
 @Serializable
 data class FilesResponse(val root: String, val entries: List<FileEntryDto>)
 
+/** A TCP port something on the Mac listens on, reachable at localhost (GET /v1/ports). */
+@Serializable
+data class LocalPortDto(val port: Int, val pid: Int = 0, val command: String = "", val cwd: String? = null)
+
+@Serializable
+data class LocalPortsResponse(val ports: List<LocalPortDto> = emptyList())
+
 /** One rate-limit window of a subscription (Claude's 5h / weekly, Codex's weekly). */
 @Serializable
 data class UsageWindowDto(

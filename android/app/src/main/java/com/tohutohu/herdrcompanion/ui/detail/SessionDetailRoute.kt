@@ -7,6 +7,11 @@ import android.text.format.Formatter
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lan
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -45,6 +50,8 @@ fun SessionDetailRoute(
     onOpenFile: (String, Int) -> Unit,
     onOpenImage: (String) -> Unit,
     onOpenSession: (String) -> Unit,
+    /** Lists what listens on the Mac's localhost; the session's folder decides what comes first. */
+    onOpenLocalhost: (cwd: String?) -> Unit = {},
 ) {
     val context = LocalContext.current
     val vm: SessionDetailViewModel = viewModel(key = sessionId) {
@@ -124,6 +131,16 @@ fun SessionDetailRoute(
             resolveAttachmentPreview = { id -> id.toUri() },
             drafts = context.container.composerDrafts,
             sideQuestions = context.container.sideQuestions,
+            extraMenuItems = { dismiss ->
+                DropdownMenuItem(
+                    text = { Text("Localhost on the Mac") },
+                    leadingIcon = { Icon(Icons.Default.Lan, contentDescription = null) },
+                    onClick = {
+                        dismiss()
+                        onOpenLocalhost(session?.cwd)
+                    },
+                )
+            },
             onAction = { action ->
                 when (action) {
                     SessionDetailAction.Back -> onBack()
