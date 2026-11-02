@@ -26,6 +26,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/directorycheck"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/files"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/forward"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/launcher"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
@@ -97,6 +98,7 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("GET /v1/sessions/{id}/files/content", s.fileContent)
 	api.HandleFunc("GET /v1/sessions/{id}/files/stat", s.fileStat)
 	api.HandleFunc("POST /v1/uploads", s.upload)
+	api.HandleFunc("GET /v1/ports", s.listPorts)
 	api.HandleFunc("GET /v1/usage", s.getUsage)
 	api.HandleFunc("POST /v1/usage/refresh", s.refreshUsage)
 	s.residentRoutes(api)
@@ -108,7 +110,28 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /debug/pprof/profile", s.auth(http.HandlerFunc(pprof.Profile)))
 	mux.Handle("GET /debug/pprof/trace", s.auth(http.HandlerFunc(pprof.Trace)))
 	mux.Handle("GET /debug/pprof/symbol", s.auth(http.HandlerFunc(pprof.Symbol)))
-	return logRequests(mux)
+	logged := logRequests(mux)
+	// Proxy requests for this Mac's localhost (docs/api.md#localhost-の転送) never reach the API
+	// paths. They are left out of the request log, as a page loads many of them.
+	proxy := &forward.Proxy{Token: func() string { return s.Config.Get().AuthToken }}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if forward.IsProxyRequest(r) {
+			proxy.ServeHTTP(w, r)
+			return
+		}
+		logged.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) listPorts(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	ports, err := forward.ListPorts(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ports": ports})
 }
 
 func (s *Server) auth(next http.Handler) http.Handler {

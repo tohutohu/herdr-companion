@@ -179,6 +179,8 @@ Gateway が動かすセッションは、プロセスが無い間（Gateway の�
 | GET | `/v1/sessions/{id}/files` | 要 | ディレクトリ一覧 |
 | GET | `/v1/sessions/{id}/files/content` | 要 | ファイル本体 |
 | GET | `/v1/sessions/{id}/files/stat` | 要 | ファイル情報 |
+| GET | `/v1/ports` | 要 | Mac の localhost で待ち受けている TCP ポート |
+| (プロキシ) | `http://localhost:<port>/…`、`CONNECT localhost:<port>` | 要（`Proxy-Authorization`） | Mac の localhost への転送（[下記](#localhost-の転送)） |
 | POST | `/v1/launches/{launchId}/trust` | 要 | 起動時のフォルダ信頼の確認に回答 |
 | GET | `/v1/models` | 要 | 起動時に選べるモデル・effort・モード |
 | GET / POST | `/v1/directories` | 要 | 作業フォルダの一覧／作成 |
@@ -540,6 +542,32 @@ Claude Code の `/btw` と同じ脇道の質問。セッションの会話を文
 | `GET /v1/sessions/{id}/files/content` | `path`（必須）、`download=1` | ファイル本体。通常は 10 MiB まで（超えると `413`）。`download=1` はサイズ無制限・`Content-Disposition: attachment`・Range 対応 |
 
 `previewable` は 10 MiB 以下の `image/*` または `text/*`。
+
+## localhost の転送
+
+エージェントが Mac で起動した開発サーバー（`http://localhost:5173` など）をスマホで開くため、
+Gateway は **Mac のループバック宛てに限った HTTP プロキシ**としても動く。ページの origin は
+`http://localhost:<port>` のままなので、絶対パス・POST・Cookie・WebSocket が Mac のブラウザと同じように動く。
+
+- 同じ待ち受けポートで、絶対形式の URL（`GET http://localhost:3000/ HTTP/1.1`）と `CONNECT localhost:3000`
+  （HTTPS や WebSocket のトンネル）をプロキシ要求として受ける。通常の API パスとは衝突しない。
+- 宛先は `localhost`・`127.0.0.0/8`・`::1` の明示ポートだけ。ほかは `403`、待ち受けがなければ `502`。
+- 認証は `Proxy-Authorization: Basic base64(<任意>:<token>)` または `Bearer <token>`。ないと
+  `407` と `Proxy-Authenticate: Basic realm="Herdr Companion"`。`Proxy-Authorization` は転送先に渡さない。
+- プロキシなので、Gateway に直接届く経路（Tailscale）でだけ使える。Cloudflare Tunnel は絶対形式の
+  URL と `CONNECT` を通さない。
+- Android アプリは WebView の localhost 宛て通信だけを Gateway に向ける（androidx.webkit の
+  `ProxyController`、reverse bypass）。チャットの `http://localhost:…` のリンクはこの画面で開く。
+
+### `GET /v1/ports`
+
+`lsof` で読んだ、localhost から届く（ループバックか全インターフェイスで待ち受ける）TCP ポート。Gateway 自身は除く。
+
+```json
+{"ports": [{"port": 5173, "pid": 4242, "command": "node", "cwd": "/Users/…/project"}]}
+```
+
+`cwd` は待ち受けているプロセスの作業フォルダ（読めたときだけ）。アプリはセッションのフォルダ配下のものを先に並べる。
 
 ## 起動の準備
 
