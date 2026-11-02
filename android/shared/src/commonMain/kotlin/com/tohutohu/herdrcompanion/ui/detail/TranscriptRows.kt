@@ -52,6 +52,20 @@ data class ActivityRow(
 }
 
 /**
+ * Images tools brought back (files the agent viewed, screenshots), shown
+ * together: a run of them is one row that scrolls sideways, below the calls
+ * that took them.
+ */
+data class ImagesRow(
+    override val key: String,
+    override val messageIndex: Int,
+    val parts: List<Message>,
+    override val end: TurnEnd? = null,
+) : TranscriptRow {
+    val images: List<BlockDto> get() = parts.flatMap { it.blocks }
+}
+
+/**
  * The work of a turn before its newest report (earlier reports, tool calls
  * and their outputs) folded to one line. [rows] are how the list would show
  * them. [durationMs] is how long the turn took, once it is over and known.
@@ -71,6 +85,7 @@ data class WorkRow(
 fun TranscriptRow.shows(id: String): Boolean = when (this) {
     is MessageRow -> message.id == id
     is ActivityRow -> parts.any { it.id == id }
+    is ImagesRow -> parts.any { it.id == id }
     is WorkRow -> rows.any { it.shows(id) }
 }
 
@@ -124,6 +139,9 @@ private data class Piece(val index: Int, val start: Int, val activity: Boolean, 
      * back (a file the agent viewed, a screenshot).
      */
     val keptInView get() = message.role == "system" || (message.role == "tool" && !activity)
+
+    /** Only images a tool brought back. */
+    val isToolImages get() = message.role == "tool" && !activity && message.blocks.all { it.type == "image" }
 }
 
 private fun turnRows(
@@ -173,16 +191,26 @@ private fun turnRows(
     return rows
 }
 
-/** Rows as the pieces read: consecutive activity shares one row. */
+/**
+ * Rows as the pieces read: consecutive activity shares one row, and so do
+ * the images tools brought back among it, which follow that row.
+ */
 private fun groupRows(pieces: List<Piece>, messageKeys: Map<String, String>): List<TranscriptRow> {
     val rows = mutableListOf<TranscriptRow>()
     var group: ActivityRow? = null
+    var images: ImagesRow? = null
     fun flush() {
         group?.let(rows::add)
+        images?.let(rows::add)
         group = null
+        images = null
     }
-    pieces.forEach { (index, start, activity, part) ->
-        if (activity) {
+    pieces.forEach { piece ->
+        val (index, start, activity, part) = piece
+        if (piece.isToolImages) {
+            val i = images
+            images = i?.copy(parts = i.parts + part) ?: ImagesRow("images:${part.id}#$start", index, listOf(part))
+        } else if (activity) {
             val g = group
             group = g?.copy(parts = g.parts + part) ?: ActivityRow("tools:${part.id}#$start", index, listOf(part))
         } else {
@@ -198,6 +226,7 @@ private fun groupRows(pieces: List<Piece>, messageKeys: Map<String, String>): Li
 private fun TranscriptRow.withEnd(end: TurnEnd): TranscriptRow = when (this) {
     is MessageRow -> copy(end = end)
     is ActivityRow -> copy(end = end)
+    is ImagesRow -> copy(end = end)
     is WorkRow -> copy(end = end)
 }
 
@@ -217,6 +246,7 @@ private fun uniqueKeys(rows: List<TranscriptRow>): List<TranscriptRow> {
             when (unique) {
                 is MessageRow -> unique.copy(key = key)
                 is ActivityRow -> unique.copy(key = key)
+                is ImagesRow -> unique.copy(key = key)
                 is WorkRow -> unique.copy(key = key)
             }
         }

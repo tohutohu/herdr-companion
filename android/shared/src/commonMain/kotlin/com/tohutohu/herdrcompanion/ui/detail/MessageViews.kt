@@ -11,11 +11,16 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
@@ -87,6 +92,7 @@ fun TranscriptRowItem(
                 onRespond = onRespond,
                 onOpenSession = onOpenSession,
             )
+            is ImagesRow -> ImagesItem(row, resolveUrl, onOpenImage)
             is WorkRow -> WorkGroupItem(row) { child ->
                 TranscriptRowItem(
                     row = child,
@@ -150,6 +156,42 @@ fun MessageBlocks(
             }
         }
     }
+}
+
+/**
+ * Images tools brought back. One shows as in a message; several scroll
+ * sideways at one height, so a run of screenshots takes a single line.
+ */
+@Composable
+fun ImagesItem(row: ImagesRow, resolveUrl: (String) -> String, onOpenImage: (String) -> Unit) {
+    val urls = row.images.mapNotNull { it.url }
+    if (urls.size == 1) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp)) {
+            ToolImage(urls[0], resolveUrl, onOpenImage, Modifier.heightIn(max = 240.dp))
+        }
+        return
+    }
+    LazyRow(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(urls) { url ->
+            ToolImage(url, resolveUrl, onOpenImage, Modifier.height(160.dp).widthIn(max = 320.dp))
+        }
+    }
+}
+
+@Composable
+private fun ToolImage(url: String, resolveUrl: (String) -> String, onOpenImage: (String) -> Unit, modifier: Modifier) {
+    AsyncImage(
+        model = resolveUrl(url),
+        contentDescription = "Image",
+        contentScale = ContentScale.Fit,
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable { onOpenImage(url) },
+    )
 }
 
 /** How long a row takes to open or close. */

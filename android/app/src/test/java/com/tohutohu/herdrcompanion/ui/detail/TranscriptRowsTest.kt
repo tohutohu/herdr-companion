@@ -141,26 +141,55 @@ class TranscriptRowsTest {
             ),
             lastTurn = LastTurn.DONE,
         )
-        assertEquals(listOf("message:u1", "work:u1#0", "message:t1#1", "message:a3"), rows.map { it.key })
-        assertEquals(listOf(shot), (rows[2] as MessageRow).message.blocks)
+        assertEquals(listOf("message:u1", "work:u1#0", "images:t1#1", "message:a3"), rows.map { it.key })
+        assertEquals(listOf(shot), (rows[2] as ImagesRow).images)
         val tools = (rows[1] as WorkRow).rows.single() as ActivityRow
         assertEquals(listOf(listOf(text("Read shot.png"), file("shot.png")), listOf(text("1 image")), listOf(text("$ go test ./..."))), tools.parts.map { it.blocks })
         assertEquals(2, tools.callCount)
     }
 
     @Test
-    fun `作業中のターンではツールが返した画像を呼び出しの行の間に表示する`() {
-        val view = BlockDto(type = "image", url = "/v1/sessions/s/files/content?path=shot.png")
+    fun `作業中のターンでは呼び出しを1行にまとめツールが返した画像をその下に横に並べる`() {
+        val first = BlockDto(type = "image", url = "/v1/sessions/s/messages/t1/images/0")
+        val second = BlockDto(type = "image", url = "/v1/sessions/s/files/content?path=shot2.png")
         val rows = transcriptRows(
             listOf(
                 msg("u1", "user", text("画面を見て")),
-                msg("a1", "assistant", text("▸ view_image shot.png")),
-                msg("t1", "tool", view),
-                msg("a2", "assistant", text("$ ls")),
+                msg("a1", "assistant", text("▸ browser_take_screenshot")),
+                msg("t1", "tool", first),
+                msg("a2", "assistant", text("▸ view_image shot2.png")),
+                msg("t2", "tool", second),
             ),
             lastTurn = LastTurn.WORKING,
         )
-        assertEquals(listOf("message:u1", "tools:a1#0", "message:t1", "tools:a2#0"), rows.map { it.key })
+        assertEquals(listOf("message:u1", "tools:a1#0", "images:t1#0"), rows.map { it.key })
+        assertEquals(listOf("a1", "a2"), (rows[1] as ActivityRow).parts.map { it.id })
+        assertEquals(listOf(first, second), (rows[2] as ImagesRow).images)
+        assertEquals(2, rows[2].messageIndex)
+    }
+
+    @Test
+    fun `終わったターンでは途中の報告をはさんだ画像も1行に並べ通知が来たら区切る`() {
+        val shots = (1..3).map { BlockDto(type = "image", url = "/v1/sessions/s/messages/t$it/images/0") }
+        val rows = transcriptRows(
+            listOf(
+                msg("u1", "user", text("画面を確認して")),
+                msg("a1", "assistant", text("▸ browser_take_screenshot")),
+                msg("t1", "tool", shots[0]),
+                msg("a2", "assistant", text("ログインします。")),
+                msg("a3", "assistant", text("▸ browser_take_screenshot")),
+                msg("t2", "tool", shots[1]),
+                msg("s1", "system", text("Conversation compacted")),
+                msg("a4", "assistant", text("▸ browser_take_screenshot")),
+                msg("t3", "tool", shots[2]),
+                msg("a5", "assistant", text("確認しました。")),
+            ),
+            lastTurn = LastTurn.DONE,
+        )
+        assertEquals(listOf("message:u1", "work:u1#0", "images:t1#0", "message:s1", "images:t3#0", "message:a5"), rows.map { it.key })
+        assertEquals(shots.take(2), (rows[2] as ImagesRow).images)
+        assertEquals(shots.drop(2), (rows[4] as ImagesRow).images)
+        assertTrue(rows[1].shows("a2"))
     }
 
     @Test
