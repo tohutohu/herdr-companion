@@ -3,9 +3,12 @@ package com.tohutohu.herdrcompanion.desktop
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -35,6 +38,26 @@ class DesktopComposerDraftsTest {
             assertFalse(Files.exists(file.resolveSibling("composer-drafts.json.tmp")))
         } finally {
             scope.cancel()
+        }
+    }
+
+    @Test
+    fun 作った直後の入力は保存の購読が遅れても書かれる() {
+        val file: Path = Files.createTempDirectory("composer-drafts").resolve("composer-drafts.json")
+        val executor = Executors.newSingleThreadExecutor()
+        val released = CountDownLatch(1)
+        // Holds the scope's only thread, so the saving coroutines start after the edit.
+        executor.execute { released.await() }
+        val scope = CoroutineScope(SupervisorJob() + executor.asCoroutineDispatcher())
+        try {
+            val drafts = fileComposerDrafts(file, scope)
+            drafts["claude:a"] = "すぐ書いた"
+            released.countDown()
+            waitUntil { Files.exists(file) }
+            assertEquals("すぐ書いた", fileComposerDrafts(file, CoroutineScope(SupervisorJob()))["claude:a"])
+        } finally {
+            scope.cancel()
+            executor.shutdownNow()
         }
     }
 }

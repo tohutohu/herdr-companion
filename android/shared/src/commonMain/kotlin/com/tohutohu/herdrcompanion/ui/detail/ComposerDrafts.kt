@@ -1,13 +1,12 @@
 package com.tohutohu.herdrcompanion.ui.detail
 
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -27,13 +26,15 @@ class ComposerDrafts(
     scope: CoroutineScope? = null,
     persist: (Map<String, String>) -> Unit = {},
 ) {
-    private val drafts = MutableStateFlow(initial.filterValues { it.isNotEmpty() })
+    private val loaded = initial.filterValues { it.isNotEmpty() }
+    private val drafts = MutableStateFlow(loaded)
 
     init {
-        // Subscribed before returning, so an edit made right away is not taken
-        // for the initial value and skipped.
-        scope?.launch(start = CoroutineStart.UNDISPATCHED) {
-            drafts.drop(1).debounce(PERSIST_DELAY_MS).collect(persist)
+        // debounce subscribes upstream from a coroutine of its own, so it may first
+        // see an edit made right after construction. Skipping only the loaded map
+        // itself, not whatever arrives first, keeps that edit.
+        scope?.launch {
+            drafts.filter { it !== loaded }.debounce(PERSIST_DELAY_MS).collect(persist)
         }
     }
 
