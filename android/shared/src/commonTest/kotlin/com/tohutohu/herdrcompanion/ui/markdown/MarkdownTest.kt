@@ -185,6 +185,42 @@ class MarkdownTest {
         assertEquals("見て: https://example.com/x 。", text(spans))
     }
 
+    private fun bareUrl(input: String): String? = parseInline(input).singleOrNull { it.link != null }?.link
+
+    @Test
+    fun `裸のURLは直後の日本語を含まない`() {
+        assertEquals("http://localhost:5173/", bareUrl("Vite（http://localhost:5173/）は動かしたままです。"))
+        assertEquals("http://localhost:5173/", bareUrl("http://localhost:5173/を開いてください"))
+        assertEquals("https://example.com/x", bareUrl("「https://example.com/x」、https以外"))
+    }
+
+    @Test
+    fun `日本語の直後に始まる裸のURLもリンクにする`() {
+        assertEquals("https://example.com/x", bareUrl("詳細はhttps://example.com/x"))
+    }
+
+    @Test
+    fun `英数字に続くhttpはリンクにしない`() {
+        assertEquals(null, bareUrl("xhttps://example.com/x"))
+    }
+
+    @Test
+    fun `裸のURLの末尾の句読点と閉じていない括弧は含まない`() {
+        assertEquals("https://example.com/x", bareUrl("(https://example.com/x)."))
+        assertEquals("https://example.com/x", bareUrl("[https://example.com/x], 次"))
+    }
+
+    @Test
+    fun `裸のURLの中で開いた括弧の閉じは含む`() {
+        assertEquals("https://example.com/Foo_(bar)", bareUrl("https://example.com/Foo_(bar)"))
+        assertEquals("http://[::1]", bareUrl("http://[::1] で動いています"))
+    }
+
+    @Test
+    fun `ラベル付きリンクのURLは日本語を含められる`() {
+        assertEquals("https://example.com/東京", bareUrl("[東京](https://example.com/東京)"))
+    }
+
     @Test
     fun `装飾のない文章は1つの段落になる`() {
         val blocks = parseMarkdown("方針を固めるため、確認します。")

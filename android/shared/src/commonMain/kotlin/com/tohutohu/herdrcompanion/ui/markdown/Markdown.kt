@@ -274,7 +274,11 @@ private fun isEscaped(text: String, index: Int): Boolean {
 }
 
 private const val ESCAPABLE = "\\`*_{}[]()#+-.!~>|"
-private val AUTOLINK = Regex("""https?://[^\s<>"']+""")
+private val LINK_URL = Regex("""https?://[^\s<>"']+""")
+
+// A bare URL ends at the first non-ASCII character: Japanese text and its punctuation follow URLs
+// with no space. A URL with a raw non-ASCII path needs the [label](url) form.
+private val BARE_URL = Regex("""https?://[^\s<>"'\u0080-\uFFFF]+""")
 
 /** Parses inline markup (code, emphasis, strikethrough, links) in [text]. */
 fun parseInline(text: String): List<MdSpan> = parseInline(text, MdSpan(""))
@@ -321,7 +325,7 @@ private fun parseInline(text: String, base: MdSpan): List<MdSpan> {
                     flush()
                     // Agent output is untrusted: other schemes (intent:, tel:,
                     // another app's deep link) keep their label but open nothing.
-                    out += parseInline(link.label, base.copy(link = link.url.takeIf { AUTOLINK.matchesAt(it, 0) }))
+                    out += parseInline(link.label, base.copy(link = link.url.takeIf { LINK_URL.matchesAt(it, 0) }))
                     i = link.end
                 }
             }
@@ -357,8 +361,8 @@ private fun parseInline(text: String, base: MdSpan): List<MdSpan> {
                 }
             }
 
-            c == 'h' && base.link == null && atWordStart(text, i) -> {
-                val url = AUTOLINK.matchAt(text, i)?.value?.trimEnd('.', ',', ';', ':', '!', '?', ')', ']')
+            c == 'h' && base.link == null && !isAsciiAlphanumeric(text.getOrNull(i - 1)) -> {
+                val url = BARE_URL.matchAt(text, i)?.value?.let(::trimUrlEnd)
                 if (url.isNullOrEmpty()) {
                     buffer.append(c)
                     i++
@@ -378,6 +382,30 @@ private fun parseInline(text: String, base: MdSpan): List<MdSpan> {
     flush()
     return out
 }
+
+/** Drops sentence punctuation after a bare URL, keeping a closing bracket opened inside it. */
+private fun trimUrlEnd(url: String): String {
+    var end = url.length
+    while (end > 0) {
+        val strip = when (url[end - 1]) {
+            '.', ',', ';', ':', '!', '?' -> true
+            ')' -> url.closesUnopened(end, '(', ')')
+            ']' -> url.closesUnopened(end, '[', ']')
+            else -> false
+        }
+        if (!strip) break
+        end--
+    }
+    return url.substring(0, end)
+}
+
+private fun String.closesUnopened(end: Int, open: Char, close: Char): Boolean {
+    val head = substring(0, end)
+    return head.count { it == close } > head.count { it == open }
+}
+
+private fun isAsciiAlphanumeric(c: Char?): Boolean =
+    c != null && (c in 'a'..'z' || c in 'A'..'Z' || c in '0'..'9')
 
 private class Link(val label: String, val url: String, val end: Int)
 
@@ -459,9 +487,4 @@ private fun canClose(text: String, after: Int, c: Char): Boolean {
     if (c != '_') return true
     val next = text.getOrNull(after)
     return next == null || !next.isLetterOrDigit()
-}
-
-private fun atWordStart(text: String, i: Int): Boolean {
-    val prev = text.getOrNull(i - 1)
-    return prev == null || !prev.isLetterOrDigit()
 }
