@@ -2,10 +2,13 @@ package com.tohutohu.herdrcompanion.ui.forward
 
 import android.annotation.SuppressLint
 import android.webkit.HttpAuthHandler
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.consumeWindowInsets
@@ -25,6 +28,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -88,8 +92,23 @@ private object LocalhostProxy {
 fun LocalhostBrowserScreen(url: String, onBack: () -> Unit) {
     val context = LocalContext.current
     val gatewayUrl = context.container.settings.current.gatewayUrl
-    val proxyRule = remember(gatewayUrl) { proxyRuleFor(gatewayUrl) }
-    val proxyHost = remember(gatewayUrl) { gatewayUrl.trim().toHttpUrlOrNull()?.host }
+    // An http:// Gateway is the proxy itself. Behind the HTTPS tunnel, which carries no proxy
+    // requests, ask it for its direct address (the Tailscale IP).
+    var proxyRule by remember(gatewayUrl) { mutableStateOf(proxyRuleFor(gatewayUrl)) }
+    var lookedUp by remember(gatewayUrl) { mutableStateOf(proxyRule != null) }
+    LaunchedEffect(gatewayUrl) {
+        if (proxyRule != null) return@LaunchedEffect
+        proxyRule = try {
+            context.container.api.capabilities().localhostProxy?.let(::proxyRuleFor)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+        lookedUp = true
+    }
+    val proxyHost = proxyRule?.toHttpUrlOrNull()?.host
+    var unreachable by remember { mutableStateOf(false) }
     val supported = remember { LocalhostProxy.supported() }
     var ready by remember { mutableStateOf(false) }
     var progress by remember { mutableIntStateOf(0) }
@@ -98,9 +117,10 @@ fun LocalhostBrowserScreen(url: String, onBack: () -> Unit) {
     var canGoBack by remember { mutableStateOf(false) }
     var webView by remember { mutableStateOf<WebView?>(null) }
 
-    if (supported && proxyRule != null) {
-        DisposableEffect(proxyRule) {
-            LocalhostProxy.acquire(context, proxyRule) { ready = true }
+    val rule = proxyRule
+    if (supported && rule != null) {
+        DisposableEffect(rule) {
+            LocalhostProxy.acquire(context, rule) { ready = true }
             onDispose { LocalhostProxy.release(context) }
         }
     }
@@ -131,7 +151,13 @@ fun LocalhostBrowserScreen(url: String, onBack: () -> Unit) {
                     }
                 },
                 actions = {
-                    IconButton(onClick = { webView?.reload() }, enabled = webView != null) {
+                    IconButton(
+                        onClick = {
+                            unreachable = false
+                            webView?.reload()
+                        },
+                        enabled = webView != null,
+                    ) {
                         Icon(Icons.Default.Refresh, contentDescription = "Reload")
                     }
                 },
@@ -141,7 +167,7 @@ fun LocalhostBrowserScreen(url: String, onBack: () -> Unit) {
         Box(Modifier.padding(padding.exceptBottom()).consumeWindowInsets(padding).fillMaxSize()) {
             val problem = when {
                 !supported -> "This phone's WebView cannot route localhost through the Gateway. Update Android System WebView."
-                proxyRule == null -> "Opening the Mac's localhost needs a direct http:// connection to the Gateway (Tailscale). It does not work through the HTTPS tunnel."
+                lookedUp && rule == null -> "Opening the Mac's localhost needs a direct http:// route to the Gateway (Tailscale), and this Gateway did not give one."
                 else -> null
             }
             if (problem != null) {
@@ -172,6 +198,7 @@ fun LocalhostBrowserScreen(url: String, onBack: () -> Unit) {
                                     current = u
                                     canGoBack = back
                                 },
+                                onProxyUnreachable = { unreachable = true },
                             )
                             webChromeClient = object : WebChromeClient() {
                                 override fun onProgressChanged(view: WebView, newProgress: Int) {
@@ -187,6 +214,16 @@ fun LocalhostBrowserScreen(url: String, onBack: () -> Unit) {
                         }
                     },
                     onRelease = { it.destroy() },
+                )
+            }
+            if (unreachable) {
+                Text(
+                    "Could not reach the Gateway at ${proxyHost.orEmpty()} directly. Is Tailscale connected on this phone?",
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.errorContainer)
+                        .padding(16.dp),
                 )
             }
             if (!ready || progress in 0..99) {
@@ -207,6 +244,7 @@ private class ProxyAuthClient(
     private val proxyHost: String?,
     private val token: () -> String,
     private val onPage: (url: String, canGoBack: Boolean) -> Unit,
+    private val onProxyUnreachable: () -> Unit,
 ) : WebViewClient() {
     private var attempts = 0
 
@@ -220,6 +258,12 @@ private class ProxyAuthClient(
         }
     }
 
+    // A server that is not running still answers (the Gateway's 502); failing to connect at all
+    // means the proxy itself is out of reach.
+    override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+        if (request.isForMainFrame && error.errorCode in PROXY_ERRORS) onProxyUnreachable()
+    }
+
     override fun onPageFinished(view: WebView, url: String) {
         attempts = 0
     }
@@ -228,3 +272,10 @@ private class ProxyAuthClient(
         onPage(url, view.canGoBack())
     }
 }
+
+private val PROXY_ERRORS = setOf(
+    WebViewClient.ERROR_CONNECT,
+    WebViewClient.ERROR_HOST_LOOKUP,
+    WebViewClient.ERROR_TIMEOUT,
+    WebViewClient.ERROR_PROXY_AUTHENTICATION,
+)

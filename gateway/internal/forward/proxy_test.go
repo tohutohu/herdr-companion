@@ -176,3 +176,26 @@ func Testプロキシ要求とAPI要求を見分ける(t *testing.T) {
 		t.Fatalf("api %v abs %v connect %v", IsProxyRequest(api), IsProxyRequest(abs), IsProxyRequest(connect))
 	}
 }
+
+func Test直接つなげるプロキシのアドレスを知らせる(t *testing.T) {
+	direct := httptest.NewRequest("GET", "http://192.168.1.20:8766/v1/capabilities", nil)
+	tunnel := httptest.NewRequest("GET", "http://gateway.example.com/v1/capabilities", nil)
+	tunnel.Header.Set("Cf-Connecting-Ip", "203.0.113.5")
+	local := httptest.NewRequest("GET", "http://127.0.0.1:8766/v1/capabilities", nil)
+	cases := []struct {
+		listen string
+		r      *http.Request
+		want   string
+	}{
+		{"100.99.15.34:8765", tunnel, "http://100.99.15.34:8765"},
+		{"100.99.15.34:8765", direct, "http://100.99.15.34:8765"},
+		{":8766", direct, "http://192.168.1.20:8766"},
+		{"0.0.0.0:8766", tunnel, ""},
+		{"127.0.0.1:8766", local, ""},
+	}
+	for _, c := range cases {
+		if got := DirectAddress(c.listen, c.r); got != c.want {
+			t.Errorf("listen %q host %q: got %q, want %q", c.listen, c.r.Host, got, c.want)
+		}
+	}
+}

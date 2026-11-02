@@ -554,7 +554,10 @@ Gateway は **Mac のループバック宛てに限った HTTP プロキシ**と
 - 認証は `Proxy-Authorization: Basic base64(<任意>:<token>)` または `Bearer <token>`。ないと
   `407` と `Proxy-Authenticate: Basic realm="Herdr Companion"`。`Proxy-Authorization` は転送先に渡さない。
 - プロキシなので、Gateway に直接届く経路（Tailscale）でだけ使える。Cloudflare Tunnel は絶対形式の
-  URL と `CONNECT` を通さない。
+  URL と `CONNECT` を通さない。トンネル経由で API を使うクライアントのため、`GET /v1/capabilities` は
+  直接届くアドレスを `localhostProxy`（例 `"http://100.99.15.34:8765"`）で返す。`listen` が 1 つの
+  インターフェイスを指すときはそのアドレス、全インターフェイスなら直接届いた要求の Host、どちらでもなければ出さない。
+  アプリは http:// の Gateway ならそれ自体を、https:// ならこのアドレスをプロキシにする。
 - Android アプリは WebView の localhost 宛て通信だけを Gateway に向ける（androidx.webkit の
   `ProxyController`、reverse bypass）。入口はチャットの `http://localhost:…` のリンクだけで、
   Mac で待ち受けているポートの一覧は出さない（セッションと関係のないものまで見えるため）。

@@ -11,6 +11,8 @@ data class CapabilitiesDto(
     val messageIdempotency: Boolean = false,
     /** Null on a gateway without resident tasks. */
     val resident: ResidentCapabilityDto? = null,
+    /** The Gateway's plain-HTTP address for its localhost proxy, for a client that reaches it through an HTTPS tunnel. */
+    val localhostProxy: String? = null,
 )
 
 @Serializable

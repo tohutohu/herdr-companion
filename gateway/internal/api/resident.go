@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/files"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/forward"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/resident"
 )
 
@@ -51,6 +52,9 @@ func (s *Server) residentRoutes(api *http.ServeMux) {
 
 func (s *Server) capabilities(w http.ResponseWriter, r *http.Request) {
 	caps := map[string]any{"messageIdempotency": s.MessageDelivery != nil}
+	if proxy := forward.DirectAddress(s.Listen, r); proxy != "" {
+		caps["localhostProxy"] = proxy
+	}
 	if s.Resident != nil {
 		caps["resident"] = map[string]any{"version": ResidentAPIVersion, "providers": []string{resident.ProviderClaude, resident.ProviderCodex},
 			"defaultTimezone": resident.DefaultTimezone}

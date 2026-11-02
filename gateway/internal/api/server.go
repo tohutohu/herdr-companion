@@ -56,6 +56,9 @@ type Server struct {
 	// Resident owns the resident tasks; nil leaves /v1/resident out (and
 	// /v1/capabilities says so).
 	Resident *resident.Service
+	// Listen is the address the server listens on, for telling clients behind
+	// a tunnel where to reach the localhost proxy directly.
+	Listen string
 }
 
 func (s *Server) Handler() http.Handler {

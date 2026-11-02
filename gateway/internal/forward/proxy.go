@@ -187,3 +187,24 @@ func closeWrite(c net.Conn) {
 		c.Close()
 	}
 }
+
+// DirectAddress is the plain-HTTP address a client can use this Gateway as a
+// proxy at, for one that reached it through an HTTPS tunnel, which carries no
+// proxy requests. It is the listen address when that names one interface (the
+// Tailscale IP), else the address r came in on when it came directly; empty
+// when neither tells.
+func DirectAddress(listen string, r *http.Request) string {
+	if host, port, err := net.SplitHostPort(listen); err == nil && host != "" {
+		if ip := net.ParseIP(host); ip == nil || !(ip.IsUnspecified() || ip.IsLoopback()) {
+			return "http://" + net.JoinHostPort(host, port)
+		}
+	}
+	if r.TLS == nil && r.Header.Get("Cf-Connecting-Ip") == "" && r.Header.Get("X-Forwarded-For") == "" {
+		if host, _, err := net.SplitHostPort(r.Host); err == nil {
+			if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
+				return "http://" + r.Host
+			}
+		}
+	}
+	return ""
+}
