@@ -1,8 +1,8 @@
 // Package agentplugin carries the skills the Gateway gives the agents it runs:
-// how the Herdr Companion app shows their replies and files, and how to drive
-// other sessions with hc. They are one Claude Code plugin ("herdr-companion");
-// Codex reads the same skills directory and names them the same way
-// ("herdr-companion:hc").
+// how the Herdr Companion app shows their replies and files, how to drive other
+// sessions with hc, and how to design resident tasks. They are one Claude Code
+// plugin ("herdr-companion"); Codex reads the same skills directory and names
+// them the same way ("herdr-companion:drive-sessions").
 package agentplugin
 
 import (

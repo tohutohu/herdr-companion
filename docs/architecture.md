@@ -146,10 +146,13 @@ with ids, responses, and session events); nothing listens on a port.
   its own session. Herdr's own configuration (`HERDR_SESSION`, the default socket) is kept, so the
   agent can still use Herdr from its Bash tool as a separate tool.
 - The gateway's own skills (`gateway/internal/agentplugin`) are one Claude Code plugin,
-  `herdr-companion`: `herdr-companion:app` (how the app shows replies, files and images) and
-  `herdr-companion:hc` (driving other sessions with hc). At start the gateway writes it to
+  `herdr-companion`: `reply-in-app` (showing images and files in the app), `drive-sessions` (other
+  sessions through hc) and `schedule-resident-tasks` (designing resident tasks; what a run itself must
+  do stays in its prompt, `resident.BuildPrompt`). At start the gateway writes it to
   `<state>/agent-plugin` and passes it as the SDK's `plugins` option; the Codex app-servers get its
-  `skills/` directory with `skills/extraRoots/set` and name the skills the same way.
+  `skills/` directory with `skills/extraRoots/set` and name the skills the same way. Change a
+  description only with `internal/agentplugin/evals/trigger.py`, which measures whether requests load
+  the right skill.
 
 ### Codex: the gateway's app-server
 

@@ -6,6 +6,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -723,5 +726,48 @@ func Testコマンドのヘルプは接続設定なしで表示できる(t *test
 	a := &app{out: out, errOut: out}
 	if code := a.run([]string{"help", "nothing"}); code != 2 || !strings.Contains(out.String(), "try one of") {
 		t.Errorf("code %d: %s", code, out.String())
+	}
+}
+
+// The Gateway's skills teach hc, so a renamed command or flag must not leave
+// them telling agents something that no longer exists.
+func Testスキルに書いたhcのコマンドとフラグはヘルプに実在する(t *testing.T) {
+	paths, err := filepath.Glob("../../internal/agentplugin/plugin/skills/*/SKILL.md")
+	if err != nil || len(paths) == 0 {
+		t.Fatalf("skills not found: %v %v", paths, err)
+	}
+	var help strings.Builder
+	for _, p := range append(append([]helpPage{}, commandHelp...), topicHelp...) {
+		help.WriteString(p.body)
+	}
+	help.WriteString(guideText)
+	command := regexp.MustCompile("(?:^|[`\\s])hc ([a-z]+)(?: ([a-z]+))?")
+	flag := regexp.MustCompile(`(?:^|[\s\x60(])(--[a-z][a-z-]+)`)
+	for _, path := range paths {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The description and prose name hc itself ("hc CLI"); commands are in code.
+		// Example instructions are in ```text blocks; they may quote other tools.
+		code := strings.Join(regexp.MustCompile("(?s)```bash.*?```|`[^`\n]+`").FindAllString(regexp.MustCompile("(?s)```text.*?```").ReplaceAllString(string(b), ""), -1), "\n")
+		for _, m := range command.FindAllStringSubmatch(code, -1) {
+			if m[1] == "help" {
+				continue
+			}
+			body, err := helpFor(m[1])
+			if err != nil {
+				t.Errorf("%s: hc %s: %v", path, m[1], err)
+				continue
+			}
+			if m[1] == "resident" && !strings.Contains(body, "hc resident "+m[2]) {
+				t.Errorf("%s: hc resident %s is not in its help", path, m[2])
+			}
+		}
+		for _, m := range flag.FindAllStringSubmatch(code, -1) {
+			if !strings.Contains(help.String(), m[1]) {
+				t.Errorf("%s: %s is not in any help page", path, m[1])
+			}
+		}
 	}
 }

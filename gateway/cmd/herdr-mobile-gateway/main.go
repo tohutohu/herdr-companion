@@ -17,8 +17,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tohutohu/herdr-android-client/gateway/internal/agentupdate"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/agentplugin"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/agentupdate"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/api"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/archive"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/config"

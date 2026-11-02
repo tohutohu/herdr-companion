@@ -1,0 +1,27 @@
+[
+  {"split": "train", "expect": "reply-in-app", "query": "さっき作ったグラフのpng、スマホで確認したいから見せて"},
+  {"split": "train", "expect": "reply-in-app", "query": "この集計結果をいい感じに可視化したやつ作って。スマホで見たい"},
+  {"split": "train", "expect": "reply-in-app", "query": "dev server 立ててこの画面確認できるようにして。いま電車でスマホしか無い"},
+  {"split": "val", "expect": "reply-in-app", "query": "docs/report.html 開けるようにしといて、外出先で見るから"},
+  {"split": "val", "expect": "reply-in-app", "query": "デザイン案のモックアップ作ったらプレビューできるようにして。今 Mac の前にいない"},
+
+  {"split": "train", "expect": "drive-sessions", "query": "別のセッションを立ててこのバグの調査を任せて、終わったら結果教えて"},
+  {"split": "train", "expect": "drive-sessions", "query": "onnoti-tracker のセッションどうなってる？"},
+  {"split": "train", "expect": "drive-sessions", "query": "Codex にもセカンドオピニオン取りたい。別セッションで読ませて結果を持ってきて"},
+  {"split": "val", "expect": "drive-sessions", "query": "回答待ちのセッションあったら内容見せて"},
+  {"split": "val", "expect": "drive-sessions", "query": "3案をそれぞれ別のセッションで worktree 切って試して"},
+
+  {"split": "train", "expect": "schedule-resident-tasks", "query": "毎朝9時にこのリポジトリの依存関係の脆弱性チェックして、問題あれば知らせて"},
+  {"split": "train", "expect": "schedule-resident-tasks", "query": "https://example.com/item/42 を1時間おきに見張って、在庫が復活したら教えて"},
+  {"split": "train", "expect": "schedule-resident-tasks", "query": "常駐で動いてるCI監視が昨日から報告してこないんだけど見て"},
+  {"split": "val", "expect": "schedule-resident-tasks", "query": "デプロイ終わったか2時間後にもう一度確認して"},
+  {"split": "val", "expect": "schedule-resident-tasks", "query": "週1で古い Issue を棚卸しして教えてくれる仕組み作りたい"},
+
+  {"split": "train", "expect": null, "query": "crontab の `*/5 * * * *` ってどういう意味？"},
+  {"split": "train", "expect": null, "query": ".github/workflows/nightly.yml の schedule を毎朝7時に変えて"},
+  {"split": "train", "expect": null, "query": "README.md の誤字を直して"},
+  {"split": "train", "expect": null, "query": "Android アプリの画像ビューアのズームのバグを直して"},
+  {"split": "val", "expect": null, "query": "このリポジトリのテストと lint の失敗をサブエージェントで並列に調べて"},
+  {"split": "val", "expect": null, "query": "./shot.png のレイアウト崩れの原因を分析して、CSS を直して"},
+  {"split": "val", "expect": null, "query": "FCM のプッシュ通知の本文を短くするコードを書いて"}
+]
