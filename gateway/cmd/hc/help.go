@@ -420,7 +420,8 @@ USE WHEN
   The session should switch between its modes (Claude Code: default, Accept edits, Plan, …;
   Codex: default, plan). Without MODE each call moves one step; it prints the mode before and
   after. MODE (a mode id, e.g. plan, acceptEdits, manual) sets it directly. Codex applies a
-  mode from its next turn.
+  mode from its next turn. Claude Code's bypassPermissions runs every tool without a check:
+  set it only when the user asks for it. Moving one step never lands on it.
 
 USAGE
   hc mode ID [MODE]

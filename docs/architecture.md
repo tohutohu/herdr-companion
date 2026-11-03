@@ -122,9 +122,12 @@ with ids, responses, and session events); nothing listens on a port.
   the history the gateway reads), `pathToClaudeCodeExecutable` = the user's `claude`
   (`claudeBinary`, else PATH, else `~/.local/bin/claude`), so login, version and subscription are
   the CLI's. The permission mode is passed only when chosen; otherwise Claude Code starts in the
-  mode the user's settings choose, as the CLI does. Bypass permissions is never set by the gateway.
+  mode the user's settings choose, as the CLI does. Bypass permissions (`allowDangerouslySkipPermissions`
+  allows it for every session but resident runs) is on only when chosen by id, at the start or
+  later: cycling never lands on it, and a session that left it does not resume in it.
 - `canUseTool` forwards every permission request (tool approvals, `AskUserQuestion`,
-  `ExitPlanMode`) to the gateway and waits; nothing is approved on its own. The gateway shows
+  `ExitPlanMode`) to the gateway and waits; the gateway approves nothing on its own. In Bypass
+  permissions Claude Code asks only `AskUserQuestion`-style questions. The gateway shows
   them as interactions with the tool call's id, replacing the transcript's closed card for the
   same call, so a question is shown once. Answers: `AskUserQuestion` → `allow` with
   `updatedInput.answers`; approvals → `allow` / `deny`, "for this session" → the SDK's suggested
@@ -399,7 +402,7 @@ used when no model is picked. A running session's model and effort can be change
 
 The session mode can be picked for the new session too, and `/v1/models` returns the modes a
 provider offers (`modes`, with one marked `default`). Claude Code's are its permission modes,
-named as its status line names them, minus Bypass permissions, which the gateway never sets;
+named as its status line names them;
 Codex's are its two collaboration modes (default, plan), given with every `turn/start`.
 
 The app does not ask for the agent, the model, the effort and the mode

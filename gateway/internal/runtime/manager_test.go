@@ -2,7 +2,9 @@ package runtime
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -238,6 +240,26 @@ func Testモードを巡回しても再開用の記録には表示名を残さ�
 	m.EnsureRunning(ctx, id)
 	if last := rt.starts[len(rt.starts)-1]; last.Mode != "acceptEdits" {
 		t.Errorf("resume mode = %q", last.Mode)
+	}
+}
+
+func Test権限バイパスから抜けたセッションは再開してもバイパスに戻らない(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "direct.json")
+	m, rt := newManager(t, path)
+	ctx := context.Background()
+	id, _ := m.Start(ctx, "claude", providers.DirectStart{Cwd: "/w", Mode: "bypassPermissions"})
+	rt.set("s1", func(in *providers.DirectInfo) { in.ModeID = "default" })
+	m.Stop(ctx, id)
+	m.EnsureRunning(ctx, id)
+	if last := rt.starts[len(rt.starts)-1]; last.Mode != "default" {
+		t.Errorf("resume mode = %q", last.Mode)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "bypassPermissions") {
+		t.Errorf("record keeps bypass: %s", data)
 	}
 }
 

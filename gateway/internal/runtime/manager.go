@@ -252,6 +252,12 @@ func (m *Manager) changed(provider, native string) {
 			rec.ActiveAt = m.now()
 			save = true
 		}
+		// A session leaves a chosen mode by a cycle or an approved plan too.
+		// Resume in the mode it is in, never back in Bypass permissions.
+		if rec != nil && rec.Mode != "" && in.ModeID != "" && rec.Mode != in.ModeID {
+			rec.Mode = in.ModeID
+			save = true
+		}
 		st.running = in.Running
 	case st.running || (rec != nil && rec.Running):
 		// The process ended during a turn.

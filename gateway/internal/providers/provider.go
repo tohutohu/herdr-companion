@@ -51,6 +51,9 @@ type DirectInfo struct {
 	// a model response.
 	Model, Effort, Mode             string
 	RequestedModel, RequestedEffort string
+	// ModeID is the id of Mode to resume with, for a runtime whose mode can
+	// change without the manager choosing it (empty when unknown).
+	ModeID string
 	// Turns counts finished turns; LastTurnFailed is the latest one's outcome.
 	Turns          int
 	LastTurnFailed bool

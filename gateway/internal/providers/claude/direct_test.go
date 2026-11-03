@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -284,6 +285,40 @@ func Testプランの承認はモードを切り替えて許可する(t *testing
 	p.Respond(ctx, id, direct, model.InteractionResponse{InteractionID: "toolu_plan", Answers: map[string]model.Answer{"0": {Text: "smaller steps"}}})
 	if r := sidecarRequests(t, log, "respond")[1]; r["behavior"] != "deny" || !strings.Contains(r["message"].(string), "smaller steps") {
 		t.Errorf("respond = %v", r)
+	}
+}
+
+func Test権限バイパスはIDで選んだときだけ有効になり巡回では選ばれない(t *testing.T) {
+	p, log := newSidecarProvider(t)
+	ctx := context.Background()
+	cat, err := p.Models(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(cat.Modes, func(m providers.ModeOption) bool { return m.ID == "bypassPermissions" && !m.Default }) {
+		t.Errorf("modes = %+v", cat.Modes)
+	}
+	id, err := p.DirectStart(ctx, providers.DirectStart{Cwd: "/w", Model: "haiku", Mode: "bypassPermissions"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if start := sidecarRequests(t, log, "start")[0]; start["permissionMode"] != "bypassPermissions" {
+		t.Errorf("start params = %v", start)
+	}
+	if err := p.DirectSetMode(ctx, id, "bypassPermissions"); err != nil {
+		t.Fatal(err)
+	}
+	if in := info(p, id); in.Mode != "Bypass permissions" {
+		t.Errorf("mode = %q", in.Mode)
+	}
+	// 巡回はバイパスから抜けるだけで、一周しても戻らない
+	for range len(directModeCycle) + 1 {
+		if err := p.DirectSetMode(ctx, id, ""); err != nil {
+			t.Fatal(err)
+		}
+		if in := info(p, id); in.Mode == "Bypass permissions" {
+			t.Errorf("cycled into bypass: %+v", in)
+		}
 	}
 }
 

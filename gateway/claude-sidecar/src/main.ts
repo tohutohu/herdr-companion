@@ -264,6 +264,9 @@ async function start(p: Json) {
       // Unset, Claude Code starts in the mode the user's settings choose,
       // exactly as the CLI does.
       ...(p.permissionMode ? { permissionMode: p.permissionMode as PermissionMode } : {}),
+      // Lets a session be started in or switched to bypass permissions; it
+      // does not turn the mode on. Resident runs never use it.
+      ...(resident ? {} : { allowDangerouslySkipPermissions: true }),
       // The same configuration the CLI loads: user, project and local
       // settings (CLAUDE.md, .claude/, skills, hooks, MCP servers, agents,
       // permission rules) and Claude Code's own system prompt.

@@ -269,7 +269,7 @@ var modes = []providers.ModeOption{
 	{ID: "acceptEdits", Name: modeLabel("acceptEdits"), Description: "Applies file edits without asking"},
 	{ID: "auto", Name: modeLabel("auto"), Description: "Works on its own, asking only when it matters"},
 	{ID: "dontAsk", Name: modeLabel("dontAsk"), Description: "Stops asking for the rest of the session"},
-	// Bypass permissions is never set by the gateway.
+	{ID: "bypassPermissions", Name: modeLabel("bypassPermissions"), Description: "Runs every tool without any permission check"},
 }
 
 func (p *Provider) Models(ctx context.Context) (providers.ModelCatalog, error) {

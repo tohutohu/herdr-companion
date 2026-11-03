@@ -433,7 +433,8 @@ func (p *Provider) DirectSetEffort(ctx context.Context, id, effort string) error
 	return nil
 }
 
-// directModeCycle is the order Claude Code's Shift+Tab goes through.
+// directModeCycle is the order Claude Code's Shift+Tab goes through. Bypass
+// permissions stays out of it: only choosing it by id turns it on.
 var directModeCycle = []string{"default", "acceptEdits", "plan"}
 
 func (p *Provider) DirectSetMode(ctx context.Context, id, mode string) error {
@@ -451,9 +452,6 @@ func (p *Provider) DirectSetMode(ctx context.Context, id, mode string) error {
 				mode = directModeCycle[(i+1)%len(directModeCycle)]
 			}
 		}
-	}
-	if mode == "bypassPermissions" {
-		return errors.New("the gateway never sets bypass permissions mode")
 	}
 	if err := p.control(ctx, id, "setMode", map[string]any{"mode": mode}); err != nil {
 		return err
@@ -477,7 +475,7 @@ func (p *Provider) DirectSessions() []providers.DirectInfo {
 		out = append(out, providers.DirectInfo{
 			NativeID: id, Cwd: s.cwd, Alive: s.alive && scAlive,
 			Running: s.running, Waiting: len(s.pending) > 0,
-			Model: s.model, Effort: s.effort, Mode: modeLabel(s.mode),
+			Model: s.model, Effort: s.effort, Mode: modeLabel(s.mode), ModeID: s.mode,
 			RequestedModel: s.requestedModel, RequestedEffort: s.requestedEffort,
 			Turns: s.turns, LastTurnFailed: s.lastFailed, Error: s.err,
 		})

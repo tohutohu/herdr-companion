@@ -697,7 +697,7 @@ func Testセッションのモードを変更できる(t *testing.T) {
 	if resp.StatusCode != http.StatusAccepted {
 		t.Errorf("plan status = %d", resp.StatusCode)
 	}
-	resp, _ = do(t, ts, tok, "POST", "/v1/sessions/fake:s1/mode", []byte(`{"mode":"bypassPermissions"}`), "application/json")
+	resp, _ = do(t, ts, tok, "POST", "/v1/sessions/fake:s1/mode", []byte(`{"mode":"unknownMode"}`), "application/json")
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("unknown mode status = %d", resp.StatusCode)
 	}
