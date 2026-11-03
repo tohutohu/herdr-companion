@@ -23,4 +23,12 @@ class NotificationsTest {
         assertTrue(Notifications.channelFor(Status.WAITING_INPUT) == Notifications.CHANNEL_ATTENTION)
         assertTrue(Notifications.channelFor(Status.FAILED) == Notifications.CHANNEL_ERRORS)
     }
+
+    @Test
+    fun `エラーのチャンネルだけタイトルに印が付く`() {
+        assertTrue(Notifications.displayTitle(Notifications.CHANNEL_ERRORS, "Codex failed") == "⚠ Codex failed")
+        assertTrue(Notifications.displayTitle(Notifications.CHANNEL_RESIDENT_ERRORS, "集計: 失敗") == "⚠ 集計: 失敗")
+        assertTrue(Notifications.displayTitle(Notifications.CHANNEL_COMPLETED, "Codex completed") == "Codex completed")
+        assertTrue(Notifications.displayTitle(Notifications.CHANNEL_RESIDENT_ATTENTION, "集計: 判断待ち") == "集計: 判断待ち")
+    }
 }

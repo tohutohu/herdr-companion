@@ -361,9 +361,14 @@ transcript that flushed after the status change. Background task results that
 update the same turn can notify again when the session returns to completion.
 
 On Android, `PushService` shows the notification (channels *Completed*,
-*Needs attention*, *Errors*) and enqueues an expedited `PrefetchWorker` that
-fetches the session into Room, so tapping the notification opens a populated
-conversation.
+*Needs attention*, *Errors* in the *Sessions* channel group; resident tasks have
+their own group, see `resident.md`) and enqueues an expedited `PrefetchWorker`
+that fetches the session into Room, so tapping the notification opens a
+populated conversation. Sessions and resident tasks are also separate bundles in
+the shade, labelled by the notification's sub text; a summary notification holds
+each bundle together and goes away with its last child. A failure's title starts
+with ⚠, and a reply that could not be delivered moves to *Errors* whatever the
+session's state is.
 
 RemoteInput replies persist their full text privately before enqueueing, with
 only a short notification-history preview. Delivery failures distinguish a

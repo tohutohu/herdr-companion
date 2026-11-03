@@ -191,7 +191,7 @@ SQLite（`modernc.org/sqlite`、純 Go で cgo 不要）、WAL、`synchronous=FU
 送信後・記録前に停止すると同じ通知が再送されることがあるが、Android は同じ `notificationId` を二度表示せず、
 タスクごとに 1 件の通知を置き換える。外部配送の exactly-once は保証しない。アプリ内の報告が正本。
 
-- Android: 「常駐タスクの報告」チャンネル（判断待ちは Needs attention、失敗は Errors）。タップで常駐タブの該当タスクを開く。
+- Android: 「常駐」チャンネルグループの「報告」「判断待ち」「失敗」（Sessions とは別のグループで、シェードでも別の束になる）。タップで常駐タブの該当タスクを開く。
 - Mac UI: `GET /v1/resident/notifications` を 15 秒ごとに読み、新しいものをシステム通知とアプリ内バナー（「開く」で該当タスク）で出す。
 - 未読数は報告メッセージだけを数える（変化のない定期実行は数えない）。会話を開くと既読になる。
 

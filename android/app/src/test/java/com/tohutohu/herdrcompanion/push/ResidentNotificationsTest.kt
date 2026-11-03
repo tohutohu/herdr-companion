@@ -30,9 +30,9 @@ class ResidentNotificationsTest {
     }
 
     @Test
-    fun `判断待ちと失敗は注意とエラーのチャンネルで変化はその他で知らせる`() {
-        assertEquals(Notifications.CHANNEL_ATTENTION, Notifications.residentChannel("question"))
-        assertEquals(Notifications.CHANNEL_ERRORS, Notifications.residentChannel("failure"))
+    fun `常駐の判断待ちと失敗と変化はSessionsとは別のチャンネルで知らせる`() {
+        assertEquals(Notifications.CHANNEL_RESIDENT_ATTENTION, Notifications.residentChannel("question"))
+        assertEquals(Notifications.CHANNEL_RESIDENT_ERRORS, Notifications.residentChannel("failure"))
         assertEquals(Notifications.CHANNEL_RESIDENT, Notifications.residentChannel("change"))
     }
 }

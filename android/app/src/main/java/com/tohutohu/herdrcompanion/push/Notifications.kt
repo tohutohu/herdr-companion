@@ -3,6 +3,7 @@ package com.tohutohu.herdrcompanion.push
 import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
+import android.app.NotificationChannelGroup
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
@@ -25,10 +26,12 @@ object Notifications {
     const val CHANNEL_ERRORS = "errors"
     /** Background syncing: must never interrupt, unlike the session channels. */
     const val CHANNEL_SYNC = "sync"
-    /** Reports of resident tasks (常駐); questions and failures use the attention and error channels. */
     const val CHANNEL_RESIDENT = "resident"
+    const val CHANNEL_RESIDENT_ATTENTION = "resident_attention"
+    const val CHANNEL_RESIDENT_ERRORS = "resident_errors"
     const val EXTRA_RESIDENT_TASK = "resident_task_id"
     private const val TAG_RESIDENT = "resident"
+    private const val TAG_SUMMARY = "summary"
     private const val SEEN_PREFS = "resident_notifications"
     private const val SEEN_KEEP = 64
     const val EXTRA_SESSION_ID = "session_id"
@@ -40,17 +43,28 @@ object Notifications {
 
     private val RETIRED_CHANNELS = listOf("completed")
 
+    /** A channel group in the system settings, and a bundle of its own in the shade. */
+    private enum class Section(val key: String, val label: String, val summaryId: Int) {
+        SESSIONS("sessions", "Sessions", 1),
+        RESIDENT("resident", "常駐", 2),
+    }
+
     fun createChannels(context: Context) {
         val nm = context.getSystemService(NotificationManager::class.java)
+        nm.createNotificationChannelGroups(Section.entries.map { NotificationChannelGroup(it.key, it.label) })
+        fun channel(id: String, name: String, section: Section) =
+            NotificationChannel(id, name, NotificationManager.IMPORTANCE_HIGH).apply { group = section.key }
         nm.createNotificationChannels(
             listOf(
-                // All three pop up as a heads-up: an agent that stopped is
+                // All of these pop up as a heads-up: an agent that stopped is
                 // worth looking at right away.
-                NotificationChannel(CHANNEL_COMPLETED, "Completed", NotificationManager.IMPORTANCE_HIGH),
-                NotificationChannel(CHANNEL_ATTENTION, "Needs attention", NotificationManager.IMPORTANCE_HIGH),
-                NotificationChannel(CHANNEL_ERRORS, "Errors", NotificationManager.IMPORTANCE_HIGH),
+                channel(CHANNEL_COMPLETED, "Completed", Section.SESSIONS),
+                channel(CHANNEL_ATTENTION, "Needs attention", Section.SESSIONS),
+                channel(CHANNEL_ERRORS, "Errors", Section.SESSIONS),
+                channel(CHANNEL_RESIDENT, "報告", Section.RESIDENT),
+                channel(CHANNEL_RESIDENT_ATTENTION, "判断待ち", Section.RESIDENT),
+                channel(CHANNEL_RESIDENT_ERRORS, "失敗", Section.RESIDENT),
                 NotificationChannel(CHANNEL_SYNC, "Syncing", NotificationManager.IMPORTANCE_LOW),
-                NotificationChannel(CHANNEL_RESIDENT, "常駐タスクの報告", NotificationManager.IMPORTANCE_HIGH),
             ),
         )
         RETIRED_CHANNELS.forEach { nm.deleteNotificationChannel(it) }
@@ -108,10 +122,19 @@ object Notifications {
             .build()
     }
 
-    private fun builder(context: Context, sessionId: String, status: String, title: String, body: String) =
-        NotificationCompat.Builder(context, channelFor(status))
+    private fun sectioned(context: Context, channel: String, section: Section) =
+        NotificationCompat.Builder(context, channel)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(title)
+            .setGroup(section.key)
+            .setSubText(section.label)
+
+    /** Inside a bundle only the title and body are left to tell a failure apart. */
+    internal fun displayTitle(channel: String, title: String): String =
+        if (channel == CHANNEL_ERRORS || channel == CHANNEL_RESIDENT_ERRORS) "⚠ $title" else title
+
+    private fun builder(context: Context, channel: String, sessionId: String, title: String, body: String) =
+        sectioned(context, channel, Section.SESSIONS)
+            .setContentTitle(displayTitle(channel, title))
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setAutoCancel(true)
@@ -121,15 +144,17 @@ object Notifications {
             .setContentIntent(sessionIntent(context, sessionId))
 
     fun show(context: Context, sessionId: String, status: String, title: String, body: String, canSend: Boolean) {
-        val b = builder(context, sessionId, status, title, body)
+        val channel = channelFor(status)
+        val b = builder(context, channel, sessionId, title, body)
         if (canReply(status, canSend)) b.addAction(replyAction(context, sessionId, status, title, body))
-        post(context, sessionId, b.build())
+        post(context, null, sessionId.hashCode(), channel, Section.SESSIONS, b.build())
     }
 
     /**
      * Re-posts the session's notification with the reply typed into it. While
      * [sending] it stays put and takes no second reply; an [error] replaces the
-     * body and alerts. An uncertain outcome asks the user to check the conversation.
+     * body and alerts on the error channel, whatever the session's own state is.
+     * An uncertain outcome asks the user to check the conversation.
      */
     fun showReply(
         context: Context,
@@ -142,7 +167,8 @@ object Notifications {
         error: String? = null,
         uncertain: Boolean = false,
     ) {
-        val b = builder(context, sessionId, status, title, error?.let { if (uncertain) "Delivery unconfirmed: $it" else "Not sent: $it" } ?: body)
+        val channel = if (error != null) CHANNEL_ERRORS else channelFor(status)
+        val b = builder(context, channel, sessionId, title, error?.let { if (uncertain) "Delivery unconfirmed: $it" else "Not sent: $it" } ?: body)
             .setRemoteInputHistory(arrayOf(replyHistoryPreview(reply)))
             .setSilent(error == null)
         if (sending) {
@@ -150,24 +176,45 @@ object Notifications {
         } else if (!uncertain) {
             b.addAction(replyAction(context, sessionId, status, title, body))
         }
-        post(context, sessionId, b.build())
+        post(context, null, sessionId.hashCode(), channel, Section.SESSIONS, b.build())
     }
 
-    // One notification per session: a newer state replaces the older one.
-    private fun post(context: Context, sessionId: String, n: Notification) {
+    // One notification per session or task: a newer state replaces the older
+    // one. The summary only holds the bundle together, so it never alerts; it
+    // follows the newest channel so that silencing another one cannot hide it.
+    private fun post(context: Context, tag: String?, id: Int, channel: String, section: Section, n: Notification) {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             return
         }
-        NotificationManagerCompat.from(context).notify(sessionId.hashCode(), n)
+        val summary = sectioned(context, channel, section)
+            .setContentTitle(section.label)
+            .setGroupSummary(true)
+            .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_CHILDREN)
+            .setAutoCancel(true)
+            .build()
+        val manager = NotificationManagerCompat.from(context)
+        manager.notify(tag, id, n)
+        manager.notify(TAG_SUMMARY, section.summaryId, summary)
     }
 
-    fun cancel(context: Context, sessionId: String) {
-        NotificationManagerCompat.from(context).cancel(sessionId.hashCode())
+    /** Cancelling from code leaves the summary behind, so the last one takes it along. */
+    private fun cancel(context: Context, tag: String?, id: Int, section: Section) {
+        val manager = NotificationManagerCompat.from(context)
+        manager.cancel(tag, id)
+        // The cancel above may not have been applied yet, so it is excluded by hand.
+        val othersRemain = context.getSystemService(NotificationManager::class.java).activeNotifications.any {
+            it.notification.group == section.key &&
+                it.notification.flags and Notification.FLAG_GROUP_SUMMARY == 0 &&
+                !(it.tag == tag && it.id == id)
+        }
+        if (!othersRemain) manager.cancel(TAG_SUMMARY, section.summaryId)
     }
+
+    fun cancel(context: Context, sessionId: String) = cancel(context, null, sessionId.hashCode(), Section.SESSIONS)
 
     fun residentChannel(kind: String): String = when (kind) {
-        "question" -> CHANNEL_ATTENTION
-        "failure" -> CHANNEL_ERRORS
+        "question" -> CHANNEL_RESIDENT_ATTENTION
+        "failure" -> CHANNEL_RESIDENT_ERRORS
         else -> CHANNEL_RESIDENT
     }
 
@@ -193,9 +240,9 @@ object Notifications {
      */
     fun showResident(context: Context, taskId: String, notificationId: String, kind: String, title: String, body: String): Boolean {
         if (!markShown(context, notificationId)) return false
-        val n = NotificationCompat.Builder(context, residentChannel(kind))
-            .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(title)
+        val channel = residentChannel(kind)
+        val n = sectioned(context, channel, Section.RESIDENT)
+            .setContentTitle(displayTitle(channel, title))
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setAutoCancel(true)
@@ -203,16 +250,11 @@ object Notifications {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(residentIntent(context, taskId))
             .build()
-        if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            return true
-        }
-        NotificationManagerCompat.from(context).notify(TAG_RESIDENT, taskId.hashCode(), n)
+        post(context, TAG_RESIDENT, taskId.hashCode(), channel, Section.RESIDENT, n)
         return true
     }
 
-    fun cancelResident(context: Context, taskId: String) {
-        NotificationManagerCompat.from(context).cancel(TAG_RESIDENT, taskId.hashCode())
-    }
+    fun cancelResident(context: Context, taskId: String) = cancel(context, TAG_RESIDENT, taskId.hashCode(), Section.RESIDENT)
 
     /** Records [notificationId] as shown; false when it already was. */
     @Synchronized

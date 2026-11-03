@@ -132,6 +132,46 @@ class DeviceNotificationPipelineTest {
         }
     }
 
+    @Test fun Sessionsと常駐は別のチャンネルグループと束に分かれエラーも混ざらない() {
+        fun channel(id: String) = notifications.getNotificationChannel(id)
+        assertEquals("sessions", channel(Notifications.CHANNEL_ERRORS).group)
+        assertEquals("resident", channel(Notifications.CHANNEL_RESIDENT_ERRORS).group)
+        assertEquals(setOf("sessions", "resident"), notifications.notificationChannelGroups.map { it.id }.toSet())
+
+        Notifications.show(context, "session-a", "failed", "Claude Code failed", "本文", canSend = false)
+        Notifications.show(context, "session-b", "completed", "Codex completed", "本文", canSend = false)
+        Notifications.showResident(context, "task-a", "ntf_${UUID.randomUUID()}", "failure", "常駐: 失敗", "本文")
+        fun active() = notifications.activeNotifications.toList()
+        fun summaries() = active().filter { it.notification.flags and android.app.Notification.FLAG_GROUP_SUMMARY != 0 }.map { it.notification.group }.toSet()
+        await("both bundles posted") { active().size == 5 }
+        assertEquals(setOf("sessions", "resident"), summaries())
+        val failedSession = active().single { it.id == "session-a".hashCode() }.notification
+        assertEquals("sessions", failedSession.group)
+        assertEquals(Notifications.CHANNEL_ERRORS, failedSession.channelId)
+        assertEquals("Sessions", failedSession.extras.getCharSequence(android.app.Notification.EXTRA_SUB_TEXT))
+        val failedTask = active().single { it.tag == "resident" }.notification
+        assertEquals("resident", failedTask.group)
+        assertEquals(Notifications.CHANNEL_RESIDENT_ERRORS, failedTask.channelId)
+        assertEquals("常駐", failedTask.extras.getCharSequence(android.app.Notification.EXTRA_SUB_TEXT))
+
+        // 束の最後の1件を消すとまとめ通知も消え、もう一方の束には影響しない
+        Notifications.cancelResident(context, "task-a")
+        await("resident bundle removed") { summaries() == setOf("sessions") }
+        Notifications.cancel(context, "session-a")
+        await("session-a removed") { active().size == 2 }
+        assertEquals(setOf("sessions"), summaries())
+        Notifications.cancel(context, "session-b")
+        await("sessions bundle removed") { active().isEmpty() }
+    }
+
+    @Test fun 返信の送信失敗は完了済みセッションでもエラーのチャンネルで知らせる() {
+        Notifications.show(context, "session-a", "completed", "Codex completed", "本文", canSend = true)
+        Notifications.showReply(context, "session-a", "completed", "Codex completed", "本文", "返信", error = "gateway error")
+        await("moved to the error channel") {
+            notifications.activeNotifications.firstOrNull { it.id == "session-a".hashCode() }?.notification?.channelId == Notifications.CHANNEL_ERRORS
+        }
+    }
+
     private fun residentNotification(): android.app.Notification? =
         notifications.activeNotifications.firstOrNull { it.tag == "resident" && it.id == fixture.residentTaskId.hashCode() }?.notification
 
