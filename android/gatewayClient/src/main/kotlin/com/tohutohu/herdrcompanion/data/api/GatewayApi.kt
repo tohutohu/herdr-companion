@@ -190,10 +190,6 @@ class GatewayApi(
         post(url("v1", "sessions", id, "respond"), json.encodeToString(response).toRequestBody(jsonType))
     }
 
-    suspend fun cycleMode(id: String) {
-        post(url("v1", "sessions", id, "mode"), ByteArray(0).toRequestBody(jsonType))
-    }
-
     /** Switches a session to the mode [mode] (a catalog mode id). */
     suspend fun setMode(id: String, mode: String) {
         post(url("v1", "sessions", id, "mode"), json.encodeToString(SessionSettingRequest(mode = mode)).toRequestBody(jsonType))

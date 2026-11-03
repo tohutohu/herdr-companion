@@ -26,8 +26,6 @@ class DesktopGatewayRepository(private val api: GatewayApi) {
 
     suspend fun respond(id: String, response: InteractionResponseDto) = api.respond(id, response)
 
-    suspend fun cycleMode(id: String) = api.cycleMode(id)
-
     suspend fun setMode(id: String, mode: String) = api.setMode(id, mode)
 
     /** The session with the change pending, until the agent uses it. */

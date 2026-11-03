@@ -57,7 +57,6 @@ fun SessionDetailRoute(
     val loading by vm.loading.collectAsState()
     val answering by vm.answering.collectAsState()
     val answeredInteractions by vm.answeredInteractions.collectAsState()
-    val modeChanging by vm.modeChanging.collectAsState()
     val reloading by vm.reloading.collectAsState()
     val reloadNotice by vm.reloadNotice.collectAsState()
     val pullRefreshing by vm.pullRefreshing.collectAsState()
@@ -106,7 +105,6 @@ fun SessionDetailRoute(
         pullRefreshing = pullRefreshing,
         attachments = attachments.toList(),
         actionBusy = session?.let { actions.busy(it.id) } == true || interrupting,
-        modeChanging = modeChanging,
         settings = settings,
     )
 
@@ -143,7 +141,6 @@ fun SessionDetailRoute(
                     is SessionDetailAction.Retry -> vm.retry(action.localId)
                     is SessionDetailAction.Discard -> vm.discard(action.localId)
                     is SessionDetailAction.Respond -> vm.respond(action.response)
-                    SessionDetailAction.CycleMode -> vm.cycleMode()
                     SessionDetailAction.LoadSettings -> vm.loadSettings()
                     is SessionDetailAction.SetModel -> vm.setModel(action.model)
                     is SessionDetailAction.SetEffort -> vm.setEffort(action.effort)

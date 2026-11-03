@@ -901,23 +901,6 @@ class DesktopAppState(
         }
     }
 
-    fun cycleMode(id: String) {
-        if (id in busySessionIds) return
-        setBusy(id, true)
-        scope.launch {
-            try {
-                repository.cycleMode(id)
-                logger.fine("session mode change requested")
-            } catch (error: Exception) {
-                val mapped = error.toDesktopGatewayError()
-                reportError(mapped.message)
-                logger.warning("session mode change failed: ${mapped.kind}")
-            } finally {
-                setBusy(id, false)
-            }
-        }
-    }
-
     /** Reads the model catalog for a direct session's pickers; once, or again after a failure. */
     fun loadSettings(id: String) {
         val detail = detailsBySession[id] ?: return

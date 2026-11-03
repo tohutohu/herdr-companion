@@ -1323,7 +1323,6 @@ private fun handleDetailAction(
         is SessionDetailAction.Retry -> state.retry(sessionId, action.localId)
         is SessionDetailAction.Discard -> state.discard(sessionId, action.localId)
         is SessionDetailAction.Respond -> state.respond(sessionId, action.response)
-        SessionDetailAction.CycleMode -> state.cycleMode(sessionId)
         SessionDetailAction.LoadSettings -> state.loadSettings(sessionId)
         is SessionDetailAction.SetModel -> state.setModel(sessionId, action.model)
         is SessionDetailAction.SetEffort -> state.setEffort(sessionId, action.effort)

@@ -348,7 +348,6 @@ fun SessionDetailScreen(
                             }
                             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                                 session?.let { s ->
-                                    val modeChangeSupported = s.provider == "claude" || s.provider == "codex"
                                     if (s.live && s.status in WORKING_STATUSES) {
                                         DropdownMenuItem(
                                             text = { Text("Interrupt") },
@@ -369,16 +368,6 @@ fun SessionDetailScreen(
                                             onAction(SessionDetailAction.Reload)
                                         },
                                     )
-                                    if (modeChangeSupported) {
-                                        DropdownMenuItem(
-                                            text = { Text("Change mode") },
-                                            enabled = s.live && !state.actionBusy && !state.modeChanging,
-                                            onClick = {
-                                                menu = false
-                                                onAction(SessionDetailAction.CycleMode)
-                                            },
-                                        )
-                                    }
                                     SessionActionMenuItems(
                                         s = s.toSessionRef(),
                                         onResume = { onAction(SessionDetailAction.Resume) },

@@ -129,8 +129,6 @@ class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidV
     val answeredInteractions = _answeredInteractions.asStateFlow()
 
     /** A live agent TUI is moving to its next available session mode. */
-    private val _modeChanging = MutableStateFlow(false)
-    val modeChanging = _modeChanging.asStateFlow()
 
     private val _reloading = MutableStateFlow(false)
     val reloading = _reloading.asStateFlow()
@@ -368,26 +366,6 @@ class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidV
                 _error.value = "Interrupt failed: ${e.message}"
             } finally {
                 _interrupting.value = false
-            }
-        }
-    }
-
-    fun cycleMode() {
-        if (_modeChanging.value) return
-        viewModelScope.launch {
-            _modeChanging.value = true
-            try {
-                repo.cycleMode(sessionId)
-                // The mode is reported by the provider's next transcript
-                // snapshot; give its TUI a moment to process the shortcut.
-                delay(300)
-                refresh()
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                _error.value = "Mode change failed: ${e.message}"
-            } finally {
-                _modeChanging.value = false
             }
         }
     }

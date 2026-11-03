@@ -45,7 +45,6 @@ data class SessionDetailUiState(
     val answeredInteractions: Set<String> = emptySet(),
     val attachments: List<AttachmentUiState> = emptyList(),
     val actionBusy: Boolean = false,
-    val modeChanging: Boolean = false,
     val loading: Boolean = false,
     /** A manual reload is reading the conversation again. */
     val reloading: Boolean = false,
@@ -91,7 +90,6 @@ sealed interface SessionDetailAction {
     data class Retry(val localId: String) : SessionDetailAction
     data class Discard(val localId: String) : SessionDetailAction
     data class Respond(val response: InteractionResponseDto) : SessionDetailAction
-    data object CycleMode : SessionDetailAction
     /** Loads (or, after a failure, retries) the catalog for [SessionDetailUiState.settings]. */
     data object LoadSettings : SessionDetailAction
     data class SetModel(val model: String) : SessionDetailAction

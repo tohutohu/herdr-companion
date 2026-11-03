@@ -134,7 +134,7 @@ class GatewayApiTest {
     @Test
     fun `セッションのモード変更は専用APIを呼ぶ`() = runBlocking {
         server.enqueue(MockResponse.Builder().code(202).body("""{"ok":true}""").build())
-        api.cycleMode("claude:s1")
+        api.setMode("claude:s1", "plan")
         val req = server.takeRequest()
         assertEquals("POST", req.method)
         assertEquals("/v1/sessions/claude:s1/mode", req.target)
@@ -386,10 +386,6 @@ class GatewayApiTest {
             assertEquals("/v1/sessions/codex:t1/mode", it.target)
             assertEquals("""{"mode":"plan"}""", it.body!!.utf8())
         }
-
-        server.enqueue(MockResponse.Builder().code(202).body("""{"ok":true}""").build())
-        api.cycleMode("codex:t1")
-        assertEquals(0, server.takeRequest().body?.size ?: 0)
     }
 
     @Test

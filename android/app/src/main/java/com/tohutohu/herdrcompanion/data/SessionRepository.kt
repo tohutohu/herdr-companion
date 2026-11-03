@@ -177,8 +177,6 @@ class SessionRepository(
     suspend fun respond(sessionId: String, response: InteractionResponseDto) =
         api.respond(sessionId, response)
 
-    suspend fun cycleMode(sessionId: String) = api.cycleMode(sessionId)
-
     suspend fun setMode(sessionId: String, mode: String) = api.setMode(sessionId, mode)
 
     /** The returned session, with the change pending, is cached at once. */
