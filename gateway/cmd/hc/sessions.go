@@ -119,6 +119,9 @@ func (a *app) sessionLine(s model.Session, short string) string {
 	if s.Title != "" {
 		line += " · " + clip(oneLine(s.Title), 60)
 	}
+	if n := len(s.Background); n > 0 {
+		line += fmt.Sprintf("  [%d in background]", n)
+	}
 	if a.isSelf(s) {
 		line += "  (you)"
 	}
@@ -275,6 +278,12 @@ func (a *app) cmdShow(args []string) error {
 		facts = append(facts, "error: "+s.Error)
 	}
 	fmt.Fprintln(w, strings.Join(facts, " · "))
+	if len(s.Background) > 0 {
+		fmt.Fprintf(w, "background (%d, may start a new turn when it ends):\n", len(s.Background))
+		for _, t := range s.Background {
+			fmt.Fprintf(w, "  %-5s %4s  %s\n", t.Kind, age(t.StartedAt), clip(oneLine(t.Description), 100))
+		}
+	}
 	o := renderOpts{short: short, maxChars: max}
 	for _, ia := range pending {
 		renderInteraction(w, ia, short)

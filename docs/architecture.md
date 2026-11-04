@@ -183,6 +183,20 @@ the gateway's; archiving removes them with `git worktree remove` (never `--force
 another live session uses or that has uncommitted or untracked changes. Branches are kept.
 Worktrees 1.x had Herdr make for its launches carry the same marker and are removed the same way.
 
+## Background work
+
+A turn can end while work it started goes on: subagents, shell commands. `status` follows the
+turn and stays that way, because a dev server would otherwise never let a session complete and
+its completion push would never come. The work is a separate field, `background`, that lists
+what Claude Code's `background_tasks_changed` reports, without its `ambient` entries. The set
+is per process, so it empties when the process goes.
+
+When its last task ends, Claude Code starts a turn with no prompt, which is reported by
+`session_state_changed`. That event needs `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS`, which the
+gateway sets; the turn then runs and completes like any other and pushes again. Codex keeps
+running sub-agents and terminals after `turn/completed` too and does not start a turn for them;
+they are not reported yet. Commands an agent detached by itself are not seen.
+
 ## Status
 
 The runtime table above is the whole mapping: a session the gateway runs gets its status from its

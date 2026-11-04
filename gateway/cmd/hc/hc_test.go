@@ -27,6 +27,8 @@ type fakeGateway struct {
 	onPost func(path string, body map[string]any)
 	// replies are bodies for POSTs to a path, instead of {"ok": true}.
 	replies map[string]any
+	// onList lets a test change state when the session list is read.
+	onList func()
 }
 
 type postedRequest struct {
@@ -67,6 +69,9 @@ func (g *fakeGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("archived") == "true" {
 			writeJSON(map[string]any{"sessions": []model.Session{}})
 			return
+		}
+		if g.onList != nil {
+			g.onList()
 		}
 		writeJSON(map[string]any{"sessions": g.sessions})
 		return
@@ -677,10 +682,10 @@ func Test状態名は別名をまとめ生の状態名は完全一致にする(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if turnOver, ok := tg[model.StatusCompleted]; !ok || !turnOver {
+	if need, ok := tg[model.StatusCompleted]; !ok || !need.turnOver {
 		t.Errorf("done must wait for the turn to be over on completed: %v", tg)
 	}
-	if turnOver, ok := tg[model.StatusIdle]; !ok || turnOver {
+	if need, ok := tg[model.StatusIdle]; !ok || need.turnOver {
 		t.Errorf("an explicit idle must match idle exactly: %v", tg)
 	}
 	tg, _ = parseUntilTarget(nil)
@@ -768,6 +773,108 @@ func Testスキルに書いたhcのコマンドとフラグはヘルプに実在
 			if !strings.Contains(help.String(), m[1]) {
 				t.Errorf("%s: %s is not in any help page", path, m[1])
 			}
+		}
+	}
+}
+
+func withBackground(g *fakeGateway, id string, tasks ...model.BackgroundTask) {
+	g.set(func() {
+		for i := range g.sessions {
+			if g.sessions[i].ID == id {
+				g.sessions[i].Background = tasks
+			}
+		}
+	})
+}
+
+func Test裏の作業は一覧と詳細に出る(t *testing.T) {
+	g := sampleGateway()
+	withBackground(g, "claude:aaaa1111-0000", model.BackgroundTask{ID: "t1", Kind: model.BackgroundAgent, Description: "差分を確認", StartedAt: time.Now().Add(-3 * time.Minute)})
+	a, out := newTestApp(t, g)
+	if got := a.mustRun(t, "ls"); !strings.Contains(got, "[1 in background]") {
+		t.Errorf("ls:\n%s", got)
+	}
+	out.Reset()
+	got := a.mustRun(t, "show", "aaaa1111")
+	for _, want := range []string{"background (1", "agent", "3m", "差分を確認"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in show:\n%s", want, got)
+		}
+	}
+}
+
+func Test完了しても裏の作業があればその旨を添えて返す(t *testing.T) {
+	g := sampleGateway()
+	id := "claude:aaaa1111-0000"
+	g.setStatus(id, model.StatusCompleted)
+	withBackground(g, id, model.BackgroundTask{ID: "t1", Kind: model.BackgroundShell, StartedAt: time.Now()})
+	a, _ := newTestApp(t, g)
+	got := a.mustRun(t, "until", "aaaa1111", "--for", "done", "--timeout", "5s")
+	if !strings.Contains(got, "already there:") || !strings.Contains(got, "hc until aaaa1111 --for settled") {
+		t.Fatalf("got:\n%s", got)
+	}
+}
+
+func Test落ち着くまで待つと裏の作業が終わるまで返らない(t *testing.T) {
+	g := sampleGateway()
+	id := "claude:aaaa1111-0000"
+	g.setStatus(id, model.StatusCompleted)
+	withBackground(g, id, model.BackgroundTask{ID: "t1", Kind: model.BackgroundShell, StartedAt: time.Now()})
+	a, _ := newTestApp(t, g)
+	code := a.run([]string{"until", "aaaa1111", "--for", "settled", "--timeout", "30ms"})
+	if code != 3 {
+		t.Fatalf("exit = %d, want a timeout while the work runs", code)
+	}
+	withBackground(g, id)
+	got := a.mustRun(t, "until", "aaaa1111", "--for", "settled", "--timeout", "5s")
+	if !strings.Contains(got, "reached after") {
+		t.Fatalf("got:\n%s", got)
+	}
+}
+
+func Test落ち着くまで待つと裏の作業の直後に始まるターンを終わりと誤認しない(t *testing.T) {
+	g := sampleGateway()
+	id := "claude:aaaa1111-0000"
+	g.setStatus(id, model.StatusCompleted)
+	// Finding the session reads the list once. The first look after that sees
+	// no work and no turn yet; by the second the turn has started, as when
+	// Claude Code wakes a moment after the last task ended.
+	looks := 0
+	g.onList = func() {
+		if looks++; looks == 3 {
+			for i := range g.sessions {
+				if g.sessions[i].ID == id {
+					g.sessions[i].Status = model.StatusRunning
+				}
+			}
+		}
+	}
+	a, _ := newTestApp(t, g)
+	if code := a.run([]string{"until", "aaaa1111", "--for", "settled", "--timeout", "30ms"}); code != 3 {
+		t.Fatalf("exit = %d, want it to keep waiting for the running turn", code)
+	}
+}
+
+func Test落ち着くまで待っていても質問が来れば裏の作業を待たない(t *testing.T) {
+	g := sampleGateway()
+	id := "claude:aaaa1111-0000"
+	g.setStatus(id, model.StatusWaitingInput)
+	withBackground(g, id, model.BackgroundTask{ID: "t1", Kind: model.BackgroundAgent, StartedAt: time.Now()})
+	a, _ := newTestApp(t, g)
+	got := a.mustRun(t, "until", "aaaa1111", "--for", "settled", "--timeout", "5s")
+	if !strings.Contains(got, "already there:") {
+		t.Fatalf("got:\n%s", got)
+	}
+}
+
+func Test一緒に指定した状態のうち早く返るほうが裏の作業の扱いを決める(t *testing.T) {
+	for _, specs := range [][]string{{"done,settled"}, {"settled,done"}} {
+		tg, err := parseUntilTarget(specs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tg[model.StatusCompleted].quiet {
+			t.Errorf("%v: completed needs quiet", specs)
 		}
 	}
 }

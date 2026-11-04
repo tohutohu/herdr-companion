@@ -17,6 +17,9 @@ type untilState struct {
 	// turnOver makes idle and completed count only when the agent has
 	// answered the latest prompt (see promptUnanswered).
 	turnOver bool
+	// quiet also waits for the session's background work to end, unless the
+	// session needs an answer: it will not get further without one.
+	quiet bool
 }
 
 var untilStates = []untilState{
@@ -28,6 +31,8 @@ var untilStates = []untilState{
 	{name: "offline", statuses: []model.Status{model.StatusOffline}},
 	{name: "stopped", statuses: []model.Status{model.StatusWaitingInput, model.StatusWaitingApproval,
 		model.StatusCompleted, model.StatusIdle, model.StatusFailed, model.StatusOffline}, turnOver: true},
+	{name: "settled", statuses: []model.Status{model.StatusWaitingInput, model.StatusWaitingApproval,
+		model.StatusCompleted, model.StatusIdle, model.StatusFailed, model.StatusOffline}, turnOver: true, quiet: true},
 	{name: "running", statuses: []model.Status{model.StatusRunning}},
 }
 
@@ -36,9 +41,13 @@ var rawStatuses = []model.Status{
 	model.StatusIdle, model.StatusFailed, model.StatusOffline,
 }
 
-// untilTarget maps each status to wait for to whether it also needs the
-// turn to be over. A raw status name matches exactly and wins over a group.
-type untilTarget map[model.Status]bool
+// untilNeed is what a status has to come with to count. Of several states
+// naming a status, the one that returns soonest decides quiet.
+type untilNeed struct{ turnOver, quiet bool }
+
+// untilTarget maps each status to wait for to what else it needs. A raw status
+// name matches exactly and wins over a group.
+type untilTarget map[model.Status]untilNeed
 
 func parseUntilTarget(specs []string) (untilTarget, error) {
 	if len(specs) == 0 {
@@ -56,7 +65,8 @@ func parseUntilTarget(specs []string) (untilTarget, error) {
 			for _, st := range untilStates {
 				if st.name == name {
 					for _, s := range st.statuses {
-						tg[s] = tg[s] || st.turnOver
+						need, named := tg[s]
+						tg[s] = untilNeed{turnOver: need.turnOver || st.turnOver, quiet: st.quiet && (need.quiet || !named)}
 					}
 					found = true
 				}
@@ -76,7 +86,7 @@ func parseUntilTarget(specs []string) (untilTarget, error) {
 		}
 	}
 	for s := range exact {
-		tg[s] = false
+		tg[s] = untilNeed{}
 	}
 	if len(tg) == 0 {
 		return nil, usagef("--for needs a state (see \"hc help until\")")
@@ -115,14 +125,27 @@ func (a *app) promptUnanswered(ctx context.Context, id string) bool {
 }
 
 func (a *app) untilReached(ctx context.Context, s model.Session, tg untilTarget) bool {
-	turnOver, ok := tg[s.Status]
+	need, ok := tg[s.Status]
 	if !ok {
 		return false
 	}
-	if turnOver && (s.Status == model.StatusIdle || s.Status == model.StatusCompleted) {
+	if needsQuiet(s, tg) && len(s.Background) > 0 {
+		return false
+	}
+	if need.turnOver && (s.Status == model.StatusIdle || s.Status == model.StatusCompleted) {
 		return !a.promptUnanswered(ctx, s.ID)
 	}
 	return true
+}
+
+// needsQuiet reports whether s counts only once its background work is over.
+func needsQuiet(s model.Session, tg untilTarget) bool {
+	return tg[s.Status].quiet && !needsYou(s.Status)
+}
+
+// backgroundHint tells a reader that a finished turn may not be the last one.
+func backgroundHint(s model.Session, short string) string {
+	return fmt.Sprintf("background: %d still running; a new turn may start when it ends (hc until %s --for settled)", len(s.Background), short)
 }
 
 type untilSession struct {
@@ -176,6 +199,9 @@ func (a *app) cmdUntil(args []string) error {
 	again += " --timeout " + timeout.String()
 	started := time.Now()
 	deadline := started.Add(*timeout)
+	// A turn starts a moment after the last background task ends. Between
+	// the two a session looks settled, so that takes two looks in a row.
+	quietOnce := map[string]bool{}
 	for first := true; ; first = false {
 		cur, err := a.client.sessions(ctx, false)
 		if err != nil {
@@ -196,7 +222,15 @@ func (a *app) cmdUntil(args []string) error {
 				r.Session, r.Short, r.Gone = known[id], clipID(nativeID(id), 8), true
 				r.Session.Status = model.StatusOffline
 			}
-			if r.Reached = a.untilReached(ctx, r.Session, tg); r.Reached {
+			r.Reached = a.untilReached(ctx, r.Session, tg)
+			if needsQuiet(r.Session, tg) && !r.Gone {
+				seen := quietOnce[id]
+				quietOnce[id] = r.Reached
+				r.Reached = r.Reached && seen
+			} else {
+				delete(quietOnce, id)
+			}
+			if r.Reached {
 				reached++
 			}
 			rows = append(rows, r)
@@ -276,6 +310,9 @@ func (a *app) reportUntil(ctx context.Context, rows []untilSession, started time
 		}
 		if len(r.Pending) == 0 && r.Session.LastMessage != "" {
 			fmt.Fprintf(w, "    last: %s\n", clip(oneLine(r.Session.LastMessage), 300))
+		}
+		if len(r.Session.Background) > 0 {
+			fmt.Fprintf(w, "    %s\n", backgroundHint(r.Session, r.Short))
 		}
 	}
 	if timedOut {

@@ -146,6 +146,20 @@ func decodeReport(t *testing.T, data map[string]string) model.Message {
 	return m
 }
 
+func Test完了の通知は裏で動いている作業の数を見出しに添える(t *testing.T) {
+	s := model.Session{ProviderName: "Claude Code", Background: []model.BackgroundTask{{ID: "t1"}, {ID: "t2"}}}
+	if got := Title(s, model.StatusCompleted); got != "Claude Code completed · 2 in background" {
+		t.Errorf("completed title = %q", got)
+	}
+	if got := Title(s, model.StatusWaitingInput); got != "Claude Code needs input" {
+		t.Errorf("input title = %q", got)
+	}
+	s.Background = nil
+	if got := Title(s, model.StatusCompleted); got != "Claude Code completed" {
+		t.Errorf("title without work = %q", got)
+	}
+}
+
 func Test通知に最後の報告を添える(t *testing.T) {
 	fs := &fakeSessions{list: []model.Session{sess(model.StatusRunning)}}
 	sender := &fakeSender{}

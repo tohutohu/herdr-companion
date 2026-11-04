@@ -194,6 +194,10 @@ func Title(s model.Session, kind model.Status) string {
 	case model.StatusFailed:
 		return s.ProviderName + " failed"
 	default:
+		// A new turn may follow: say so, as the report may not be the last.
+		if n := len(s.Background); n > 0 {
+			return fmt.Sprintf("%s completed · %d in background", s.ProviderName, n)
+		}
 		return s.ProviderName + " completed"
 	}
 }

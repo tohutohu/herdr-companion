@@ -80,7 +80,13 @@ func (a *app) afterAct(ctx context.Context, short, id string, before time.Time, 
 		fmt.Fprintf(a.out, "still %s after %s; continue with: hc until %s --timeout %s\n", s.Status, *wf.timeout, short, *wf.timeout)
 		return nil
 	}
-	return a.cmdRead([]string{short})
+	if err := a.cmdRead([]string{short}); err != nil {
+		return err
+	}
+	if len(s.Background) > 0 && !a.json {
+		fmt.Fprintln(a.out, backgroundHint(s, short))
+	}
+	return nil
 }
 
 func (a *app) cmdSend(args []string) error {

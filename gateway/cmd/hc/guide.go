@@ -30,6 +30,7 @@ WORKFLOW 3 — fan out and join
   hc start --cwd DIR "part A"  ·  hc start --cwd DIR "part B"  ·  ...
   hc until A B --all --for done --timeout 9m     all finished
   hc until A B --for needs-you                   the first one that asks something
+  hc until A --for settled --timeout 9m          also wait out its background work
 
 WORKFLOW 4 — resident supervisor (watch every session)
   1. hc wait --timeout 9m     blocks until any session needs you: a question, an approval,

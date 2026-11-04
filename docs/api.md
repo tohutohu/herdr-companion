@@ -258,6 +258,7 @@ Gateway が動かすセッションは、プロセスが無い間（Gateway の�
 |---|---|
 | `canSend` | 今メッセージを送れるか（Gateway が動かしている。プロセスが無ければ送信時に再開する） |
 | `unread` | 最後のターンが終わり、まだ見ていない（`seen` 未送信） |
+| `background` | セッションが裏で動かし続けている作業。`[{id, kind, description, startedAt}]`、無ければ省略。`kind` は `agent` / `shell` / `other`。`status` とは独立で、`completed` や `idle` でも空とは限らない。`startedAt` は Gateway が最初に見た時刻。Claude Code のセッションのみ |
 | `model` / `effort` | 最後の応答が使ったモデルと推論強度 |
 | `pendingModel` / `pendingEffort` | 変更を要求したがまだ使われていない値。適用されると消える |
 | `settingsApply` | 保留中の変更が効く時点。`next_request`（Claude: 次のモデル呼び出し。実行中のターン内でも）／`next_turn`（Codex: 次のターン） |

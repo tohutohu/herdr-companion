@@ -140,7 +140,8 @@ OUTPUT
     5b27a61d running            now  claude herdr-android-client · CLI設計  (you)
   (+47 offline: hc ls --all)
   Columns: "!" when it waits for an answer, short ID, status, last update, provider,
-  project · title. "(you)" is the session hc runs in.
+  project · title. "(you)" is the session hc runs in; "[2 in background]" is work it left
+  running (see "hc help states").
 
 SEE ALSO
   hc show ID · hc help ids · hc help states
@@ -159,6 +160,7 @@ FLAGS
 
 OUTPUT
   id and status; project, cwd and title; model, mode, context use and cost;
+  "background": work it left running, with its kind and age;
   each pending question or approval with the exact "answer:" command;
   "last report:" the agent's latest prose; "now:" the tool calls of a running turn.
 
@@ -228,6 +230,7 @@ STATES  (--for; default: stopped)
   failed      the agent reported an error
   offline     the agent is not running, or the session was archived
   stopped     anything but running: needs-you, done, failed or offline
+  settled     stopped, and any background work has ended too (or it needs you)
   running     the agent is working (e.g. a queued prompt has started)
   A raw status (waiting_input, idle, ...) matches exactly. See "hc help states".
 
@@ -250,6 +253,7 @@ EXAMPLES
   hc send a9b7 "run the tests" && hc until a9b7 --timeout 9m
   hc until a9b7 --for needs-you              only stop for a question or an approval
   hc until a9b7 c3d4 e5f6 --all --for done   join work fanned out to three sessions
+  hc until a9b7 --for settled --timeout 9m   also wait for its background subagents and commands
 
 SEE ALSO
   hc wait · hc send --wait · hc help states
@@ -518,6 +522,15 @@ WHAT IS DONE
   session whose newest message is a prompt under a minute old has not started yet).
   hc send/answer/start --wait: the turn after the action ended (seen running, or a newer
   outcome, or a new reply from the agent).
+
+BACKGROUND WORK
+  The status follows the turn. A session can be completed or idle while subagents and shell
+  commands it started keep running; ls, until and wait mark it "[N in background]", show
+  lists them and --json has a "background" array. When they end, Claude Code starts a new
+  turn by itself, so "done" may not be the last word: hc until --for settled waits for that.
+  A command that never ends, such as a dev server, keeps a session from settling: use
+  --timeout. Only tasks of Claude Code sessions are reported, not Codex's; commands an agent
+  detached by itself (nohup, &) are not seen either.
 `},
 	{"ids", "how to name a session", `hc help ids — naming a session
 
