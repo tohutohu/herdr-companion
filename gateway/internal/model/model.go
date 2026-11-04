@@ -59,6 +59,25 @@ type Session struct {
 	Context *ContextUsage `json:"context,omitempty"`
 	// Cost is what the session's tokens are worth; nil when nothing is known.
 	Cost *Cost `json:"cost,omitempty"`
+	// Background is the work still running behind the session, whatever
+	// Status says: the status follows the turn, and a task such as a dev
+	// server may never end.
+	Background []BackgroundTask `json:"background,omitempty"`
+}
+
+// Kinds of BackgroundTask.
+const (
+	BackgroundAgent = "agent" // a subagent, workflow or teammate
+	BackgroundShell = "shell" // a shell command
+	BackgroundOther = "other"
+)
+
+// BackgroundTask is one piece of work a session left running.
+type BackgroundTask struct {
+	ID          string    `json:"id"`
+	Kind        string    `json:"kind"`
+	Description string    `json:"description,omitempty"`
+	StartedAt   time.Time `json:"startedAt"`
 }
 
 type Role string

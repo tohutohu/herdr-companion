@@ -352,6 +352,7 @@ func (s *Service) toSession(r *Resolved, sum *providers.Summary) model.Session {
 			sess.Mode = d.Mode
 		}
 		sess.PendingModel, sess.PendingEffort, sess.SettingsApply = d.PendingModel, d.PendingEffort, d.SettingsApply
+		sess.Background = d.Background
 		if sess.Status == model.StatusFailed {
 			sess.Error = d.Error
 		}

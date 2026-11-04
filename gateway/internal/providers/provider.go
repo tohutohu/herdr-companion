@@ -59,6 +59,8 @@ type DirectInfo struct {
 	LastTurnFailed bool
 	// Error is the reason the runtime or the latest turn failed.
 	Error string
+	// Background is the work the session left running, oldest first.
+	Background []model.BackgroundTask
 }
 
 // SettingsApply says when a model or effort change takes effect.

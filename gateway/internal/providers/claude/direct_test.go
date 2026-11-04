@@ -86,6 +86,14 @@ func fakeSidecar() {
 					emit(sid, "messageStart", map[string]any{"messageId": "msg_plan", "model": m})
 				}
 				emit(sid, "permission", map[string]any{"requestId": "toolu_plan", "toolName": "ExitPlanMode", "input": map[string]any{"plan": "1. do it"}})
+			case strings.Contains(text, "leave work behind"):
+				emit(sid, "background", map[string]any{"tasks": []map[string]any{
+					{"taskId": "t1", "taskType": "local_bash", "description": "dev server", "ambient": false},
+					{"taskId": "t2", "taskType": "local_agent", "description": "review", "ambient": false},
+					{"taskId": "w", "taskType": "monitor_mcp", "description": "live updates", "ambient": true},
+				}})
+				emit(sid, "result", map[string]any{"subtype": "success", "isError": false})
+				emit(sid, "state", map[string]any{"state": "idle"})
 			case strings.Contains(text, "stream"):
 				emit(sid, "messageStart", map[string]any{"messageId": "msg_1", "model": "claude-haiku-5-5"})
 				emit(sid, "delta", map[string]any{"text": "Hel"})
@@ -200,8 +208,8 @@ func Testサイドカーで開始したセッションはIDを先に決め応答
 		t.Errorf("start params = %v", start)
 	}
 	env, _ := start["env"].(map[string]any)
-	if env["HC_SESSION_ID"] != "claude:"+id || env["CLAUDECODE"] != nil {
-		t.Errorf("env HC_SESSION_ID=%v CLAUDECODE=%v", env["HC_SESSION_ID"], env["CLAUDECODE"])
+	if env["HC_SESSION_ID"] != "claude:"+id || env["CLAUDECODE"] != nil || env["CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS"] != "1" {
+		t.Errorf("env HC_SESSION_ID=%v CLAUDECODE=%v EMIT_SESSION_STATE=%v", env["HC_SESSION_ID"], env["CLAUDECODE"], env["CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS"])
 	}
 	eventually(t, "streamed text", func() bool {
 		msgs, _ := p.Messages(ctx, id, direct)
@@ -351,6 +359,60 @@ func Testオートモード非対応のモデルではプランの選択肢に�
 	msgs, _ := p.Messages(ctx, id, direct)
 	if ia := findInteraction(msgs, "toolu_plan"); ia == nil || ia.Questions[0].Options[0].Label != planAutoAccept {
 		t.Fatalf("plan card = %+v", ia)
+	}
+}
+
+func Testターンが終わっても裏の作業は実行中のまま一覧に残りアンビエントは数えない(t *testing.T) {
+	p, _ := newSidecarProvider(t)
+	ctx := context.Background()
+	id, err := p.DirectStart(ctx, providers.DirectStart{Cwd: "/w", Mode: "manual", Prompt: model.Input{Text: "leave work behind"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the turn ending", func() bool { return info(p, id).Turns == 1 })
+	in := info(p, id)
+	if in.Running || len(in.Background) != 2 {
+		t.Fatalf("info = %+v", in)
+	}
+	if b := in.Background[0]; b.ID != "t1" || b.Kind != model.BackgroundShell || b.Description != "dev server" || b.StartedAt.IsZero() {
+		t.Errorf("background[0] = %+v", b)
+	}
+	if b := in.Background[1]; b.ID != "t2" || b.Kind != model.BackgroundAgent {
+		t.Errorf("background[1] = %+v", b)
+	}
+}
+
+func Test裏の作業が終わって自動で始まるターンは実行中になる(t *testing.T) {
+	p, _ := newSidecarProvider(t)
+	ctx := context.Background()
+	id, err := p.DirectStart(ctx, providers.DirectStart{Cwd: "/w", Mode: "manual", Prompt: model.Input{Text: "leave work behind"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the turn ending", func() bool { return info(p, id).Turns == 1 })
+	// What Claude Code does when the last task ends: the set empties, then a
+	// turn starts that nobody sent a prompt for.
+	p.sidecarEvent(sidecarEvent{SessionID: id, Event: "background", Data: json.RawMessage(`{"tasks":[]}`)})
+	p.sidecarEvent(sidecarEvent{SessionID: id, Event: "state", Data: json.RawMessage(`{"state":"running"}`)})
+	if in := info(p, id); !in.Running || len(in.Background) != 0 {
+		t.Errorf("info = %+v", in)
+	}
+}
+
+func Testプロセスが消えると裏の作業も一覧から消える(t *testing.T) {
+	p, _ := newSidecarProvider(t)
+	ctx := context.Background()
+	id, err := p.DirectStart(ctx, providers.DirectStart{Cwd: "/w", Mode: "manual", Prompt: model.Input{Text: "leave work behind"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the turn ending", func() bool { return len(info(p, id).Background) == 2 })
+	if err := p.Send(ctx, id, direct, model.Input{Text: "crash"}); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the process going away", func() bool { return !info(p, id).Alive })
+	if b := info(p, id).Background; len(b) != 0 {
+		t.Errorf("background = %+v", b)
 	}
 }
 

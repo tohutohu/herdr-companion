@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -86,6 +87,8 @@ type directSession struct {
 	partialAt                       time.Time
 	// autoModels are the model ids the account can run in auto mode.
 	autoModels map[string]bool
+	// background is what the latest background_tasks_changed listed.
+	background []model.BackgroundTask
 }
 
 type directState struct {
@@ -223,7 +226,12 @@ func (p *Provider) DirectStart(ctx context.Context, opts providers.DirectStart) 
 	}
 	p.direct.mu.Unlock()
 
-	drop := map[string]string{"HC_SESSION_ID": gatewayID(id)}
+	drop := map[string]string{
+		"HC_SESSION_ID": gatewayID(id),
+		// Without it no session_state_changed arrives, and a turn Claude Code
+		// starts by itself when background work ends never shows as running.
+		"CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS": "1",
+	}
 	env := providers.ChildEnv(os.Environ(), drop)
 	if !cfg.AllowAPIKey {
 		env = withoutAPIKeys(env)
@@ -478,6 +486,7 @@ func (p *Provider) DirectSessions() []providers.DirectInfo {
 			Model: s.model, Effort: s.effort, Mode: modeLabel(s.mode), ModeID: s.mode,
 			RequestedModel: s.requestedModel, RequestedEffort: s.requestedEffort,
 			Turns: s.turns, LastTurnFailed: s.lastFailed, Error: s.err,
+			Background: slices.Clone(s.background),
 		})
 	}
 	return out
@@ -521,6 +530,12 @@ func (p *Provider) sidecarEvent(ev sidecarEvent) {
 		}
 		json.Unmarshal(ev.Data, &d)
 		s.mode = d.PermissionMode
+	case "background":
+		var d struct {
+			Tasks []sidecarBackgroundTask `json:"tasks"`
+		}
+		json.Unmarshal(ev.Data, &d)
+		s.background = foldBackground(s.background, d.Tasks, time.Now())
 	case "permission":
 		var r permissionRequest
 		if json.Unmarshal(ev.Data, &r) == nil && r.ID != "" {
@@ -602,6 +617,48 @@ func (p *Provider) sidecarEvent(ev sidecarEvent) {
 	}
 }
 
+// sidecarBackgroundTask is one entry of Claude Code's background_tasks_changed.
+type sidecarBackgroundTask struct {
+	TaskID      string `json:"taskId"`
+	TaskType    string `json:"taskType"`
+	Description string `json:"description"`
+	// Ambient tasks, such as live-update watchers, are not activity.
+	Ambient bool `json:"ambient"`
+}
+
+// foldBackground replaces the set with what Claude Code reports, the whole set
+// on every change, keeping when each task was first seen: the event has no
+// start time. A session's tasks come back oldest first.
+func foldBackground(prev []model.BackgroundTask, tasks []sidecarBackgroundTask, now time.Time) []model.BackgroundTask {
+	started := make(map[string]time.Time, len(prev))
+	for _, t := range prev {
+		started[t.ID] = t.StartedAt
+	}
+	var out []model.BackgroundTask
+	for _, t := range tasks {
+		if t.Ambient || t.TaskID == "" {
+			continue
+		}
+		at, ok := started[t.TaskID]
+		if !ok {
+			at = now
+		}
+		out = append(out, model.BackgroundTask{ID: t.TaskID, Kind: backgroundKind(t.TaskType), Description: t.Description, StartedAt: at})
+	}
+	slices.SortStableFunc(out, func(a, b model.BackgroundTask) int { return a.StartedAt.Compare(b.StartedAt) })
+	return out
+}
+
+func backgroundKind(taskType string) string {
+	switch taskType {
+	case "local_bash":
+		return model.BackgroundShell
+	case "local_agent", "remote_agent", "in_process_teammate", "local_workflow":
+		return model.BackgroundAgent
+	}
+	return model.BackgroundOther
+}
+
 // markExited ends a session whose process is gone. A turn it was running is
 // reported as failed; nothing is retried.
 func markExited(s *directSession, reason *string) {
@@ -612,7 +669,8 @@ func markExited(s *directSession, reason *string) {
 			s.err += " " + *reason
 		}
 	}
-	s.alive, s.running, s.pending = false, false, nil
+	// Background work dies with the process.
+	s.alive, s.running, s.pending, s.background = false, false, nil, nil
 	s.partialID, s.partialText = "", ""
 }
 

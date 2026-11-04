@@ -584,6 +584,8 @@ type Session struct {
 	// Mode is the runtime's mode label, when it knows one.
 	Mode  string
 	Error string
+	// Background is the work the session left running.
+	Background []model.BackgroundTask
 }
 
 // Sessions returns every recorded session with its live state.
@@ -634,6 +636,7 @@ func (m *Manager) Sessions() map[string]Session {
 			live.State = providers.StateIdle
 		}
 		s.Mode = in.Mode
+		s.Background = in.Background
 		s.PendingModel, s.PendingEffort = in.RequestedModel, in.RequestedEffort
 		if s.PendingModel != "" || s.PendingEffort != "" {
 			s.SettingsApply = m.runtimes[name].SettingsApply()

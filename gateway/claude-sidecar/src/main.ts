@@ -190,6 +190,16 @@ function forward(s: Session, m: SDKMessage) {
         case "status":
           if (m.permissionMode) emit(s.id, "mode", { permissionMode: m.permissionMode });
           return;
+        case "background_tasks_changed":
+          emit(s.id, "background", {
+            tasks: m.tasks.map((t) => ({
+              taskId: t.task_id,
+              taskType: t.task_type,
+              description: t.description,
+              ambient: t.ambient ?? false,
+            })),
+          });
+          return;
       }
       return;
     case "stream_event": {
