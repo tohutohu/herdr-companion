@@ -168,7 +168,7 @@ class ResidentApiTest {
     }
 
     @Test
-    fun `フォームは予定と基本項目だけを送り権限や通知は既定値に任せる`() {
+    fun `フォームは予定と上限を送り権限や通知は既定値に任せる`() {
         val d = ResidentDraft(instruction = "CIを確認", cwd = "/w", kind = "weekly", time = "07:30", days = setOf("thu", "mon"), timezone = "Europe/London", provider = "codex")
         val s = d.schedule()
         assertEquals(listOf("mon", "thu"), s.days)
@@ -178,10 +178,47 @@ class ResidentApiTest {
         assertNull(create.name) // the gateway names it after the instruction
         assertNull(create.permissions)
         assertNull(create.notify)
-        assertNull(create.limits)
+        assertEquals(LimitsDto(), create.limits)
         assertNull(create.trust)
         // Editing can clear a model back to the default.
         assertEquals("", ResidentDraft(instruction = "x", cwd = "/w").request(trust = true, expectedVersion = 3).model)
+    }
+
+    @Test
+    fun `編集した上限を送信し既存の期限とバージョンを保つ`() = runBlocking {
+        val task = ResidentTaskDto(id = "task_1", name = "CI", instruction = "確認", cwd = "/w", provider = "claude",
+            version = 7, limits = LimitsDto(45, 24, "2027-01-01T00:00:00Z"))
+        val draft = ResidentDraft.from(task)
+        assertEquals("45", draft.maxRunMinutes)
+        assertEquals("24", draft.maxRunsPerDay)
+        MockWebServer().use { server ->
+            server.start()
+            server.enqueue(json(200, """{"id":"task_1","name":"CI","provider":"claude"}"""))
+            backend(server).update(task.id, draft.copy(maxRunsPerDay = "48", maxRunMinutes = "60").request(false, expectedVersion = task.version))
+            val request = server.takeRequest()
+            assertEquals("PATCH", request.method)
+            val body = GatewayApi.residentJson.decodeFromString<ResidentTaskRequest>(request.body!!.utf8())
+            assertEquals(LimitsDto(60, 48, "2027-01-01T00:00:00Z"), body.limits)
+            assertEquals(7L, body.expectedVersion)
+            assertNull(body.permissions)
+            assertNull(body.notify)
+        }
+    }
+
+    @Test
+    fun `空欄や範囲外の上限は保存できず事前チェックより短い制限時間も拒否する`() {
+        val draft = ResidentDraft(instruction = "確認", cwd = "/w")
+        for (value in listOf("", "0", "-1", "289", "1.5", "abc", "999999999999")) {
+            assertFalse(draft.copy(maxRunsPerDay = value).complete, value)
+        }
+        for (value in listOf("", "0", "-1", "241", "1.5", "abc")) {
+            assertFalse(draft.copy(maxRunMinutes = value).complete, value)
+        }
+        assertTrue(draft.copy(maxRunsPerDay = "1", maxRunMinutes = "1").complete)
+        assertTrue(draft.copy(maxRunsPerDay = "288", maxRunMinutes = "240").complete)
+        assertFalse(draft.copy(precheck = "./check.sh", maxRunMinutes = "1").complete)
+        assertFalse(draft.copy(precheck = "./check.sh", precheckTimeoutSeconds = 120, maxRunMinutes = "2").complete)
+        assertTrue(draft.copy(precheck = "./check.sh", precheckTimeoutSeconds = 120, maxRunMinutes = "3").complete)
     }
 
     @Test

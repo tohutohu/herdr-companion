@@ -2,6 +2,7 @@ package com.tohutohu.herdrcompanion.ui.resident
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -15,12 +16,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -46,9 +49,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.tohutohu.herdrcompanion.data.api.DirListingDto
 import com.tohutohu.herdrcompanion.data.api.ModelsResponse
+import com.tohutohu.herdrcompanion.data.api.LimitsDto
 import com.tohutohu.herdrcompanion.data.api.PrecheckDto
 import com.tohutohu.herdrcompanion.data.api.ResidentTaskDto
 import com.tohutohu.herdrcompanion.data.api.ResidentTaskRequest
@@ -59,9 +64,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * The form's editable values: as few as starting a session. Permissions,
- * notifications and limits keep the gateway's defaults (or the task's own
- * values when editing).
+ * The form's editable values. Permissions and notifications remain unchanged.
  */
 data class ResidentDraft(
     /** Optional: the gateway names a task after its instruction's first line. */
@@ -83,6 +86,10 @@ data class ResidentDraft(
     val precheckTimeoutSeconds: Int? = null,
     /** The task being edited has a precheck, so a blank command removes it. */
     val hadPrecheck: Boolean = false,
+    val maxRunsPerDay: String = "12",
+    val maxRunMinutes: String = "30",
+    /** Preserve an API-configured expiry when changing the numeric limits. */
+    val expiresAt: String? = null,
 ) {
     fun schedule() = ScheduleDto(
         kind = kind,
@@ -99,6 +106,7 @@ data class ResidentDraft(
         model = if (expectedVersion == null) model.ifBlank { null } else model,
         effort = if (expectedVersion == null) effort.ifBlank { null } else effort,
         cwd = cwd, schedule = schedule(), trust = trust.takeIf { it },
+        limits = LimitsDto(maxRunMinutes.toInt(), maxRunsPerDay.toInt(), expiresAt),
         precheck = when {
             precheck.isNotBlank() -> PrecheckDto(precheck.trim(), precheckTimeoutSeconds)
             expectedVersion != null && hadPrecheck -> PrecheckDto("")
@@ -107,7 +115,16 @@ data class ResidentDraft(
         requestId = requestId, expectedVersion = expectedVersion,
     )
 
-    val complete get() = instruction.isNotBlank() && cwd.isNotBlank()
+    val runsLimitError get() = if (maxRunsPerDay.toIntOrNull() in 1..288) null else "1〜288 回で入力してください"
+    val minutesLimitError: String? get() {
+        val minutes = maxRunMinutes.toIntOrNull()
+        if (minutes == null || minutes !in 1..240) return "1〜240 分で入力してください"
+        if (precheck.isNotBlank() && (precheckTimeoutSeconds ?: 60) >= minutes * 60) {
+            return "事前チェックの上限（${precheckTimeoutSeconds ?: 60}秒）より長くしてください"
+        }
+        return null
+    }
+    val complete get() = instruction.isNotBlank() && cwd.isNotBlank() && runsLimitError == null && minutesLimitError == null
 
     companion object {
         fun from(t: ResidentTaskDto) = ResidentDraft(
@@ -115,6 +132,7 @@ data class ResidentDraft(
             cwd = t.cwd, kind = t.schedule.kind, time = t.schedule.time ?: "07:00", days = t.schedule.days?.toSet() ?: emptySet(),
             cron = t.schedule.cron ?: "0 7 * * 1-5", at = t.schedule.at.orEmpty(), timezone = t.schedule.timezone ?: "Asia/Tokyo",
             precheck = t.precheck?.command.orEmpty(), precheckTimeoutSeconds = t.precheck?.timeoutSeconds, hadPrecheck = t.precheck != null,
+            maxRunsPerDay = t.limits.maxRunsPerDay.toString(), maxRunMinutes = t.limits.maxRunMinutes.toString(), expiresAt = t.limits.expiresAt,
         )
     }
 }
@@ -184,6 +202,7 @@ fun ResidentTaskForm(
     val scope = rememberCoroutineScope()
 
     fun save() {
+        if (saving || !draft.complete || (existingId != null && existing == null)) return
         saving = true
         saveError = null
         scope.launch {
@@ -217,13 +236,20 @@ fun ResidentTaskForm(
                 title = { Text(if (existingId == null) "新しい常駐タスク" else "設定を編集") },
                 navigationIcon = { IconButton(onClick = onCancel) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "戻る") } },
                 actions = {
-                    TextButton(onClick = { save() }, enabled = !saving && draft.complete) {
+                    TextButton(onClick = { save() }, enabled = !saving && draft.complete && (existingId == null || existing != null)) {
                         Text(if (saving) "保存中…" else "保存")
                     }
                 },
             )
         },
     ) { padding ->
+        if (existingId != null && existing == null) {
+            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                if (loadError != null) Notice("設定を読み込めません", loadError.orEmpty(), action = "戻る" to onCancel)
+                else CircularProgressIndicator()
+            }
+            return@Scaffold
+        }
         Column(
             Modifier.fillMaxSize().padding(padding).imePadding().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -237,6 +263,12 @@ fun ResidentTaskForm(
                         style = MaterialTheme.typography.bodySmall)
                 }
             }
+            OutlinedTextField(
+                draft.name, { draft = draft.copy(name = it) },
+                label = { Text("タスク名（省略可）") },
+                placeholder = { Text("指示の1行目") },
+                modifier = Modifier.fillMaxWidth(), singleLine = true,
+            )
             OutlinedTextField(
                 draft.instruction, { draft = draft.copy(instruction = it) },
                 label = { Text("指示") },
@@ -282,6 +314,26 @@ fun ResidentTaskForm(
                 preview.isNotEmpty() -> Text("次の実行: " + preview.joinToString(" / ") { backend.formatInstant(it) }, style = MaterialTheme.typography.bodySmall)
                 else -> Text("予定された実行はありません", style = MaterialTheme.typography.bodySmall)
             }
+            Section("実行の上限")
+            OutlinedTextField(
+                draft.maxRunsPerDay, { draft = draft.copy(maxRunsPerDay = it) },
+                label = { Text("1日の起動上限（回）") },
+                supportingText = { Text(draft.runsLimitError ?: "1〜288 回・${draft.timezone} の日付で数えます") },
+                isError = draft.runsLimitError != null,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true, modifier = Modifier.fillMaxWidth(),
+            )
+            Text("上限に達すると、その日の自動実行を見送ります。今すぐ実行・回答は回数に含まれますが、上限に達しても実行できます。",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            OutlinedTextField(
+                draft.maxRunMinutes, { draft = draft.copy(maxRunMinutes = it) },
+                label = { Text("1回の制限時間（分）") },
+                supportingText = { Text(draft.minutesLimitError ?: "1〜240 分・超えるとその実行を停止します") },
+                isError = draft.minutesLimitError != null,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true, modifier = Modifier.fillMaxWidth(),
+            )
+            draft.expiresAt?.let { Text("タスクの期限: ${backend.formatInstant(it)}", style = MaterialTheme.typography.bodySmall) }
             Section("事前チェック（省略可）")
             OutlinedTextField(
                 draft.precheck, { draft = draft.copy(precheck = it) },
@@ -295,12 +347,6 @@ fun ResidentTaskForm(
                     "（1日の上限に数えません）。それ以外は失敗として知らせます。標準入力には記憶（JSON）が入ります。" +
                     "コマンドは権限設定の対象外で、あなたの権限で動きます。",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            OutlinedTextField(
-                draft.name, { draft = draft.copy(name = it) },
-                label = { Text("タスク名（省略可）") },
-                placeholder = { Text("指示の1行目") },
-                modifier = Modifier.fillMaxWidth(), singleLine = true,
             )
             Text("フォルダ内のファイル編集とネットワークは使えます。人の承認が必要な操作は無人では行わず、実行は「進められず」として知らせます。",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

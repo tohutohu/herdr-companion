@@ -43,6 +43,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -210,13 +211,15 @@ fun ResidentTaskScreen(
                         }
                     }
                     PrimaryTabRow(selectedTabIndex = tab) {
-                        listOf("会話", "実行履歴", "記憶", "設定").forEachIndexed { i, title ->
+                        listOf("報告", "実行履歴", "記憶", "設定").forEachIndexed { i, title ->
                             Tab(selected = tab == i, onClick = { tab = i }, text = { Text(title) })
                         }
                     }
                     when (tab) {
-                        0 -> Conversation(state.messages, backend, Modifier.weight(1f),
-                            continuing = busy == "セッションで続ける", continueEnabled = busy == null, onContinue = continueInSession)
+                        0 -> key(backend.connectionKey, taskId) {
+                            ResidentReports(state.messages, backend, Modifier.weight(1f),
+                                continuing = busy == "セッションで続ける", continueEnabled = busy == null, onContinue = continueInSession)
+                        }
                         1 -> RunHistory(state.runs, backend, Modifier.weight(1f), busy != null,
                             onCancel = { act("実行停止") { backend.cancelRun(it) } },
                             onDismiss = { act("確認済みにする") { backend.dismissRun(it) } },
@@ -283,26 +286,35 @@ private fun TaskHeader(
     val style = taskStateStyle(task.state)
     val running = runs.firstOrNull { it.status == RunStatus.RUNNING }
     val queued = runs.firstOrNull { it.status == RunStatus.QUEUED }
+    var expanded by rememberSaveable(task.id) { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Text(style.label, color = style.color, style = MaterialTheme.typography.titleSmall)
-            Text(
-                "  ${scheduleLabel(task.schedule, backend::formatInstant)} · ${providerLabel(task.provider)} ${task.model ?: "既定モデル"}${task.effort?.let { " / $it" }.orEmpty()}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "実行情報を閉じる" else "実行情報") }
         }
         val next = detail.upcoming.take(3).map(backend::formatInstant)
         val self = detail.wakeups.firstOrNull { it.kind == "self" }
         Text(
             buildString {
-                append(if (!task.enabled) task.pausedUntil?.let { "一時停止中（${backend.formatInstant(it)} に再開）" } ?: "一時停止中（自動実行しません）" else if (next.isEmpty()) "予定された自動実行はありません" else "次回: ${next.joinToString(", ")}")
-                self?.let { append("\n再確認の予約: ${backend.formatInstant(it.dueAt)}${it.reason?.let { r -> "（$r）" }.orEmpty()}") }
-                task.lastSuccessAt?.let { append("\n最終成功: ${backend.formatInstant(it)}") }
-                append("\n今日の起動: ${task.runsToday} / ${task.limits.maxRunsPerDay} 回")
+                append(if (!task.enabled) task.pausedUntil?.let { "${backend.formatInstant(it)} に再開" } ?: "自動実行は一時停止中" else task.nextRunAt?.let { "次回: ${backend.formatInstant(it)}" } ?: "予定された自動実行はありません")
+                append(" · 今日 ${task.runsToday} / ${task.limits.maxRunsPerDay} 回")
             },
             style = MaterialTheme.typography.bodySmall,
         )
+        if (task.enabled && task.runsToday >= task.limits.maxRunsPerDay) {
+            Text("今日の自動実行は上限に達しました。設定から回数を変更できます。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
+        }
+        if (expanded) {
+            Text(
+                buildString {
+                    append("${scheduleLabel(task.schedule, backend::formatInstant)} · ${providerLabel(task.provider)} ${task.model ?: "既定モデル"}${task.effort?.let { " / $it" }.orEmpty()}")
+                    if (task.enabled && next.isNotEmpty()) append("\n今後の予定: ${next.joinToString(", ")}")
+                    self?.let { append("\n再確認の予約: ${backend.formatInstant(it.dueAt)}${it.reason?.let { r -> "（$r）" }.orEmpty()}") }
+                    task.lastSuccessAt?.let { append("\n最終成功: ${backend.formatInstant(it)}") }
+                },
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         task.attention?.let { Text(it, color = taskStateStyle("needs_attention").color, style = MaterialTheme.typography.bodySmall) }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (running != null) {
@@ -366,7 +378,7 @@ private fun QuestionCard(text: String, options: List<String>, expires: String, b
 }
 
 @Composable
-private fun Conversation(
+internal fun ResidentReports(
     messages: List<ResidentMessageDto>,
     backend: ResidentBackend,
     modifier: Modifier,
@@ -375,16 +387,23 @@ private fun Conversation(
     onContinue: ((runId: String) -> Unit)?,
 ) {
     val list = rememberLazyListState()
-    LaunchedEffect(messages.size) { if (messages.isNotEmpty()) list.scrollToItem(messages.size - 1) }
+    val scope = rememberCoroutineScope()
+    // The API returns chronological order. Stable keys keep the report being
+    // read in place when polling prepends another report; never force a jump.
+    val newestFirst = remember(messages) { messages.asReversed() }
     Column(modifier) {
         if (messages.isEmpty()) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text("報告はまだありません。変化のない定期実行は会話に出さず、実行履歴にだけ残ります。",
+                Text("報告はまだありません。変化のない定期実行は実行履歴に残ります。",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(24.dp))
             }
         } else {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("新しい報告から表示", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                TextButton(onClick = { scope.launch { list.animateScrollToItem(0) } }, enabled = list.canScrollBackward) { Text("最新の報告へ") }
+            }
             LazyColumn(Modifier.weight(1f), state = list, contentPadding = PaddingValues(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(messages, key = { it.id }) { m ->
+                items(newestFirst, key = { it.id }) { m ->
                     val runId = m.runId?.takeIf { m.role == "assistant" && canContinueAsSession(m.conversation) }
                     MessageBubble(m, backend, continuing, continueEnabled, onContinue = if (runId != null && onContinue != null) { { onContinue(runId) } } else null)
                 }
@@ -574,9 +593,10 @@ private fun SettingsSummary(detail: ResidentTaskDetailDto, backend: ResidentBack
             if (t.notify.cooldownMinutes > 0) append(" · クールダウン ${t.notify.cooldownMinutes}分")
             if (t.notify.quietStart != null) append(" · 静穏時間 ${t.notify.quietStart}〜${t.notify.quietEnd}")
         },
-        "上限" to "1回 ${t.limits.maxRunMinutes}分 · 1日 ${t.limits.maxRunsPerDay}回" + (t.limits.expiresAt?.let { " · 期限 ${backend.formatInstant(it)}" }.orEmpty()),
+        "実行の上限" to "1日 ${t.limits.maxRunsPerDay}回 · 1回 ${t.limits.maxRunMinutes}分\n今すぐ実行・回答は回数上限に達しても実行できます。" + (t.limits.expiresAt?.let { "\n期限 ${backend.formatInstant(it)}" }.orEmpty()),
     ) + listOfNotNull(t.precheck?.let { "事前チェック（${it.timeoutSeconds ?: 60}秒まで · 0 で起動 · 1 で見送り）" to it.command })
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item { OutlinedButton(onClick = onEdit) { Text("設定を編集") } }
         item {
             Text("指示", style = MaterialTheme.typography.labelLarge)
             SelectionContainer { MarkdownText(t.instruction) }
@@ -585,6 +605,5 @@ private fun SettingsSummary(detail: ResidentTaskDetailDto, backend: ResidentBack
             Text(k, style = MaterialTheme.typography.labelLarge)
             Text(v, style = MaterialTheme.typography.bodyMedium)
         }
-        item { OutlinedButton(onClick = onEdit) { Text("設定を編集") } }
     }
 }
