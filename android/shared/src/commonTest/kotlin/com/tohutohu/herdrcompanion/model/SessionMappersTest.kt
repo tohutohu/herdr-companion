@@ -1,5 +1,6 @@
 package com.tohutohu.herdrcompanion.model
 
+import com.tohutohu.herdrcompanion.data.api.BackgroundTaskDto
 import com.tohutohu.herdrcompanion.data.api.ContextUsageDto
 import com.tohutohu.herdrcompanion.data.api.CostDto
 import com.tohutohu.herdrcompanion.data.api.SessionDto
@@ -26,6 +27,23 @@ class SessionMappersTest {
         assertEquals(12, model.contextUsedPercent)
         assertEquals(0.04, model.costUsd)
         assertTrue(model.live)
+    }
+
+    @Test
+    fun `裏の作業を表示モデルへ引き継ぎ空の説明はなしにする`() {
+        val model = SessionDto(
+            id = "claude:1",
+            provider = "claude",
+            status = "completed",
+            updatedAt = "2026-09-20T00:00:00Z",
+            background = listOf(
+                BackgroundTaskDto("t1", "agent", "review", "2026-09-20T00:00:00Z"),
+                BackgroundTaskDto("t2", "shell", " ", "2026-09-20T00:00:00Z"),
+            ),
+        ).toUiModel()
+
+        assertEquals("completed", model.status)
+        assertEquals(listOf("review", null), model.background.map { it.description })
     }
 
     @Test

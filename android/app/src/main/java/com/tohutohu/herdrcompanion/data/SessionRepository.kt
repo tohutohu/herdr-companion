@@ -1,6 +1,7 @@
 package com.tohutohu.herdrcompanion.data
 
 import androidx.room.withTransaction
+import com.tohutohu.herdrcompanion.data.api.BackgroundTaskDto
 import com.tohutohu.herdrcompanion.data.api.BlockDto
 import com.tohutohu.herdrcompanion.data.api.GatewayApi
 import com.tohutohu.herdrcompanion.data.api.InteractionResponseDto
@@ -250,4 +251,9 @@ fun SessionDto.toEntity(now: Long, listed: Boolean) = SessionEntity(
     pendingEffort = pendingEffort,
     settingsApply = settingsApply,
     error = error,
+    backgroundJson = background.takeIf { it.isNotEmpty() }?.let {
+        GatewayApi.json.encodeToString(backgroundTasksSerializer, it)
+    },
 )
+
+internal val backgroundTasksSerializer = ListSerializer(BackgroundTaskDto.serializer())

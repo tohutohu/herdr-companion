@@ -27,6 +27,29 @@ class SessionUiModelMappersTest {
         assertTrue(session.toUiModel().unread)
     }
     @Test
+    fun `キャッシュした裏の作業を一覧モデルへ引き継ぎ壊れていれば無視する`() {
+        val session = SessionEntity(
+            id = "claude:session",
+            provider = "claude",
+            providerName = "Claude Code",
+            project = "project",
+            title = null,
+            cwd = null,
+            status = "completed",
+            updatedAt = 1L,
+            lastMessage = null,
+            canSend = true,
+            listed = true,
+            lastSyncedAt = 1L,
+            backgroundJson = """[{"id":"t1","kind":"agent","description":"review","startedAt":"2026-11-04T12:00:00Z"}]""",
+        )
+
+        assertEquals(listOf("review"), session.toUiModel().background.map { it.description })
+        assertTrue(session.copy(backgroundJson = "{broken").toUiModel().background.isEmpty())
+        assertTrue(session.copy(backgroundJson = null).toUiModel().background.isEmpty())
+    }
+
+    @Test
     fun `キャッシュした保留中の設定と失敗理由を一覧モデルへ引き継ぐ`() {
         val session = SessionEntity(
             id = "claude:session",

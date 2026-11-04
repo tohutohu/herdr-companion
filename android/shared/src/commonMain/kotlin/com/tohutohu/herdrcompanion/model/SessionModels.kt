@@ -30,6 +30,15 @@ data class SessionUiModel(
     val settingsApply: String? = null,
     /** Why the session failed. */
     val error: String? = null,
+    /** Work the session left running; a finished turn does not end it. */
+    val background: List<BackgroundTaskUiModel> = emptyList(),
+)
+
+data class BackgroundTaskUiModel(
+    val id: String,
+    val kind: String,
+    val description: String?,
+    val startedAt: String,
 )
 
 fun SessionUiModel.headline(): String =

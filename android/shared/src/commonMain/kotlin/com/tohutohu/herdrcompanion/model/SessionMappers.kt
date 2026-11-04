@@ -1,5 +1,6 @@
 package com.tohutohu.herdrcompanion.model
 
+import com.tohutohu.herdrcompanion.data.api.BackgroundTaskDto
 import com.tohutohu.herdrcompanion.data.api.SessionDto
 
 /** Maps the gateway's transport model to the presentation model used by both JVM clients. */
@@ -28,4 +29,12 @@ fun SessionDto.toUiModel(): SessionUiModel = SessionUiModel(
     pendingEffort = pendingEffort,
     settingsApply = settingsApply,
     error = error,
+    background = background.map { it.toUiModel() },
+)
+
+fun BackgroundTaskDto.toUiModel() = BackgroundTaskUiModel(
+    id = id,
+    kind = kind,
+    description = description?.takeIf { it.isNotBlank() },
+    startedAt = startedAt,
 )

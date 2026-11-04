@@ -40,9 +40,21 @@ data class SessionDto(
     val settingsApply: String? = null,
     /** Why the session failed. */
     val error: String? = null,
+    /** Work the session left running, whatever [status] says. */
+    val background: List<BackgroundTaskDto> = emptyList(),
 ) {
     val isLive get() = status != Status.OFFLINE
 }
+
+@Serializable
+data class BackgroundTaskDto(
+    val id: String,
+    /** "agent", "shell" or "other". */
+    val kind: String = "other",
+    val description: String? = null,
+    /** When the gateway first saw it. */
+    val startedAt: String = "",
+)
 
 /** When a pending model or effort change takes effect, as [SessionDto.settingsApply] reports it. */
 object SettingsApply {

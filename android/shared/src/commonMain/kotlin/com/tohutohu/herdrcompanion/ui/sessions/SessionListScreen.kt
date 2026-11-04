@@ -74,6 +74,8 @@ import com.tohutohu.herdrcompanion.model.SessionUiModel
 import com.tohutohu.herdrcompanion.ui.agentSettingsLabel
 import com.tohutohu.herdrcompanion.ui.contextLabel
 import com.tohutohu.herdrcompanion.ui.exceptBottom
+import com.tohutohu.herdrcompanion.ui.BACKGROUND_SYMBOL
+import com.tohutohu.herdrcompanion.ui.backgroundLabel
 import com.tohutohu.herdrcompanion.ui.statusStyle
 import kotlinx.coroutines.flow.filter
 
@@ -405,6 +407,18 @@ internal fun SessionRow(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         softWrap = false,
+                    )
+                }
+                if (s.background.isNotEmpty()) {
+                    Text(
+                        "$BACKGROUND_SYMBOL ${s.background.size} bg",
+                        color = MaterialTheme.colorScheme.tertiary,
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier
+                            .padding(start = 8.dp)
+                            .semantics { contentDescription = backgroundLabel(s.background.size) },
                     )
                 }
                 Text(

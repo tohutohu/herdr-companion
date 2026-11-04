@@ -25,7 +25,7 @@ class DatabaseTest {
     @Test
     fun `全旧バージョンから会話とセッションを失わず移行できる`() = runBlocking(Dispatchers.IO) {
         val context = RuntimeEnvironment.getApplication()
-        for (version in 1..9) {
+        for (version in 1..10) {
             context.deleteDatabase("herdr-mobile.db")
             val schema = javaClass.getResourceAsStream("/com.tohutohu.herdrcompanion.data.db.AppDatabase/$version.json")!!
                 .bufferedReader().use { Json.parseToJsonElement(it.readText()).jsonObject.getValue("database").jsonObject }
@@ -56,7 +56,7 @@ class DatabaseTest {
                 val messages = db.messages().observe("session-test").first()
                 assertEquals("migration $version", listOf("message-test"), messages.map { it.id })
                 assertEquals("[]", messages.single().blocksJson)
-                assertEquals(10, db.openHelper.readableDatabase.version)
+                assertEquals(11, db.openHelper.readableDatabase.version)
             } finally {
                 db.close()
                 context.deleteDatabase("herdr-mobile.db")
@@ -153,7 +153,7 @@ class DatabaseTest {
                 buildList { while (cursor.moveToNext()) add(cursor.getString(cursor.getColumnIndexOrThrow("name"))) }
             }
             assertEquals(emptyList<String>(), columns.filter { it == "paneId" || it == "backend" })
-            assertEquals(10, db.openHelper.readableDatabase.version)
+            assertEquals(11, db.openHelper.readableDatabase.version)
         } finally {
             db.close()
             context.deleteDatabase("herdr-mobile.db")

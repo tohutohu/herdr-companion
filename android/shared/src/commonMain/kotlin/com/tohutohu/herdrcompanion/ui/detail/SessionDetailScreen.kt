@@ -97,6 +97,7 @@ import com.tohutohu.herdrcompanion.data.SendState
 import com.tohutohu.herdrcompanion.data.api.InteractionResponseDto
 import com.tohutohu.herdrcompanion.data.api.Status
 import com.tohutohu.herdrcompanion.model.headline
+import com.tohutohu.herdrcompanion.ui.BACKGROUND_SYMBOL
 import com.tohutohu.herdrcompanion.ui.ContextBar
 import com.tohutohu.herdrcompanion.ui.ContextGauge
 import com.tohutohu.herdrcompanion.ui.ExpandingContent
@@ -326,6 +327,15 @@ fun SessionDetailScreen(
                             val statusColor by animateColorAsState(st.color, label = "status")
                             Row {
                                 Text("${st.symbol} ${st.label}", color = statusColor, style = MaterialTheme.typography.labelSmall)
+                                if (it.background.isNotEmpty()) {
+                                    Text(
+                                        " · $BACKGROUND_SYMBOL ${it.background.size} bg",
+                                        color = MaterialTheme.colorScheme.tertiary,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                    )
+                                }
                                 if (details.isNotEmpty()) {
                                     Text(
                                         " · $details",
@@ -486,7 +496,8 @@ fun SessionDetailScreen(
             val pull = rememberBottomPullState { onAction(SessionDetailAction.PullRefresh) }
             Box(
                 Modifier
-                    .fillMaxSize()
+                    .weight(1f)
+                    .fillMaxWidth()
                     .clipToBounds()
                     .then(if (state.pullToRefresh) Modifier.nestedScroll(pull.connection) else Modifier),
             ) {
@@ -567,6 +578,9 @@ fun SessionDetailScreen(
                         }
                     },
                 )
+            }
+            ExpandingContent(value = session?.background?.takeIf { it.isNotEmpty() }) {
+                BackgroundTasksBar(state.sessionId, it)
             }
         }
     }
