@@ -1,5 +1,6 @@
 package com.tohutohu.herdrcompanion.desktop
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.material3.AlertDialog
@@ -51,6 +52,7 @@ import com.tohutohu.herdrcompanion.ui.newsession.normalizedMode
 import com.tohutohu.herdrcompanion.ui.newsession.withKnownNames
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import java.nio.file.Path
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -89,6 +91,11 @@ fun DesktopNewSessionWindow(
 
     DisposableEffect(Unit) {
         onDispose { cleanupAttachments(attachments) }
+    }
+
+    fun addFiles(paths: List<Path>) {
+        val added = paths.map { it.toDesktopAttachment() }
+        attachments = attachments + added.filterNot { new -> attachments.any { it.id == new.id } }
     }
 
     suspend fun load(nextPath: String?) {
@@ -288,114 +295,116 @@ fun DesktopNewSessionWindow(
                 dismissButton = { TextButton(onClick = { answerTrust(false) }) { Text("Cancel") } },
             )
         }
-        Surface(Modifier.fillMaxSize()) {
-            NewSessionScreen(
-                state = state,
-                topContent = {
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text("Choose a working folder from Gateway or this computer.")
-                        TextButton(
-                            onClick = {
-                                DesktopFilePicker.pickDirectory(window)?.let { selected ->
-                                    scope.launch { load(selected.toString()) }
-                                }
-                            },
-                        ) { Text("Choose folder…") }
-                    }
-                },
-                initialPromptFocusRequester = promptFocusRequester,
-                showStartInSplit = true,
-                resolveAttachmentPreview = { id -> attachments.firstOrNull { it.id == id }?.previewModel },
-                onPasteImage = {
-                    val image = DesktopPlatformActions.pasteImage()
-                    if (image != null) {
-                        attachments = attachments + image.toDesktopAttachment(deleteWhenDone = true)
-                    }
-                    image != null
-                },
-                onAction = { action ->
-                    when (action) {
-                        NewSessionAction.Back -> onDismiss()
-                        is NewSessionAction.SetProvider -> {
-                            if (provider != action.provider) {
-                                provider = action.provider
-                                model = ""
-                                effort = ""
-                                mode = ""
-                            }
+        val dropTarget = rememberDesktopAttachmentDropTarget(enabled = !starting, onFilesDropped = ::addFiles)
+        Box(Modifier.fillMaxSize().then(dropTarget.modifier)) {
+            Surface(Modifier.fillMaxSize()) {
+                NewSessionScreen(
+                    state = state,
+                    topContent = {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("Choose a working folder from Gateway or this computer.")
+                            TextButton(
+                                onClick = {
+                                    DesktopFilePicker.pickDirectory(window)?.let { selected ->
+                                        scope.launch { load(selected.toString()) }
+                                    }
+                                },
+                            ) { Text("Choose folder…") }
                         }
-                        is NewSessionAction.SetModel -> {
-                            model = action.model
-                            if (effortsFor(catalog, action.model).none { it.id == effort }) effort = ""
+                    },
+                    initialPromptFocusRequester = promptFocusRequester,
+                    showStartInSplit = true,
+                    resolveAttachmentPreview = { id -> attachments.firstOrNull { it.id == id }?.previewModel },
+                    onPasteImage = {
+                        val image = DesktopPlatformActions.pasteImage()
+                        if (image != null) {
+                            attachments = attachments + image.toDesktopAttachment(deleteWhenDone = true)
                         }
-                        is NewSessionAction.SetEffort -> effort = action.effort
-                        is NewSessionAction.SetMode -> mode = normalizedMode(catalog, action.mode)
-                        is NewSessionAction.SetPrompt -> prompt = action.prompt
-                        NewSessionAction.PickImage, NewSessionAction.PickFile -> {
-                            val picked = DesktopFilePicker.pickFiles(window, imagesOnly = action == NewSessionAction.PickImage)
-                                .map { it.toDesktopAttachment() }
-                            attachments = attachments + picked.filterNot { new -> attachments.any { it.id == new.id } }
-                        }
-                        is NewSessionAction.RemoveAttachment -> {
-                            cleanupAttachments(attachments.filter { it.id == action.id })
-                            attachments = attachments.filterNot { it.id == action.id }
-                        }
-                        is NewSessionAction.SelectPreset -> {
-                            provider = action.preset.provider
-                            model = action.preset.model
-                            effort = action.preset.effort
-                            mode = action.preset.mode
-                        }
-                        is NewSessionAction.ReorderPresets -> {
-                            presets = presets.copy(presets = action.presets)
-                            DesktopPreferences.saveAgentPresets(presets)
-                        }
-                        is NewSessionAction.ReorderFavoriteDirectories -> {
-                            shortcuts = shortcuts.copy(favorites = action.paths)
-                            DesktopPreferences.saveDirectoryShortcuts(shortcuts)
-                        }
-                        NewSessionAction.ToggleFavorite -> {
-                            presets = presets.copy(presets = togglePreset(presets.presets, currentPreset))
-                            DesktopPreferences.saveAgentPresets(presets)
-                        }
-                        NewSessionAction.ToggleFavoriteDirectory -> {
-                            shortcuts = shortcuts.copy(favorites = toggleFavorite(shortcuts.favorites, path))
-                            DesktopPreferences.saveDirectoryShortcuts(shortcuts)
-                        }
-                        NewSessionAction.CustomizeAgent -> showPicker = true
-                        NewSessionAction.ToggleWorktree -> worktree = !worktree
-                        is NewSessionAction.OpenDirectory -> scope.launch { load(action.path) }
-                        NewSessionAction.OpenParent -> scope.launch { load(listing?.parent) }
-                        NewSessionAction.ShowMkdir -> showMkdir = true
-                        NewSessionAction.CancelMkdir -> showMkdir = false
-                        is NewSessionAction.CreateDirectory -> {
-                            showMkdir = false
-                            scope.launch {
-                                try {
-                                    load(api.createDirectory(path, action.name.trim()))
-                                } catch (cause: Exception) {
-                                    val mapped = cause.toDesktopGatewayError()
-                                    error = mapped.message
-                                    onError(mapped.message)
+                        image != null
+                    },
+                    onAction = { action ->
+                        when (action) {
+                            NewSessionAction.Back -> onDismiss()
+                            is NewSessionAction.SetProvider -> {
+                                if (provider != action.provider) {
+                                    provider = action.provider
+                                    model = ""
+                                    effort = ""
+                                    mode = ""
                                 }
                             }
-                        }
-                        NewSessionAction.DismissPicker -> showPicker = false
-                        NewSessionAction.StartAnyway -> {
-                            pendingStart?.let {
-                                pendingStart = null
-                                start(it.request, it.preset)
+                            is NewSessionAction.SetModel -> {
+                                model = action.model
+                                if (effortsFor(catalog, action.model).none { it.id == effort }) effort = ""
                             }
+                            is NewSessionAction.SetEffort -> effort = action.effort
+                            is NewSessionAction.SetMode -> mode = normalizedMode(catalog, action.mode)
+                            is NewSessionAction.SetPrompt -> prompt = action.prompt
+                            NewSessionAction.PickImage, NewSessionAction.PickFile -> {
+                                addFiles(DesktopFilePicker.pickFiles(window, imagesOnly = action == NewSessionAction.PickImage))
+                            }
+                            is NewSessionAction.RemoveAttachment -> {
+                                cleanupAttachments(attachments.filter { it.id == action.id })
+                                attachments = attachments.filterNot { it.id == action.id }
+                            }
+                            is NewSessionAction.SelectPreset -> {
+                                provider = action.preset.provider
+                                model = action.preset.model
+                                effort = action.preset.effort
+                                mode = action.preset.mode
+                            }
+                            is NewSessionAction.ReorderPresets -> {
+                                presets = presets.copy(presets = action.presets)
+                                DesktopPreferences.saveAgentPresets(presets)
+                            }
+                            is NewSessionAction.ReorderFavoriteDirectories -> {
+                                shortcuts = shortcuts.copy(favorites = action.paths)
+                                DesktopPreferences.saveDirectoryShortcuts(shortcuts)
+                            }
+                            NewSessionAction.ToggleFavorite -> {
+                                presets = presets.copy(presets = togglePreset(presets.presets, currentPreset))
+                                DesktopPreferences.saveAgentPresets(presets)
+                            }
+                            NewSessionAction.ToggleFavoriteDirectory -> {
+                                shortcuts = shortcuts.copy(favorites = toggleFavorite(shortcuts.favorites, path))
+                                DesktopPreferences.saveDirectoryShortcuts(shortcuts)
+                            }
+                            NewSessionAction.CustomizeAgent -> showPicker = true
+                            NewSessionAction.ToggleWorktree -> worktree = !worktree
+                            is NewSessionAction.OpenDirectory -> scope.launch { load(action.path) }
+                            NewSessionAction.OpenParent -> scope.launch { load(listing?.parent) }
+                            NewSessionAction.ShowMkdir -> showMkdir = true
+                            NewSessionAction.CancelMkdir -> showMkdir = false
+                            is NewSessionAction.CreateDirectory -> {
+                                showMkdir = false
+                                scope.launch {
+                                    try {
+                                        load(api.createDirectory(path, action.name.trim()))
+                                    } catch (cause: Exception) {
+                                        val mapped = cause.toDesktopGatewayError()
+                                        error = mapped.message
+                                        onError(mapped.message)
+                                    }
+                                }
+                            }
+                            NewSessionAction.DismissPicker -> showPicker = false
+                            NewSessionAction.StartAnyway -> {
+                                pendingStart?.let {
+                                    pendingStart = null
+                                    start(it.request, it.preset)
+                                }
+                            }
+                            NewSessionAction.ChangeFolder -> pendingStart = null
+                            NewSessionAction.Start -> requestStart(inSplit = false)
+                            NewSessionAction.StartInSplit -> requestStart(inSplit = true)
                         }
-                        NewSessionAction.ChangeFolder -> pendingStart = null
-                        NewSessionAction.Start -> requestStart(inSplit = false)
-                        NewSessionAction.StartInSplit -> requestStart(inSplit = true)
-                    }
-                },
-            )
+                    },
+                )
+            }
+            DesktopAttachmentDropOverlay(dropTarget.active)
         }
     }
 }

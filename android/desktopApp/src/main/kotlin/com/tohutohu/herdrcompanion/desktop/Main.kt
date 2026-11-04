@@ -53,6 +53,7 @@ import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -932,11 +933,14 @@ internal fun DesktopSessionContent(
     extraMenuItems: @Composable ColumnScope.(dismiss: () -> Unit) -> Unit,
 ) {
     val detail = state.detailFor(sessionId)
+    val sideConversations by state.sideQuestions.conversations.collectAsState()
+    // The same conditions that show the composer's attach button.
     val dropTarget = rememberDesktopAttachmentDropTarget(
-        enabled = detail?.session?.canSend == true,
+        enabled = detail != null && detail.session?.canSend == true && detail.attachmentsEnabled &&
+            !detail.answering && sideConversations[sessionId]?.open != true,
         onFilesDropped = { paths -> state.addAttachments(sessionId, paths) },
     )
-    Box(modifier) {
+    Box(modifier.then(dropTarget.modifier)) {
         if (detail == null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
@@ -948,8 +952,6 @@ internal fun DesktopSessionContent(
                 formatFileSize = ::formatFileSize,
                 formatTime = ::formatTime,
                 resolveAttachmentPreview = { id -> state.resolveAttachmentPreview(id) },
-                composerModifier = dropTarget.modifier,
-                attachmentDropActive = dropTarget.active,
                 onPasteImage = { state.addClipboardImage(sessionId) },
                 headerModifier = headerModifier,
                 extraMenuItems = extraMenuItems,
@@ -959,6 +961,7 @@ internal fun DesktopSessionContent(
                 onAction = { action -> handleDetailAction(state, api, window, sessionId, action) },
             )
         }
+        DesktopAttachmentDropOverlay(dropTarget.active)
     }
 }
 

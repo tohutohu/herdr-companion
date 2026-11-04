@@ -43,7 +43,6 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -128,8 +127,6 @@ fun SessionDetailScreen(
     /** When a turn ended, as a clock time (with the date unless it is today). */
     formatTime: (Long) -> String,
     resolveAttachmentPreview: (String) -> Any? = { null },
-    composerModifier: Modifier = Modifier,
-    attachmentDropActive: Boolean = false,
     onPasteImage: (() -> Boolean)? = null,
     /** Applied to the top bar, e.g. to make it a drag handle on the desktop. */
     headerModifier: Modifier = Modifier,
@@ -431,8 +428,6 @@ fun SessionDetailScreen(
                         sendOnEnter = state.sendOnEnter,
                         sendWithModifier = state.sendWithModifier,
                         resolveAttachmentPreview = resolveAttachmentPreview,
-                        composerModifier = composerModifier,
-                        attachmentDropActive = attachmentDropActive,
                         onPasteImage = onPasteImage,
                         onAskOnTheSide = if (sideAvailable && sideQuestions != null) {
                             { sideQuestions.setOpen(state.sessionId, true) }
@@ -658,8 +653,6 @@ private fun Composer(
     sendOnEnter: Boolean,
     sendWithModifier: Boolean,
     resolveAttachmentPreview: (String) -> Any?,
-    composerModifier: Modifier,
-    attachmentDropActive: Boolean,
     onPasteImage: (() -> Boolean)?,
     /** Opens the side conversation (btw) from the attach menu. */
     onAskOnTheSide: (() -> Unit)?,
@@ -681,19 +674,10 @@ private fun Composer(
     // No bar of its own: the field floats on the conversation's background as
     // one filled pill, with attach and send inside it.
     Surface(
-        modifier = composerModifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.background,
-        border = if (attachmentDropActive) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
     ) {
         Column(Modifier.navigationBarsPadding().imePadding().padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 10.dp)) {
-            if (attachmentDropActive) {
-                Text(
-                    "Drop files to attach",
-                    color = MaterialTheme.colorScheme.primary,
-                    style = MaterialTheme.typography.labelMedium,
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
-                )
-            }
             AttachmentPreviewRow(
                 attachments = attachments,
                 resolvePreview = resolveAttachmentPreview,
