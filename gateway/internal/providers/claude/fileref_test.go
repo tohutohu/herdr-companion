@@ -19,13 +19,7 @@ import (
 //	repo/sub/promo.js
 func fileRefWorkspace(t *testing.T) (repo, sub string) {
 	t.Helper()
-	// t.TempDir would put the Japanese test name into the path, which the
-	// file-reference pattern does not treat as part of a path.
-	repo, err := os.MkdirTemp("", "fileref")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(repo) })
+	repo = t.TempDir()
 	sub = filepath.Join(repo, "sub")
 	for _, p := range []string{filepath.Join(repo, "out", "video.mp4"), filepath.Join(sub, "promo.js")} {
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
