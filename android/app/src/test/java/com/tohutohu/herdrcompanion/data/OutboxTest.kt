@@ -21,6 +21,33 @@ class OutboxTest {
     private val before = listOf(msg("u1", "user", "続けて"), msg("a1", "assistant", "はい"))
 
     @Test
+    fun `英訳された履歴と日本語の送信待ちは一つのメッセージになる`() {
+        val p = pending("p1", "原文を見せて").copy(sentText = "Show the original text")
+        val english = msg("u2", "user", "Show the original text\n/tmp/uploads/note.txt")
+        assertEquals("u2", matchPending(listOf(p), before + english)["p1"]?.id)
+        assertTrue(stillPending(listOf(p), "claude:s", before + english, now = 1).isEmpty())
+        val japanese = english.copy(blocks = listOf(BlockDto("text", text = p.text, originalText = p.sentText)))
+        assertEquals("u2", matchPending(listOf(p), before + japanese)["p1"]?.id)
+    }
+
+    @Test
+    fun `英訳でも既存の履歴や他の送信待ちを重複して消さない`() {
+        val ps = listOf(pending("p1", "続けて"), pending("p2", "続けて")).map { it.copy(sentText = "Continue") }
+        val old = listOf(msg("u1", "user", "Continue"))
+        assertTrue(matchPending(ps, old).isEmpty())
+        assertEquals(setOf("p1"), matchPending(ps, old + msg("u2", "user", "Continue")).keys)
+        assertTrue(matchPending(ps, old + msg("a2", "assistant", "Continue")).isEmpty())
+    }
+
+    @Test
+    fun `英語のキュー待ちでも表示は一つで保留は履歴に入るまで残す`() {
+        val p = pending("p1", "続けて").copy(sentText = "Continue")
+        val queued = msg("queued:1", "user", "Continue", queued = true)
+        assertEquals("queued:1", matchPending(listOf(p), before + queued)["p1"]?.id)
+        assertEquals(listOf(p), stillPending(listOf(p), "claude:s", before + queued, now = 1))
+    }
+
+    @Test
     fun `送信前からある同じ文面のメッセージとは結び付けない`() {
         val p = pending("p1", "続けて")
         assertTrue(matchPending(listOf(p), before).isEmpty())

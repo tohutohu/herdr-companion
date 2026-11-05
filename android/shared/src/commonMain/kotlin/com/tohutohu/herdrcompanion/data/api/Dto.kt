@@ -190,6 +190,13 @@ data class InteractionResponseDto(
 data class SendMessageRequest(val text: String, val uploads: List<String> = emptyList(), val requestId: String? = null)
 
 @Serializable
+data class SendMessageResponse(
+    val ok: Boolean = true,
+    /** Exact prompt sent after translation; absent on older gateways or receipt replays. */
+    val sentText: String? = null,
+)
+
+@Serializable
 data class MessageDeliveryCapabilities(val idempotency: Boolean = false)
 
 @Serializable

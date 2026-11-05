@@ -19,6 +19,19 @@ import okhttp3.OkHttpClient
 
 class MessageDeliveryAttemptTest {
     @Test
+    fun `翻訳後の送信本文を保留メッセージの照合に使える`() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(capability(true))
+            server.enqueue(MockResponse(code = 202, body = """{"ok":true,"sentText":"Show the original text"}"""))
+            server.start()
+            val api = api(server)
+            val attempt = MessageDeliveryAttempt("translated-id", api)
+            attempt.send(api, "s", "原文を見せて") { emptyList() }
+            assertEquals("Show the original text", attempt.sentText)
+        }
+    }
+
+    @Test
     fun `受付応答が失われた再試行も同じ本文とrequestIdとuploadIdsを使う`() = runBlocking {
         MockWebServer().use { server ->
             val sent = CopyOnWriteArrayList<SendMessageRequest>()

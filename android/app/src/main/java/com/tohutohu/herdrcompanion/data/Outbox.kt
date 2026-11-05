@@ -38,6 +38,8 @@ data class PendingMessage(
     /** Kept after a successful upload so a retry does not upload again. */
     val uploadIds: List<String>? = null,
     val canRetry: Boolean = true,
+    /** Matches the provider's English echo even before its Japanese source is restored. */
+    val sentText: String? = null,
 )
 
 /**
@@ -122,7 +124,7 @@ class Outbox(
                 val attempt = attempts[localId] ?: return@withLock
                 try {
                     attempt.send(api, sessionId, p.text) { target -> p.attachments.map { upload(target, it) } }
-                    edit(localId) { it.copy(state = SendState.ACCEPTED, acceptedAt = System.currentTimeMillis(), uploadIds = attempt.uploadIds, canRetry = attempt.canRetry) }
+                    edit(localId) { it.copy(state = SendState.ACCEPTED, acceptedAt = System.currentTimeMillis(), uploadIds = attempt.uploadIds, canRetry = attempt.canRetry, sentText = attempt.sentText) }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -169,9 +171,13 @@ fun matchPending(pending: List<PendingMessage>, messages: List<Message>): Map<St
     val out = mutableMapOf<String, Message>()
     for (p in pending) {
         val want = normalize(p.text).take(MATCH_CHARS)
+        val sent = p.sentText?.let { normalize(it).take(MATCH_CHARS) }?.takeIf { it.isNotEmpty() }
         val hit = messages.firstOrNull { m ->
             m.role == "user" && m.id !in p.known && m.id !in taken &&
-                (want.isEmpty() || normalize(m.text()).contains(want))
+                (want.isEmpty() || listOf(m.text(), m.text(original = true)).any {
+                    val text = normalize(it)
+                    text.contains(want) || (sent != null && text.contains(sent))
+                })
         } ?: continue
         taken += hit.id
         out[p.localId] = hit
@@ -179,6 +185,7 @@ fun matchPending(pending: List<PendingMessage>, messages: List<Message>): Map<St
     return out
 }
 
-private fun Message.text(): String = blocks.filter { it.type == "text" }.joinToString(" ") { it.text.orEmpty() }
+private fun Message.text(original: Boolean = false): String = blocks.filter { it.type == "text" }
+    .joinToString(" ") { if (original) it.originalText ?: it.text.orEmpty() else it.text.orEmpty() }
 
 private fun normalize(s: String): String = s.replace(Regex("\\s+"), " ").trim()

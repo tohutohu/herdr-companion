@@ -20,6 +20,9 @@ class MessageDeliveryAttempt(val requestId: String, api: GatewayApi) {
     var uploadIds: List<String>? = null
         private set
 
+    var sentText: String? = null
+        private set
+
     val canRetry: Boolean get() = !stopped && (!attempted || receipts)
 
     /** Callers serialize a session and admit only one in-flight attempt per message. */
@@ -41,7 +44,8 @@ class MessageDeliveryAttempt(val requestId: String, api: GatewayApi) {
         attempted = true
         receipts = supportsReceipts
         try {
-            pinnedApi.sendMessage(sessionId, text, ids, requestId.takeIf { supportsReceipts })
+            val result = pinnedApi.sendMessage(sessionId, text, ids, requestId.takeIf { supportsReceipts })
+            sentText = result.sentText ?: sentText
         } catch (cancel: CancellationException) {
             throw cancel
         } catch (error: Exception) {

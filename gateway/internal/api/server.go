@@ -487,7 +487,13 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("unarchive after send failed", "session_id", id, "error", err)
 		}
 	}
-	writeJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
+	response := map[string]any{"ok": true}
+	if in.Text != req.Text {
+		// Let the sending client reconcile its Japanese pending bubble with
+		// the provider's English echo even before display enrichment arrives.
+		response["sentText"] = in.Text
+	}
+	writeJSON(w, http.StatusAccepted, response)
 }
 
 func (s *Server) respond(w http.ResponseWriter, r *http.Request) {

@@ -142,10 +142,17 @@ func Test翻訳失敗後は同じ送信IDで再試行でき成功後は再翻訳
 		t.Fatal(response.StatusCode, p.sent)
 	}
 	tr.fail = false
-	for range 2 {
-		response, _ = do(t, ts, token, http.MethodPost, "/v1/sessions/fake:s1/messages", payload, "application/json")
+	for i := range 2 {
+		var body []byte
+		response, body = do(t, ts, token, http.MethodPost, "/v1/sessions/fake:s1/messages", payload, "application/json")
 		if response.StatusCode != 202 {
 			t.Fatal(response.StatusCode)
+		}
+		if i == 0 {
+			var result struct{ SentText string }
+			if json.Unmarshal(body, &result) != nil || result.SentText != "translated: 修正して" {
+				t.Fatal(string(body))
+			}
 		}
 	}
 	if len(p.sent) != 1 || p.sent[0].Text != "translated: 修正して" || tr.calls != 2 {

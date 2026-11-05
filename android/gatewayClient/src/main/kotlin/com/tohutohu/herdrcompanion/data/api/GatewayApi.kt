@@ -173,7 +173,7 @@ class GatewayApi(
         if (error.code == 404) false else throw error
     }
 
-    suspend fun sendMessage(id: String, text: String, uploads: List<String>, requestId: String? = null) {
+    suspend fun sendMessage(id: String, text: String, uploads: List<String>, requestId: String? = null): SendMessageResponse {
         val body = json.encodeToString(SendMessageRequest(text, uploads, requestId)).toRequestBody(jsonType)
         val once = object : RequestBody() {
             override fun contentType() = body.contentType()
@@ -186,7 +186,9 @@ class GatewayApi(
         val req = request(url("v1", "sessions", id, "messages")).post(once).build()
         // Local translation may precede the Gateway's two-minute send limit.
         val sending = http.newBuilder().readTimeout(220, TimeUnit.SECONDS).callTimeout(230, TimeUnit.SECONDS).build()
-        withContext(Dispatchers.IO) { sending.newCall(req).awaitBody { bodyOrThrow(it) } }
+        return withContext(Dispatchers.IO) {
+            sending.newCall(req).awaitBody { json.decodeFromString<SendMessageResponse>(bodyOrThrow(it)) }
+        }
     }
 
     suspend fun respond(id: String, response: InteractionResponseDto) {
