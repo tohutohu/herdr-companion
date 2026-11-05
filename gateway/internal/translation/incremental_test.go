@@ -3,11 +3,58 @@ package translation
 import (
 	"context"
 	"os"
+	"reflect"
 	"testing"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/notifications"
 )
+
+func Testセッション一覧のプレビューは設定に従って非同期翻訳しキャッシュを共有する(t *testing.T) {
+	s, calls := lifecycleService(t)
+	if err := s.Start("0.8b"); err != nil {
+		t.Fatal(err)
+	}
+	on, off := true, false
+	original := model.Session{ID: "session", LastMessage: "Build succeeded."}
+	if got := s.Session(original); !reflect.DeepEqual(got, original) {
+		t.Fatal("global off ignored", got)
+	}
+	if _, err := os.Stat(calls); !os.IsNotExist(err) {
+		t.Fatal("disabled preview queued inference", err)
+	}
+	waitFor(t, func() bool { return s.Session(original, &on).LastMessage == "ja:Build succeeded." })
+	raw := []model.Message{{Role: model.RoleAssistant, Blocks: []model.Block{model.ReportBlock(original.LastMessage)}}}
+	if got := s.Messages(original.ID, raw, false, &on); got[0].Blocks[0].Text != "ja:Build succeeded." {
+		t.Fatal("preview cache not shared with conversation", got)
+	}
+	if err := s.Configure(false, true); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Session(original); got.LastMessage != "ja:Build succeeded." {
+		t.Fatal("global on ignored", got)
+	}
+	if got := s.Session(original, &off); !reflect.DeepEqual(got, original) {
+		t.Fatal("session off ignored", got)
+	}
+	if err := s.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Session(original, &on); got.LastMessage != "ja:Build succeeded." {
+		t.Fatal("cached preview lost while stopped", got)
+	}
+	for _, preview := range []string{"Uncached preview", "完了しました。", ""} {
+		if got := s.Session(model.Session{LastMessage: preview}, &on); got.LastMessage != preview {
+			t.Fatal("unavailable translation must preserve preview", got)
+		}
+	}
+	if original.LastMessage != "Build succeeded." {
+		t.Fatal("provider preview mutated", original)
+	}
+	if data, _ := os.ReadFile(calls); string(data) != "x" {
+		t.Fatalf("duplicate preview inference: %s", data)
+	}
+}
 
 func Testターンの途中でも確定メッセージを翻訳しストリームの断片は翻訳しない(t *testing.T) {
 	s, calls := lifecycleService(t)

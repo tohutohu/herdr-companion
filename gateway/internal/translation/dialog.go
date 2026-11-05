@@ -94,7 +94,7 @@ func (s *Service) dialogLocked(ia *model.Interaction) *model.Interaction {
 	return &copy
 }
 
-// Session returns a display copy; provider titles and notification state stay unchanged.
+// Session returns a display copy; provider titles, previews and notification state stay unchanged.
 func (s *Service) Session(session model.Session, mode ...*bool) model.Session {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -105,5 +105,6 @@ func (s *Service) Session(session model.Session, mode ...*bool) model.Session {
 	if translated != session.Title {
 		session.OriginalTitle, session.Title = session.Title, translated
 	}
+	session.LastMessage = s.cachedDisplayLocked(session.LastMessage, false)
 	return session
 }
