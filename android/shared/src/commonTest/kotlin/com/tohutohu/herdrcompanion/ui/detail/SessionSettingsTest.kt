@@ -14,9 +14,10 @@ class SessionSettingsTest {
         SessionDto(id = "$provider:1", provider = provider, status = status, updatedAt = "").toUiModel()
 
     @Test
-    fun `稼働中のClaudeとCodexだけがモデルとエフォートを変更できる`() {
+    fun `対応エージェントの稼働中セッションはモデルとエフォートを変更できる`() {
         assertTrue(settingsChangeable(session("claude")))
         assertTrue(settingsChangeable(session("codex")))
+        assertTrue(settingsChangeable(session("dsh")))
         assertFalse(settingsChangeable(session("unknown")))
         assertFalse(settingsChangeable(session("codex", status = "offline")))
     }

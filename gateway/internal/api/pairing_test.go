@@ -20,6 +20,7 @@ func Testペアリングは認証付き発行と一度だけの交換(t *testing
 	}
 	store.Update(func(c *config.Config) {
 		c.JevAPIKey = "private-secret"
+		c.DSHAPIKey = "private-secret-dsh"
 		c.FirebaseAndroid = &config.FirebaseAndroid{ProjectID: "example"}
 	})
 	s := &Server{Config: store}

@@ -20,7 +20,7 @@ import com.tohutohu.herdrcompanion.ui.newsession.OptionPicker
 import com.tohutohu.herdrcompanion.ui.newsession.effortsFor
 
 /** Agents whose sessions can be reconfigured while they run. */
-private val CONFIGURABLE_PROVIDERS = setOf("claude", "codex")
+private val CONFIGURABLE_PROVIDERS = setOf("claude", "codex", "dsh")
 
 /** Whether the details panel offers model and effort pickers for [session]. */
 fun settingsChangeable(session: SessionUiModel): Boolean =

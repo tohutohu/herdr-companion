@@ -30,6 +30,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/claude"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/codex"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/dsh"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/resident"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/runtime"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/sessions"
@@ -145,6 +146,11 @@ func serve(args []string) error {
 
 	claudeProvider := claude.New(cfg.ClaudeConfigDir, sink)
 	codexProvider := codex.New(cfg.CodexBinary, sink)
+	dshProvider, err := dsh.New(dsh.Config{Binary: cfg.DSHBinary, Home: cfg.DSHHome, Model: cfg.DSHModel, APIKey: cfg.DSHAPIKey}, filepath.Join(config.StateDir(), "dsh"), sink)
+	if err != nil {
+		return fmt.Errorf("open DSH sessions: %w", err)
+	}
+	defer dshProvider.Close()
 	claudeProvider.SetCacheBytes(int64(cfg.HistoryCacheMB) << 20)
 	// The Gateway's own skills, for the agents it starts. Without them the
 	// agents still run.
@@ -157,14 +163,14 @@ func serve(args []string) error {
 	claudeProvider.SetDirect(claude.DirectConfig{Sidecar: sidecarPath(cfg.ClaudeSidecar), Claude: claudePath(cfg.ClaudeBinary), AllowAPIKey: cfg.ClaudeAllowAPIKey, Plugin: plugin})
 	codexProvider.SetCacheBytes(cfg.HistoryCacheMB << 20)
 	go codexProvider.Run(ctx)
-	svc := sessions.New(time.Duration(cfg.OfflineSessionDays)*24*time.Hour, claudeProvider, codexProvider)
+	svc := sessions.New(time.Duration(cfg.OfflineSessionDays)*24*time.Hour, claudeProvider, codexProvider, dshProvider)
 	archived, err := archive.Open(filepath.Join(config.StateDir(), "archive.json"))
 	if err != nil {
 		return err
 	}
 	svc.Archive = archived
 	offlineWindow := time.Duration(cfg.OfflineSessionDays) * 24 * time.Hour
-	direct, err := runtime.New(filepath.Join(config.StateDir(), "direct-sessions.json"), offlineWindow, claudeProvider, codexProvider)
+	direct, err := runtime.New(filepath.Join(config.StateDir(), "direct-sessions.json"), offlineWindow, claudeProvider, codexProvider, dshProvider)
 	if err != nil {
 		return err
 	}
@@ -178,14 +184,14 @@ func serve(args []string) error {
 	if len(roots) == 0 {
 		roots = launcher.DefaultRoots()
 	}
-	launch := &launcher.Launcher{Roots: roots, Providers: []providers.Provider{claudeProvider, codexProvider},
+	launch := &launcher.Launcher{Roots: roots, Providers: []providers.Provider{claudeProvider, codexProvider, dshProvider},
 		Direct: direct, WorktreeDir: filepath.Join(config.StateDir(), "worktrees")}
 
 	jevKey := os.Getenv("TYPESAFE_API_KEY")
 	if jevKey == "" {
 		jevKey = cfg.JevAPIKey
 	}
-	dirCheck := &directorycheck.Checker{APIKey: jevKey, Providers: []directorycheck.History{claudeProvider, codexProvider}}
+	dirCheck := &directorycheck.Checker{APIKey: jevKey, Providers: []directorycheck.History{claudeProvider, codexProvider, dshProvider}}
 
 	limits := usage.New(cfg.UsageCommand, time.Duration(cfg.UsageRefreshMinutes)*time.Minute, codexProvider)
 	go limits.Run(ctx)
@@ -236,6 +242,7 @@ func serve(args []string) error {
 		// processes (the Codex app-server ends with ctx).
 		direct.Shutdown()
 		claudeProvider.Close()
+		dshProvider.Close()
 		// Resident runs cut off here are decided on the next start.
 		<-residentDone
 		residents.Shutdown(15 * time.Second)

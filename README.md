@@ -2,9 +2,9 @@
 
 Japanese version: [README.ja.md](README.ja.md)
 
-Herdr Companion lets you start, inspect and control Claude Code and Codex sessions on your Mac from Android (and from a Compose Desktop UI and the `hc` CLI for other agents). Keep an AI agent running on the Mac while checking its progress, answering questions, switching its model, and sending the next instruction from your phone.
+Herdr Companion lets you start, inspect and control Claude Code, Codex and DeepSeek Harness sessions on your Mac from Android (and from a Compose Desktop UI and the `hc` CLI for other agents). Keep an AI agent running on the Mac while checking its progress, answering questions, switching its model, and sending the next instruction from your phone.
 
-The Gateway runs Claude Code (through the official Claude Agent SDK) and Codex (through its own private app-server) itself, so **Herdr is not required**. Since 2.0 the Gateway no longer integrates with [Herdr](https://herdr.dev) at all, and OpenCode and Devin are no longer supported. You can still use Herdr on its own, and agents can still call `herdr` from their own tools. Upgrading from 1.x: see [Upgrading from 1.x](#upgrading-from-1x).
+The Gateway runs Claude Code (through the official Claude Agent SDK), Codex (through its own private app-server), and DeepSeek Harness (through its SDK stdio profile) itself, so **Herdr is not required**. Since 2.0 the Gateway no longer integrates with [Herdr](https://herdr.dev) at all, and OpenCode and Devin are no longer supported. You can still use Herdr on its own, and agents can still call `herdr` from their own tools. Upgrading from 1.x: see [Upgrading from 1.x](#upgrading-from-1x).
 
 ## Why this app is useful
 
@@ -32,12 +32,13 @@ Android fetches the conversation in the background → saves it to Room → show
 
 Firebase project and service-account setup is, honestly, the most cumbersome part of this project. The rest of the app still works without notifications: you can browse, send messages, answer interactions, and start sessions. When notifications are enabled, the recommended menu-bar app only requires a one-time setup, and shared APKs do not need to be rebuilt.
 
-The Gateway runs on the Mac and does not keep a separate cloud conversation database. It reads each agent's own data (Claude Code's transcripts, Codex's threads) and caches only what Android needs locally.
+The Gateway runs on the Mac and does not keep a separate cloud conversation database. It reads Claude Code's transcripts and Codex's threads. For DeepSeek Harness, it keeps a local display journal alongside DSH's native model history.
 
 ```text
 Android / Desktop / hc ──(Tailscale recommended / trusted LAN / HTTPS tunnel, HTTP(S) + Bearer)──▶ Herdr Companion Gateway (Mac)
     ├─▶ Claude Agent SDK sidecar ──▶ Claude Code
-    └─▶ codex app-server (stdio) ──▶ Codex
+    ├─▶ codex app-server (stdio) ──▶ Codex
+    └─▶ dsh --profile sdk (stdio) ──▶ DeepSeek Harness
 ```
 
 See [docs/architecture.md](docs/architecture.md) for the detailed design.
@@ -76,6 +77,8 @@ docs/      architecture and macOS release documentation
 ## 1. Agents
 
 Claude Code and Codex need nothing besides being installed and logged in: the Gateway runs them itself. Claude Code sessions use your existing login and subscription (the Gateway never switches to per-token API billing: `ANTHROPIC_API_KEY` is not passed to Claude Code unless you set `claudeAllowApiKey`, and a session that would bill an API key is refused with the reason), and load the same settings as the CLI: CLAUDE.md, `.claude/`, skills, hooks, MCP servers, agents and permission rules. Codex runs in a `codex app-server` the Gateway starts for itself. Their history stays in Claude Code's and Codex's own local storage.
+
+DeepSeek Harness is available for ordinary sessions after installing the supported SDK runtime and configuring an API key. See [DeepSeek Harness setup and limitations](docs/deepseek-harness.md).
 
 **Agent updates on Mac** in the app's Settings shows the installed Claude Code and Codex versions and runs `claude update` / `codex update` with **Check and update**.
 
@@ -145,7 +148,7 @@ The Gateway refreshes and caches usage every five minutes by default, and the ap
 
 ### Starting sessions from the app
 
-From **New session**, choose Claude Code or Codex, a working directory under workspaceRoots (browse or create one), and the first prompt.
+From **New session**, choose Claude Code, Codex or DeepSeek Harness, a working directory under workspaceRoots (browse or create one), and the first prompt.
 
 The Gateway starts the agent itself and the session id is known immediately. If the agent was never trusted in that folder, the app asks first (project hooks and MCP servers run code); **Trust** starts it, **Cancel** does not. With **worktree**, the Gateway creates a git worktree on a new `worktree/<name>` branch; archiving the session removes it unless it has uncommitted or untracked changes (the branch is kept).
 

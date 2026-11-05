@@ -333,7 +333,7 @@ type startResult struct {
 
 func (a *app) cmdStart(args []string) error {
 	fs := flag.NewFlagSet("start", flag.ContinueOnError)
-	provider := fs.String("provider", "claude", "claude or codex")
+	provider := fs.String("provider", "claude", "claude, codex or dsh")
 	cwd := fs.String("cwd", "", "working directory (default: current directory)")
 	modelID := fs.String("model", "", "model id (see the app or GET /v1/models)")
 	effort := fs.String("effort", "", "reasoning effort id")

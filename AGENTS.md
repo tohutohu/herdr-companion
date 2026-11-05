@@ -2,7 +2,9 @@
 
 Herdr Companion: Go gateway on the Mac (`gateway/`) + native Android app (`android/`).
 The gateway runs Claude Code (Agent SDK sidecar, `gateway/claude-sidecar/`) and Codex (its own
-`codex app-server`) directly. Since 2.0 these are the only agents and the only way sessions run:
+`codex app-server`) directly. DeepSeek Harness ordinary sessions use a dedicated `dsh --profile sdk` process per session
+(`gateway/internal/providers/dsh`, setup and limits: `docs/deepseek-harness.md`).
+These direct runtimes are the only way sessions run:
 Herdr panes, OpenCode and Devin are no longer supported (agents may still use Herdr as a tool).
 Design: `docs/architecture.md`. Setup for humans: `README.md`.
 

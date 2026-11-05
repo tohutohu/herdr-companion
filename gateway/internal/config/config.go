@@ -36,6 +36,11 @@ type Config struct {
 
 	ClaudeConfigDir string `json:"claudeConfigDir,omitempty"`
 	CodexBinary     string `json:"codexBinary,omitempty"`
+	// DeepSeek Harness uses a private SDK profile; see docs/deepseek-harness.md.
+	DSHBinary string `json:"dshBinary,omitempty"`
+	DSHHome   string `json:"dshHome,omitempty"`
+	DSHModel  string `json:"dshModel,omitempty"`
+	DSHAPIKey string `json:"dshApiKey,omitempty"`
 	// ClaudeBinary is the Claude Code CLI that directly managed sessions run
 	// (default: claude on PATH, then ~/.local/bin/claude).
 	ClaudeBinary string `json:"claudeBinary,omitempty"`

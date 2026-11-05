@@ -371,7 +371,7 @@ USAGE
 FLAGS
   --cwd DIR      working directory on the Gateway's Mac (default: current directory; required
                  when hc talks to a Gateway on another machine)
-  --provider P   claude (default) or codex
+  --provider P   claude (default), codex or dsh
   --model M      model id (as in the app); --effort E reasoning effort id
   --mode M       start mode id, e.g. plan
   --worktree     start in a new git worktree of DIR

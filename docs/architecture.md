@@ -1,7 +1,7 @@
 # Architecture
 
 Herdr Companion lets an Android phone (and the Compose Desktop UI and the `hc` CLI) start,
-follow and answer Claude Code and Codex sessions on a Mac. The Gateway runs every session
+follow and answer Claude Code, Codex and DeepSeek Harness sessions on a Mac. The Gateway runs every session
 itself; it does not need or integrate with [Herdr](https://herdr.dev), which stays usable on its
 own (agents can still call `herdr` from their tools).
 
@@ -13,7 +13,8 @@ Herdr Companion Gateway (Go, on the Mac)
    ├─ Session manager (internal/sessions + internal/runtime)
    │    ├─ Claude ── herdr-claude-sidecar (Bun, Claude Agent SDK, stdio JSON lines)
    │    │            └─ the user's `claude` CLI, one query() per session
-   │    └─ Codex ─── the gateway's own `codex app-server` (stdio JSON-RPC)
+   │    ├─ Codex ─── the gateway's own `codex app-server` (stdio JSON-RPC)
+   │    └─ DSH ───── one `dsh --profile sdk` process per session (stdio JSON-RPC)
    ├─ Resident tasks (internal/resident) ── resident.db (SQLite)
    │    ├─ Claude ── a herdr-claude-sidecar per run (outputFormat; transcript kept for promotion)
    │    └─ Codex ─── a codex app-server per run (saved thread, outputSchema)
@@ -62,7 +63,7 @@ it in the gateway under the same id.
 
 ## Identity
 
-Sessions are `claude:<session-id>` and `codex:<thread-id>`. A Claude session gets its id from
+Sessions are `claude:<session-id>`, `codex:<thread-id>` and `dsh:<session-id>`. A Claude session gets its id from
 the gateway before it starts (`sessionId` option, a UUID), a Codex thread from `thread/start`,
 so a start returns the id at once. Sessions started elsewhere (a terminal, or a Herdr pane in
 1.x) carry the same ids, so they are listed as offline and resume under that id.
@@ -207,7 +208,14 @@ any other recently updated session is `offline`.
 
 `internal/providers.Provider` is the whole abstraction:
 `Summary`, `Recent`, `Messages`, `Image`, `Send`, `Respond`, plus `DirectRuntime` for the
-processes. Claude Code and Codex are the only providers.
+processes. Claude Code, Codex and DeepSeek Harness implement this boundary.
+
+DeepSeek Harness uses one `dsh --profile sdk` process per ordinary session,
+with newline-delimited JSON-RPC. Its SDK has no per-session cancel method, so
+interrupt disposes that process and the next send resumes the same native ID.
+The Gateway keeps a private display journal; native DSH persistence supplies
+model history. See [DeepSeek Harness](deepseek-harness.md) for version,
+configuration and feature boundaries.
 
 ### Claude Code
 
