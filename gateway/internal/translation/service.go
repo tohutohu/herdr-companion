@@ -54,7 +54,8 @@ type sourcePrompt struct {
 }
 
 type cached struct {
-	text  string
+	Text  string `json:"text,omitempty"`
+	Used  uint64 `json:"used,omitempty"`
 	retry time.Time
 }
 type job struct{ key, text string }
@@ -62,6 +63,7 @@ type Service struct {
 	dir        string
 	ctx        context.Context
 	mu         sync.Mutex
+	timingMu   sync.Mutex
 	life       sync.Mutex
 	status     Status
 	cancel     context.CancelFunc
@@ -70,6 +72,7 @@ type Service struct {
 	gate       chan struct{}
 	cache      map[string]cached
 	cacheBytes int
+	cacheClock uint64
 	pending    map[string]bool
 	queue      chan job
 	priority   chan job
@@ -86,6 +89,7 @@ func New(ctx context.Context, dir string) *Service {
 	if revisions[s.status.Model] == "" {
 		s.status.Model = "0.8b"
 	}
+	s.loadCache()
 	go s.runQueue()
 	if s.status.AutoStart && s.status.Supported {
 		_ = s.Start(s.status.Model)
@@ -127,6 +131,11 @@ func (s *Service) Start(size string) error {
 	}
 	s.life.Lock()
 	defer s.life.Unlock()
+	return s.startLocked(size)
+}
+
+// Caller holds life so concurrent recovery requests never restart each other.
+func (s *Service) startLocked(size string) error {
 	s.stop(false)
 	s.mu.Lock()
 	s.status.Model = size
@@ -140,11 +149,10 @@ func (s *Service) Start(size string) error {
 	s.done = make(chan struct{})
 	done := s.done
 	s.status.State, s.status.Detail, s.status.Error = "starting", "準備中…", ""
-	s.cache = map[string]cached{}
-	s.cacheBytes = 0
 	s.mu.Unlock()
 	go func() {
 		defer close(done)
+		started := time.Now()
 		err := s.install(ctx, size)
 		var w *worker
 		if err == nil {
@@ -157,6 +165,7 @@ func (s *Service) Start(size string) error {
 				s.status.State, s.status.Error = "failed", err.Error()
 			}
 			s.mu.Unlock()
+			s.recordTiming(timing{Event: "worker_start", Model: size, ElapsedMS: milliseconds(time.Since(started)), Outcome: timingOutcome(err)})
 			return
 		}
 		if ctx.Err() != nil {
@@ -166,14 +175,21 @@ func (s *Service) Start(size string) error {
 		s.worker = w
 		s.status.State, s.status.Detail = "ready", "翻訳可能"
 		s.mu.Unlock()
+		s.recordTiming(timing{Event: "worker_start", Model: size, ElapsedMS: milliseconds(time.Since(started)), Outcome: "ok"})
+		readyAt := time.Now()
 		err = w.cmd.Wait()
+		outcome := "error"
+		if ctx.Err() != nil {
+			outcome = "stopped"
+		}
+		s.recordTiming(timing{Event: "worker_exit", Model: size, ElapsedMS: milliseconds(time.Since(readyAt)), Outcome: outcome, Exit: w.cmd.ProcessState.String()})
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		if s.worker == w {
 			s.worker = nil
 		}
 		if ctx.Err() == nil {
-			s.status.State = "failed"
+			s.status.State, s.status.Detail = "failed", "翻訳プロセスが終了しました"
 			s.status.Error = fmt.Sprintf("翻訳プロセスが終了しました: %v", err)
 		}
 	}()
@@ -325,62 +341,160 @@ func (s *Service) Input(ctx context.Context, sessionID, text string, mode ...*bo
 	return translated, nil
 }
 
-func (s *Service) Translate(ctx context.Context, text, target string) (string, error) {
+// readyWorker recovers unexpected exits only when automatic startup is enabled.
+// An explicit Stop remains stopped; a request during startup waits for readiness.
+func (s *Service) readyWorker(ctx context.Context) (*worker, string, error) {
+	s.life.Lock()
+	st := s.Status()
+	if st.Supported && st.AutoStart && (st.State == "failed" || st.State == "stopped") {
+		if err := s.startLocked(st.Model); err != nil {
+			s.life.Unlock()
+			return nil, "", err
+		}
+	}
+	s.life.Unlock()
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		s.mu.Lock()
+		w, st := s.worker, s.status
+		s.mu.Unlock()
+		if st.State == "ready" && w != nil {
+			return w, st.Model, nil
+		}
+		if st.State != "starting" {
+			if st.Error != "" && st.State == "failed" {
+				return nil, "", errors.New(st.Error)
+			}
+			return nil, "", errors.New("PLaMo翻訳が停止中です。Gatewayメニューから起動するか、プロンプト翻訳を無効にしてください")
+		}
+		select {
+		case <-ctx.Done():
+			return nil, "", ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func (s *Service) Translate(ctx context.Context, text, target string) (translated string, err error) {
+	started := time.Now()
+	metric := timing{Event: "request", Model: s.Status().Model, Target: target, InputBytes: len(text)}
+	defer func() {
+		metric.ElapsedMS = milliseconds(time.Since(started))
+		metric.OutputBytes, metric.Outcome = len(translated), timingOutcome(err)
+		s.recordTiming(metric)
+	}()
 	if len(text) > 128<<10 {
 		return "", errors.New("翻訳対象は128 KiB以下に分割してください")
 	}
+	if target != "en" && target != "ja" {
+		return "", errors.New("unsupported target")
+	}
+	// Cache hits do not need a loaded model, even after a Gateway restart.
+	s.mu.Lock()
+	value, ok := s.cacheGetLocked(translationKey(s.status.Model, target, text))
+	s.mu.Unlock()
+	if ok {
+		metric.CacheHit = true
+		return value, nil
+	}
+	waitStarted := time.Now()
 	select {
 	case s.gate <- struct{}{}:
-		defer func() { <-s.gate }()
 	case <-ctx.Done():
+		metric.QueueMS = milliseconds(time.Since(waitStarted))
 		return "", ctx.Err()
 	}
+	metric.QueueMS = milliseconds(time.Since(waitStarted))
+	// A duplicate may have completed while this request waited for the worker.
 	s.mu.Lock()
-	w := s.worker
-	ready := s.status.State == "ready"
+	value, ok = s.cacheGetLocked(translationKey(s.status.Model, target, text))
 	s.mu.Unlock()
-	if w == nil || !ready {
-		return "", errors.New("PLaMo翻訳が停止中です。Gatewayメニューから起動するか、プロンプト翻訳を無効にしてください")
+	if ok {
+		metric.CacheHit = true
+		<-s.gate
+		return value, nil
 	}
-	req, _ := json.Marshal(map[string]string{"text": text, "target": target})
-	result := make(chan struct {
+	if err := ctx.Err(); err != nil {
+		<-s.gate
+		return "", err
+	}
+	type result struct {
 		text string
 		err  error
-	}, 1)
+	}
+	resultCh := make(chan result, 1)
 	go func() {
-		_, err := w.in.Write(append(req, '\n'))
-		var reply struct {
-			Text  string
-			Error string
+		defer func() { <-s.gate }()
+		// Finish and cache work after a phone disconnects. Only our own inference
+		// deadline or explicit Stop may kill the worker and interrupt its protocol.
+		workCtx, cancel := context.WithTimeout(s.ctx, 2*time.Minute)
+		defer cancel()
+		workStarted := time.Now()
+		workMetric := timing{Event: "inference", Model: s.Status().Model, Target: target, InputBytes: len(text)}
+		w, size, err := s.readyWorker(workCtx)
+		workMetric.StartupMS = milliseconds(time.Since(workStarted))
+		if err != nil {
+			workMetric.ElapsedMS = milliseconds(time.Since(workStarted))
+			workMetric.Outcome = timingOutcome(err)
+			s.recordTiming(workMetric)
+			resultCh <- result{err: err}
+			return
 		}
-		if err == nil {
-			var line []byte
-			line, err = w.out.ReadBytes('\n')
+		workMetric.Model = size
+		inferenceStarted := time.Now()
+		replyCh := make(chan result, 1)
+		go func() {
+			req, _ := json.Marshal(map[string]string{"text": text, "target": target})
+			_, err := w.in.Write(append(req, '\n'))
+			var reply struct{ Text, Error string }
 			if err == nil {
-				err = json.Unmarshal(line, &reply)
+				var line []byte
+				line, err = w.out.ReadBytes('\n')
+				if err == nil {
+					err = json.Unmarshal(line, &reply)
+				}
 			}
+			if reply.Error != "" {
+				err = errors.New(reply.Error)
+			}
+			if err == nil && reply.Text == "" {
+				err = errors.New("empty translation")
+			}
+			replyCh <- result{reply.Text, err}
+		}()
+		select {
+		case r := <-replyCh:
+			workMetric.InferenceMS = milliseconds(time.Since(inferenceStarted))
+			workMetric.ElapsedMS = milliseconds(time.Since(workStarted))
+			workMetric.OutputBytes, workMetric.Outcome = len(r.text), timingOutcome(r.err)
+			s.recordTiming(workMetric)
+			if r.err == nil {
+				s.mu.Lock()
+				s.cachePutLocked(translationKey(size, target, text), r.text)
+				s.mu.Unlock()
+			}
+			resultCh <- r
+		case <-workCtx.Done():
+			_ = w.cmd.Cancel()
+			// Drain the old reader before letting another call use the protocol.
+			<-replyCh
+			workMetric.InferenceMS = milliseconds(time.Since(inferenceStarted))
+			workMetric.ElapsedMS = milliseconds(time.Since(workStarted))
+			workMetric.Outcome = timingOutcome(workCtx.Err())
+			s.recordTiming(workMetric)
+			resultCh <- result{err: workCtx.Err()}
 		}
-		if reply.Error != "" {
-			err = errors.New(reply.Error)
-		}
-		if err == nil && reply.Text == "" {
-			err = errors.New("empty translation")
-		}
-		result <- struct {
-			text string
-			err  error
-		}{reply.Text, err}
 	}()
 	select {
-	case r := <-result:
+	case r := <-resultCh:
 		return r.text, r.err
 	case <-ctx.Done():
-		_ = w.cmd.Cancel()
 		return "", ctx.Err()
 	}
 }
-func cacheKey(size, text string) string {
-	sum := sha256.Sum256([]byte(size + "\x00" + text))
+func cacheKey(scope, text string) string {
+	sum := sha256.Sum256([]byte(scope + "\x00" + text))
 	return hex.EncodeToString(sum[:])
 }
 
@@ -423,7 +537,7 @@ func (s *Service) Messages(sessionID string, msgs []model.Message, complete bool
 		}
 	}
 
-	if !modeEnabled(s.status.Output, mode) || s.status.State != "ready" {
+	if !modeEnabled(s.status.Output, mode) {
 		return out
 	}
 	for i := range out {
@@ -449,13 +563,13 @@ func (s *Service) Messages(sessionID string, msgs []model.Message, complete bool
 			if count > 128 {
 				continue
 			}
-			key := cacheKey(s.status.Model, block.Text)
+			key := translationKey(s.status.Model, "ja", block.Text)
 			v, ok := s.cache[key]
-			if ok && v.text != "" {
-				block.OriginalText, block.Text = block.Text, v.text
+			if translated, hit := s.cacheGetLocked(key); hit {
+				block.OriginalText, block.Text = block.Text, translated
 				continue
 			}
-			if !complete || s.pending[key] || (ok && time.Now().Before(v.retry)) {
+			if !s.canTranslateLocked() || !complete || s.pending[key] || (ok && time.Now().Before(v.retry)) {
 				continue
 			}
 			select {
@@ -484,7 +598,7 @@ func (s *Service) runQueue() {
 		}
 		{
 			s.mu.Lock()
-			valid := s.status.Output && s.status.State == "ready" && j.key == cacheKey(s.status.Model, j.text)
+			valid := s.canTranslateLocked() && j.key == translationKey(s.status.Model, "ja", j.text)
 			if !valid {
 				delete(s.pending, j.key)
 			}
@@ -493,19 +607,16 @@ func (s *Service) runQueue() {
 				continue
 			}
 			ctx, cancel := context.WithTimeout(s.ctx, 2*time.Minute)
-			text, err := s.Translate(ctx, j.text, "ja")
+			_, err := s.Translate(ctx, j.text, "ja")
 			cancel()
 			s.mu.Lock()
 			delete(s.pending, j.key)
-			if len(s.cache) >= 256 || s.cacheBytes+len(text) > 8<<20 {
-				s.cache = map[string]cached{}
-				s.cacheBytes = 0
-			}
-			if err == nil {
-				s.cache[j.key] = cached{text: text}
-				s.cacheBytes += len(text)
-			} else {
-				s.cache[j.key] = cached{retry: time.Now().Add(30 * time.Second)}
+			if err != nil {
+				// Do not replace a success that finished after the caller timed out.
+				if _, hit := s.cacheGetLocked(j.key); !hit {
+					s.cache[j.key] = cached{retry: time.Now().Add(30 * time.Second)}
+					s.trimCacheLocked()
+				}
 				if s.status.State == "ready" {
 					s.status.Error = "回答の翻訳に失敗: " + err.Error()
 				}

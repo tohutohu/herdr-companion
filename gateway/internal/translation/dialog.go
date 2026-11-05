@@ -24,12 +24,12 @@ func (s *Service) cachedDisplayLocked(text string, urgent bool) string {
 	if !latin {
 		return text
 	}
-	key := cacheKey(s.status.Model, text)
+	key := translationKey(s.status.Model, "ja", text)
 	v, ok := s.cache[key]
-	if ok && v.text != "" {
-		return v.text
+	if translated, hit := s.cacheGetLocked(key); hit {
+		return translated
 	}
-	if s.pending[key] || (ok && time.Now().Before(v.retry)) {
+	if !s.canTranslateLocked() || s.pending[key] || (ok && time.Now().Before(v.retry)) {
 		return text
 	}
 	queue := s.queue
@@ -93,7 +93,7 @@ func (s *Service) dialogLocked(ia *model.Interaction) *model.Interaction {
 func (s *Service) Session(session model.Session, mode ...*bool) model.Session {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !modeEnabled(s.status.Output, mode) || s.status.State != "ready" {
+	if !modeEnabled(s.status.Output, mode) {
 		return session
 	}
 	translated := s.cachedDisplayLocked(session.Title, false)

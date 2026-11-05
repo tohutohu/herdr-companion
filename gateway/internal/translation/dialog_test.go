@@ -14,7 +14,7 @@ func Test承認の原文と操作値を保持しコマンドを翻訳しない(t
 	s.status.State = "ready"
 	s.status.Output = true
 	for source, target := range map[string]string{"Allow command?": "コマンドを許可しますか？", "Needs write permission": "書き込み権限が必要です", "Choose": "選択してください", "A": "同じ表示", "B": "同じ表示"} {
-		s.cache[cacheKey(s.status.Model, source)] = cached{text: target}
+		s.cache[translationKey(s.status.Model, "ja", source)] = cached{Text: target}
 	}
 	ia := &model.Interaction{ID: "approval-id", Type: model.InteractionApproval, State: model.InteractionPending, Title: "Allow command?", Detail: "rm -rf /tmp/example\nNeeds write permission", DetailProse: "Needs write permission", Decisions: []string{model.DecisionApprove, model.DecisionDeny}, Questions: []model.Question{{ID: "question-id", Type: model.QuestionSelect, Question: "Choose", Options: []model.Option{{Label: "A", Preview: "code()"}, {Label: "B"}}}}}
 	raw := []model.Message{{Role: model.RoleAssistant, Blocks: []model.Block{{Type: model.BlockInteraction, Interaction: ia}}}}
@@ -46,7 +46,7 @@ func Testセッションタイトルを表示だけ翻訳して原文を保持�
 	s := New(ctx, t.TempDir())
 	s.status.State = "ready"
 	s.status.Output = true
-	s.cache[cacheKey(s.status.Model, "Fix login")] = cached{text: "ログインを修正"}
+	s.cache[translationKey(s.status.Model, "ja", "Fix login")] = cached{Text: "ログインを修正"}
 	original := model.Session{ID: "session", Title: "Fix login"}
 	got := s.Session(original)
 	if got.Title != "ログインを修正" || got.OriginalTitle != "Fix login" || original.Title != "Fix login" {

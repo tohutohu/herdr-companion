@@ -117,7 +117,11 @@ func Testローカル実モデル翻訳(t *testing.T) {
 	defer cancel()
 	s := New(ctx, dir)
 	defer s.Close()
-	if err := s.Start("0.8b"); err != nil {
+	size := os.Getenv("HERDR_PLAMO_SMOKE_MODEL")
+	if size == "" {
+		size = "0.8b"
+	}
+	if err := s.Start(size); err != nil {
 		t.Fatal(err)
 	}
 	last := ""
@@ -148,6 +152,9 @@ func Testローカル実モデル翻訳(t *testing.T) {
 		if translated == tt.text {
 			t.Fatal("unchanged translation")
 		}
+		if again, err := s.Translate(ctx, tt.text, tt.target); err != nil || again != translated {
+			t.Fatal("cached result changed", again, err)
+		}
 		if strings.Contains(tt.text, "```go") && !strings.Contains(translated, "```go\nfmt.Println(\"hello\")\n```") {
 			t.Fatal("code changed")
 		}
@@ -169,7 +176,7 @@ func Testセッションの翻訳選択はグローバル設定を上書きす�
 		t.Fatal("stopped model silently sent original")
 	}
 	s.status.State = "ready"
-	s.cache[cacheKey(s.status.Model, "Hello")] = cached{text: "こんにちは"}
+	s.cache[translationKey(s.status.Model, "ja", "Hello")] = cached{Text: "こんにちは"}
 	session := model.Session{ID: "session", Title: "Hello"}
 	msgs := []model.Message{{Role: model.RoleAssistant, Blocks: []model.Block{model.ReportBlock("Hello")}}}
 	for _, enabled := range []bool{false, true} {

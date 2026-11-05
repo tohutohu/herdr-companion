@@ -71,9 +71,9 @@ struct TranslationBox: View {
                     get: { model.translation.output },
                     set: { value in model.perform { try await model.translationAction("configure", output: value) } }
                 ))
-                Text("このGatewayの通常セッションすべてに適用し、ターン完了後に報告本文を翻訳します。コード・ツール結果・承認の操作値はそのまま保持します。承認ダイアログの表示文も翻訳し、原文に戻して確認できます。")
+                Text("セッションごとのTranslation mode指定が優先され、指定のないセッションではこの設定を使います。報告本文はターン完了後に翻訳します。コード・ツール結果・承認の操作値はそのまま保持し、承認ダイアログの表示文も原文に戻して確認できます。")
                     .font(.caption).foregroundStyle(.secondary)
-                Text("プロンプト翻訳が有効でモデルが停止・失敗している場合は、翻訳できるまで送信しません。").font(.caption).foregroundStyle(.secondary)
+                Text("保存済みの訳はモデル停止中も再利用します。新しい翻訳が必要な場合は、翻訳できるまで送信しません。自動起動が有効なら異常終了後も次の翻訳要求で再起動します。").font(.caption).foregroundStyle(.secondary)
                 Text("Apple silicon Mac専用。初回はPython・MLX・PFN公式モデルをダウンロードします。導入後の翻訳はMac内で動き、次回のGateway起動時にも自動起動します。")
                     .font(.caption).foregroundStyle(.secondary)
                 Link("モデル・PLaMo Community License", destination: URL(string: "https://huggingface.co/pfnet/plamo-3-translate-0.8b-MLX-4bit")!)
