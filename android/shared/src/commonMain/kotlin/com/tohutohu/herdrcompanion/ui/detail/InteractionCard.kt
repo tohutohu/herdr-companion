@@ -42,6 +42,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -120,6 +121,32 @@ fun InteractionCard(
     enabled: Boolean,
     onRespond: (InteractionResponseDto) -> Unit,
 ) {
+    var showOriginal by rememberSaveable(interaction.id) { mutableStateOf(false) }
+    val translated = interaction.translation != null && !showOriginal
+    CompositionLocalProvider(LocalInteractionTranslated provides translated) {
+        Column {
+            InteractionCardContent(if (translated) interaction.translation else interaction, enabled, onRespond)
+            if (interaction.translation != null) {
+                TextButton(onClick = { showOriginal = !showOriginal }) {
+                    Text(if (showOriginal) "日本語訳を表示" else "原文を表示 · PLaMo")
+                }
+            }
+        }
+    }
+}
+
+private val LocalInteractionTranslated = staticCompositionLocalOf { false }
+
+@Composable
+private fun dialogLabel(english: String, japanese: String): String =
+    if (LocalInteractionTranslated.current) japanese else english
+
+@Composable
+private fun InteractionCardContent(
+    interaction: InteractionDto,
+    enabled: Boolean,
+    onRespond: (InteractionResponseDto) -> Unit,
+) {
     val pending = interaction.isPending
     // An accepted answer keeps the card busy until the transcript reports it
     // answered; otherwise the controls come back and a second press fails.
@@ -185,8 +212,8 @@ private fun AnsweredSummary(interaction: InteractionDto) {
     interaction.questions.forEach { Text("• ${it.question}", style = MaterialTheme.typography.bodySmall) }
     interaction.detail?.let { Text(it, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall) }
     val summary = when (interaction.state) {
-        "answered" -> interaction.answer?.takeIf { it.isNotBlank() }?.let { "Answered: $it" } ?: "Answered"
-        else -> "No longer waiting for an answer"
+        "answered" -> interaction.answer?.takeIf { it.isNotBlank() }?.let { "Answered: $it" } ?: dialogLabel("Answered", "回答済み")
+        else -> dialogLabel("No longer waiting for an answer", "回答待ちは終了しました")
     }
     Text(summary, style = MaterialTheme.typography.bodySmall, color = Muted)
 }
@@ -199,7 +226,7 @@ private fun Unsupported(interaction: InteractionDto) {
         interaction.detail?.takeIf { it.isNotBlank() }?.let {
             Text(it, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
         }
-        Text("This prompt can't be answered from the app.", style = MaterialTheme.typography.bodySmall, color = Muted)
+        Text(dialogLabel("This prompt can't be answered from the app.", "この確認にはアプリから回答できません。"), style = MaterialTheme.typography.bodySmall, color = Muted)
     }
 }
 
@@ -230,9 +257,9 @@ private fun Approval(
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         interaction.decisions.forEach { d ->
             val label = when (d) {
-                "approve" -> "Approve"
-                "approve_session" -> "Always"
-                "deny" -> "Deny"
+                "approve" -> dialogLabel("Approve", "承認")
+                "approve_session" -> dialogLabel("Always", "このセッションで許可")
+                "deny" -> dialogLabel("Deny", "拒否")
                 else -> d
             }
             val onClick = { onRespond(InteractionResponseDto(interactionId = interaction.id, decision = d)) }
@@ -298,7 +325,7 @@ private fun Questions(
                 ),
             )
         },
-    ) { ResponseButtonLabel("Answer", busy = responding) }
+    ) { ResponseButtonLabel(dialogLabel("Answer", "回答する"), busy = responding) }
 }
 
 /** Keep the button's label-sized footprint while the request is in flight. */
@@ -382,7 +409,7 @@ private fun QuestionView(
             )
         }
 
-        val choices = q.options.map { it.label to it.description } +
+        val choices = q.options.map { (it.value ?: it.label) to it.description } +
             if (q.allowOther && q.type != "text") listOf(OTHER to null) else emptyList()
         choices.forEach { (key, description) ->
             Row(
@@ -429,7 +456,8 @@ private fun QuestionView(
                     )
                 }
                 Column {
-                    Text(if (key == OTHER) q.otherLabel?.let { "$it…" } ?: "Other…" else key)
+                    Text(if (key == OTHER) q.otherLabel?.let { "$it…" } ?: dialogLabel("Other…", "その他…")
+                        else q.options.firstOrNull { (it.value ?: it.label) == key }?.label ?: key)
                     description?.takeIf { it.isNotBlank() }?.let {
                         Text(it, style = MaterialTheme.typography.bodySmall, color = Muted)
                     }
@@ -438,7 +466,7 @@ private fun QuestionView(
         }
         // Like Claude Code, show the preview of the chosen option, or of the
         // first one until something is chosen.
-        val previewed = q.options.firstOrNull { it.label in selected && !it.preview.isNullOrBlank() }
+        val previewed = q.options.firstOrNull { (it.value ?: it.label) in selected && !it.preview.isNullOrBlank() }
             ?: q.options.firstOrNull { !it.preview.isNullOrBlank() }.takeIf { selected.isEmpty() }
         AnimatedContent(
             targetState = previewed,
@@ -456,7 +484,7 @@ private fun QuestionView(
                 value = otherText,
                 enabled = enabled,
                 onValueChange = onOtherText,
-                placeholder = { Text(q.otherLabel ?: "Your answer") },
+                placeholder = { Text(q.otherLabel ?: dialogLabel("Your answer", "回答を入力")) },
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedTextColor = LocalContentColor.current,
                     unfocusedTextColor = LocalContentColor.current,

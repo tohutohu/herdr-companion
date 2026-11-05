@@ -32,6 +32,7 @@ data class SessionUiModel(
     val error: String? = null,
     /** Work the session left running; a finished turn does not end it. */
     val background: List<BackgroundTaskUiModel> = emptyList(),
+    val originalTitle: String? = null,
 )
 
 data class BackgroundTaskUiModel(

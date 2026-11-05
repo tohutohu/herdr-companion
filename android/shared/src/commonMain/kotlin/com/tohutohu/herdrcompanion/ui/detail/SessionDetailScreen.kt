@@ -460,6 +460,10 @@ fun SessionDetailScreen(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                         )
                     }
+                    it.originalTitle?.let { original ->
+                        Text("元のタイトル: $original", style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+                    }
                     ContextBar(it.contextUsedTokens, it.contextWindowTokens, it.contextUsedPercent)
                     if (settingsChangeable(it)) SessionSettingsPanel(it, state.settings, onAction)
                     HorizontalDivider()

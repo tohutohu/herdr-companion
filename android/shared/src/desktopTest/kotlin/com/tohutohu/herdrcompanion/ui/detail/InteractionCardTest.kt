@@ -28,6 +28,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
@@ -55,6 +56,27 @@ class InteractionCardTest {
     private var registry by mutableStateOf(SaveableStateRegistry(null) { true })
     private var response: InteractionResponseDto? = null
     private lateinit var focusManager: FocusManager
+
+    @Test
+    fun `翻訳された同名の選択肢を選んでも原文の値を送る`() {
+        val original = InteractionDto(
+            id = "translated-question", type = "questions", state = "pending", supported = true,
+            questions = listOf(QuestionDto("q", "select", question = "Choose", options = listOf(OptionDto("A"), OptionDto("B")))),
+        )
+        val translated = original.copy(
+            questions = listOf(QuestionDto("q", "select", question = "選んでください", options = listOf(
+                OptionDto("同じ表示", value = "A"), OptionDto("同じ表示", value = "B"),
+            ))),
+        )
+        rule.setContent { MaterialTheme { Box(Modifier.width(500.dp)) {
+            InteractionCard(original.copy(translation = translated), true) { response = it }
+        } } }
+        rule.onAllNodesWithText("同じ表示")[1].performClick()
+        rule.onNodeWithText("原文を表示 · PLaMo").performClick()
+        rule.onNodeWithText("B").assertIsSelected()
+        rule.onNodeWithText("Answer").performClick()
+        rule.runOnIdle { assertEquals(listOf("B"), response?.answers?.get("q")?.selected) }
+    }
 
     private fun content() {
         rule.setContent {

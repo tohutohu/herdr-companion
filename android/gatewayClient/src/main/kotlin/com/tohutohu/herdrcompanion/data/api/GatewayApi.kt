@@ -183,7 +183,10 @@ class GatewayApi(
         }
         // Only the delivery owner may decide to retry a non-idempotent POST.
         // Old gateways ignore request IDs, so even transport-level replay is unsafe.
-        execute(request(url("v1", "sessions", id, "messages")).post(once).build())
+        val req = request(url("v1", "sessions", id, "messages")).post(once).build()
+        // Local translation may precede the Gateway's two-minute send limit.
+        val sending = http.newBuilder().readTimeout(220, TimeUnit.SECONDS).callTimeout(230, TimeUnit.SECONDS).build()
+        withContext(Dispatchers.IO) { sending.newCall(req).awaitBody { bodyOrThrow(it) } }
     }
 
     suspend fun respond(id: String, response: InteractionResponseDto) {

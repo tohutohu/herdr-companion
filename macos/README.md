@@ -117,3 +117,7 @@ HERDR_MOBILE_CONFIG="$HOME/.config/herdr-mobile/desktop/config.json" \
 HERDR_MOBILE_STATE_DIR="$HOME/.local/state/herdr-mobile/desktop" \
   "/Applications/Herdr Companion Gateway.app/Contents/Resources/herdr-mobile-gateway" devices
 ```
+
+## ローカル翻訳
+
+メニューバーの「ローカル翻訳 · PLaMo 3 Translate」から、MLX と公式モデル（0.8B / 2B / 8B）をダウンロード・起動できます。プロンプトの英訳と報告・承認画面の日本語表示を個別に切り替えられます。Apple silicon Mac 専用です。導入方法・対象範囲・保存先は [ローカル翻訳](../docs/local-translation.md) を参照してください。

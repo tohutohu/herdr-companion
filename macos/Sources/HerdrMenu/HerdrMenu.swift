@@ -63,6 +63,10 @@ struct SetupError: LocalizedError {
 }
 
 @MainActor final class GatewayModel: ObservableObject {
+    @Published var translation = TranslationStatus()
+    @Published var translationChoice = "0.8b"
+    var translationPolling = false
+    var translationLoaded = false
     @Published var address = UserDefaults.standard.string(forKey: "address") ?? ""
     @Published var port = UserDefaults.standard.string(forKey: "port") ?? "8766"
     @Published var status = "停止中"
@@ -119,6 +123,7 @@ struct SetupError: LocalizedError {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 if let expires = self.expires, expires <= Date() { self.clearQR() }
+                await self.refreshTranslation()
             }
         }
         Task {
@@ -315,13 +320,18 @@ struct SetupError: LocalizedError {
         else { return false }
         return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) == "ok"
     }
-    func request(_ path: String, method: String) async throws -> Data {
+    func request(_ path: String, method: String, body: Data? = nil) async throws -> Data {
         guard let url = baseURL?.appendingPathComponent(String(path.dropFirst())) else { throw SetupError(message: "接続先が未設定です。") }
         let config = try JSONDecoder().decode(LocalConfig.self, from: Data(contentsOf: configURL))
-        var request = URLRequest(url: url); request.httpMethod = method; request.timeoutInterval = 3
+        var request = URLRequest(url: url); request.httpMethod = method; request.timeoutInterval = path == "/v1/translation" ? 15 : 3
         request.setValue("Bearer \(config.authToken)", forHTTPHeaderField: "Authorization")
+        request.httpBody = body
+        if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw SetupError(message: "Gatewayに接続できません。起動状態を確認してください。") }
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let detail = (try? JSONSerialization.jsonObject(with: data) as? [String: String])?["error"]
+            throw SetupError(message: detail ?? "Gatewayに接続できません。起動状態を確認してください。")
+        }
         return data
     }
     func createQR() async throws {
@@ -475,6 +485,7 @@ struct Panel: View {
                         }
                     }.padding(6)
                 }
+                TranslationBox(model: model)
                 GroupBox("通知 · Firebaseを持ち込む") {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(model.firebaseProject.map { "設定済み: \($0)" } ?? "未設定でも閲覧・操作は利用できます。")

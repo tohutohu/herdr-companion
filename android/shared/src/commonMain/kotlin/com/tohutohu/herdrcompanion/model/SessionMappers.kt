@@ -10,6 +10,7 @@ fun SessionDto.toUiModel(): SessionUiModel = SessionUiModel(
     providerName = providerName,
     project = project,
     title = title,
+    originalTitle = originalTitle,
     cwd = cwd,
     status = status,
     lastMessage = lastMessage,

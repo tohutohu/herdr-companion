@@ -42,6 +42,7 @@ data class SessionDto(
     val error: String? = null,
     /** Work the session left running, whatever [status] says. */
     val background: List<BackgroundTaskDto> = emptyList(),
+    val originalTitle: String? = null,
 ) {
     val isLive get() = status != Status.OFFLINE
 }
@@ -131,6 +132,7 @@ data class BlockDto(
     val interaction: InteractionDto? = null,
     val sessionId: String? = null,
     val senderName: String? = null,
+    val originalText: String? = null,
 )
 
 @Serializable
@@ -148,6 +150,7 @@ data class InteractionDto(
     val supported: Boolean = false,
     val answer: String? = null,
     val decisions: List<String> = emptyList(),
+    val translation: InteractionDto? = null,
 ) {
     val isPending get() = state == "pending"
 }
@@ -170,6 +173,7 @@ data class OptionDto(
     val description: String? = null,
     /** Monospace text, such as an ASCII mockup, to compare the options by. */
     val preview: String? = null,
+    val value: String? = null,
 )
 
 @Serializable
