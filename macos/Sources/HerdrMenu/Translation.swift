@@ -19,7 +19,10 @@ extension GatewayModel {
         defer { translationPolling = false }
         do {
             let next = try JSONDecoder().decode(TranslationStatus.self, from: await request("/v1/translation", method: "GET"))
-            if !translationLoaded { translationChoice = next.model; translationLoaded = true }
+            if !translationLoaded || translationChoice == translation.model {
+                translationChoice = next.model
+                translationLoaded = true
+            }
             translation = next
         } catch {
             translation.detail = "翻訳の状態を取得できませんでした"
