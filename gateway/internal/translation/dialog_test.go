@@ -57,3 +57,15 @@ func Testセッションタイトルを表示だけ翻訳して原文を保持�
 		t.Fatal(got)
 	}
 }
+
+func Test翻訳された選択肢の既存の送信値をラベルで上書きしない(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := New(ctx, t.TempDir())
+	s.cache[translationKey(s.status.Model, "ja", "Allow")] = cached{Text: "許可"}
+	ia := &model.Interaction{Questions: []model.Question{{Options: []model.Option{{Label: "Allow", Value: "allow_once"}}}}}
+	got := s.dialogLocked(ia)
+	if got.Translation == nil || got.Translation.Questions[0].Options[0].Value != "allow_once" {
+		t.Fatal(got)
+	}
+}

@@ -86,6 +86,11 @@ func New(ctx context.Context, dir string) *Service {
 	}
 	s.status.OutputEverEnabled = s.status.OutputEverEnabled || s.status.Output
 	s.status.InputEverEnabled = s.status.InputEverEnabled || s.status.Input
+	// Prompt originals are durable history, including sessions that opted in
+	// without ever enabling the global input setting.
+	if info, err := os.Stat(filepath.Join(dir, "prompts")); err == nil && info.IsDir() {
+		s.status.InputEverEnabled = true
+	}
 	if revisions[s.status.Model] == "" {
 		s.status.Model = "0.8b"
 	}
@@ -314,31 +319,41 @@ func (s *Service) Input(ctx context.Context, sessionID, text string, mode ...*bo
 	if translated == text {
 		return text, nil
 	}
+	if err := s.RememberPrompt(sessionID, text, translated); err != nil {
+		return "", err
+	}
+	return translated, nil
+}
+
+// RememberPrompt also records the exact form providers put in their transcript
+// (trimmed whitespace and appended attachment paths), without translating paths.
+func (s *Service) RememberPrompt(sessionID, source, translated string) error {
 	// Source prompts are private durable user data, separate from agent transcripts.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	dir := filepath.Join(s.dir, "prompts")
 	if err := os.MkdirAll(dir, 0700); err != nil {
-		return "", err
+		return err
 	}
 	path := filepath.Join(dir, cacheKey("input:"+sessionID, translated)+".json")
 	var saved []sourcePrompt
 	if data, err := os.ReadFile(path); err == nil {
 		if err := json.Unmarshal(data, &saved); err != nil {
-			return "", err
+			return err
 		}
 	} else if !os.IsNotExist(err) {
-		return "", err
+		return err
 	}
-	saved = append(saved, sourcePrompt{Source: text, Translated: translated, Created: time.Now().UTC()})
+	saved = append(saved, sourcePrompt{Source: source, Translated: translated, Created: time.Now().UTC()})
 	data, _ := json.Marshal(saved)
 	if err := os.WriteFile(path+".tmp", data, 0600); err != nil {
-		return "", err
+		return err
 	}
 	if err := os.Rename(path+".tmp", path); err != nil {
-		return "", err
+		return err
 	}
-	return translated, nil
+	s.status.InputEverEnabled = true
+	return nil
 }
 
 // readyWorker recovers unexpected exits only when automatic startup is enabled.
@@ -524,7 +539,7 @@ func (s *Service) Messages(sessionID string, msgs []model.Message, complete bool
 					}
 					for _, candidate := range saved {
 						if candidate.Translated == block.Text &&
-							(out[i].Timestamp.IsZero() || !candidate.Created.After(out[i].Timestamp.Add(time.Millisecond))) &&
+							promptPrecedesMessage(candidate.Created, out[i].Timestamp) &&
 							candidate.Created.After(chosen.Created) {
 							chosen = candidate
 						}
@@ -556,7 +571,7 @@ func (s *Service) Messages(sessionID string, msgs []model.Message, complete bool
 		out[i].Blocks = append([]model.Block(nil), out[i].Blocks...)
 		for b := range out[i].Blocks {
 			block := &out[i].Blocks[b]
-			if block.Type != model.BlockText || !block.Report || strings.TrimSpace(block.Text) == "" {
+			if block.Type != model.BlockText || !block.Report || !hasLatin(block.Text) {
 				continue
 			}
 			count++
@@ -566,7 +581,9 @@ func (s *Service) Messages(sessionID string, msgs []model.Message, complete bool
 			key := translationKey(s.status.Model, "ja", block.Text)
 			v, ok := s.cache[key]
 			if translated, hit := s.cacheGetLocked(key); hit {
-				block.OriginalText, block.Text = block.Text, translated
+				if translated != block.Text {
+					block.OriginalText, block.Text = block.Text, translated
+				}
 				continue
 			}
 			if !s.canTranslateLocked() || !complete || s.pending[key] || (ok && time.Now().Before(v.retry)) {
@@ -580,6 +597,19 @@ func (s *Service) Messages(sessionID string, msgs []model.Message, complete bool
 		}
 	}
 	return out
+}
+
+// Codex turn timestamps are truncated to seconds; Claude's are typically
+// milliseconds. Compare at the provider's precision, not the save clock's.
+func promptPrecedesMessage(created, message time.Time) bool {
+	if message.IsZero() {
+		return true
+	}
+	precision := time.Millisecond
+	if message.Nanosecond() == 0 {
+		precision = time.Second
+	}
+	return created.Before(message.Add(precision))
 }
 func (s *Service) runQueue() {
 	for {

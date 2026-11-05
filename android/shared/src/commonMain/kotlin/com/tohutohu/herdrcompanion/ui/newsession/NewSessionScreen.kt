@@ -218,7 +218,7 @@ fun NewSessionScreen(
                         Column(Modifier.weight(1f)) {
                             Text("Translation mode", style = MaterialTheme.typography.bodyMedium)
                             Text(
-                                "Japanese prompts → English; replies → Japanese. Start local translation in the Gateway menu first.",
+                                "Sends Japanese prompts in English and displays replies in Japanese. Your original prompts stay visible; you can view the sent English and original replies. Start local translation in the Gateway menu first.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )

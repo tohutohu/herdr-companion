@@ -14,14 +14,7 @@ func (s *Service) cachedDisplayLocked(text string, urgent bool) string {
 	if strings.TrimSpace(text) == "" {
 		return text
 	}
-	latin := false
-	for _, r := range text {
-		if unicode.In(r, unicode.Latin) {
-			latin = true
-			break
-		}
-	}
-	if !latin {
+	if !hasLatin(text) {
 		return text
 	}
 	key := translationKey(s.status.Model, "ja", text)
@@ -42,6 +35,15 @@ func (s *Service) cachedDisplayLocked(text string, urgent bool) string {
 	default:
 	}
 	return text
+}
+
+func hasLatin(text string) bool {
+	for _, r := range text {
+		if unicode.In(r, unicode.Latin) {
+			return true
+		}
+	}
+	return false
 }
 func (s *Service) dialogLocked(ia *model.Interaction) *model.Interaction {
 	translated := *ia
@@ -74,7 +76,10 @@ func (s *Service) dialogLocked(ia *model.Interaction) *model.Interaction {
 		for j := range q.Options {
 			option := &q.Options[j]
 			raw := original.Options[j]
-			option.Value = raw.Label
+			option.Value = raw.Value
+			if option.Value == "" {
+				option.Value = raw.Label
+			}
 			option.Label = s.cachedDisplayLocked(raw.Label, true)
 			option.Description = s.cachedDisplayLocked(raw.Description, true)
 			if option.Label != raw.Label || option.Description != raw.Description {

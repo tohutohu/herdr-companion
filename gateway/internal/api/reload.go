@@ -60,10 +60,6 @@ func (s *Server) reloadSession(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, id, "reload", err)
 		return
 	}
-	if msgs == nil {
-		msgs = []model.Message{}
-	}
-
 	pending := pendingInteractions(msgs)
 	fresh := interactionIDs(pending)
 	findings := []reloadFinding{}
@@ -89,7 +85,13 @@ func (s *Server) reloadSession(w http.ResponseWriter, r *http.Request) {
 		raw := map[string]any{"lastMessageIds": lastIDs(msgs, 3)}
 		add(findingUncaptured, "The agent is waiting for an answer the app cannot give", raw)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"session": sess, "messages": msgs, "findings": findings})
+	if s.Translation != nil {
+		msgs = s.Translation.Messages(id, msgs, sess.Status != model.StatusRunning, s.sessionTranslation(id))
+	}
+	if msgs == nil {
+		msgs = []model.Message{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"session": s.translatedSession(sess), "messages": msgs, "findings": findings})
 }
 
 func pendingInteractions(msgs []model.Message) []*model.Interaction {

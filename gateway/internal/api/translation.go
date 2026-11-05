@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/translation"
 )
 
@@ -19,6 +20,7 @@ type Translator interface {
 	Stop() error
 	Configure(bool, bool) error
 	Input(context.Context, string, string, ...*bool) (string, error)
+	RememberPrompt(string, string, string) error
 	Messages(string, []model.Message, bool, ...*bool) []model.Message
 }
 
@@ -63,7 +65,7 @@ func (s *Server) configureTranslation(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 202, s.Translation.Status())
 }
 
-func (s *Server) translateInput(ctx context.Context, sessionID, text string, mode ...*bool) (string, error) {
+func (s *Server) translateInput(ctx context.Context, sessionID, text string, files []string, mode ...*bool) (string, error) {
 	if len(mode) == 0 {
 		mode = []*bool{s.sessionTranslation(sessionID)}
 	}
@@ -75,7 +77,20 @@ func (s *Server) translateInput(ctx context.Context, sessionID, text string, mod
 	}
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
-	return s.Translation.Input(ctx, sessionID, text, mode...)
+	translated, err := s.Translation.Input(ctx, sessionID, text, mode...)
+	if err != nil {
+		return "", err
+	}
+	if translated != text {
+		sent := providers.TextWithFiles(model.Input{Text: translated, Files: files})
+		if sent != translated {
+			source := providers.TextWithFiles(model.Input{Text: text, Files: files})
+			if err := s.Translation.RememberPrompt(sessionID, source, sent); err != nil {
+				return "", err
+			}
+		}
+	}
+	return translated, nil
 }
 
 func (s *Server) translatedSession(session model.Session) model.Session {

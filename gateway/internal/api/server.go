@@ -334,7 +334,7 @@ func (s *Server) getMessages(w http.ResponseWriter, r *http.Request) {
 		msgs = s.Translation.Messages(id, msgs, sess.Status != model.StatusRunning, s.sessionTranslation(id))
 	}
 	mode := s.sessionTranslation(id)
-	if s.Translation == nil || (!s.Translation.Status().OutputEverEnabled && (mode == nil || !*mode)) {
+	if s.Translation == nil || (!s.Translation.Status().OutputEverEnabled && !s.Translation.Status().InputEverEnabled && (mode == nil || !*mode)) {
 		msgs = messagesFrom(msgs, r.URL.Query().Get("after"))
 	}
 	if msgs == nil {
@@ -441,7 +441,7 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if in.Text, err = s.translateInput(r.Context(), id, in.Text); err != nil {
+	if in.Text, err = s.translateInput(r.Context(), id, in.Text, in.Files); err != nil {
 		writeError(w, http.StatusServiceUnavailable, "プロンプトを翻訳できませんでした（未送信）: "+err.Error())
 		return
 	}
@@ -789,7 +789,7 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Prompt, err = s.translateInput(r.Context(), "", req.Prompt, req.Translation); err != nil {
+	if req.Prompt, err = s.translateInput(r.Context(), "", req.Prompt, req.Files, req.Translation); err != nil {
 		writeError(w, http.StatusServiceUnavailable, "プロンプトを翻訳できませんでした（未送信）: "+err.Error())
 		return
 	}

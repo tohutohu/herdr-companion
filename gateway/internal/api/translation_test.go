@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -12,18 +13,81 @@ import (
 )
 
 type testTranslator struct {
-	st    translation.Status
-	fail  bool
-	calls int
+	st            translation.Status
+	fail          bool
+	calls         int
+	remembered    [][3]string
+	rememberError error
 }
 
 func (t *testTranslator) Session(session model.Session, _ ...*bool) model.Session { return session }
 func (t *testTranslator) Status() translation.Status                              { return t.st }
 func (t *testTranslator) Start(size string) error                                 { t.st.Model = size; return nil }
 func (t *testTranslator) Stop() error                                             { return nil }
-func (t *testTranslator) Configure(in, out bool) error                            { t.st.Output = out; return nil }
+func (t *testTranslator) RememberPrompt(session, source, sent string) error {
+	t.remembered = append(t.remembered, [3]string{session, source, sent})
+	return t.rememberError
+}
+func (t *testTranslator) Configure(in, out bool) error { t.st.Output = out; return nil }
 func (t *testTranslator) Messages(_ string, msgs []model.Message, _ bool, _ ...*bool) []model.Message {
 	return msgs
+}
+
+func Test添付ファイル付きプロンプトは履歴の形式でも原文を保存する(t *testing.T) {
+	tr := &testTranslator{st: translation.Status{Options: translation.Options{Input: true}}}
+	s := &Server{Translation: tr}
+	files := []string{"/uploads/資料.pdf", "/uploads/second.txt"}
+	got, err := s.translateInput(context.Background(), "session", "確認して", files)
+	if err != nil || got != "translated: 確認して" {
+		t.Fatal(got, err)
+	}
+	want := [3]string{"session", "確認して\n/uploads/資料.pdf\n/uploads/second.txt", "translated: 確認して\n/uploads/資料.pdf\n/uploads/second.txt"}
+	if len(tr.remembered) != 1 || tr.remembered[0] != want {
+		t.Fatal(tr.remembered)
+	}
+	tr.rememberError = errors.New("disk full")
+	if _, err := s.translateInput(context.Background(), "session", "確認して", files); err == nil {
+		t.Fatal("must not send if the original cannot be saved")
+	}
+}
+
+type displayTranslator struct{ testTranslator }
+
+func (t *displayTranslator) Session(session model.Session, _ ...*bool) model.Session {
+	session.OriginalTitle, session.Title = session.Title, "日本語タイトル"
+	return session
+}
+func (t *displayTranslator) Messages(_ string, msgs []model.Message, _ bool, _ ...*bool) []model.Message {
+	out := append([]model.Message(nil), msgs...)
+	for i := range out {
+		out[i].Blocks = append([]model.Block(nil), out[i].Blocks...)
+		for b := range out[i].Blocks {
+			block := &out[i].Blocks[b]
+			if block.Type == model.BlockText {
+				block.OriginalText, block.Text = block.Text, "日本語表示"
+			}
+		}
+	}
+	return out
+}
+
+func Test再読込と差分取得も保存済み原文と翻訳表示を返す(t *testing.T) {
+	tr := &displayTranslator{testTranslator{st: translation.Status{Options: translation.Options{InputEverEnabled: true}}}}
+	ts, _, _, token := newTestServer(t, func(s *Server) { s.Translation = tr })
+	for _, req := range []struct{ method, path string }{
+		{"GET", "/v1/sessions/fake:s1/messages?after=m2"},
+		{"POST", "/v1/sessions/fake:s1/reload"},
+	} {
+		resp, data := do(t, ts, token, req.method, req.path, nil, "application/json")
+		var got reloadResponse
+		if resp.StatusCode != 200 || json.Unmarshal(data, &got) != nil {
+			t.Fatal(resp.StatusCode, string(data))
+		}
+		if got.Session.Title != "日本語タイトル" || len(got.Messages) != 3 ||
+			got.Messages[0].Blocks[0].Text != "日本語表示" || got.Messages[0].Blocks[0].OriginalText != "hi" {
+			t.Fatal(string(data))
+		}
+	}
 }
 func (t *testTranslator) Input(_ context.Context, _ string, text string, mode ...*bool) (string, error) {
 	t.calls++
