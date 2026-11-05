@@ -167,10 +167,11 @@ func quietEnd(n Notify, tz string, now time.Time) time.Time {
 // app replaces a notification with the same id, and the conversation in
 // the app is the record, not the push.
 type Notifier struct {
-	Store  *Store
-	Sender notifications.Sender
-	Config *config.Store
-	Now    func() time.Time
+	Store   *Store
+	Sender  notifications.Sender
+	Config  *config.Store
+	Now     func() time.Time
+	Prepare notifications.PrepareContent
 }
 
 // MaxNotificationAttempts bounds retries of one entry.
@@ -210,6 +211,9 @@ func (n *Notifier) Deliver(ctx context.Context) {
 	}
 	rows.Close()
 	for _, e := range due {
+		if ctx.Err() != nil {
+			return
+		}
 		n.deliverOne(ctx, e.Notification, e.delivered)
 	}
 }
@@ -221,6 +225,13 @@ func (n *Notifier) deliverOne(ctx context.Context, e Notification, delivered []s
 		return
 	}
 	cfg := n.Config.Get()
+	content := notifications.Content{Title: e.Title, Body: e.Body}
+	if n.Prepare != nil {
+		content = n.Prepare(ctx, "", content)
+	}
+	if ctx.Err() != nil {
+		return
+	}
 	data := map[string]string{
 		"type":           "resident",
 		"gatewayId":      config.GatewayID(cfg.AuthToken),
@@ -228,8 +239,8 @@ func (n *Notifier) deliverOne(ctx context.Context, e Notification, delivered []s
 		"runId":          e.RunID,
 		"notificationId": e.ID,
 		"kind":           e.Kind,
-		"title":          e.Title,
-		"body":           e.Body,
+		"title":          truncateBytes(content.Title, 200),
+		"body":           truncateBytes(content.Body, 1500),
 	}
 	var lastErr error
 	for _, d := range cfg.Devices {

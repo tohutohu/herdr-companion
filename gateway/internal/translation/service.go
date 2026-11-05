@@ -515,7 +515,7 @@ func cacheKey(scope, text string) string {
 
 // Messages never mutates provider caches. Translation runs off the polling path.
 // Full snapshots are served while enabled so older blocks receive finished translations too.
-func (s *Service) Messages(sessionID string, msgs []model.Message, complete bool, mode ...*bool) []model.Message {
+func (s *Service) Messages(sessionID string, msgs []model.Message, _ bool, mode ...*bool) []model.Message {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := append([]model.Message(nil), msgs...)
@@ -563,38 +563,53 @@ func (s *Service) Messages(sessionID string, msgs []model.Message, complete bool
 			}
 		}
 	}
-	count := 0
-	for i := len(out) - 1; i >= 0; i-- {
+	// Providers mark live token streams separately from closed messages. Queue
+	// each closed message in conversation order, without waiting for the turn.
+	type position struct{ message, block int }
+	var reports []position
+	for i := range out {
 		if out[i].Role != model.RoleAssistant {
 			continue
 		}
-		out[i].Blocks = append([]model.Block(nil), out[i].Blocks...)
 		for b := range out[i].Blocks {
 			block := &out[i].Blocks[b]
-			if block.Type != model.BlockText || !block.Report || !hasLatin(block.Text) {
+			if block.Type != model.BlockText || !hasLatin(block.Text) {
 				continue
 			}
-			count++
-			if count > 128 {
-				continue
-			}
-			key := translationKey(s.status.Model, "ja", block.Text)
-			v, ok := s.cache[key]
-			if translated, hit := s.cacheGetLocked(key); hit {
-				if translated != block.Text {
-					block.OriginalText, block.Text = block.Text, translated
+			if out[i].Streaming {
+				if s.canTranslateLocked() {
+					block.OriginalText, block.Text = block.Text, "応答を受信中…"
 				}
 				continue
 			}
-			if !s.canTranslateLocked() || !complete || s.pending[key] || (ok && time.Now().Before(v.retry)) {
-				continue
+			if block.Report {
+				reports = append(reports, position{i, b})
 			}
+		}
+	}
+	for _, pos := range reports[max(0, len(reports)-128):] {
+		block := &out[pos.message].Blocks[pos.block]
+		key := translationKey(s.status.Model, "ja", block.Text)
+		v, ok := s.cache[key]
+		if translated, hit := s.cacheGetLocked(key); hit {
+			if translated != block.Text {
+				block.OriginalText, block.Text = block.Text, translated
+			}
+			continue
+		}
+		if !s.canTranslateLocked() || (ok && time.Now().Before(v.retry)) {
+			continue // unavailable/failed: keep readable original text
+		}
+		if !s.pending[key] {
 			select {
 			case s.queue <- job{key, block.Text}:
 				s.pending[key] = true
 			default:
 			}
 		}
+		// Keep the message identity and its original for the menu, but do not
+		// flash an English report before its translation is ready.
+		block.OriginalText, block.Text = block.Text, "翻訳中…"
 	}
 	return out
 }

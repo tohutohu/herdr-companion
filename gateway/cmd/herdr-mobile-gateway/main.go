@@ -26,6 +26,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/directorycheck"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/launcher"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/logging"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/notifications"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/claude"
@@ -201,7 +202,23 @@ func serve(args []string) error {
 	limits := usage.New(cfg.UsageCommand, time.Duration(cfg.UsageRefreshMinutes)*time.Minute, codexProvider)
 	go limits.Run(ctx)
 
-	watcher := &notifications.Watcher{Sessions: svc, Conversations: svc, Config: store, Sink: sink}
+	translator := translation.New(ctx, filepath.Join(config.StateDir(), "translation"))
+	defer translator.Close()
+	prepareNotification := func(ctx context.Context, id string, content notifications.Content) notifications.Content {
+		return translator.Notification(ctx, id, content, direct.Translation(id))
+	}
+	watcher := &notifications.Watcher{Sessions: svc, Conversations: svc, Config: store, Sink: sink, Prepare: prepareNotification}
+	watcher.Observe = func(ctx context.Context, session model.Session) {
+		mode := direct.Translation(session.ID)
+		if !translator.OutputEnabled(mode) || session.Status != model.StatusRunning {
+			return
+		}
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		if _, msgs, err := svc.Conversation(ctx, session.ID); err == nil {
+			translator.Messages(session.ID, msgs, false, mode)
+		}
+	}
 	var sender notifications.Sender
 	if fcm, err := newSender(cfg); err != nil {
 		slog.Warn("push notifications disabled", "operation", "fcm", "error", err)
@@ -223,7 +240,7 @@ func serve(args []string) error {
 	residents := resident.New(residentStore, residentEnv{launch: launch, providers: []providers.Provider{claudeProvider, codexProvider, dshProvider}},
 		map[string]resident.Runner{resident.ProviderClaude: claudeResident, resident.ProviderCodex: codexResident, resident.ProviderDSH: dshProvider.ResidentRunner()},
 		resident.Config{MaxConcurrentRuns: cfg.ResidentMaxConcurrentRuns, CatchUpWindow: time.Duration(cfg.ResidentCatchUpHours) * time.Hour}, nil)
-	residents.Notifier = &resident.Notifier{Store: residentStore, Sender: sender, Config: store}
+	residents.Notifier = &resident.Notifier{Store: residentStore, Sender: sender, Config: store, Prepare: prepareNotification}
 	if err := residents.Recover(ctx); err != nil {
 		return fmt.Errorf("recover resident runs: %w", err)
 	}
@@ -231,8 +248,6 @@ func serve(args []string) error {
 	residentDone := make(chan struct{})
 	go func() { residents.Run(ctx); close(residentDone) }()
 
-	translator := translation.New(ctx, filepath.Join(config.StateDir(), "translation"))
-	defer translator.Close()
 	srv := &http.Server{
 		Addr:              cfg.Listen,
 		Handler:           (&api.Server{Translation: translator, MessageDelivery: delivery, AgentUpdates: agentupdate.New(ctx, cfg.CodexBinary), Sessions: svc, Uploads: up, Config: store, Sink: sink, Launcher: launch, Archive: archived, Usage: limits, DirectoryCheck: dirCheck, Direct: direct, Resident: residents, Listen: cfg.Listen}).Handler(),

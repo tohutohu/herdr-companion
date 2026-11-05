@@ -155,8 +155,15 @@ func ConvertThread(th *Thread, opt convertOptions) []model.Message {
 			ts = time.Unix(*turn.StartedAt, 0).UTC()
 		}
 		var msgs []model.Message
-		for _, raw := range turn.Items {
+		for index, raw := range turn.Items {
 			if m, ok := convertItem(raw, ts, opt); ok {
+				// Earlier items are closed. The live tail may still contain token
+				// deltas; item/completed can clear this conservatively set flag.
+				if turn.Status == "inProgress" && index == len(turn.Items)-1 && m.Role == model.RoleAssistant {
+					for _, block := range m.Blocks {
+						m.Streaming = m.Streaming || block.Report
+					}
+				}
 				msgs = append(msgs, m)
 			}
 		}

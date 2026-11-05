@@ -397,6 +397,14 @@ func (p *Provider) messagesFromThread(ctx context.Context, th *Thread, live *pro
 
 	var pending []model.Message
 	if d := p.connFor(nativeID, live); d != nil {
+		d.mu.Lock()
+		completed := d.completedMessage[nativeID]
+		d.mu.Unlock()
+		for i := range msgs {
+			if msgs[i].ID == completed {
+				msgs[i].Streaming = false
+			}
+		}
 		pending = d.interactions(nativeID, p.sink)
 	}
 	return append(msgs, pending...)
@@ -477,6 +485,7 @@ type serverConn struct {
 	latestTurns      map[string]Turn
 	latestTurnTimes  map[string]time.Time
 	summaryVersions  map[string]uint64
+	completedMessage map[string]string // latest closed agent message in the active turn
 }
 
 // threadSettings is the part of a loaded thread's settings shown as its mode.
@@ -526,6 +535,7 @@ func newServerConn(sink deadletter.Sink) *serverConn {
 		latestTurns:      map[string]Turn{},
 		latestTurnTimes:  map[string]time.Time{},
 		summaryVersions:  map[string]uint64{},
+		completedMessage: map[string]string{},
 	}
 }
 
@@ -570,6 +580,7 @@ func (d *serverConn) Notification(method string, params json.RawMessage) {
 		RequestID json.RawMessage `json:"requestId"`
 		Status    ThreadStatus    `json:"status"`
 		Settings  threadSettings  `json:"threadSettings"`
+		Item      itemHead        `json:"item"`
 		Turn      struct {
 			ID     string `json:"id"`
 			Status string `json:"status"`
@@ -578,6 +589,12 @@ func (d *serverConn) Notification(method string, params json.RawMessage) {
 	json.Unmarshal(params, &p)
 	d.mu.Lock()
 	if p.ThreadID != "" {
+		if method == "turn/started" || method == "thread/reverted" || method == "thread/compacted" || method == "thread/closed" {
+			delete(d.completedMessage, p.ThreadID)
+		}
+		if method == "item/completed" && p.Item.Type == "agentMessage" && p.Item.ID != "" {
+			d.completedMessage[p.ThreadID] = p.Item.ID
+		}
 		if strings.HasPrefix(method, "item/") || strings.HasPrefix(method, "turn/") || method == "thread/reverted" || method == "thread/compacted" || method == "thread/closed" {
 			d.historyVersions[p.ThreadID]++
 		}

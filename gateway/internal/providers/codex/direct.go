@@ -305,7 +305,7 @@ func (p *Provider) directEvent(method string, params json.RawMessage) {
 			dt.alive, dt.activeTurn = false, ""
 		}
 		p.directMu.Unlock()
-	case "thread/status/changed", "serverRequest/resolved", "thread/settings/updated":
+	case "thread/status/changed", "serverRequest/resolved", "thread/settings/updated", "item/completed":
 	default:
 		if len(method) < 8 || method[:8] != "request:" {
 			return // item streaming and token counts change no session state

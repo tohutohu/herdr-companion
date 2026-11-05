@@ -59,16 +59,13 @@ func Test翻訳ワーカープロトコル(t *testing.T) {
 		{Role: model.RoleUser, Blocks: []model.Block{model.ReportBlock("日本語プロンプト")}},
 		{Role: model.RoleTool, Blocks: []model.Block{model.TextBlock("tool output")}},
 	}
-	if got := s.Messages("test-session", original, false); got[0].Blocks[0].Text != "Hello" {
+	if got := s.Messages("test-session", original, false); got[0].Blocks[0].Text != "翻訳中…" || got[0].Blocks[0].OriginalText != "Hello" {
 		t.Fatal(got)
-	}
-	if len(s.queue) != 0 {
-		t.Fatal("running turn was queued")
 	}
 	deadline := time.Now().Add(time.Second)
 	for {
-		got := s.Messages("test-session", original, true)
-		if got[0].Blocks[0].OriginalText == "Hello" {
+		got := s.Messages("test-session", original, false)
+		if got[0].Blocks[0].Text != "翻訳中…" {
 			if got[0].Blocks[0].Text != "ja:Hello" {
 				t.Fatal(got)
 			}

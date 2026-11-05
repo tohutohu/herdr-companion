@@ -587,7 +587,7 @@ func (p *Provider) sidecarEvent(ev sidecarEvent) {
 		if d.Model != "" && d.Model != "<synthetic>" {
 			s.model = d.Model
 		}
-		notify = false
+		// A closed message can be translated while the rest of the turn runs.
 	case "result":
 		var d struct {
 			IsError bool     `json:"isError"`
@@ -841,7 +841,7 @@ func withDirectState(msgs []model.Message, pending []*permissionRequest, partial
 	}
 	if streaming {
 		out = append(out, model.Message{
-			ID: streamingPrefix + partialID, Role: model.RoleAssistant, Timestamp: partialAt.UTC(),
+			ID: streamingPrefix + partialID, Role: model.RoleAssistant, Timestamp: partialAt.UTC(), Streaming: true,
 			Blocks: []model.Block{model.TextBlock(partialText)},
 		})
 	}

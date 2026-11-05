@@ -91,6 +91,8 @@ const (
 )
 
 type Message struct {
+	// Streaming is provider-owned: translate this message only once it closes.
+	Streaming bool      `json:"-"`
 	ID        string    `json:"id"`
 	Role      Role      `json:"role"`
 	Timestamp time.Time `json:"timestamp"`

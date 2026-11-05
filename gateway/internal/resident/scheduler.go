@@ -123,10 +123,16 @@ func automaticStartsToday(tx *sql.Tx, t *Task, now time.Time) (int, error) {
 // per-minute cron after a week asleep).
 const maxCatchUpScan = 20000
 
-// Tick processes due wake-ups, expires questions, enforces run deadlines
-// and starts queued runs. The loop calls it; tests call it with a fake
-// clock.
+// Tick processes scheduling and notification delivery synchronously for a
+// single step. Run separates delivery from scheduling in production.
 func (s *Service) Tick(ctx context.Context) {
+	s.scheduleTick(ctx)
+	if s.Notifier != nil {
+		s.Notifier.Deliver(ctx)
+	}
+}
+
+func (s *Service) scheduleTick(ctx context.Context) {
 	now := s.clock()
 	if err := s.resumeDue(ctx, now); err != nil {
 		slog.Error("resident resume failed", "operation", "resident.resume", "error", err)
@@ -137,9 +143,6 @@ func (s *Service) Tick(ctx context.Context) {
 	s.store.db.ExecContext(ctx, `UPDATE questions SET status = 'expired' WHERE status = 'open' AND expires_at <= ?`, ms(now))
 	s.enforceDeadlines(now)
 	s.dispatch(ctx)
-	if s.Notifier != nil {
-		s.Notifier.Deliver(ctx)
-	}
 }
 
 // resumeDue resumes the tasks whose timed pause has ended.
@@ -409,9 +412,34 @@ func (s *Service) Wakeups(ctx context.Context, taskID string) ([]Wakeup, error) 
 
 // Run drives the scheduler until ctx ends.
 func (s *Service) Run(ctx context.Context) {
+	// Notification translation and network delivery must not delay schedules,
+	// deadline enforcement or new runs. One worker owns outbox delivery.
+	deliver := make(chan struct{}, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-deliver:
+				if s.Notifier != nil {
+					s.Notifier.Deliver(ctx)
+				}
+			}
+		}
+	}()
+	defer func() { <-done }()
+	tick := func() {
+		s.scheduleTick(ctx)
+		select {
+		case deliver <- struct{}{}:
+		default:
+		}
+	}
 	t := time.NewTicker(s.cfg.Tick)
 	defer t.Stop()
-	s.Tick(ctx)
+	tick()
 	for {
 		select {
 		case <-ctx.Done():
@@ -419,6 +447,6 @@ func (s *Service) Run(ctx context.Context) {
 		case <-t.C:
 		case <-s.kick:
 		}
-		s.Tick(ctx)
+		tick()
 	}
 }

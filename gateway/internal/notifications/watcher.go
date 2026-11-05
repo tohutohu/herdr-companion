@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -32,6 +33,14 @@ type Conversations interface {
 	Conversation(ctx context.Context, id string) (model.Session, []model.Message, error)
 }
 
+// Content is prepared once per notification, before truncation and fan-out.
+type Content struct {
+	Title, Body string
+	Report      *model.Message
+}
+
+type PrepareContent func(context.Context, string, Content) Content
+
 // Watcher notices state transitions of live sessions and pushes them.
 // Statuses and finished turn revisions are kept in memory per session.
 //
@@ -44,14 +53,19 @@ type Watcher struct {
 	Sender        Sender // nil disables sending (transitions are still logged)
 	Config        *config.Store
 	Sink          deadletter.Sink
+	Prepare       PrepareContent
+	// Observe warms display translations when provider events arrive, even if
+	// no client currently has the conversation open.
+	Observe func(context.Context, model.Session)
 
 	// Debounce lets providers flush transcripts before we read them.
 	Debounce time.Duration
 	// Resync re-evaluates everything periodically (covers missed events).
 	Resync time.Duration
 
-	mu   sync.Mutex
-	last map[string]observation
+	mu         sync.Mutex
+	last       map[string]observation
+	pushQueues []chan pendingPush
 
 	triggerOnce sync.Once
 	trigger     chan struct{}
@@ -75,6 +89,12 @@ type observation struct {
 	completionRevision string
 }
 
+type pendingPush struct {
+	session model.Session
+	kind    model.Status
+	content Content
+}
+
 func (w *Watcher) Run(ctx context.Context) {
 	if w.Debounce == 0 {
 		w.Debounce = time.Second
@@ -84,6 +104,23 @@ func (w *Watcher) Run(ctx context.Context) {
 	}
 	w.mu.Lock()
 	w.last = map[string]observation{}
+	// Translation can take longer than a status read. Separate delivery from
+	// observation, preserving order per session with bounded worker queues.
+	w.pushQueues = make([]chan pendingPush, 4)
+	for i := range w.pushQueues {
+		queue := make(chan pendingPush, 64)
+		w.pushQueues[i] = queue
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case next := <-queue:
+					w.pushContent(ctx, next.session, next.kind, next.content)
+				}
+			}
+		}()
+	}
 	w.mu.Unlock()
 	go w.evaluator(ctx, w.triggers())
 	w.Kick()
@@ -133,6 +170,9 @@ func (w *Watcher) Evaluate(ctx context.Context) {
 		}
 		w.last[s.ID] = next
 		w.mu.Unlock()
+		if w.Observe != nil {
+			w.Observe(ctx, s)
+		}
 		if !known {
 			continue // first sighting after (re)start: no push
 		}
@@ -158,7 +198,7 @@ func (w *Watcher) Evaluate(ctx context.Context) {
 				slog.Info("push skipped: completion already observed", "provider", s.Provider, "session_id", s.ID, "operation", "push", "completion_revision", s.CompletionRevision)
 				continue
 			}
-			w.push(ctx, s, kind)
+			w.dispatchPush(ctx, s, kind)
 		}
 	}
 	w.mu.Lock()
@@ -168,6 +208,28 @@ func (w *Watcher) Evaluate(ctx context.Context) {
 		}
 	}
 	w.mu.Unlock()
+}
+
+func (w *Watcher) dispatchPush(ctx context.Context, s model.Session, kind model.Status) {
+	if w.Sender == nil {
+		return
+	}
+	w.mu.Lock()
+	queues := w.pushQueues
+	w.mu.Unlock()
+	if len(queues) == 0 {
+		w.push(ctx, s, kind)
+		return
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(s.ID))
+	// Capture the event's report now; a newer turn may finish while this
+	// notification waits for translation or a preceding notification.
+	content := Content{Title: Title(s, kind), Body: Body(s), Report: w.readReport(ctx, s)}
+	select {
+	case queues[int(h.Sum32())%len(queues)] <- pendingPush{s, kind, content}:
+	case <-ctx.Done():
+	}
 }
 
 // notificationKind decides whether a transition deserves a push. A finished
@@ -247,7 +309,7 @@ const reportTimeout = 5 * time.Second
 func LastReport(msgs []model.Message) (model.Message, bool) {
 	for i := len(msgs) - 1; i >= 0; i-- {
 		m := msgs[i]
-		if m.Role != model.RoleAssistant || m.Queued {
+		if m.Role != model.RoleAssistant || m.Queued || m.Streaming {
 			continue
 		}
 		var parts []string
@@ -271,12 +333,20 @@ func AttachReport(data map[string]string, report model.Message) bool {
 		budget -= len(k) + len(v)
 	}
 	full := []rune(report.Blocks[0].Text)
+	original := []rune(report.Blocks[0].OriginalText)
 	for keep := len(full); keep > 0; {
 		text := string(full[:keep])
 		if keep < len(full) {
 			text = strings.TrimRight(text, " \t\n") + "…"
 		}
 		report.Blocks = []model.Block{model.TextBlock(text)}
+		if len(original) > 0 {
+			originalKeep := max(1, len(original)*keep/len(full))
+			report.Blocks[0].OriginalText = string(original[:originalKeep])
+			if originalKeep < len(original) {
+				report.Blocks[0].OriginalText += "…"
+			}
+		}
 		var buf bytes.Buffer
 		enc := json.NewEncoder(&buf)
 		enc.SetEscapeHTML(false)
@@ -295,20 +365,21 @@ func AttachReport(data map[string]string, report model.Message) bool {
 	return false
 }
 
-func (w *Watcher) attachReport(ctx context.Context, s model.Session, data map[string]string) {
+func (w *Watcher) readReport(ctx context.Context, s model.Session) *model.Message {
 	if w.Conversations == nil {
-		return
+		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, reportTimeout)
 	defer cancel()
 	_, msgs, err := w.Conversations.Conversation(ctx, s.ID)
 	if err != nil {
 		slog.Warn("push sent without report", "provider", s.Provider, "session_id", s.ID, "operation", "push", "error", err)
-		return
+		return nil
 	}
 	if report, ok := LastReport(msgs); ok {
-		AttachReport(data, report)
+		return &report
 	}
+	return nil
 }
 
 func truncate(s string, n int) string {
@@ -321,12 +392,29 @@ func truncate(s string, n int) string {
 
 func (w *Watcher) push(ctx context.Context, s model.Session, kind model.Status) {
 	if w.Sender == nil {
+		return
+	}
+	content := Content{Title: Title(s, kind), Body: Body(s), Report: w.readReport(ctx, s)}
+	w.pushContent(ctx, s, kind, content)
+}
+
+func (w *Watcher) pushContent(ctx context.Context, s model.Session, kind model.Status, content Content) {
+	if w.Sender == nil {
 		slog.Info("push skipped: FCM not configured", "provider", s.Provider, "session_id", s.ID, "operation", "push")
 		return
 	}
+	if w.Prepare != nil {
+		content = w.Prepare(ctx, s.ID, content)
+	}
+	if ctx.Err() != nil {
+		return
+	}
 	data := Payload(s, kind)
+	data["title"], data["body"] = truncate(content.Title, 120), truncate(content.Body, 300)
 	data["gatewayId"] = config.GatewayID(w.Config.Get().AuthToken)
-	w.attachReport(ctx, s, data)
+	if content.Report != nil {
+		AttachReport(data, *content.Report)
+	}
 	for _, d := range w.Config.Get().Devices {
 		err := w.Sender.Send(ctx, d.FCMToken, data)
 		switch {
