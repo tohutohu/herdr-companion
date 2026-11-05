@@ -51,11 +51,14 @@ type conn struct {
 	closeOnce sync.Once
 }
 
-func launch(binary, home, cwd, apiKey string) (*conn, error) {
+func launch(binary, home, cwd, apiKey, mode string, unattended bool) (*conn, error) {
 	cmd := exec.Command(binary, "--profile", "sdk")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Dir = cwd
-	set := map[string]string{"DSH_HOME": home}
+	set := map[string]string{"DSH_HOME": home, "DSH_PERMISSION_MODE": mode}
+	if unattended {
+		set["HC_RESIDENT"] = "1"
+	}
 	if apiKey != "" {
 		set["DEEPSEEK_API_KEY"] = apiKey
 	}
@@ -134,7 +137,12 @@ func (c *conn) write(value any) error {
 }
 
 func (c *conn) call(ctx context.Context, method string, params any, result any) error {
-	ctx, cancel := context.WithTimeout(ctx, callTimeout)
+	// A resident wait owns the task's deadline, which can be hours. Control
+	// RPCs retain their short deadline; cancellation still abandons the waiter.
+	cancel := func() {}
+	if method != "session/wait" {
+		ctx, cancel = context.WithTimeout(ctx, callTimeout)
+	}
 	defer cancel()
 	c.mu.Lock()
 	c.next++

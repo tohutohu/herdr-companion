@@ -258,7 +258,7 @@ func (h *harness) open() {
 		h.t.Fatal(err)
 	}
 	h.store = st
-	h.svc = New(st, h.env, map[string]Runner{ProviderClaude: h.runner, ProviderCodex: h.runner}, Config{}, h.clock.Now)
+	h.svc = New(st, h.env, map[string]Runner{ProviderClaude: h.runner, ProviderCodex: h.runner, ProviderDSH: h.runner}, Config{}, h.clock.Now)
 	h.svc.Notifier = &Notifier{Store: st, Sender: h.sender, Config: h.cfg, Now: h.clock.Now}
 	h.t.Cleanup(func() { h.svc.Shutdown(5 * time.Second); st.Close() })
 }

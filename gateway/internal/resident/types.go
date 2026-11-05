@@ -19,6 +19,7 @@ import (
 const (
 	ProviderClaude = "claude"
 	ProviderCodex  = "codex"
+	ProviderDSH    = "dsh"
 )
 
 // Permission profiles. They are enforced by the provider's own permission

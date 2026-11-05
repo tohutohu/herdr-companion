@@ -56,7 +56,7 @@ func (s *Server) capabilities(w http.ResponseWriter, r *http.Request) {
 		caps["localhostProxy"] = proxy
 	}
 	if s.Resident != nil {
-		caps["resident"] = map[string]any{"version": ResidentAPIVersion, "providers": []string{resident.ProviderClaude, resident.ProviderCodex},
+		caps["resident"] = map[string]any{"version": ResidentAPIVersion, "providers": []string{resident.ProviderClaude, resident.ProviderCodex, resident.ProviderDSH},
 			"defaultTimezone": resident.DefaultTimezone}
 	}
 	writeJSON(w, http.StatusOK, caps)

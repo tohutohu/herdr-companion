@@ -70,7 +70,7 @@ USE WHEN
 USAGE
   hc resident ls                                  one line per task; "!" = waits for the user
   hc resident show TASK                           settings, next 3 runs, memory, recent runs
-  hc resident create --provider claude|codex --cwd DIR (--instruction T | --instruction-file F)
+  hc resident create --provider claude|codex|dsh --cwd DIR (--instruction T | --instruction-file F)
                      [--daily HH:MM | --weekly mon,thu@HH:MM | --cron "M H D Mo W" | --once RFC3339 | --manual]
                      [--name N] [--tz Asia/Tokyo] [--model M] [--effort E] [--trust]
                      rarely needed: [--profile read_only|workspace_write] [--allow 'Bash(gh pr view:*)']...

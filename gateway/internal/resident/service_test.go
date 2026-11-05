@@ -822,6 +822,28 @@ func TestMemoryAndQuestions(t *testing.T) {
 }
 
 func TestValidationAndArtifacts(t *testing.T) {
+	t.Run("DSH常駐の作成と実行と会話への昇格", func(t *testing.T) {
+		h := newHarness(t)
+		task := h.create(func(r *CreateRequest) { r.Provider = ProviderDSH; r.Schedule = Schedule{Kind: ScheduleManual} })
+		h.svc.RunNow(bg, task.ID, "")
+		h.settle()
+		run := h.runs(task.ID)[0]
+		want := "dsh:native-" + run.ID
+		if !h.svc.HiddenSessionIDs(bg)[want] {
+			t.Fatal("resident conversation is not hidden")
+		}
+		p, err := h.svc.Promote(bg, run.ID)
+		if err != nil || p.SessionID != want {
+			t.Fatalf("promote: %+v %v", p, err)
+		}
+		if h.svc.HiddenSessionIDs(bg)[want] {
+			t.Fatal("promoted conversation still hidden")
+		}
+		_, err = h.svc.CreateTask(bg, CreateRequest{Settings: Settings{Name: "x", Instruction: "y", Provider: ProviderDSH, Cwd: h.cwd(), Schedule: Schedule{Kind: ScheduleManual}, Permissions: Permissions{AllowedTools: []string{"Bash(ls:*)"}}}})
+		if !errors.Is(err, ErrInvalid) {
+			t.Fatalf("Claude rules on DSH: %v", err)
+		}
+	})
 	t.Run("範囲外のcwd・未信頼フォルダ・未提供のモデルとeffortを理由付きで拒否する", func(t *testing.T) {
 		h := newHarness(t)
 		h.env.catalog = providers.ModelCatalog{Models: []providers.ModelOption{{ID: "sonnet", Efforts: []providers.EffortOption{{ID: "low"}, {ID: "high"}}}}}

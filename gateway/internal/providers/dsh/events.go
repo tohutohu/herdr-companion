@@ -29,6 +29,16 @@ type event struct {
 	Data json.RawMessage `json:"data"`
 }
 type eventData struct {
+	Error struct {
+		Code   string `json:"code"`
+		Reason string `json:"reason"`
+	} `json:"error"`
+	Usage struct {
+		InputTokens      int64 `json:"inputTokens"`
+		OutputTokens     int64 `json:"outputTokens"`
+		CacheReadTokens  int64 `json:"cacheReadTokens"`
+		CacheWriteTokens int64 `json:"cacheWriteTokens"`
+	} `json:"usage"`
 	Source struct {
 		Kind string `json:"kind"`
 	} `json:"source"`
@@ -148,12 +158,24 @@ func (p *Provider) eventLocked(s *session, e event) error {
 	case "assistant/message":
 		m.Role = model.RoleAssistant
 		m.Blocks = displayBlocks(d.Message.Content)
+		if p.unattended != nil {
+			p.unattended.text = messageText(m)
+			p.unattended.usage.InputTokens += d.Usage.InputTokens + d.Usage.CacheReadTokens + d.Usage.CacheWriteTokens
+			p.unattended.usage.CachedInputTokens += d.Usage.CacheReadTokens
+			p.unattended.usage.OutputTokens += d.Usage.OutputTokens
+		}
 	case "tool/call":
+		if p.unattended != nil {
+			p.unattended.text = ""
+		}
 		m.Role = model.RoleTool
 		m.Blocks = []model.Block{model.TextBlock(d.Name + "\n" + d.Arguments)}
 	case "tool/result":
 		m.Role = model.RoleTool
 		m.Blocks = displayBlocks(d.Message.Content)
+		if p.unattended != nil && d.Error.Code == "FS_SANDBOX_DENIED" {
+			p.unattended.denials = append(p.unattended.denials, d.Error.Code+": "+messageText(m))
+		}
 		for key, r := range s.pending {
 			if r.CallID != "" && r.CallID == d.Message.ToolCallID {
 				delete(s.pending, key)
@@ -161,6 +183,9 @@ func (p *Provider) eventLocked(s *session, e event) error {
 		}
 		s.info.Waiting = len(s.pending) > 0
 	case "turn/start":
+		if p.unattended != nil {
+			p.unattended.text = ""
+		}
 		s.activity++
 		s.info.Running = true
 		s.Summary.LastTurnFailed = false
@@ -168,6 +193,9 @@ func (p *Provider) eventLocked(s *session, e event) error {
 		s.Turns++
 		s.info.Turns = s.Turns
 		s.info.LastTurnFailed = d.Reason.Kind == "error" || d.Reason.Kind == "interrupted" || d.Reason.Kind == "blocked"
+		if p.unattended != nil && d.Reason.Kind != "completed" {
+			s.info.LastTurnFailed = true
+		}
 		s.Summary.LastTurnFailed = s.info.LastTurnFailed
 		s.info.Error = d.Reason.Error.Message
 		s.Summary.CompletionRevision = fmt.Sprintf("%d", e.Seq)
@@ -299,6 +327,10 @@ func (p *Provider) Messages(ctx context.Context, id string, _ *providers.Live) (
 }
 
 func (p *Provider) request(s *session, c *conn, f frame) {
+	if p.unattended != nil {
+		p.residentRequest(c, f)
+		return
+	}
 	var r struct {
 		SessionID string         `json:"sessionId"`
 		RequestID string         `json:"requestId"`

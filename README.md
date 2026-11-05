@@ -78,7 +78,7 @@ docs/      architecture and macOS release documentation
 
 Claude Code and Codex need nothing besides being installed and logged in: the Gateway runs them itself. Claude Code sessions use your existing login and subscription (the Gateway never switches to per-token API billing: `ANTHROPIC_API_KEY` is not passed to Claude Code unless you set `claudeAllowApiKey`, and a session that would bill an API key is refused with the reason), and load the same settings as the CLI: CLAUDE.md, `.claude/`, skills, hooks, MCP servers, agents and permission rules. Codex runs in a `codex app-server` the Gateway starts for itself. Their history stays in Claude Code's and Codex's own local storage.
 
-DeepSeek Harness is available for ordinary sessions after installing the supported SDK runtime and configuring an API key. See [DeepSeek Harness setup and limitations](docs/deepseek-harness.md).
+DeepSeek Harness is available for ordinary sessions and resident tasks after installing the supported SDK runtime and configuring its model route. Claude/ChatGPT subscription-backed resident tasks use the existing Claude Code/Codex logins. See [DeepSeek Harness setup and limitations](docs/deepseek-harness.md).
 
 **Agent updates on Mac** in the app's Settings shows the installed Claude Code and Codex versions and runs `claude update` / `codex update` with **Check and update**.
 

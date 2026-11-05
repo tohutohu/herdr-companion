@@ -24,13 +24,19 @@ import (
 const DefaultModel = "deepseek-flash"
 const workspaceMode = "workspace-write"
 const fullMode = "danger-full-access"
+const readOnlyMode = "read-only"
 
 var nativeID = regexp.MustCompile(`^[a-f0-9]{32}$`)
 
-type Config struct{ Binary, Home, Model, APIKey string }
+type Config struct {
+	Binary, Home, Model, APIKey string
+	Models                      []ModelRoute
+}
 type savedSession struct {
-	Summary providers.Summary `json:"summary"`
-	Turns   int               `json:"turns"`
+	Summary     providers.Summary `json:"summary"`
+	Turns       int               `json:"turns"`
+	Route       string            `json:"route,omitempty"`
+	NativeModel string            `json:"nativeModel,omitempty"`
 }
 type session struct {
 	op sync.Mutex
@@ -42,13 +48,15 @@ type session struct {
 	pending  map[string]*pendingRequest
 }
 type Provider struct {
-	mu       sync.Mutex
-	cfg      Config
-	dir      string
-	sessions map[string]*session
-	listener func(string)
-	sink     deadletter.Sink
-	closed   bool
+	mu         sync.Mutex
+	cfg        Config
+	dir        string
+	sessions   map[string]*session
+	listener   func(string)
+	sink       deadletter.Sink
+	closed     bool
+	routes     map[string]ModelRoute
+	unattended *residentState
 }
 
 var _ providers.Provider = (*Provider)(nil)
@@ -64,7 +72,11 @@ func New(cfg Config, dir string, sink deadletter.Sink) (*Provider, error) {
 	if cfg.Model == "" {
 		cfg.Model = DefaultModel
 	}
-	p := &Provider{cfg: cfg, dir: dir, sessions: map[string]*session{}, sink: sink}
+	routes, err := modelRoutes(cfg)
+	if err != nil {
+		return nil, err
+	}
+	p := &Provider{cfg: cfg, dir: dir, sessions: map[string]*session{}, sink: sink, routes: routes}
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
 	}
@@ -87,6 +99,10 @@ func New(cfg Config, dir string, sink deadletter.Sink) (*Provider, error) {
 		}
 		if saved.Summary.NativeID != id {
 			return nil, fmt.Errorf("DSH session identity mismatch: %s", id)
+		}
+		if saved.Route == "" {
+			saved.Route = deepSeekRoute
+			saved.NativeModel = saved.Summary.Model
 		}
 		s := &session{savedSession: saved, pending: map[string]*pendingRequest{}}
 		s.info = providers.DirectInfo{NativeID: id, Cwd: s.Summary.Cwd, Model: s.Summary.Model, Effort: s.Summary.Effort, Mode: s.Summary.Mode, ModeID: s.Summary.Mode, Turns: s.Turns}
@@ -134,22 +150,31 @@ func (p *Provider) recordError(id string, err error) {
 }
 
 func (p *Provider) Models(context.Context) (providers.ModelCatalog, error) {
-	models := []providers.ModelOption{{ID: p.cfg.Model, Name: p.cfg.Model, Default: true}}
-	for _, id := range []string{DefaultModel, "deepseek-v4-pro"} {
-		if id != p.cfg.Model {
-			models = append(models, providers.ModelOption{ID: id, Name: id})
+	models := make([]providers.ModelOption, 0, len(p.routes))
+	for _, r := range p.routes {
+		m := providers.ModelOption{ID: r.ID, Name: r.Name, Default: r.ID == p.cfg.Model}
+		for _, e := range r.Efforts {
+			m.Efforts = append(m.Efforts, providers.EffortOption{ID: e, Name: providers.EffortName(e)})
 		}
+		models = append(models, m)
 	}
+	sort.Slice(models, func(i, j int) bool {
+		if models[i].Default != models[j].Default {
+			return models[i].Default
+		}
+		return models[i].ID < models[j].ID
+	})
 	// The SDK validates exact model/effort routes at initialize. It has no
 	// catalog endpoint; do not invent reasoning-effort choices.
 	return providers.ModelCatalog{Models: models, Modes: []providers.ModeOption{
+		{ID: readOnlyMode, Name: "Read only"},
 		{ID: workspaceMode, Name: "Workspace write", Default: true},
 		{ID: fullMode, Name: "Full access", Description: "Run without sandbox or approval prompts"},
 	}}, nil
 }
 
 func (p *Provider) DirectStart(ctx context.Context, opts providers.DirectStart) (string, error) {
-	if opts.Mode != "" && opts.Mode != workspaceMode && opts.Mode != fullMode {
+	if opts.Mode != "" && opts.Mode != workspaceMode && opts.Mode != fullMode && opts.Mode != readOnlyMode {
 		return "", errors.New("unsupported DSH permission mode")
 	}
 	id := opts.Resume
@@ -174,6 +199,10 @@ func (p *Provider) DirectStart(ctx context.Context, opts providers.DirectStart) 
 		id = hex.EncodeToString(b[:])
 		s = &session{pending: map[string]*pendingRequest{}}
 		s.Summary = providers.Summary{NativeID: id, Cwd: opts.Cwd, UpdatedAt: time.Now(), Model: p.cfg.Model, Mode: workspaceMode}
+		if err := p.selectModel(s, p.cfg.Model); err != nil {
+			p.mu.Unlock()
+			return "", err
+		}
 		p.sessions[id] = s
 	}
 	p.mu.Unlock()
@@ -185,7 +214,17 @@ func (p *Provider) DirectStart(ctx context.Context, opts providers.DirectStart) 
 		return "", errors.New("DSH session already running")
 	}
 	if opts.Model != "" {
-		s.Summary.Model = opts.Model
+		// Restoring the saved selection must retain its exact route even if
+		// an operator later changes the catalog alias's configuration.
+		if opts.Resume == "" || opts.Model != s.Summary.Model {
+			if err := p.selectModel(s, opts.Model); err != nil {
+				if opts.Resume == "" {
+					delete(p.sessions, id)
+				}
+				p.mu.Unlock()
+				return "", err
+			}
+		}
 	}
 	if opts.Effort != "" {
 		s.Summary.Effort = opts.Effort
@@ -226,11 +265,12 @@ func (p *Provider) startLocked(ctx context.Context, s *session, resume bool) err
 		return providers.ErrRuntimeUnavailable
 	}
 	summary := s.Summary
+	route, nativeModel := s.Route, s.NativeModel
 	p.mu.Unlock()
 	if err := os.MkdirAll(p.cfg.Home, 0700); err != nil {
 		return err
 	}
-	c, err := launch(p.cfg.Binary, p.cfg.Home, summary.Cwd, p.cfg.APIKey)
+	c, err := launch(p.cfg.Binary, p.cfg.Home, summary.Cwd, p.cfg.APIKey, summary.Mode, p.unattended != nil)
 	if err != nil {
 		return err
 	}
@@ -240,7 +280,7 @@ func (p *Provider) startLocked(ctx context.Context, s *session, resume bool) err
 	s.info = providers.DirectInfo{NativeID: summary.NativeID, Cwd: summary.Cwd, Model: summary.Model, Effort: summary.Effort, Mode: summary.Mode, ModeID: summary.Mode, Turns: s.Turns, Alive: true}
 	p.mu.Unlock()
 	go c.read(func(f frame) { p.handle(s, c, f) }, func(err error) { p.exited(s, c, err) })
-	params := map[string]any{"cwd": summary.Cwd, "provider": "deepseek-official", "model": summary.Model, "approvalRequests": true, "capabilities": map[string]bool{"userQuestions": true}}
+	params := map[string]any{"cwd": summary.Cwd, "provider": route, "model": nativeModel, "approvalRequests": true, "capabilities": map[string]bool{"userQuestions": true}}
 	if summary.Effort != "" {
 		params["reasoningEffort"] = summary.Effort
 	}
@@ -442,7 +482,10 @@ func (p *Provider) setting(id, value string, effort bool) error {
 		s.Summary.Effort = value
 		s.info.RequestedEffort = value
 	} else {
-		s.Summary.Model = value
+		if err := p.selectModel(s, value); err != nil {
+			p.mu.Unlock()
+			return err
+		}
 		s.info.RequestedModel = value
 	}
 	err = p.saveLocked(s)
@@ -470,7 +513,7 @@ func (p *Provider) DirectSetMode(ctx context.Context, id, mode string) error {
 			mode = fullMode
 		}
 	}
-	if mode != workspaceMode && mode != fullMode {
+	if mode != workspaceMode && mode != fullMode && mode != readOnlyMode {
 		return errors.New("unsupported DSH permission mode")
 	}
 	if err = p.modeCall(ctx, c, id, mode); err != nil {

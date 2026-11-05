@@ -12,14 +12,15 @@ API は [api.md](api.md#常駐タスク)。実装は `gateway/internal/resident`
 
 | | 通常セッション | 常駐タスク |
 |---|---|---|
-| 正本 | エージェントの履歴（Claude transcript / Codex rollout） | Gateway の `resident.db` |
+| 正本 | エージェントの履歴（Claude transcript / Codex rollout / DSH history） | Gateway の `resident.db` |
 | 実行 | `internal/runtime.Manager`、`direct-sessions.json` | `internal/resident`（Run ごとに runId） |
 | Claude | 共有 sidecar の `query()`（`persistSession: true`） | **Run ごとに起動する sidecar** の `query()`（`persistSession: true`, `outputFormat`） |
 | Codex | Gateway の app-server のスレッド | **Run ごとに起動する app-server** のスレッド（`ephemeral: false`, `outputSchema`） |
+| DSH | セッション専用 SDK プロセス | **Run ごとに起動する SDK プロセス**（`session/wait`、最終JSON検証） |
 | 通知 | Watcher が状態遷移から送る | 結果確定時に Outbox へ入れ、Outbox から送る |
 
 - 常駐の Run は Manager・`direct-sessions.json`・Watcher・セッション listener に登録されない。Run の会話（Claude transcript /
-  Codex rollout）は[セッションに昇格](#セッションへの昇格)できるように残すが、`/v1/sessions` の offline 一覧は昇格していない
+  Codex rollout / DSH history と表示用 journal）は[セッションに昇格](#セッションへの昇格)できるように残すが、`/v1/sessions` の offline 一覧は昇格していない
   Run の native id を除外する（`hc ls` も同じ一覧を使う）。
 - 共有しているのは低層部分だけ: sidecar の stdio プロトコル（`startSidecar`）、Codex の JSON-RPC クライアントと stdio transport、
   Claude CLI のパス・ログイン・課金ガード（`billingProblem`、API キーの除去）、環境変数の整理（`ChildEnv`）、
@@ -28,7 +29,7 @@ API は [api.md](api.md#常駐タスク)。実装は `gateway/internal/resident`
   止めないため（コマンドは別プロセスグループで残る）。Run が終わる・停止される・時間切れになると、その sidecar / app-server と
   そこから起動されたプロセス（別グループのコマンドも含む）を `ps` の親子関係で列挙して終了する。共有の sidecar / app-server、
   通常セッション、他の Run、ユーザーの Herdr には触れない。
-- エージェントの環境には `HC_RESIDENT_RUN=<runId>`（Claude）/`HC_RESIDENT=1`（Codex）が入り、`HC_SESSION_ID` は入らない。
+- エージェントの環境には `HC_RESIDENT_RUN=<runId>`（Claude）/`HC_RESIDENT=1`（Codex / DSH）が入り、`HC_SESSION_ID` は入らない。
   `herdr` や `hc` はツールとしてそのまま使える。
 
 ## データ（`resident.db`）
@@ -158,13 +159,14 @@ SQLite（`modernc.org/sqlite`、純 Go で cgo 不要）、WAL、`synchronous=FU
 | | フォルダ内の編集可（`workspace_write`、既定） | 読み取りのみ（`read_only`） |
 |---|---|---|
 | Claude | auto モード（モデルが対応していれば。Claude Code の分類器が各操作を判断し、人に聞く操作は拒否）、未対応なら `acceptEdits` | permissionMode `default`、Read/Glob/Grep/LS を許可、Edit/Write/MultiEdit/NotebookEdit を禁止 |
+| DSH | preset `workspace-write`、追加の承認要求は拒否 | preset `read-only`、追加の承認要求は拒否 |
 | Codex | sandbox `workspace-write`、approvalPolicy `on-request` を auto review（`approvalsReviewer: auto_review`）が人の代わりに判断 | sandbox `read-only`、approvalPolicy `never` |
 
-- ネットワークは常に使える（Claude は WebSearch/WebFetch を許可、Codex は sandbox の `networkAccess: true`）。
+- ネットワークは常に使える（Claude は WebSearch/WebFetch を許可、Codex は sandbox の `networkAccess: true`、DSH は標準プロファイルのネットワーク設定）。
   古いクライアントが送る `permissions.network` は無視する。
 - Claude には追加の許可ルール（例 `Bash(gh pr view:*)`、`mcp__github__get_issue`）を指定できる。無制限の `Bash` は不可。
   ユーザー・プロジェクトの設定にある許可ルールは `claude -p` と同様に有効（Claude Code が既定で許す読み取り専用コマンドも含む）。
-- それ以外の権限要求は自動で拒否する（Claude: 常駐用の `canUseTool` が拒否して記録、Codex: auto review の却下を記録し、Gateway に来た承認要求には decline）。
+- それ以外の権限要求は自動で拒否する（Claude: 常駐用の `canUseTool` が拒否して記録、Codex: auto review の却下を記録し、Gateway に来た承認要求には decline、DSH: SDK の承認要求に rejected）。
   通常セッションの承認設定は変えない。bypassPermissions は使わない。
 - 必要な権限・ログイン・判断がなければ、エージェントは `blocked` と質問を返し、Run は `waiting_user` になる（プロセスは待たせない）。
   回答は期限（7 日）と対象 Run を照合して保存し、質問した Run のチェックポイントから新しい Run を始める。古い承認 ID は再送しない。
@@ -173,6 +175,9 @@ SQLite（`modernc.org/sqlite`、純 Go で cgo 不要）、WAL、`synchronous=FU
   ただし Codex は `workspace-write` の実行で、そのフォルダを `~/.codex/config.toml` に `trust_level = "trusted"` として自分で追加する
   （codex-cli 0.166.0 で確認）。
 - Claude のログイン・API キー課金のガードは通常セッションと同じ（`claudeAllowApiKey` がなければ API キーでは実行しない）。
+- Claudeサブスクは Claude Code、ChatGPTサブスクは Codex を選び、Mac上の各CLIでログインする。常駐もその認証を使う。
+  DSH自体の別モデル接続は `dshModels` で設定する。DSHのChatGPTログインは未実装で、Anthropicサブスクは公式Claude Code経由を使う（[接続と制限](deepseek-harness.md#model-routes-and-subscriptions)）。
+- DSH は最終回答に結果スキーマを指示し、Gateway で検証する。SDKに出力スキーマ制約はないため、不正な結果は契約エラーになり、自動で再送しない。
 - モデル・effort は保存時に Provider のカタログで検証し、実行時に提供されないモデルは置き換えずに失敗させる。
 - メール・Web 検索などの外部連携は、この Mac で設定済みの CLI / MCP だけが使える。未設定ならエージェントが理由を返す。
 

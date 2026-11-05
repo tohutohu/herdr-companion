@@ -146,7 +146,11 @@ func serve(args []string) error {
 
 	claudeProvider := claude.New(cfg.ClaudeConfigDir, sink)
 	codexProvider := codex.New(cfg.CodexBinary, sink)
-	dshProvider, err := dsh.New(dsh.Config{Binary: cfg.DSHBinary, Home: cfg.DSHHome, Model: cfg.DSHModel, APIKey: cfg.DSHAPIKey}, filepath.Join(config.StateDir(), "dsh"), sink)
+	dshModels := make([]dsh.ModelRoute, 0, len(cfg.DSHModels))
+	for _, m := range cfg.DSHModels {
+		dshModels = append(dshModels, dsh.ModelRoute{ID: m.ID, Name: m.Name, Provider: m.Provider, Model: m.Model, Efforts: m.Efforts})
+	}
+	dshProvider, err := dsh.New(dsh.Config{Binary: cfg.DSHBinary, Home: cfg.DSHHome, Model: cfg.DSHModel, APIKey: cfg.DSHAPIKey, Models: dshModels}, filepath.Join(config.StateDir(), "dsh"), sink)
 	if err != nil {
 		return fmt.Errorf("open DSH sessions: %w", err)
 	}
@@ -207,7 +211,7 @@ func serve(args []string) error {
 	direct.SetListener(watcher.Kick)
 	go watcher.Run(ctx)
 
-	// Resident tasks: their own database, sidecar and app-server; nothing
+	// Resident tasks: their own database, sidecar, app-server and DSH SDK; nothing
 	// is shared with the session runtime or its watcher but the FCM sender.
 	residentStore, err := resident.Open(filepath.Join(config.StateDir(), "resident.db"))
 	if err != nil {
@@ -215,8 +219,8 @@ func serve(args []string) error {
 	}
 	defer residentStore.Close()
 	claudeResident, codexResident := claudeProvider.ResidentRunner(), codexProvider.ResidentRunner()
-	residents := resident.New(residentStore, residentEnv{launch: launch, providers: []providers.Provider{claudeProvider, codexProvider}},
-		map[string]resident.Runner{resident.ProviderClaude: claudeResident, resident.ProviderCodex: codexResident},
+	residents := resident.New(residentStore, residentEnv{launch: launch, providers: []providers.Provider{claudeProvider, codexProvider, dshProvider}},
+		map[string]resident.Runner{resident.ProviderClaude: claudeResident, resident.ProviderCodex: codexResident, resident.ProviderDSH: dshProvider.ResidentRunner()},
 		resident.Config{MaxConcurrentRuns: cfg.ResidentMaxConcurrentRuns, CatchUpWindow: time.Duration(cfg.ResidentCatchUpHours) * time.Hour}, nil)
 	residents.Notifier = &resident.Notifier{Store: residentStore, Sender: sender, Config: store}
 	if err := residents.Recover(ctx); err != nil {

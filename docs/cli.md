@@ -24,7 +24,7 @@
 | 常駐 | `resident`（`ls` `show` `create` `update` `preview` `pause` `resume` `run` `runs` `log` `cancel` `dismiss` `promote` `send` `answer` `messages` `memory` `delete`） |
 | その他 | `usage` `guide` `version` |
 
-- `hc start` は Gateway が起動し、すぐにセッション ID を返す（`started claude:<id>`）。`--provider` は `claude`（既定）か `codex`。
+- `hc start` は Gateway が起動し、すぐにセッション ID を返す（`started claude:<id>`）。`--provider` は `claude`（既定）/ `codex` / `dsh`。
 - `hc model ID MODEL` / `hc effort ID LEVEL` はセッション ID と履歴を保ったまま変える。カタログに無い値は理由付きで拒否され、別の値には置き換わらない。Claude Code は次のモデル呼び出しから、Codex は次のターンから効き、それまで `hc show` に「switching to …」と出る。
 - `hc mode ID [MODE]` は巡回、または直接指定。`hc interrupt ID` は実行中のターンだけを止める。
 - `hc resume ID` は停止中（offline）・アーカイブ済みのセッションを、どこで始めたものでも同じ ID のまま新しいプロセスで再開する。Gateway が一覧で動作中と出すセッションはプロセスが止まっていても `hc send` だけで再開する。

@@ -32,6 +32,8 @@ func TestDSHプロトコル子プロセス(t *testing.T) {
 		}
 	}
 	var id, pending string
+	unattended := os.Getenv("HC_RESIDENT") == "1"
+	held := false
 	seq := int64(0)
 	event := func(kind string, data any) {
 		seq++
@@ -41,7 +43,11 @@ func TestDSHプロトコル子プロセス(t *testing.T) {
 		emit(map[string]any{"jsonrpc": "2.0", "method": "session.status", "params": map[string]string{"sessionId": id, "status": value}})
 	}
 	finish := func() {
-		event("assistant/message", map[string]any{"message": map[string]any{"content": []any{map[string]string{"type": "text", "text": "done"}}}})
+		text := "done"
+		if unattended {
+			text = residentTestResult
+		}
+		event("assistant/message", map[string]any{"message": map[string]any{"content": []any{map[string]string{"type": "text", "text": text}}}, "usage": map[string]int{"inputTokens": 11, "outputTokens": 7, "cacheReadTokens": 3, "cacheWriteTokens": 2}})
 		event("turn/end", map[string]any{"reason": map[string]string{"kind": "completed"}})
 		status("idle")
 	}
@@ -52,10 +58,10 @@ func TestDSHプロトコル子プロセス(t *testing.T) {
 			os.Exit(3)
 		}
 		if f.Method == "" {
-			if pending == "approval" && !strings.Contains(string(f.Result), "allowed-once") {
+			if pending == "approval" && ((!unattended && !strings.Contains(string(f.Result), "allowed-once")) || (unattended && !strings.Contains(string(f.Result), "rejected"))) {
 				os.Exit(4)
 			}
-			if pending == "question" && !strings.Contains(string(f.Result), `"selected":["Yes"]`) {
+			if pending == "question" && ((!unattended && !strings.Contains(string(f.Result), `"selected":["Yes"]`)) || (unattended && !strings.Contains(string(f.Result), `"cancelled":true`))) {
 				os.Exit(5)
 			}
 			pending = ""
@@ -73,6 +79,10 @@ func TestDSHプロトコル子プロセス(t *testing.T) {
 		result := any(map[string]any{})
 		switch f.Method {
 		case "initialize":
+			os.WriteFile(filepath.Join(os.Getenv("DSH_HOME"), "initialize.json"), f.Params, 0600)
+			if unattended && os.Getenv("DSH_PERMISSION_MODE") != readOnlyMode && os.Getenv("DSH_PERMISSION_MODE") != workspaceMode {
+				os.Exit(10)
+			}
 			if !strings.Contains(string(f.Params), `"approvalRequests":true`) || !strings.Contains(string(f.Params), `"userQuestions":true`) {
 				os.Exit(6)
 			}
@@ -94,7 +104,7 @@ func TestDSHプロトコル子プロセス(t *testing.T) {
 			status("running")
 			event("turn/start", map[string]int{"turn": 1})
 			event("user/message", map[string]any{"content": params.ContentBlocks, "source": map[string]string{"kind": "user"}})
-			switch text {
+			switch strings.SplitN(text, "\n", 2)[0] {
 			case "approval":
 				pending = "approval"
 				emit(map[string]any{"jsonrpc": "2.0", "id": 900, "method": "approval/request", "params": map[string]string{"sessionId": id, "toolName": "bash", "reason": "Run test command", "callId": "call-1"}})
@@ -106,10 +116,18 @@ func TestDSHプロトコル子プロセス(t *testing.T) {
 			case "crash":
 				os.Exit(9)
 			case "hold":
+				held = true
+			case "failed-result":
+				finish()
+				event("turn/end", map[string]any{"reason": map[string]any{"kind": "error", "error": map[string]string{"message": "model failed"}}})
 			default:
 				finish()
 			}
 			result = map[string]string{"kind": "prompt", "messageId": "message-1"}
+		case "session/wait":
+			if held {
+				continue
+			}
 		default:
 			emit(map[string]any{"id": f.ID, "error": rpcError{Code: -32601, Message: "unknown method"}})
 			continue

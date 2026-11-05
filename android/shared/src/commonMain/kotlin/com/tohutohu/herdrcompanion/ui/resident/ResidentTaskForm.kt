@@ -282,10 +282,18 @@ fun ResidentTaskForm(
             }
             Section("エージェント")
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("claude", "codex").forEach { p ->
+                listOf("claude", "codex", "dsh").forEach { p ->
                     FilterChip(draft.provider == p, { draft = draft.copy(provider = p, model = "", effort = "") }, label = { Text(providerLabel(p)) })
                 }
             }
+            Text(
+                when (draft.provider) {
+                    "claude" -> "Claude サブスクを使う場合は、この Mac の Claude Code でログインしてください。"
+                    "codex" -> "ChatGPT サブスクを使う場合は、この Mac の Codex で ChatGPT にログインしてください。"
+                    else -> "DSH の設定済みモデル接続を使います。認証と課金方法は接続先の設定に従います。"
+                },
+                style = MaterialTheme.typography.bodySmall,
+            )
             ModelPickers(draft, models) { draft = it }
             Section("予定")
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

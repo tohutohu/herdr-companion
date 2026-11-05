@@ -125,7 +125,7 @@ curl -s -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
 
 ### セッション ID
 
-`<provider>:<native-id>` 形式。`provider` は `claude` / `codex`。
+`<provider>:<native-id>` 形式。`provider` は `claude` / `codex` / `dsh`。
 `native-id` は各エージェント自身のセッション（スレッド）ID。ターミナルや 1.x の Herdr のペインで始めた
 セッションも同じ ID のまま一覧に出て、再開できる。
 
@@ -301,7 +301,7 @@ Gateway が動かすセッションは、プロセスが無い間（Gateway の�
 
 | フィールド | 必須 | 説明 |
 |---|---|---|
-| `provider`, `cwd` | ○ | `provider` は `claude` / `codex` |
+| `provider`, `cwd` | ○ | `provider` は `claude` / `codex` / `dsh` |
 | `prompt` | | 最初のプロンプト。`uploads` は最初のプロンプトに添付される |
 | `model` / `effort` / `mode` | | `GET /v1/models` の `id`。空ならエージェントの既定 |
 | `trust` | | フォルダ信頼を代わりに承認する（信頼の記録は書かない）。`false` のとき、エージェントが一度も信頼していないフォルダ（Claude: `~/.claude.json`、Codex: `config.toml` の記録を読むだけ）なら起動せずに `trustRequired` と `launchId` を返す |
@@ -728,7 +728,7 @@ Run と会話のメッセージには `conversation`（`kept`: 昇格できる�
 ### 対応の判別: `GET /v1/capabilities`
 
 ```json
-{"messageIdempotency": true, "resident": {"version": 1, "providers": ["claude", "codex"], "defaultTimezone": "Asia/Tokyo"}}
+{"messageIdempotency": true, "resident": {"version": 1, "providers": ["claude", "codex", "dsh"], "defaultTimezone": "Asia/Tokyo"}}
 ```
 
 `resident` がない（または `/v1/capabilities` が 404 の）Gateway は常駐タスクに対応していない。アプリは 404 や通信エラーを

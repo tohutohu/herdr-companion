@@ -21,6 +21,16 @@ type Device struct {
 	RegisteredAt time.Time `json:"registeredAt"`
 }
 
+// DSHModel maps an app-visible selection to an installed DSH provider route.
+// Authentication is managed by that route in the dedicated DSH home.
+type DSHModel struct {
+	ID       string   `json:"id"`
+	Name     string   `json:"name,omitempty"`
+	Provider string   `json:"provider"`
+	Model    string   `json:"model"`
+	Efforts  []string `json:"efforts,omitempty"`
+}
+
 type Config struct {
 	FirebaseAndroid *FirebaseAndroid `json:"firebaseAndroid,omitempty"`
 	// Optional TypeSafe key for advisory directory checks; TYPESAFE_API_KEY overrides it.
@@ -37,10 +47,11 @@ type Config struct {
 	ClaudeConfigDir string `json:"claudeConfigDir,omitempty"`
 	CodexBinary     string `json:"codexBinary,omitempty"`
 	// DeepSeek Harness uses a private SDK profile; see docs/deepseek-harness.md.
-	DSHBinary string `json:"dshBinary,omitempty"`
-	DSHHome   string `json:"dshHome,omitempty"`
-	DSHModel  string `json:"dshModel,omitempty"`
-	DSHAPIKey string `json:"dshApiKey,omitempty"`
+	DSHBinary string     `json:"dshBinary,omitempty"`
+	DSHHome   string     `json:"dshHome,omitempty"`
+	DSHModel  string     `json:"dshModel,omitempty"`
+	DSHAPIKey string     `json:"dshApiKey,omitempty"`
+	DSHModels []DSHModel `json:"dshModels,omitempty"`
 	// ClaudeBinary is the Claude Code CLI that directly managed sessions run
 	// (default: claude on PATH, then ~/.local/bin/claude).
 	ClaudeBinary string `json:"claudeBinary,omitempty"`

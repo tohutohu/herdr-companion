@@ -50,7 +50,7 @@ func withResident(t *testing.T, runner *apiRunner) (func(*Server), **resident.Se
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { st.Close() })
-		svc = resident.New(st, apiEnv{root}, map[string]resident.Runner{"claude": runner, "codex": runner}, resident.Config{}, nil)
+		svc = resident.New(st, apiEnv{root}, map[string]resident.Runner{"claude": runner, "codex": runner, "dsh": runner}, resident.Config{}, nil)
 		t.Cleanup(func() { svc.Shutdown(time.Second) })
 		s.Resident = svc
 	}, &svc, root
@@ -80,11 +80,12 @@ func Test機能一覧で常駐APIの対応を判別できる(t *testing.T) {
 	_, body = do(t, ts2, tok2, "GET", "/v1/capabilities", nil, "")
 	var caps struct {
 		Resident struct {
-			Version int `json:"version"`
+			Version   int      `json:"version"`
+			Providers []string `json:"providers"`
 		} `json:"resident"`
 	}
 	json.Unmarshal(body, &caps)
-	if caps.Resident.Version != ResidentAPIVersion {
+	if caps.Resident.Version != ResidentAPIVersion || strings.Join(caps.Resident.Providers, ",") != "claude,codex,dsh" {
 		t.Errorf("capabilities = %s", body)
 	}
 }

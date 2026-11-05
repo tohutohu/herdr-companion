@@ -214,7 +214,10 @@ DeepSeek Harness uses one `dsh --profile sdk` process per ordinary session,
 with newline-delimited JSON-RPC. Its SDK has no per-session cancel method, so
 interrupt disposes that process and the next send resumes the same native ID.
 The Gateway keeps a private display journal; native DSH persistence supplies
-model history. See [DeepSeek Harness](deepseek-harness.md) for version,
+model history. Resident runs use separate SDK processes and only adopt their
+display journals after shutdown; `session/wait` follows the task deadline.
+Configured catalog aliases resolve to persisted native provider/model routes.
+See [DeepSeek Harness](deepseek-harness.md) for version,
 configuration and feature boundaries.
 
 ### Claude Code

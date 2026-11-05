@@ -13,7 +13,8 @@ import (
 )
 
 // ResultSchema is the JSON Schema every run's final answer must match, for
-// both providers (Claude's outputFormat and Codex's outputSchema). It stays
+// all providers (Claude's outputFormat, Codex's outputSchema, and DSH's
+// final JSON text validated by ParseResult). It stays
 // within what strict structured outputs accept: every property required,
 // no free-form objects. Memory values therefore travel as JSON text in
 // statePatch[].value.

@@ -94,5 +94,6 @@ fun notifyDecisionLabel(d: String?): String? = when (d) {
 fun providerLabel(p: String) = when (p) {
     "claude" -> "Claude Code"
     "codex" -> "Codex"
+    "dsh" -> "DeepSeek Harness"
     else -> p
 }

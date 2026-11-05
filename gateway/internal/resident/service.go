@@ -165,11 +165,11 @@ func normalize(in Settings) (Settings, error) {
 		return s, invalid("instruction is longer than 32 KiB")
 	}
 	switch s.Provider {
-	case ProviderClaude, ProviderCodex:
+	case ProviderClaude, ProviderCodex, ProviderDSH:
 	case "":
-		return s, invalid("provider is required (claude or codex)")
+		return s, invalid("provider is required (claude, codex or dsh)")
 	default:
-		return s, invalid("unknown provider %q (claude or codex)", s.Provider)
+		return s, invalid("unknown provider %q (claude, codex or dsh)", s.Provider)
 	}
 	if s.Model != "" && !providers.ValidModelID(s.Model) {
 		return s, invalid("model %q is not a model id", s.Model)
@@ -196,8 +196,8 @@ func normalize(in Settings) (Settings, error) {
 	if s.Permissions.AllowedTools == nil {
 		s.Permissions.AllowedTools = []string{}
 	}
-	if len(s.Permissions.AllowedTools) > 0 && s.Provider == ProviderCodex {
-		return s, invalid("allowedTools are Claude Code permission rules; Codex runs use its sandbox only")
+	if len(s.Permissions.AllowedTools) > 0 && s.Provider != ProviderClaude {
+		return s, invalid("allowedTools are Claude Code permission rules; Codex and DSH runs use their sandbox only")
 	}
 	if len(s.Permissions.AllowedTools) > 50 {
 		return s, invalid("at most 50 allowedTools")
