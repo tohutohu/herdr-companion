@@ -25,6 +25,8 @@ data class AgentPresets(
     val lastUsed: AgentPreset? = null,
     /** Whether the last session started in a new worktree. */
     val lastWorktree: Boolean = false,
+    /** Whether translation was enabled when the last session started. */
+    val lastTranslation: Boolean = false,
 )
 
 fun togglePreset(presets: List<AgentPreset>, preset: AgentPreset): List<AgentPreset> =

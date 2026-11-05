@@ -61,10 +61,28 @@ class DesktopPreferencesTest {
             presets = listOf(AgentPreset("codex", "gpt-6-astra", "high", "Astra", "High")),
             lastUsed = AgentPreset("claude", model = "sonnet"),
             lastWorktree = true,
+            lastTranslation = true,
         )
 
         assertEquals(value, decodeAgentPresets(encodeAgentPresets(value)))
         assertEquals(AgentPresets(), decodeAgentPresets("not json"))
+    }
+
+    @Test
+    fun `以前の設定に翻訳モードがなければオフで復元する`() {
+        val loaded = decodeAgentPresets("""{"lastUsed":{"provider":"codex"},"lastWorktree":true}""")
+
+        assertEquals("codex", loaded.lastUsed?.provider)
+        assertTrue(loaded.lastWorktree)
+        assertFalse(loaded.lastTranslation)
+    }
+
+    @Test
+    fun `翻訳モードをオフに戻した設定も保存できる`() {
+        val enabled = AgentPresets(lastTranslation = true)
+        val disabled = enabled.copy(lastTranslation = false)
+
+        assertFalse(decodeAgentPresets(encodeAgentPresets(disabled)).lastTranslation)
     }
 
     @Test

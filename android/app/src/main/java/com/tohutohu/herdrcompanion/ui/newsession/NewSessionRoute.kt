@@ -109,7 +109,7 @@ fun NewSessionRoute(
         val id = starts.enqueue(request) { picked.map { uploadAttachment(resolver, api, it) } }
         container.scope.launch {
             runCatching { shortcutStore.recordUsed(request.cwd) }
-            runCatching { presetStore.recordUsed(preset, request.worktree) }
+            runCatching { presetStore.recordUsed(preset, request.worktree, request.translation == true) }
         }
         onStarted(id)
     }
@@ -149,6 +149,7 @@ fun NewSessionRoute(
             mode = it.mode
         }
         worktree = loaded.lastWorktree
+        translation = loaded.lastTranslation
     }
 
     LaunchedEffect(provider) {

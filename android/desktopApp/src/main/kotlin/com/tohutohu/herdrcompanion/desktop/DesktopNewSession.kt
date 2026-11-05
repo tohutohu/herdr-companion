@@ -81,7 +81,7 @@ fun DesktopNewSessionWindow(
     var model by rememberSaveable { mutableStateOf("") }
     var effort by rememberSaveable { mutableStateOf("") }
     var mode by rememberSaveable { mutableStateOf("") }
-    var translation by rememberSaveable { mutableStateOf(false) }
+    var translation by rememberSaveable { mutableStateOf(presets.lastTranslation) }
     var worktree by rememberSaveable { mutableStateOf(presets.lastWorktree) }
     var catalog by remember { mutableStateOf(ModelsResponse()) }
     var modelsLoading by remember { mutableStateOf(false) }
@@ -129,7 +129,7 @@ fun DesktopNewSessionWindow(
         // last-used selection even when it is not one of the favorites.
         shortcuts = shortcuts.copy(recents = pushRecent(shortcuts.recents, request.cwd))
         DesktopPreferences.saveDirectoryShortcuts(shortcuts)
-        presets = presets.copy(lastUsed = preset, lastWorktree = request.worktree)
+        presets = presets.copy(lastUsed = preset, lastWorktree = request.worktree, lastTranslation = request.translation == true)
         DesktopPreferences.saveAgentPresets(presets)
         scope.launch {
             try {
