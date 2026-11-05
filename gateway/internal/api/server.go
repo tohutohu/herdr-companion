@@ -986,6 +986,7 @@ func (s *Server) archiveSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	for i, sess := range archived {
 		slog.Info("session archived", "provider", sess.Provider, "session_id", sess.ID, "operation", "archive_sessions", "stopped", stopped[i])
+		archived[i].Session = s.translatedSession(sess.Session)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"sessions": archived})
 }

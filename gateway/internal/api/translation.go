@@ -94,15 +94,20 @@ func (s *Server) translateInput(ctx context.Context, sessionID, text string, fil
 }
 
 func (s *Server) translatedSession(session model.Session) model.Session {
+	mode := s.sessionTranslation(session.ID)
+	enabled := false
 	if s.Translation != nil {
-		return s.Translation.Session(session, s.sessionTranslation(session.ID))
+		status := s.Translation.Status()
+		enabled = status.Input || status.Output
+		session = s.Translation.Session(session, mode)
 	}
+	if mode != nil {
+		enabled = *mode
+	}
+	session.Translation = &enabled
 	return session
 }
 func (s *Server) translatedSessions(list []model.Session) []model.Session {
-	if s.Translation == nil {
-		return list
-	}
 	out := append([]model.Session{}, list...)
 	for i := range out {
 		out[i] = s.translatedSession(out[i])

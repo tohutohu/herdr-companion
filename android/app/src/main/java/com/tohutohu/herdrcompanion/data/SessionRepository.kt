@@ -247,6 +247,7 @@ fun SessionDto.toEntity(now: Long, listed: Boolean) = SessionEntity(
     listed = listed,
     lastSyncedAt = now,
     unread = unread,
+    translation = translation,
     pendingModel = pendingModel,
     pendingEffort = pendingEffort,
     settingsApply = settingsApply,

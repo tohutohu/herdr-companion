@@ -43,6 +43,8 @@ data class SessionDto(
     /** Work the session left running, whatever [status] says. */
     val background: List<BackgroundTaskDto> = emptyList(),
     val originalTitle: String? = null,
+    /** Effective translation mode; null when an older gateway has not reported it. */
+    val translation: Boolean? = null,
 ) {
     val isLive get() = status != Status.OFFLINE
 }

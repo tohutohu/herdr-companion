@@ -54,6 +54,7 @@ data class SessionEntity(
     val error: String? = null,
     /** The work the session left running, as JSON; only rendered, never queried. */
     val backgroundJson: String? = null,
+    val translation: Boolean? = null,
 )
 
 /** Messages keep their blocks as JSON; they are only rendered, never queried. */
@@ -153,7 +154,7 @@ class DropHerdrColumns : AutoMigrationSpec
 
 @Database(
     entities = [SessionEntity::class, MessageEntity::class],
-    version = 11,
+    version = 12,
     exportSchema = true,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
@@ -166,6 +167,7 @@ class DropHerdrColumns : AutoMigrationSpec
         AutoMigration(from = 8, to = 9),
         AutoMigration(from = 9, to = 10, spec = DropHerdrColumns::class),
         AutoMigration(from = 10, to = 11),
+        AutoMigration(from = 11, to = 12),
     ],
 )
 abstract class AppDatabase : RoomDatabase() {

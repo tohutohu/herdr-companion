@@ -31,6 +31,7 @@ fun SessionEntity.toUiModel() = SessionUiModel(
     archived = archived,
     live = status != Status.OFFLINE,
     unread = unread,
+    translation = translation,
     pendingModel = pendingModel,
     pendingEffort = pendingEffort,
     settingsApply = settingsApply,

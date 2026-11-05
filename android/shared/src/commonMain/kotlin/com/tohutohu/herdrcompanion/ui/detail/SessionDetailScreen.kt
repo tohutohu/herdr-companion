@@ -16,6 +16,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.DragInteraction
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.ColumnScope
@@ -476,6 +477,21 @@ fun SessionDetailScreen(
                             maxLines = 1,
                             overflow = TextOverflow.StartEllipsis,
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Default.Translate, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Text(
+                            text = "Translation mode: " + when (it.translation) {
+                                true -> "On"
+                                false -> "Off"
+                                null -> "Unknown"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
                         )
                     }
                     ContextBar(it.contextUsedTokens, it.contextWindowTokens, it.contextUsedPercent)

@@ -81,6 +81,29 @@ class MessageTranslationTest {
     }
 
     @Test
+    fun 翻訳履歴がなくても詳細にモードを表示し状態の変化を反映する() {
+        var translation by mutableStateOf<Boolean?>(true)
+        rule.setContent {
+            MaterialTheme {
+                SessionDetailScreen(
+                    state = SessionDetailUiState(
+                        "session", SessionDto("session", "codex", status = "offline", updatedAt = "",
+                            title = "Session title", translation = translation).toUiModel(),
+                        emptyList(), emptyList(), error = null, answering = false,
+                    ),
+                    resolveUrl = { it }, formatFileSize = { "$it bytes" }, formatTime = { "$it" }, onAction = {},
+                )
+            }
+        }
+        rule.onNodeWithText("Session title").performClick()
+        rule.onNodeWithText("Translation mode: On").assertExists()
+        rule.runOnIdle { translation = false }
+        rule.onNodeWithText("Translation mode: Off").assertExists()
+        rule.runOnIdle { translation = null }
+        rule.onNodeWithText("Translation mode: Unknown").assertExists()
+    }
+
+    @Test
     fun 翻訳のない会話には原文切替を出さない() {
         rule.setContent {
             MaterialTheme {

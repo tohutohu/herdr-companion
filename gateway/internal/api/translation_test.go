@@ -183,6 +183,10 @@ func Test開始時の翻訳選択は初回と後続の送信に適用され信�
 				if choice := dp.m.Translation(id); choice == nil || *choice != enabled {
 					t.Fatal(choice)
 				}
+				code, detail := call(t, ts, token, "GET", "/v1/sessions/"+id, nil)
+				if code != http.StatusOK || detail["translation"] != enabled {
+					t.Fatal(code, detail)
+				}
 				code, result = call(t, ts, token, "POST", "/v1/sessions/"+id+"/messages", map[string]string{"text": "続けて"})
 				if code != http.StatusAccepted {
 					t.Fatal(code, result)
@@ -201,6 +205,33 @@ func Test開始時の翻訳選択は初回と後続の送信に適用され信�
 					t.Fatal("global default changed")
 				}
 			})
+		}
+	}
+}
+
+func Test翻訳状態は既定設定と翻訳機能なしでも一覧と詳細に明示する(t *testing.T) {
+	for _, options := range []*translation.Options{nil, {}, {Input: true}, {Output: true}, {InputEverEnabled: true, OutputEverEnabled: true}} {
+		ts, _, _, token := newTestServer(t, func(s *Server) {
+			if options != nil {
+				s.Translation = &testTranslator{st: translation.Status{Options: *options}}
+			}
+		})
+		want := options != nil && (options.Input || options.Output)
+		for _, path := range []string{"/v1/sessions/fake:s1", "/v1/sessions", "/v1/sessions/fake:s1/messages"} {
+			code, result := call(t, ts, token, "GET", path, nil)
+			if code != http.StatusOK {
+				t.Fatal(code, result)
+			}
+			session := result
+			if list, ok := result["sessions"].([]any); ok {
+				session = list[0].(map[string]any)
+			}
+			if detail, ok := result["session"].(map[string]any); ok {
+				session = detail
+			}
+			if session["translation"] != want {
+				t.Fatalf("%s: %v, want %v", path, session, want)
+			}
 		}
 	}
 }

@@ -258,6 +258,7 @@ Gateway が動かすセッションは、プロセスが無い間（Gateway の�
 |---|---|
 | `canSend` | 今メッセージを送れるか（Gateway が動かしている。プロセスが無ければ送信時に再開する） |
 | `unread` | 最後のターンが終わり、まだ見ていない（`seen` 未送信） |
+| `translation` | セッションの有効な翻訳モード（boolean、無効時も `false` を返す）。開始時の明示指定を優先し、未指定なら Gateway の入力・出力翻訳のいずれかが有効かを返す。翻訳モデルの起動状態や原文表示の切替とは独立。旧 Gateway が返さない場合は不明として扱う |
 | `background` | セッションが裏で動かし続けている作業。`[{id, kind, description, startedAt}]`、無ければ省略。`kind` は `agent` / `shell` / `other`。`status` とは独立で、`completed` や `idle` でも空とは限らない。`startedAt` は Gateway が最初に見た時刻。Claude Code のセッションのみ |
 | `model` / `effort` | 最後の応答が使ったモデルと推論強度 |
 | `pendingModel` / `pendingEffort` | 変更を要求したがまだ使われていない値。適用されると消える |

@@ -29,6 +29,8 @@ func (s Status) Notifiable() bool {
 }
 
 type Session struct {
+	// Translation is the effective session mode, populated by the API.
+	Translation   *bool     `json:"translation,omitempty"`
 	OriginalTitle string    `json:"originalTitle,omitempty"`
 	ID            string    `json:"id"` // "<provider>:<native-id>"
 	Provider      string    `json:"provider"`

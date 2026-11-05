@@ -33,6 +33,8 @@ data class SessionUiModel(
     /** Work the session left running; a finished turn does not end it. */
     val background: List<BackgroundTaskUiModel> = emptyList(),
     val originalTitle: String? = null,
+    /** Effective translation mode; null when an older gateway has not reported it. */
+    val translation: Boolean? = null,
 )
 
 data class BackgroundTaskUiModel(

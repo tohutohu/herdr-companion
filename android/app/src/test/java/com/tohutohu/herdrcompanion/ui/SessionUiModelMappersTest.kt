@@ -1,11 +1,22 @@
 package com.tohutohu.herdrcompanion.ui
 
+import com.tohutohu.herdrcompanion.data.toEntity
 import com.tohutohu.herdrcompanion.data.db.SessionEntity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SessionUiModelMappersTest {
+    @Test
+    fun `翻訳状態はDTOからキャッシュを経由して詳細へ渡し旧Gatewayは不明のままにする`() {
+        for (translation in listOf(true, false, null)) {
+            val dto = com.tohutohu.herdrcompanion.data.api.SessionDto(
+                id = "s", provider = "codex", status = "idle", updatedAt = "", translation = translation,
+            )
+            assertEquals(translation, dto.toEntity(0, true).toUiModel().translation)
+        }
+    }
+
     @Test
     fun `未読状態を一覧モデルへ引き継ぐ`() {
         val session = SessionEntity(

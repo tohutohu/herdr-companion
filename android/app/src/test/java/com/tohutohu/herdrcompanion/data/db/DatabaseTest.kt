@@ -25,7 +25,7 @@ class DatabaseTest {
     @Test
     fun `全旧バージョンから会話とセッションを失わず移行できる`() = runBlocking(Dispatchers.IO) {
         val context = RuntimeEnvironment.getApplication()
-        for (version in 1..10) {
+        for (version in 1..11) {
             context.deleteDatabase("herdr-mobile.db")
             val schema = javaClass.getResourceAsStream("/com.tohutohu.herdrcompanion.data.db.AppDatabase/$version.json")!!
                 .bufferedReader().use { Json.parseToJsonElement(it.readText()).jsonObject.getValue("database").jsonObject }
@@ -53,10 +53,14 @@ class DatabaseTest {
             val db = AppDatabase.create(context)
             try {
                 assertEquals("migration $version", "preserved-title", db.sessions().get("session-test")!!.title)
+                val session = db.sessions().get("session-test")!!
+                assertNull("migration $version", session.translation)
+                db.sessions().upsert(listOf(session.copy(translation = true)))
+                assertEquals(true, db.sessions().get("session-test")!!.translation)
                 val messages = db.messages().observe("session-test").first()
                 assertEquals("migration $version", listOf("message-test"), messages.map { it.id })
                 assertEquals("[]", messages.single().blocksJson)
-                assertEquals(11, db.openHelper.readableDatabase.version)
+                assertEquals(12, db.openHelper.readableDatabase.version)
             } finally {
                 db.close()
                 context.deleteDatabase("herdr-mobile.db")
@@ -153,7 +157,7 @@ class DatabaseTest {
                 buildList { while (cursor.moveToNext()) add(cursor.getString(cursor.getColumnIndexOrThrow("name"))) }
             }
             assertEquals(emptyList<String>(), columns.filter { it == "paneId" || it == "backend" })
-            assertEquals(11, db.openHelper.readableDatabase.version)
+            assertEquals(12, db.openHelper.readableDatabase.version)
         } finally {
             db.close()
             context.deleteDatabase("herdr-mobile.db")

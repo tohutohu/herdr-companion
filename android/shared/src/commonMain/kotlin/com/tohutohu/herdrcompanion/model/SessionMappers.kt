@@ -26,6 +26,7 @@ fun SessionDto.toUiModel(): SessionUiModel = SessionUiModel(
     archived = archived,
     live = isLive,
     unread = unread,
+    translation = translation,
     pendingModel = pendingModel,
     pendingEffort = pendingEffort,
     settingsApply = settingsApply,
