@@ -9,6 +9,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,6 +47,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -58,6 +60,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.Key
@@ -200,6 +203,28 @@ fun NewSessionScreen(
                         }
                     }
                     val editable = !state.starting && !state.checking
+                    Row(
+                        modifier = Modifier.fillMaxWidth()
+                            .toggleable(
+                                value = state.translation,
+                                enabled = editable,
+                                role = Role.Switch,
+                                onValueChange = { onAction(NewSessionAction.SetTranslation(it)) },
+                            )
+                            .padding(horizontal = 4.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Translation mode", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "Japanese prompts → English; replies → Japanese. Start local translation in the Gateway menu first.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(checked = state.translation, onCheckedChange = null, enabled = editable)
+                    }
                     AttachmentPreviewRow(
                         attachments = state.attachments,
                         resolvePreview = resolveAttachmentPreview,

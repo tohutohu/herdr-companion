@@ -299,3 +299,44 @@ func Testアーカイブ直後でまだ閉じていないセッションは閉�
 		t.Fatalf("starts = %+v", rt.starts)
 	}
 }
+
+func Test翻訳選択は再起動と再開後も保持し古いセッションは既定に従う(t *testing.T) {
+	for _, choice := range []*bool{nil, boolChoice(false), boolChoice(true)} {
+		path := filepath.Join(t.TempDir(), "direct.json")
+		rt := &fakeRuntime{}
+		m, err := New(path, time.Hour, rt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, err := m.StartWithTranslation(context.Background(), "claude", providers.DirectStart{Cwd: t.TempDir()}, choice)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := m.Stop(context.Background(), id); err != nil {
+			t.Fatal(err)
+		}
+		restored, err := New(path, time.Hour, &fakeRuntime{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := restored.Resume(context.Background(), id, providers.DirectStart{}); err != nil {
+			t.Fatal(err)
+		}
+		got := restored.Translation(id)
+		if choice == nil {
+			if got != nil {
+				t.Fatal(got)
+			}
+		} else {
+			if got == nil || *got != *choice {
+				t.Fatal(got, choice)
+			}
+			*got = !*got
+			if *restored.Translation(id) != *choice {
+				t.Fatal("choice was not copied")
+			}
+		}
+	}
+}
+
+func boolChoice(value bool) *bool { return &value }

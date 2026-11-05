@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"time"
@@ -12,13 +13,13 @@ import (
 )
 
 type Translator interface {
-	Session(model.Session) model.Session
+	Session(model.Session, ...*bool) model.Session
 	Status() translation.Status
 	Start(string) error
 	Stop() error
 	Configure(bool, bool) error
-	Input(context.Context, string, string) (string, error)
-	Messages(string, []model.Message, bool) []model.Message
+	Input(context.Context, string, string, ...*bool) (string, error)
+	Messages(string, []model.Message, bool, ...*bool) []model.Message
 }
 
 func (s *Server) translationStatus(w http.ResponseWriter, r *http.Request) {
@@ -62,18 +63,24 @@ func (s *Server) configureTranslation(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 202, s.Translation.Status())
 }
 
-func (s *Server) translateInput(ctx context.Context, sessionID, text string) (string, error) {
+func (s *Server) translateInput(ctx context.Context, sessionID, text string, mode ...*bool) (string, error) {
+	if len(mode) == 0 {
+		mode = []*bool{s.sessionTranslation(sessionID)}
+	}
 	if s.Translation == nil {
+		if len(mode) > 0 && mode[0] != nil && *mode[0] {
+			return "", errors.New("translation unavailable")
+		}
 		return text, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
-	return s.Translation.Input(ctx, sessionID, text)
+	return s.Translation.Input(ctx, sessionID, text, mode...)
 }
 
 func (s *Server) translatedSession(session model.Session) model.Session {
 	if s.Translation != nil {
-		return s.Translation.Session(session)
+		return s.Translation.Session(session, s.sessionTranslation(session.ID))
 	}
 	return session
 }
@@ -83,7 +90,14 @@ func (s *Server) translatedSessions(list []model.Session) []model.Session {
 	}
 	out := append([]model.Session{}, list...)
 	for i := range out {
-		out[i] = s.Translation.Session(out[i])
+		out[i] = s.translatedSession(out[i])
 	}
 	return out
+}
+
+func (s *Server) sessionTranslation(id string) *bool {
+	if s.Direct != nil {
+		return s.Direct.Translation(id)
+	}
+	return nil
 }

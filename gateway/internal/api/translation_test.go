@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -16,20 +17,24 @@ type testTranslator struct {
 	calls int
 }
 
-func (t *testTranslator) Session(session model.Session) model.Session { return session }
-func (t *testTranslator) Status() translation.Status                  { return t.st }
-func (t *testTranslator) Start(size string) error                     { t.st.Model = size; return nil }
-func (t *testTranslator) Stop() error                                 { return nil }
-func (t *testTranslator) Configure(in, out bool) error                { t.st.Output = out; return nil }
-func (t *testTranslator) Messages(_ string, msgs []model.Message, _ bool) []model.Message {
+func (t *testTranslator) Session(session model.Session, _ ...*bool) model.Session { return session }
+func (t *testTranslator) Status() translation.Status                              { return t.st }
+func (t *testTranslator) Start(size string) error                                 { t.st.Model = size; return nil }
+func (t *testTranslator) Stop() error                                             { return nil }
+func (t *testTranslator) Configure(in, out bool) error                            { t.st.Output = out; return nil }
+func (t *testTranslator) Messages(_ string, msgs []model.Message, _ bool, _ ...*bool) []model.Message {
 	return msgs
 }
-func (t *testTranslator) Input(_ context.Context, _ string, text string) (string, error) {
+func (t *testTranslator) Input(_ context.Context, _ string, text string, mode ...*bool) (string, error) {
 	t.calls++
 	if t.fail {
 		return "", errors.New("model unavailable")
 	}
-	if t.st.Input {
+	enabled := t.st.Input
+	if len(mode) > 0 && mode[0] != nil {
+		enabled = *mode[0]
+	}
+	if enabled {
 		return "translated: " + text, nil
 	}
 	return text, nil
@@ -81,5 +86,50 @@ func Test翻訳失敗後は同じ送信IDで再試行でき成功後は再翻訳
 	}
 	if len(p.sent) != 1 || p.sent[0].Text != "translated: 修正して" || tr.calls != 2 {
 		t.Fatal(p.sent, tr.calls)
+	}
+}
+
+func Test開始時の翻訳選択は初回と後続の送信に適用され信頼確認でも保持する(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		for _, trusted := range []bool{false, true} {
+			t.Run(fmt.Sprintf("translation=%v/trusted=%v", enabled, trusted), func(t *testing.T) {
+				tr := &testTranslator{st: translation.Status{Options: translation.Options{Input: !enabled}}}
+				ts, p, dp, token := newTestServer(t, func(s *Server) { s.Translation = tr })
+				dp.trusted = trusted
+				code, result := call(t, ts, token, "POST", "/v1/sessions", map[string]any{
+					"provider": "fake", "cwd": p.root, "prompt": "修正して", "translation": enabled,
+				})
+				if code != http.StatusCreated {
+					t.Fatal(code, result)
+				}
+				if !trusted {
+					code, result = call(t, ts, token, "POST", "/v1/launches/"+result["launchId"].(string)+"/trust", map[string]bool{"trust": true})
+					if code != http.StatusOK {
+						t.Fatal(code, result)
+					}
+				}
+				id := result["sessionId"].(string)
+				if choice := dp.m.Translation(id); choice == nil || *choice != enabled {
+					t.Fatal(choice)
+				}
+				code, result = call(t, ts, token, "POST", "/v1/sessions/"+id+"/messages", map[string]string{"text": "続けて"})
+				if code != http.StatusAccepted {
+					t.Fatal(code, result)
+				}
+				if len(p.sent) != 2 {
+					t.Fatal(p.sent)
+				}
+				prefix := ""
+				if enabled {
+					prefix = "translated: "
+				}
+				if p.sent[0].Text != prefix+"修正して" || p.sent[1].Text != prefix+"続けて" {
+					t.Fatal(p.sent)
+				}
+				if tr.st.Input == enabled {
+					t.Fatal("global default changed")
+				}
+			})
+		}
 	}
 }

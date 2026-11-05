@@ -66,6 +66,7 @@ fun NewSessionRoute(
     var model by rememberSaveable { mutableStateOf("") }
     var effort by rememberSaveable { mutableStateOf("") }
     var mode by rememberSaveable { mutableStateOf("") }
+    var translation by rememberSaveable { mutableStateOf(false) }
     var worktree by rememberSaveable { mutableStateOf(false) }
     var catalog by remember { mutableStateOf(ModelsResponse()) }
     var modelsLoading by remember { mutableStateOf(false) }
@@ -194,6 +195,7 @@ fun NewSessionRoute(
         currentPreset = current,
         favorite = favorite,
         worktree = worktree,
+        translation = translation,
         attachments = attachments.toList(),
         attachmentsEnabled = true,
     )
@@ -237,6 +239,7 @@ fun NewSessionRoute(
                 NewSessionAction.ToggleFavorite -> scope.launch { presetStore.toggle(current) }
                 NewSessionAction.ToggleFavoriteDirectory -> scope.launch { shortcutStore.toggleFavorite(path) }
                 NewSessionAction.ToggleWorktree -> worktree = !worktree
+                is NewSessionAction.SetTranslation -> translation = action.enabled
                 is NewSessionAction.OpenDirectory -> scope.launch { load(action.path) }
                 NewSessionAction.OpenParent -> scope.launch { load(listing?.parent.orEmpty()) }
                 NewSessionAction.ShowMkdir -> showMkdir = true
@@ -272,6 +275,7 @@ fun NewSessionRoute(
                             effort.ifEmpty { null },
                             mode.ifEmpty { null },
                             worktree = state.startsInWorktree,
+                            translation = translation,
                         )
                         val preset = current
                         scope.launch {

@@ -287,8 +287,8 @@ func hasJapanese(text string) bool {
 	}
 	return false
 }
-func (s *Service) Input(ctx context.Context, sessionID, text string) (string, error) {
-	if !s.Status().Input || !hasJapanese(text) || strings.HasPrefix(strings.TrimSpace(text), "/") {
+func (s *Service) Input(ctx context.Context, sessionID, text string, mode ...*bool) (string, error) {
+	if !modeEnabled(s.Status().Input, mode) || !hasJapanese(text) || strings.HasPrefix(strings.TrimSpace(text), "/") {
 		return text, nil
 	}
 	translated, err := s.Translate(ctx, text, "en")
@@ -386,11 +386,11 @@ func cacheKey(size, text string) string {
 
 // Messages never mutates provider caches. Translation runs off the polling path.
 // Full snapshots are served while enabled so older blocks receive finished translations too.
-func (s *Service) Messages(sessionID string, msgs []model.Message, complete bool) []model.Message {
+func (s *Service) Messages(sessionID string, msgs []model.Message, complete bool, mode ...*bool) []model.Message {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := append([]model.Message(nil), msgs...)
-	if s.status.InputEverEnabled {
+	if s.status.InputEverEnabled || modeEnabled(false, mode) {
 		for i := range out {
 			if out[i].Role != model.RoleUser {
 				continue
@@ -423,7 +423,7 @@ func (s *Service) Messages(sessionID string, msgs []model.Message, complete bool
 		}
 	}
 
-	if !s.status.Output || s.status.State != "ready" {
+	if !modeEnabled(s.status.Output, mode) || s.status.State != "ready" {
 		return out
 	}
 	for i := range out {
@@ -513,4 +513,12 @@ func (s *Service) runQueue() {
 			s.mu.Unlock()
 		}
 	}
+}
+
+// A session choice overrides the global default without changing other sessions.
+func modeEnabled(fallback bool, mode []*bool) bool {
+	if len(mode) > 0 && mode[0] != nil {
+		return *mode[0]
+	}
+	return fallback
 }

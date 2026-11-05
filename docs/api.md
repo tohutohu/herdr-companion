@@ -295,7 +295,8 @@ Gateway が動かすセッションは、プロセスが無い間（Gateway の�
   "effort": "high",
   "mode": "plan",
   "trust": true,
-  "worktree": false
+  "worktree": false,
+  "translation": false
 }
 ```
 
@@ -305,6 +306,7 @@ Gateway が動かすセッションは、プロセスが無い間（Gateway の�
 | `prompt` | | 最初のプロンプト。`uploads` は最初のプロンプトに添付される |
 | `model` / `effort` / `mode` | | `GET /v1/models` の `id`。空ならエージェントの既定 |
 | `trust` | | フォルダ信頼を代わりに承認する（信頼の記録は書かない）。`false` のとき、エージェントが一度も信頼していないフォルダ（Claude: `~/.claude.json`、Codex: `config.toml` の記録を読むだけ）なら起動せずに `trustRequired` と `launchId` を返す |
+| `translation` | | `true` はこのセッションのプロンプト英訳・日本語表示を有効にし、`false` は両方を無効にする。省略／`null` は Gateway のモード設定に従う。初回文から適用し、信頼確認・再起動・再開後も保持する。モデルは Gateway メニューから事前に起動する |
 | `worktree` | | `cwd` のリポジトリに新しい git worktree（`worktree/<名前>` ブランチ）を作り、そこで起動する。Gateway が git で作る（状態ディレクトリの `worktrees/` 配下） |
 
 `201`（StartResult）:

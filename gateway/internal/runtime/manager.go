@@ -45,6 +45,8 @@ type Record struct {
 	// Running is set while a turn runs. Still set at load, it means the
 	// gateway stopped during the turn.
 	Running bool `json:"running,omitempty"`
+	// Translation overrides the Gateway defaults for this session; nil keeps legacy behavior.
+	Translation *bool `json:"translation,omitempty"`
 }
 
 type file struct {
@@ -293,6 +295,11 @@ func (m *Manager) notify() {
 // Start starts a new direct session and records it. An id with an error
 // means the session started but its first prompt was not delivered.
 func (m *Manager) Start(ctx context.Context, provider string, opts providers.DirectStart) (string, error) {
+	return m.StartWithTranslation(ctx, provider, opts, nil)
+}
+
+// StartWithTranslation records the session translation choice along with its first prompt.
+func (m *Manager) StartWithTranslation(ctx context.Context, provider string, opts providers.DirectStart, translation *bool) (string, error) {
 	rt, ok := m.runtimes[provider]
 	if !ok {
 		return "", providers.ErrNotFound
@@ -304,17 +311,21 @@ func (m *Manager) Start(ctx context.Context, provider string, opts providers.Dir
 	}
 	// The session exists even when its first prompt failed (err != nil).
 	id := provider + ":" + native
-	m.record(id, opts)
+	m.record(id, opts, translation)
 	return id, err
 }
 
-func (m *Manager) record(id string, opts providers.DirectStart) {
+func (m *Manager) record(id string, opts providers.DirectStart, translation *bool) {
 	now := m.now()
 	m.mu.Lock()
 	r := m.records[id]
 	if r == nil {
 		r = &Record{ID: id, StartedAt: now}
 		m.records[id] = r
+	}
+	if translation != nil {
+		value := *translation
+		r.Translation = &value
 	}
 	r.Cwd, r.ActiveAt = opts.Cwd, now
 	r.Model, r.Effort, r.Mode = opts.Model, opts.Effort, opts.Mode
@@ -347,7 +358,7 @@ func (m *Manager) Resume(ctx context.Context, id string, opts providers.DirectSt
 	}
 	if in, ok := m.info(id); ok && in.Alive {
 		if !recorded {
-			m.record(id, opts)
+			m.record(id, opts, nil)
 		}
 		return nil
 	}
@@ -371,7 +382,7 @@ func (m *Manager) Resume(ctx context.Context, id string, opts providers.DirectSt
 	if _, err := rt.DirectStart(ctx, opts); err != nil {
 		return err
 	}
-	m.record(id, opts)
+	m.record(id, opts, nil)
 	slog.Info("direct session resumed", "session_id", id, "operation", "runtime.resume", "cwd", opts.Cwd)
 	return nil
 }
@@ -647,4 +658,15 @@ func (m *Manager) Sessions() map[string]Session {
 		out[id] = s
 	}
 	return out
+}
+
+// Translation returns a copy of the persisted choice, or nil for Gateway defaults.
+func (m *Manager) Translation(id string) *bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if r := m.records[id]; r != nil && r.Translation != nil {
+		value := *r.Translation
+		return &value
+	}
+	return nil
 }

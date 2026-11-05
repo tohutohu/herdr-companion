@@ -154,3 +154,37 @@ func Testローカル実モデル翻訳(t *testing.T) {
 	}
 	fmt.Fprintln(os.Stderr, "PLaMo smoke test passed")
 }
+
+func Testセッションの翻訳選択はグローバル設定を上書きする(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := New(ctx, t.TempDir())
+	on, off := true, false
+	s.status.Input, s.status.Output = true, true
+	if got, err := s.Input(ctx, "off", "修正して", &off); err != nil || got != "修正して" {
+		t.Fatal(got, err)
+	}
+	s.status.Input, s.status.Output = false, false
+	if _, err := s.Input(ctx, "on", "修正して", &on); err == nil {
+		t.Fatal("stopped model silently sent original")
+	}
+	s.status.State = "ready"
+	s.cache[cacheKey(s.status.Model, "Hello")] = cached{text: "こんにちは"}
+	session := model.Session{ID: "session", Title: "Hello"}
+	msgs := []model.Message{{Role: model.RoleAssistant, Blocks: []model.Block{model.ReportBlock("Hello")}}}
+	for _, enabled := range []bool{false, true} {
+		s.status.Output = !enabled
+		got := s.Session(session, &enabled)
+		display := s.Messages("session", msgs, true, &enabled)
+		want := "Hello"
+		if enabled {
+			want = "こんにちは"
+		}
+		if got.Title != want || display[0].Blocks[0].Text != want {
+			t.Fatal(got, display)
+		}
+	}
+	if session.Title != "Hello" || msgs[0].Blocks[0].Text != "Hello" {
+		t.Fatal("provider data mutated")
+	}
+}

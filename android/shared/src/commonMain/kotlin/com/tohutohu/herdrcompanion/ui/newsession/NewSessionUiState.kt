@@ -32,6 +32,8 @@ data class NewSessionUiState(
     val favorite: Boolean,
     /** The user's choice to start in a new git worktree. */
     val worktree: Boolean = false,
+    /** Applies to this session only, including its first prompt. */
+    val translation: Boolean = false,
     /** Files picked to go with the first prompt. */
     val attachments: List<AttachmentUiState> = emptyList(),
     /** Whether this platform can pick attachments. */
@@ -66,6 +68,7 @@ sealed interface NewSessionAction {
     data object ToggleFavorite : NewSessionAction
     data object ToggleFavoriteDirectory : NewSessionAction
     data object ToggleWorktree : NewSessionAction
+    data class SetTranslation(val enabled: Boolean) : NewSessionAction
     data class OpenDirectory(val path: String) : NewSessionAction
     data object OpenParent : NewSessionAction
     data object ShowMkdir : NewSessionAction

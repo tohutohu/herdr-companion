@@ -81,6 +81,7 @@ fun DesktopNewSessionWindow(
     var model by rememberSaveable { mutableStateOf("") }
     var effort by rememberSaveable { mutableStateOf("") }
     var mode by rememberSaveable { mutableStateOf("") }
+    var translation by rememberSaveable { mutableStateOf(false) }
     var worktree by rememberSaveable { mutableStateOf(presets.lastWorktree) }
     var catalog by remember { mutableStateOf(ModelsResponse()) }
     var modelsLoading by remember { mutableStateOf(false) }
@@ -211,6 +212,7 @@ fun DesktopNewSessionWindow(
                 effort = effort.ifEmpty { null },
                 mode = mode.ifEmpty { null },
                 worktree = worktree && listing?.git == true,
+                translation = translation,
             )
             scope.launch {
                 checking = true
@@ -250,6 +252,7 @@ fun DesktopNewSessionWindow(
         currentPreset = currentPreset,
         favorite = presets.presets.any { it.key == currentPreset.key },
         worktree = worktree,
+        translation = translation,
         attachments = attachments.map { it.toUiState() },
         attachmentsEnabled = true,
     )
@@ -374,6 +377,7 @@ fun DesktopNewSessionWindow(
                             }
                             NewSessionAction.CustomizeAgent -> showPicker = true
                             NewSessionAction.ToggleWorktree -> worktree = !worktree
+                            is NewSessionAction.SetTranslation -> translation = action.enabled
                             is NewSessionAction.OpenDirectory -> scope.launch { load(action.path) }
                             NewSessionAction.OpenParent -> scope.launch { load(listing?.parent) }
                             NewSessionAction.ShowMkdir -> showMkdir = true

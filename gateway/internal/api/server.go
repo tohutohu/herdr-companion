@@ -331,9 +331,10 @@ func (s *Server) getMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.Translation != nil {
-		msgs = s.Translation.Messages(id, msgs, sess.Status != model.StatusRunning)
+		msgs = s.Translation.Messages(id, msgs, sess.Status != model.StatusRunning, s.sessionTranslation(id))
 	}
-	if s.Translation == nil || !s.Translation.Status().OutputEverEnabled {
+	mode := s.sessionTranslation(id)
+	if s.Translation == nil || (!s.Translation.Status().OutputEverEnabled && (mode == nil || !*mode)) {
 		msgs = messagesFrom(msgs, r.URL.Query().Get("after"))
 	}
 	if msgs == nil {
@@ -788,7 +789,7 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Prompt, err = s.translateInput(r.Context(), "", req.Prompt); err != nil {
+	if req.Prompt, err = s.translateInput(r.Context(), "", req.Prompt, req.Translation); err != nil {
 		writeError(w, http.StatusServiceUnavailable, "プロンプトを翻訳できませんでした（未送信）: "+err.Error())
 		return
 	}

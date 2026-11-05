@@ -293,6 +293,8 @@ data class StartSessionRequest(
     val worktree: Boolean = false,
     /** Upload ids attached to the first prompt. */
     val uploads: List<String> = emptyList(),
+    /** Null keeps Gateway defaults; true translates prompts and display for this session. */
+    val translation: Boolean? = null,
 )
 
 @Serializable

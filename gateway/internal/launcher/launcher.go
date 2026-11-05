@@ -181,6 +181,9 @@ type StartRequest struct {
 	Trust bool `json:"trust"`
 	// Worktree starts the session in a new git worktree of Cwd's repository.
 	Worktree bool `json:"worktree,omitempty"`
+	// Translation enables both prompt and display translation for this session.
+	// Nil preserves the Gateway defaults for older clients.
+	Translation *bool `json:"translation,omitempty"`
 	// Images and Files are attachments of the first prompt, as local paths
 	// the API has already resolved from upload ids.
 	Images []string `json:"-"`
@@ -294,7 +297,7 @@ func (l *Launcher) run(ctx context.Context, p providers.Provider, req StartReque
 	}
 	opts := providers.DirectStart{Cwd: cwd, Model: req.Model, Effort: req.Effort, Mode: req.Mode,
 		Prompt: model.Input{Text: req.Prompt, Images: req.Images, Files: req.Files}}
-	id, err := l.Direct.Start(ctx, p.Name(), opts)
+	id, err := l.Direct.StartWithTranslation(ctx, p.Name(), opts, req.Translation)
 	if id == "" {
 		if wt != "" {
 			if derr := worktree.Discard(context.WithoutCancel(ctx), wt); derr != nil {
