@@ -64,8 +64,15 @@ func fakeSidecar() {
 					{"value": "claude-haiku-4-5-20251001", "resolvedModel": "claude-haiku-4-5-20251001", "supportsAutoMode": false},
 				}})
 		case "send":
-			reply(map[string]any{})
 			text, _ := req.Params["text"].(string)
+			if text == "complete before receipt" {
+				emit(sid, "state", map[string]any{"state": "running"})
+				emit(sid, "result", map[string]any{"subtype": "success", "isError": false})
+				emit(sid, "state", map[string]any{"state": "idle"})
+				reply(map[string]any{})
+				continue
+			}
+			reply(map[string]any{})
 			if residents[sid] {
 				fakeResidentTurn(text, func(ev string, data map[string]any) { emit(sid, ev, data) })
 				continue
@@ -379,6 +386,17 @@ func Testターンが終わっても裏の作業は実行中のまま一覧に�
 	}
 	if b := in.Background[1]; b.ID != "t2" || b.Kind != model.BackgroundAgent {
 		t.Errorf("background[1] = %+v", b)
+	}
+}
+
+func Test送信応答より先に届いた完了状態を実行中に戻さない(t *testing.T) {
+	p, _ := newSidecarProvider(t)
+	id, err := p.DirectStart(context.Background(), providers.DirectStart{Cwd: "/w", Prompt: model.Input{Text: "complete before receipt"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in := info(p, id); in.Running || in.Turns != 1 {
+		t.Fatalf("completed state overwritten: %+v", in)
 	}
 }
 

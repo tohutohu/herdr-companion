@@ -344,12 +344,21 @@ func (p *Provider) directSend(ctx context.Context, id string, in model.Input) er
 	}
 	cctx, cancel := context.WithTimeout(ctx, controlTimeout)
 	defer cancel()
+	p.direct.mu.Lock()
+	before := p.direct.sessions[id]
+	if before == nil {
+		p.direct.mu.Unlock()
+		return providers.ErrNotLive
+	}
+	turns := before.turns
+	p.direct.mu.Unlock()
 	if err := sc.call(cctx, "send", map[string]any{"sessionId": id, "text": text, "images": images}, nil); err != nil {
 		return err
 	}
 	p.direct.mu.Lock()
-	if s := p.direct.sessions[id]; s != nil {
-		// The SDK reports running a moment later; show it now.
+	if s := p.direct.sessions[id]; s == before && s.alive && s.turns == turns {
+		// A fast result can arrive before the send waiter resumes. Do not
+		// overwrite its completed state with this optimistic running hint.
 		s.running = true
 		s.lastFailed, s.err = false, ""
 	}
