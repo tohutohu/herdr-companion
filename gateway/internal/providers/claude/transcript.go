@@ -1152,7 +1152,7 @@ func (t *Transcript) convertAssistant(e *entry, raw []byte, l *toolLookup, opt P
 }
 
 func (t *Transcript) textWithRefs(text string, opt ParseOptions) []model.Block {
-	return append([]model.Block{model.TextBlock(text)}, t.fileRefs(text, opt.refRoot, opt.Root)...)
+	return append([]model.Block{model.ReportBlock(text)}, t.fileRefs(text, opt.refRoot, opt.Root)...)
 }
 
 // pendingToolUses returns tool_use ids without results in the last assistant

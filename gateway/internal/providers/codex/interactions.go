@@ -67,7 +67,7 @@ func interactionFor(r pendingRequest, sink deadletter.Sink) *model.Interaction {
 	var ap approvalParams
 	json.Unmarshal(r.Params, &ap)
 	thread := ap.ThreadID
-	base := model.Interaction{ID: id, State: model.InteractionPending, Supported: true}
+	base := model.Interaction{ID: id, State: model.InteractionPending, Supported: true, DetailProse: str(ap.Reason)}
 
 	switch r.Method {
 	case "item/tool/requestUserInput":

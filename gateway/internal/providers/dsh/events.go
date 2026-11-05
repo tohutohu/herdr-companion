@@ -309,6 +309,9 @@ func (p *Provider) Messages(ctx context.Context, id string, _ *providers.Live) (
 			return nil, err
 		}
 		for i := range m.Blocks {
+			if m.Role == model.RoleAssistant && m.Blocks[i].Type == model.BlockText {
+				m.Blocks[i].Report = true
+			}
 			ia := m.Blocks[i].Interaction
 			if ia != nil && ia.State == model.InteractionPending {
 				if !pending[ia.ID] {

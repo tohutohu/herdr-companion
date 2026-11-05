@@ -29,19 +29,20 @@ func (s Status) Notifiable() bool {
 }
 
 type Session struct {
-	ID           string    `json:"id"` // "<provider>:<native-id>"
-	Provider     string    `json:"provider"`
-	ProviderName string    `json:"providerName"`
-	Project      string    `json:"project"`
-	Title        string    `json:"title,omitempty"`
-	Cwd          string    `json:"cwd,omitempty"`
-	Status       Status    `json:"status"`
-	UpdatedAt    time.Time `json:"updatedAt"`
-	LastMessage  string    `json:"lastMessage,omitempty"`
-	Model        string    `json:"model,omitempty"`  // last used model, provider naming
-	Effort       string    `json:"effort,omitempty"` // reasoning effort: low, medium, high, ...
-	Mode         string    `json:"mode,omitempty"`   // display label, e.g. "Plan", "Accept edits"
-	CanSend      bool      `json:"canSend"`
+	OriginalTitle string    `json:"originalTitle,omitempty"`
+	ID            string    `json:"id"` // "<provider>:<native-id>"
+	Provider      string    `json:"provider"`
+	ProviderName  string    `json:"providerName"`
+	Project       string    `json:"project"`
+	Title         string    `json:"title,omitempty"`
+	Cwd           string    `json:"cwd,omitempty"`
+	Status        Status    `json:"status"`
+	UpdatedAt     time.Time `json:"updatedAt"`
+	LastMessage   string    `json:"lastMessage,omitempty"`
+	Model         string    `json:"model,omitempty"`  // last used model, provider naming
+	Effort        string    `json:"effort,omitempty"` // reasoning effort: low, medium, high, ...
+	Mode          string    `json:"mode,omitempty"`   // display label, e.g. "Plan", "Accept edits"
+	CanSend       bool      `json:"canSend"`
 	// PendingModel / PendingEffort are a requested change the agent has not
 	// used yet; SettingsApply says when it will ("next_request", "next_turn").
 	PendingModel  string `json:"pendingModel,omitempty"`
@@ -114,20 +115,24 @@ const (
 // New block kinds (diff, command...) can be added later without breaking clients
 // because Android falls back to rendering Text for unknown types.
 type Block struct {
-	Type        BlockType    `json:"type"`
-	Text        string       `json:"text,omitempty"`
-	URL         string       `json:"url,omitempty"` // image: gateway-relative URL
-	Path        string       `json:"path,omitempty"`
-	Line        int          `json:"line,omitempty"`
-	Size        int64        `json:"size,omitempty"` // file: bytes
-	Interaction *Interaction `json:"interaction,omitempty"`
-	SessionID   string       `json:"sessionId,omitempty"` // session_message: resolved sender
-	SenderName  string       `json:"senderName,omitempty"`
+	Report       bool         `json:"-"`                      // only provider-authored user-facing prose may be translated
+	OriginalText string       `json:"originalText,omitempty"` // display translation; provider transcript stays unchanged
+	Type         BlockType    `json:"type"`
+	Text         string       `json:"text,omitempty"`
+	URL          string       `json:"url,omitempty"` // image: gateway-relative URL
+	Path         string       `json:"path,omitempty"`
+	Line         int          `json:"line,omitempty"`
+	Size         int64        `json:"size,omitempty"` // file: bytes
+	Interaction  *Interaction `json:"interaction,omitempty"`
+	SessionID    string       `json:"sessionId,omitempty"` // session_message: resolved sender
+	SenderName   string       `json:"senderName,omitempty"`
 	// SenderAddress is resolved from Claude's local registry before serving.
 	SenderAddress string `json:"-"`
 }
 
 func TextBlock(s string) Block { return Block{Type: BlockText, Text: s} }
+
+func ReportBlock(s string) Block { return Block{Type: BlockText, Text: s, Report: true} }
 
 type InteractionType string
 
@@ -146,8 +151,10 @@ const (
 )
 
 type Interaction struct {
-	ID   string          `json:"id"`
-	Type InteractionType `json:"type"`
+	Translation *Interaction    `json:"translation,omitempty"` // display only; original controls stay unchanged
+	DetailProse string          `json:"-"`                     // reason safe to translate, separate from commands and paths
+	ID          string          `json:"id"`
+	Type        InteractionType `json:"type"`
 	// Kind refines Type for clients that give it its own look; older clients
 	// ignore it and still get a working Type.
 	Kind      string           `json:"kind,omitempty"`
@@ -195,6 +202,7 @@ type Question struct {
 }
 
 type Option struct {
+	Value       string `json:"value,omitempty"` // original selection label in a translated display snapshot
 	Label       string `json:"label"`
 	Description string `json:"description,omitempty"`
 	// Preview is monospace text (such as an ASCII mockup) to compare options by.

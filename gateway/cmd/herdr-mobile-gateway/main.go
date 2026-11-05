@@ -34,6 +34,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/resident"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/runtime"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/sessions"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/translation"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/uploads"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/usage"
 )
@@ -230,9 +231,11 @@ func serve(args []string) error {
 	residentDone := make(chan struct{})
 	go func() { residents.Run(ctx); close(residentDone) }()
 
+	translator := translation.New(ctx, filepath.Join(config.StateDir(), "translation"))
+	defer translator.Close()
 	srv := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           (&api.Server{MessageDelivery: delivery, AgentUpdates: agentupdate.New(ctx, cfg.CodexBinary), Sessions: svc, Uploads: up, Config: store, Sink: sink, Launcher: launch, Archive: archived, Usage: limits, DirectoryCheck: dirCheck, Direct: direct, Resident: residents, Listen: cfg.Listen}).Handler(),
+		Handler:           (&api.Server{Translation: translator, MessageDelivery: delivery, AgentUpdates: agentupdate.New(ctx, cfg.CodexBinary), Sessions: svc, Uploads: up, Config: store, Sink: sink, Launcher: launch, Archive: archived, Usage: limits, DirectoryCheck: dirCheck, Direct: direct, Resident: residents, Listen: cfg.Listen}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	shutdownDone := make(chan struct{})

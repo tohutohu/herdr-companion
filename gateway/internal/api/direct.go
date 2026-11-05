@@ -212,7 +212,7 @@ func (s *Server) writeSession(w http.ResponseWriter, r *http.Request, id string)
 		writeJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
 		return
 	}
-	writeJSON(w, http.StatusOK, sess)
+	writeJSON(w, http.StatusOK, s.translatedSession(sess))
 }
 
 // worktreeInUse reports whether a live session other than id works in path.

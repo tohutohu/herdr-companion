@@ -39,6 +39,7 @@ import (
 )
 
 type Server struct {
+	Translation     Translator
 	pairing         pairingState
 	MessageDelivery *MessageDeliveryStore
 	AgentUpdates    *agentupdate.Service
@@ -69,6 +70,8 @@ func (s *Server) Handler() http.Handler {
 	api := http.NewServeMux()
 	api.HandleFunc("POST /v1/pairing", s.createPairing)
 	api.HandleFunc("DELETE /v1/pairing", s.cancelPairing)
+	api.HandleFunc("GET /v1/translation", s.translationStatus)
+	api.HandleFunc("POST /v1/translation", s.configureTranslation)
 	api.HandleFunc("GET /v1/sessions", s.listSessions)
 	api.HandleFunc("POST /v1/sessions", s.startSession)
 	api.HandleFunc("POST /v1/sessions/archive", s.archiveSessions)
@@ -275,7 +278,7 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []model.Session{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"sessions": list})
+	writeJSON(w, http.StatusOK, map[string]any{"sessions": s.translatedSessions(list)})
 }
 
 // listArchived lists archived sessions. With limit, it returns one page and
@@ -299,7 +302,7 @@ func (s *Server) listArchived(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []model.Session{}
 	}
-	resp := map[string]any{"sessions": list}
+	resp := map[string]any{"sessions": s.translatedSessions(list)}
 	if next > 0 {
 		resp["nextOffset"] = next
 	}
@@ -313,7 +316,7 @@ func (s *Server) getSession(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, id, "get_session", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, sess)
+	writeJSON(w, http.StatusOK, s.translatedSession(sess))
 }
 
 // getMessages returns the session plus messages. With ?after=<id> only the
@@ -327,11 +330,16 @@ func (s *Server) getMessages(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, id, "get_messages", err)
 		return
 	}
-	msgs = messagesFrom(msgs, r.URL.Query().Get("after"))
+	if s.Translation != nil {
+		msgs = s.Translation.Messages(id, msgs, sess.Status != model.StatusRunning)
+	}
+	if s.Translation == nil || !s.Translation.Status().OutputEverEnabled {
+		msgs = messagesFrom(msgs, r.URL.Query().Get("after"))
+	}
 	if msgs == nil {
 		msgs = []model.Message{}
 	}
-	writeJSONWithETag(w, r, map[string]any{"session": sess, "messages": msgs})
+	writeJSONWithETag(w, r, map[string]any{"session": s.translatedSession(sess), "messages": msgs})
 }
 
 func messagesFrom(msgs []model.Message, after string) []model.Message {
@@ -429,6 +437,11 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	if res.Live == nil {
 		s.fail(w, r, id, "send_message", providers.ErrNotLive)
+		return
+	}
+
+	if in.Text, err = s.translateInput(r.Context(), id, in.Text); err != nil {
+		writeError(w, http.StatusServiceUnavailable, "プロンプトを翻訳できませんでした（未送信）: "+err.Error())
 		return
 	}
 	if req.RequestID != "" {
@@ -774,6 +787,11 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, "", "start_session", err)
 		return
 	}
+
+	if req.Prompt, err = s.translateInput(r.Context(), "", req.Prompt); err != nil {
+		writeError(w, http.StatusServiceUnavailable, "プロンプトを翻訳できませんでした（未送信）: "+err.Error())
+		return
+	}
 	res, err := s.Launcher.Start(r.Context(), req.StartRequest)
 	if err != nil {
 		s.Sink.Record(req.Provider, "", deadletter.SendError, "start session: "+err.Error(), req)
@@ -902,6 +920,7 @@ func (s *Server) archiveSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slog.Info("session archived", "provider", sess.Provider, "session_id", id, "operation", "archive_session", "stopped", stopped)
+	sess.Session = s.translatedSession(sess.Session)
 	writeJSON(w, http.StatusOK, sess)
 }
 
@@ -975,7 +994,7 @@ func (s *Server) unarchiveSession(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, id, "unarchive_session", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, sess)
+	writeJSON(w, http.StatusOK, s.translatedSession(sess))
 }
 
 // resumeSession reopens a session that runs nowhere, in a new process under

@@ -242,7 +242,7 @@ func convertItem(raw json.RawMessage, ts time.Time, opt convertOptions) (model.M
 		if strings.TrimSpace(it.Text) == "" {
 			return model.Message{}, false
 		}
-		return msg(model.RoleAssistant, append([]model.Block{model.TextBlock(it.Text)}, model.ExtractFileRefs(it.Text, opt.Root)...)...)
+		return msg(model.RoleAssistant, append([]model.Block{model.ReportBlock(it.Text)}, model.ExtractFileRefs(it.Text, opt.Root)...)...)
 	case "plan":
 		return msg(model.RoleAssistant, model.TextBlock("Plan:\n"+it.Text))
 	case "reasoning", "hookPrompt", "sleep", "subAgentActivity":

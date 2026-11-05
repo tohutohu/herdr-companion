@@ -589,3 +589,26 @@ func Test画像付きの指示は本文から画像ラベルを除き画像の�
 		t.Fatalf("got %+v, want labels kept", got)
 	}
 }
+
+func Test報告とインラインツール呼び出しを翻訳対象として区別する(t *testing.T) {
+	tr, rec, ws := loadFixture(t, "normal.jsonl")
+	reports, tools := 0, 0
+	for _, message := range tr.Messages(ParseOptions{SessionID: "claude:test", Root: ws, Sink: rec}) {
+		if message.Role != model.RoleAssistant {
+			continue
+		}
+		for _, block := range message.Blocks {
+			if block.Type != model.BlockText {
+				continue
+			}
+			if block.Report {
+				reports++
+			} else {
+				tools++
+			}
+		}
+	}
+	if reports == 0 || tools == 0 {
+		t.Fatalf("reports %d, tools %d", reports, tools)
+	}
+}
