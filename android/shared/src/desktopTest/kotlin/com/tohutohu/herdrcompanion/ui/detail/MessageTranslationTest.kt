@@ -1,63 +1,100 @@
 package com.tohutohu.herdrcompanion.ui.detail
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
+import androidx.compose.runtime.saveable.SaveableStateRegistry
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.dp
 import com.tohutohu.herdrcompanion.data.Message
 import com.tohutohu.herdrcompanion.data.api.BlockDto
+import com.tohutohu.herdrcompanion.data.api.SessionDto
+import com.tohutohu.herdrcompanion.model.toUiModel
 import org.junit.Rule
 import org.junit.Test
 
 class MessageTranslationTest {
     @get:Rule val rule = createComposeRule()
 
-    private var block by mutableStateOf(BlockDto("text", text = "入力した日本語", originalText = "Sent English"))
-
-    private fun content(role: String) {
+    @Test
+    fun メニューから会話全体とタイトルを切り替え再生成と新着でも原文表示を保つ() {
+        var visible by mutableStateOf(true)
+        var registry by mutableStateOf(SaveableStateRegistry(null) { true })
+        var messages by mutableStateOf(listOf(
+            Message("u", "user", 0, listOf(BlockDto("text", text = "入力した日本語", originalText = "Sent English"))),
+            Message("a", "assistant", 1, listOf(BlockDto("text", text = "日本語の返信", originalText = "Original reply"))),
+        ))
         rule.setContent {
             MaterialTheme {
-                MessageItem(
-                    message = Message("message", role, 0, listOf(block)),
-                    resolveUrl = { it }, formatFileSize = { "$it bytes" },
-                    onOpenFile = { _, _ -> }, onOpenImage = {},
-                    interactionsEnabled = true, onRespond = {},
+                if (visible) CompositionLocalProvider(LocalSaveableStateRegistry provides registry) {
+                    Box(Modifier.size(480.dp, 800.dp)) {
+                        SessionDetailScreen(
+                            state = SessionDetailUiState(
+                                "session", SessionDto("session", "codex", status = "idle", updatedAt = "",
+                                    title = "日本語タイトル", originalTitle = "Original title").toUiModel(),
+                                messages, emptyList(), error = null, answering = false,
+                            ),
+                            resolveUrl = { it }, formatFileSize = { "$it bytes" }, formatTime = { "$it" }, onAction = {},
+                        )
+                    }
+                }
+            }
+        }
+        rule.onNodeWithText("日本語タイトル").assertExists()
+        rule.onNodeWithText("日本語の返信").assertExists()
+        rule.onNodeWithText("送信した英語を表示 · PLaMo").assertDoesNotExist()
+        rule.onNodeWithText("原文を表示 · PLaMo").assertDoesNotExist()
+        rule.onNodeWithContentDescription("Session actions").performClick()
+        rule.onAllNodesWithText("原文を表示").assertCountEquals(1)
+        rule.onNodeWithText("原文を表示").performClick()
+        rule.onNodeWithText("Original title").assertExists()
+        rule.onNodeWithText("Original reply").assertExists()
+        rule.onNodeWithText("入力した日本語").assertDoesNotExist()
+        // The prompt may also appear in the pinned outline, in the same language.
+        rule.onAllNodesWithText("Sent English").fetchSemanticsNodes().also { check(it.isNotEmpty()) }
+        var saved: Map<String, List<Any?>> = emptyMap()
+        rule.runOnIdle { saved = registry.performSave(); visible = false }
+        rule.waitForIdle()
+        rule.runOnIdle { registry = SaveableStateRegistry(saved) { true }; visible = true }
+        rule.onNodeWithText("Original reply").assertExists()
+        rule.runOnIdle {
+            messages = messages.dropLast(1) + messages.last().copy(blocks = listOf(
+                BlockDto("text", text = "更新された返信", originalText = "Updated reply"),
+            ))
+        }
+        rule.onNodeWithText("Updated reply").assertExists()
+        rule.onNodeWithContentDescription("Session actions").performClick()
+        rule.onNodeWithText("日本語表示に戻す").performClick()
+        rule.onNodeWithText("日本語タイトル").assertExists()
+        rule.onNodeWithText("更新された返信").assertExists()
+    }
+
+    @Test
+    fun 翻訳のない会話には原文切替を出さない() {
+        rule.setContent {
+            MaterialTheme {
+                SessionDetailScreen(
+                    state = SessionDetailUiState(
+                        "session", SessionDto("session", "codex", status = "idle", updatedAt = "").toUiModel(),
+                        listOf(Message("a", "assistant", 0, listOf(BlockDto("text", text = "日本語のまま")))),
+                        emptyList(), error = null, answering = false,
+                    ),
+                    resolveUrl = { it }, formatFileSize = { "$it bytes" }, formatTime = { "$it" }, onAction = {},
                 )
             }
         }
-    }
-
-    @Test
-    fun 日本語の入力を既定で表示し送信した英語と往復できる() {
-        content("user")
-        rule.onNodeWithText("入力した日本語").assertExists()
-        rule.onNodeWithText("Sent English").assertDoesNotExist()
-        rule.onNodeWithText("送信した英語を表示 · PLaMo").performClick()
-        rule.onNodeWithText("Sent English").assertExists()
-        // A polling refresh with equal content must keep the selected view.
-        rule.runOnIdle { block = block.copy() }
-        rule.onNodeWithText("Sent English").assertExists()
-        rule.onNodeWithText("入力した原文を表示").performClick()
-        rule.onNodeWithText("入力した日本語").assertExists()
-    }
-
-    @Test
-    fun 報告は日本語訳から原文へ切り替えられる() {
-        content("assistant")
-        rule.onNodeWithText("原文を表示 · PLaMo").performClick()
-        rule.onNodeWithText("Sent English").assertExists()
-        rule.onNodeWithText("日本語訳を表示").performClick()
-        rule.onNodeWithText("入力した日本語").assertExists()
-    }
-
-    @Test
-    fun 本文と同じ原文には翻訳の切替を表示しない() {
-        block = BlockDto("text", text = "日本語のまま", originalText = "日本語のまま")
-        content("assistant")
-        rule.onNodeWithText("日本語のまま").assertExists()
-        rule.onNodeWithText("原文を表示 · PLaMo").assertDoesNotExist()
+        rule.onNodeWithContentDescription("Session actions").performClick()
+        rule.onNodeWithText("原文を表示").assertDoesNotExist()
     }
 }

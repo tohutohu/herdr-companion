@@ -68,11 +68,14 @@ class InteractionCardTest {
                 OptionDto("同じ表示", value = "A"), OptionDto("同じ表示", value = "B"),
             ))),
         )
+        var showOriginal by mutableStateOf(false)
         rule.setContent { MaterialTheme { Box(Modifier.width(500.dp)) {
-            InteractionCard(original.copy(translation = translated), true) { response = it }
+            CompositionLocalProvider(LocalOriginalText provides showOriginal) {
+                InteractionCard(original.copy(translation = translated), true) { response = it }
+            }
         } } }
         rule.onAllNodesWithText("同じ表示")[1].performClick()
-        rule.onNodeWithText("原文を表示 · PLaMo").performClick()
+        rule.runOnIdle { showOriginal = true }
         rule.onNodeWithText("B").assertIsSelected()
         rule.onNodeWithText("Answer").performClick()
         rule.runOnIdle { assertEquals(listOf("B"), response?.answers?.get("q")?.selected) }

@@ -9,7 +9,6 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,12 +31,14 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.VerticalSplit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FilledTonalIconToggleButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -47,7 +48,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
+import androidx.compose.material3.PlainTooltip
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -60,7 +64,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.Key
@@ -186,6 +189,7 @@ fun NewSessionScreen(
                     Modifier.navigationBarsPadding().imePadding().padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    val editable = !state.starting && !state.checking
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -201,29 +205,11 @@ fun NewSessionScreen(
                         FilledTonalIconButton(onClick = { onAction(NewSessionAction.CustomizeAgent) }) {
                             Icon(Icons.Default.Tune, contentDescription = "Choose agent, model or mode")
                         }
-                    }
-                    val editable = !state.starting && !state.checking
-                    Row(
-                        modifier = Modifier.fillMaxWidth()
-                            .toggleable(
-                                value = state.translation,
-                                enabled = editable,
-                                role = Role.Switch,
-                                onValueChange = { onAction(NewSessionAction.SetTranslation(it)) },
-                            )
-                            .padding(horizontal = 4.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Translation mode", style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                "Sends Japanese prompts in English and displays replies in Japanese. Your original prompts stay visible; you can view the sent English and original replies. Start local translation in the Gateway menu first.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(checked = state.translation, onCheckedChange = null, enabled = editable)
+                        TranslationModeButton(
+                            checked = state.translation,
+                            enabled = editable,
+                            onCheckedChange = { onAction(NewSessionAction.SetTranslation(it)) },
+                        )
                     }
                     AttachmentPreviewRow(
                         attachments = state.attachments,
@@ -428,6 +414,25 @@ fun NewSessionScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+/** Fits beside the agent settings; the explanation appears only on hover/long press. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun TranslationModeButton(checked: Boolean, enabled: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+        state = rememberTooltipState(),
+        tooltip = {
+            PlainTooltip {
+                Text("Translation mode: ${if (checked) "on" else "off"}. Japanese prompts → English; replies → Japanese. Start local translation in the Gateway menu first.")
+            }
+        },
+    ) {
+        FilledTonalIconToggleButton(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled) {
+            Icon(Icons.Default.Translate, contentDescription = "Translation mode")
         }
     }
 }

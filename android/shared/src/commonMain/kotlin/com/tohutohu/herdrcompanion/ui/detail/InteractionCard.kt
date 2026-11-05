@@ -121,17 +121,9 @@ fun InteractionCard(
     enabled: Boolean,
     onRespond: (InteractionResponseDto) -> Unit,
 ) {
-    var showOriginal by rememberSaveable(interaction.id) { mutableStateOf(false) }
-    val translated = interaction.translation != null && !showOriginal
+    val translated = interaction.translation != null && !LocalOriginalText.current
     CompositionLocalProvider(LocalInteractionTranslated provides translated) {
-        Column {
-            InteractionCardContent(if (translated) interaction.translation else interaction, enabled, onRespond)
-            if (interaction.translation != null) {
-                TextButton(onClick = { showOriginal = !showOriginal }) {
-                    Text(if (showOriginal) "日本語訳を表示" else "原文を表示 · PLaMo")
-                }
-            }
-        }
+        InteractionCardContent(if (translated) interaction.translation else interaction, enabled, onRespond)
     }
 }
 

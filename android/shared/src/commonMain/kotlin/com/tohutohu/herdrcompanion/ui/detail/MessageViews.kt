@@ -206,6 +206,9 @@ internal val LocalRowResize = staticCompositionLocalOf<() -> Unit> { {} }
 /** See [SessionDetailUiState.answeredInteractions]. */
 internal val LocalAnsweredInteractions = compositionLocalOf<Set<String>> { emptySet() }
 
+/** One reading preference for the whole conversation, owned by its menu. */
+internal val LocalOriginalText = compositionLocalOf { false }
+
 /** The reader's own messages: a plain neutral bubble, sent or on its way. */
 internal val UserBubbleShape = RoundedCornerShape(20.dp)
 
@@ -418,18 +421,7 @@ private fun BlockView(
                 if (role == "assistant" && isToolCallText(text)) {
                     CollapsibleTool(text, output = false)
                 } else {
-                    Column {
-                        var showOriginal by rememberSaveable(block.originalText, text) { mutableStateOf(false) }
-                        val onResize = LocalRowResize.current
-                        MarkdownText(if (showOriginal) block.originalText ?: text else text)
-                        if (!block.originalText.isNullOrBlank() && block.originalText != text) {
-                            TextButton(onClick = { onResize(); showOriginal = !showOriginal }) {
-                                Text(if (role == "user") {
-                                    if (showOriginal) "入力した原文を表示" else "送信した英語を表示 · PLaMo"
-                                } else if (showOriginal) "日本語訳を表示" else "原文を表示 · PLaMo")
-                            }
-                        }
-                    }
+                    MarkdownText(if (LocalOriginalText.current) block.originalText ?: text else text)
                 }
             }
         }

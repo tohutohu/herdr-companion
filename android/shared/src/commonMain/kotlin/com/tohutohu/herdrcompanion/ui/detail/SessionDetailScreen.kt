@@ -38,6 +38,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
@@ -152,6 +153,12 @@ fun SessionDetailScreen(
     val error = state.error
     val answering = state.answering
     var menu by remember { mutableStateOf(false) }
+    var showOriginal by rememberSaveable(state.sessionId) { mutableStateOf(false) }
+    val hasTranslation = session?.originalTitle != null || messages.any { message ->
+        message.blocks.any { block ->
+            (!block.originalText.isNullOrBlank() && block.originalText != block.text) || block.interaction?.translation != null
+        }
+    }
     // The header carries only what changes; the directory and the context bar
     // open under it when the title or the context ring is tapped.
     var detailsOpen by rememberSaveable(state.sessionId) { mutableStateOf(false) }
@@ -249,7 +256,7 @@ fun SessionDetailScreen(
     // Pending messages sit below the conversation, as the first items of the
     // bottom-up list; row indexes in the list are shifted by them.
     val tail = pending.size
-    val stack by remember(messages, rows, tail) {
+    val stack by remember(messages, rows, tail, showOriginal) {
         derivedStateOf {
             val info = listState.layoutInfo
             val top = info.visibleItemsInfo.maxOfOrNull { it.index }
@@ -257,7 +264,7 @@ fun SessionDetailScreen(
                 FlowStack.EMPTY
             } else {
                 val r = rows.lastIndex - (top - tail)
-                flowStack(messages, if (r > rows.lastIndex) messages.size else rows.getOrNull(r)?.messageIndex ?: 0)
+                flowStack(messages, if (r > rows.lastIndex) messages.size else rows.getOrNull(r)?.messageIndex ?: 0, original = showOriginal)
             }
         }
     }
@@ -310,7 +317,7 @@ fun SessionDetailScreen(
                 title = {
                     Column(Modifier.clickable { detailsOpen = !detailsOpen }) {
                         Text(
-                            session?.headline() ?: state.sessionId,
+                            (if (showOriginal) session?.copy(title = session.originalTitle ?: session.title) else session)?.headline() ?: state.sessionId,
                             style = MaterialTheme.typography.titleSmall,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -348,12 +355,23 @@ fun SessionDetailScreen(
                 },
                 actions = {
                     ContextGauge(session?.contextUsedPercent, onClick = { detailsOpen = !detailsOpen })
-                    if (session != null || extraMenuItems != null) {
+                    if (session != null || extraMenuItems != null || hasTranslation || showOriginal) {
                         Box {
                             IconButton(onClick = { menu = true }) {
                                 Icon(Icons.Default.MoreVert, contentDescription = "Session actions")
                             }
                             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                                if (hasTranslation || showOriginal) {
+                                    DropdownMenuItem(
+                                        text = { Text(if (showOriginal) "日本語表示に戻す" else "原文を表示") },
+                                        leadingIcon = { Icon(Icons.Default.Translate, contentDescription = null) },
+                                        onClick = {
+                                            menu = false
+                                            onRowResize()
+                                            showOriginal = !showOriginal
+                                        },
+                                    )
+                                }
                                 session?.let { s ->
                                     if (s.live && s.status in WORKING_STATUSES) {
                                         DropdownMenuItem(
@@ -460,10 +478,6 @@ fun SessionDetailScreen(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                         )
                     }
-                    it.originalTitle?.let { original ->
-                        Text("元のタイトル: $original", style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
-                    }
                     ContextBar(it.contextUsedTokens, it.contextWindowTokens, it.contextUsedPercent)
                     if (settingsChangeable(it)) SessionSettingsPanel(it, state.settings, onAction)
                     HorizontalDivider()
@@ -503,6 +517,7 @@ fun SessionDetailScreen(
                 CompositionLocalProvider(
                     LocalRowResize provides onRowResize,
                     LocalAnsweredInteractions provides state.answeredInteractions,
+                    LocalOriginalText provides showOriginal,
                 ) {
                     LazyColumn(
                         state = listState,

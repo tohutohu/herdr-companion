@@ -23,7 +23,7 @@ data class FlowStack(val instruction: FlowEntry?, val reports: List<FlowEntry>) 
  * before it count as scrolled off. Tool calls and outputs are left out, so
  * at the bottom of a long turn the stack reads as its outline.
  */
-fun flowStack(messages: List<Message>, firstVisible: Int): FlowStack {
+fun flowStack(messages: List<Message>, firstVisible: Int, original: Boolean = false): FlowStack {
     if (messages.isEmpty()) return FlowStack.EMPTY
     val top = firstVisible.coerceIn(0, messages.size)
     var turnStart = -1
@@ -35,20 +35,20 @@ fun flowStack(messages: List<Message>, firstVisible: Int): FlowStack {
     }
     // The instruction itself is on screen: nothing of its turn is hidden yet.
     if (turnStart == top) return FlowStack.EMPTY
-    val instruction = messages.getOrNull(turnStart)?.let { FlowEntry(it.id, entryText(it).ifEmpty { "(attachment)" }) }
+    val instruction = messages.getOrNull(turnStart)?.let { FlowEntry(it.id, entryText(it, original).ifEmpty { "(attachment)" }) }
     val reports = (turnStart + 1 until top).mapNotNull { i ->
         val m = messages[i]
         if (m.role != "assistant") return@mapNotNull null
-        entryText(m).takeIf { it.isNotEmpty() }?.let { FlowEntry(m.id, it) }
+        entryText(m, original).takeIf { it.isNotEmpty() }?.let { FlowEntry(m.id, it) }
     }
     return FlowStack(instruction, reports)
 }
 
 /** Prose of a message on one line; tool calls are not prose. */
-private fun entryText(message: Message): String =
+private fun entryText(message: Message, original: Boolean): String =
     message.blocks.asSequence()
         .filter { it.type == "text" }
-        .mapNotNull { it.text }
+        .mapNotNull { if (original) it.originalText ?: it.text else it.text }
         .filter { message.role != "assistant" || !isToolCallText(it) }
         .joinToString(" ")
         .replace(Regex("\\s+"), " ")
