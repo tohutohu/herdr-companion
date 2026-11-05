@@ -317,12 +317,26 @@ fun SessionDetailScreen(
                 },
                 title = {
                     Column(Modifier.clickable { detailsOpen = !detailsOpen }) {
-                        Text(
-                            (if (showOriginal) session?.copy(title = session.originalTitle ?: session.title) else session)?.headline() ?: state.sessionId,
-                            style = MaterialTheme.typography.titleSmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            if (session?.translation == true) {
+                                Icon(
+                                    Icons.Default.Translate,
+                                    contentDescription = "Translation mode: On",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                            Text(
+                                (if (showOriginal) session?.copy(title = session.originalTitle ?: session.title) else session)?.headline() ?: state.sessionId,
+                                style = MaterialTheme.typography.titleSmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
                         session?.let {
                             val st = statusStyle(it.status)
                             val details = listOfNotNull(

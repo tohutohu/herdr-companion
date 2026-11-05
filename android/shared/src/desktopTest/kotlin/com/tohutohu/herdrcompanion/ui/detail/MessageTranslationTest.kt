@@ -15,6 +15,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import com.tohutohu.herdrcompanion.data.Message
@@ -95,6 +96,13 @@ class MessageTranslationTest {
                 )
             }
         }
+        rule.onNodeWithText("Translation mode: On").assertDoesNotExist()
+        rule.onNodeWithContentDescription("Translation mode: On").assertIsDisplayed()
+        rule.runOnIdle { translation = false }
+        rule.onNodeWithContentDescription("Translation mode: On").assertDoesNotExist()
+        rule.runOnIdle { translation = null }
+        rule.onNodeWithContentDescription("Translation mode: On").assertDoesNotExist()
+        rule.runOnIdle { translation = true }
         rule.onNodeWithText("Session title").performClick()
         rule.onNodeWithText("Translation mode: On").assertExists()
         rule.runOnIdle { translation = false }
