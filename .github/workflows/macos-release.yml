@@ -42,7 +42,7 @@ jobs:
   macos:
     needs: metadata
     # Compose Multiplatform 1.12.1 supports macOS arm64 for this project.
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       APPLE_ID: ${{ secrets.APPLE_ID }}
       APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}

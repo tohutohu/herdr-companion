@@ -168,7 +168,7 @@ Gatewayも使う場合は、別途`Herdr-Companion-Gateway-x.y.z.dmg`を開い�
 
 ## GitHub Actions / GitHub Release
 
-[`.github/workflows/macos-release.yml`](../.github/workflows/macos-release.yml)は`v*` tag pushまたはmanual dispatchで動きます。`macos-14` arm64 runner上で、JDK 17、Gradle cache、Go 1.27、Bun、Android/shared regression、Gateway test/vet、Claudeサイドカーのtypecheck、release APK生成、temporary keychain、2つのrelease DMG生成、verification、artifact uploadを順に実行します。Linux .debとエージェント向けCLI `hc`（[cli.md](cli.md)）は別jobで作ります。tag push時は次のファイルをGitHub Releaseへ添付します（それぞれ`.sha256`付き）。
+[`.github/workflows/macos-release.yml`](../.github/workflows/macos-release.yml)は`v*` tag pushまたはmanual dispatchで動きます。`macos-15` arm64 runner上で、JDK 17、Gradle cache、Go 1.27、Bun、Android/shared regression、Gateway test/vet、Claudeサイドカーのtypecheck、release APK生成、temporary keychain、2つのrelease DMG生成、verification、artifact uploadを順に実行します。Linux .debとエージェント向けCLI `hc`（[cli.md](cli.md)）は別jobで作ります。tag push時は次のファイルをGitHub Releaseへ添付します（それぞれ`.sha256`付き）。
 
 ```text
 Herdr-Companion-x.y.z.dmg
