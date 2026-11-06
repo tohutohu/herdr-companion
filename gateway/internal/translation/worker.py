@@ -5,6 +5,38 @@ import re
 import sys
 
 PROTOCOL = sys.stdout
+REFERENCE_TOKENS = 2048
+CONTEXT_TOKENS = 512
+
+
+def reference_text(text):
+    # Reference data cannot introduce PFML3 fields. Current-source literals are
+    # protected separately and restored exactly, like code and URLs.
+    return text.replace("<|plamo:", "＜|plamo:")
+
+
+def build_prompt(source, target, history, context, tokenizer):
+    output_tag = "<|plamo:tag|>output<|plamo:key|>lang<|plamo:val|>" + target + "<|plamo:msg|>"
+    input_tag = "<|plamo:tag|>input<|plamo:msg|>"
+    context = reference_text(context)
+    # Trim text at character boundaries, using actual tokenizer counts. Keep
+    # both ends so the latest proposal survives a long reference excerpt.
+    while context and len(tokenizer.encode(context)) > CONTEXT_TOKENS:
+        keep = max(0, len(context) * 3 // 4 - 5)
+        context = context[:keep // 2] + " […] " + context[-(keep - keep // 2):] if keep else ""
+    reference = "<|plamo:tag|>context<|plamo:msg|>" + context if context else ""
+    pairs = []
+    for previous_source, previous_translation in reversed(history[-2:]):
+        pair = input_tag + reference_text(previous_source) + output_tag + reference_text(previous_translation)
+        if len(tokenizer.encode(reference + pair + "".join(pairs))) > REFERENCE_TOKENS:
+            break  # Drop whole pairs; never present misaligned partial translations.
+        pairs.insert(0, pair)
+    glossary = "".join("<|plamo:index|>" + literal + "<|plamo:item|>" + literal
+                       for literal in re.findall(r"HERDRLITERALX*\d+END", source))
+    if glossary:
+        glossary = "<|plamo:tag|>glossary" + glossary
+    return ("<|plamo:tag|>dataset<|plamo:msg|>translation" + reference +
+            "".join(pairs) + glossary + input_tag + source + output_tag)
 
 def emit(**value):
     print(json.dumps(value, ensure_ascii=False), file=PROTOCOL, flush=True)
@@ -39,6 +71,7 @@ def translate(text, target, run):
     except (ValueError, TypeError):
         pass
     result = []
+    history = []  # Request-local: never carry one session's text into another.
     for should_translate, part in pieces(text):
         if not should_translate or not part.strip():
             result.append(part)
@@ -52,13 +85,16 @@ def translate(text, target, run):
         def protect(match):
             literals.append(match.group())
             return prefix + str(len(literals) - 1) + "END"
-        protected = re.sub(r"(`+)[^`\n]+\1|https?://[^\s<>]+", protect, part.strip())
-        translated = run(protected, target)
+        protected = re.sub(r"(`+)[^`\n]+\1|https?://[^\s<>]+|<\|plamo:[^\n]*?\|>", protect, part.strip())
+        translated = run(protected, target, tuple(history))
         for index, literal in enumerate(literals):
             token = prefix + str(index) + "END"
             if translated.count(token) != 1:
                 raise ValueError("code or URL placeholder was changed; no partial translation was sent")
             translated = translated.replace(token, literal)
+        # Store restored literals, not reusable placeholder IDs: the next chunk
+        # may use HERDRLITERAL0END for an entirely different path.
+        history = (history + [(part.strip(), translated)])[-2:]
         result.append(leading + translated + trailing)
     return "".join(result)
 
@@ -81,16 +117,9 @@ def main():
             request = json.loads(line)
             if request["target"] not in ("ja", "en"):
                 raise ValueError("unsupported target")
-            def run(source, target):
+            def run(source, target, history):
                 # PFN recommends direct PFML3 prompts for application integration.
-                glossary = ""
-                for literal in re.findall(r"HERDRLITERALX*\d+END", source):
-                    glossary += "<|plamo:index|>" + literal + "<|plamo:item|>" + literal
-                if glossary:
-                    glossary = "<|plamo:tag|>glossary" + glossary
-                prompt = ("<|plamo:tag|>dataset<|plamo:msg|>translation" + glossary +
-                          "<|plamo:tag|>input<|plamo:msg|>" + source +
-                          "<|plamo:tag|>output<|plamo:key|>lang<|plamo:val|>" + target + "<|plamo:msg|>")
+                prompt = build_prompt(source, target, history, request.get("context", ""), tokenizer)
                 tokens = tokenizer.encode(prompt)
                 if len(tokens) + 4096 > 32768:
                     raise ValueError("translation input exceeds context limit")

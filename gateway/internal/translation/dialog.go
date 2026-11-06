@@ -30,7 +30,7 @@ func (s *Service) cachedDisplayLocked(text string, urgent bool) string {
 		queue = s.priority
 	}
 	select {
-	case queue <- job{key, text}:
+	case queue <- job{key: key, text: text}:
 		s.pending[key] = true
 	default:
 	}

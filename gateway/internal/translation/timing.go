@@ -13,20 +13,21 @@ import (
 // user text. Request timings include queueing; inference timings survive a caller
 // disconnect and measure the actual work that populated the cache.
 type timing struct {
-	Time        time.Time `json:"time"`
-	Event       string    `json:"event"`
-	Model       string    `json:"model"`
-	Revision    string    `json:"revision"`
-	Target      string    `json:"target"`
-	InputBytes  int       `json:"inputBytes"`
-	OutputBytes int       `json:"outputBytes"`
-	CacheHit    bool      `json:"cacheHit"`
-	ElapsedMS   float64   `json:"elapsedMs"`
-	QueueMS     float64   `json:"queueMs"`
-	StartupMS   float64   `json:"startupMs"`
-	InferenceMS float64   `json:"inferenceMs"`
-	Outcome     string    `json:"outcome"`
-	Exit        string    `json:"exit,omitempty"`
+	Time         time.Time `json:"time"`
+	Event        string    `json:"event"`
+	Model        string    `json:"model"`
+	Revision     string    `json:"revision"`
+	Target       string    `json:"target"`
+	ContextBytes int       `json:"contextBytes,omitempty"`
+	InputBytes   int       `json:"inputBytes"`
+	OutputBytes  int       `json:"outputBytes"`
+	CacheHit     bool      `json:"cacheHit"`
+	ElapsedMS    float64   `json:"elapsedMs"`
+	QueueMS      float64   `json:"queueMs"`
+	StartupMS    float64   `json:"startupMs"`
+	InferenceMS  float64   `json:"inferenceMs"`
+	Outcome      string    `json:"outcome"`
+	Exit         string    `json:"exit,omitempty"`
 }
 
 func milliseconds(d time.Duration) float64 { return float64(d.Microseconds()) / 1000 }

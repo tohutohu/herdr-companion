@@ -202,7 +202,7 @@ func serve(args []string) error {
 	limits := usage.New(cfg.UsageCommand, time.Duration(cfg.UsageRefreshMinutes)*time.Minute, codexProvider)
 	go limits.Run(ctx)
 
-	translator := translation.New(ctx, filepath.Join(config.StateDir(), "translation"))
+	translator := translation.New(ctx, filepath.Join(config.StateDir(), "translation"), svc)
 	defer translator.Close()
 	prepareNotification := func(ctx context.Context, id string, content notifications.Content) notifications.Content {
 		return translator.Notification(ctx, id, content, direct.Translation(id))

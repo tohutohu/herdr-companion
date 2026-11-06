@@ -58,28 +58,32 @@ type cached struct {
 	Used  uint64 `json:"used,omitempty"`
 	retry time.Time
 }
-type job struct{ key, text string }
+type job struct{ key, text, reference string }
 type Service struct {
-	dir        string
-	ctx        context.Context
-	mu         sync.Mutex
-	timingMu   sync.Mutex
-	life       sync.Mutex
-	status     Status
-	cancel     context.CancelFunc
-	done       chan struct{}
-	worker     *worker
-	gate       chan struct{}
-	cache      map[string]cached
-	cacheBytes int
-	cacheClock uint64
-	pending    map[string]bool
-	queue      chan job
-	priority   chan job
+	conversations ConversationReader
+	dir           string
+	ctx           context.Context
+	mu            sync.Mutex
+	timingMu      sync.Mutex
+	life          sync.Mutex
+	status        Status
+	cancel        context.CancelFunc
+	done          chan struct{}
+	worker        *worker
+	gate          chan struct{}
+	cache         map[string]cached
+	cacheBytes    int
+	cacheClock    uint64
+	pending       map[string]bool
+	queue         chan job
+	priority      chan job
 }
 
-func New(ctx context.Context, dir string) *Service {
+func New(ctx context.Context, dir string, conversations ...ConversationReader) *Service {
 	s := &Service{dir: dir, ctx: ctx, gate: make(chan struct{}, 1), cache: map[string]cached{}, pending: map[string]bool{}, queue: make(chan job, 16), priority: make(chan job, 64)}
+	if len(conversations) > 0 {
+		s.conversations = conversations[0]
+	}
 	s.status = Status{Options: Options{Model: "0.8b"}, Supported: runtime.GOOS == "darwin" && runtime.GOARCH == "arm64", State: "stopped", Detail: "停止中"}
 	if data, err := os.ReadFile(filepath.Join(dir, "settings.json")); err == nil {
 		_ = json.Unmarshal(data, &s.status.Options)
@@ -312,7 +316,9 @@ func (s *Service) Input(ctx context.Context, sessionID, text string, mode ...*bo
 	if !modeEnabled(s.Status().Input, mode) || !hasJapanese(text) || strings.HasPrefix(strings.TrimSpace(text), "/") {
 		return text, nil
 	}
-	translated, err := s.Translate(ctx, text, "en")
+	messages := s.conversation(ctx, sessionID)
+	reference := contextBefore(messages, len(messages), 0)
+	translated, err := s.translate(ctx, text, "en", reference)
 	if err != nil {
 		return "", err
 	}
@@ -391,9 +397,13 @@ func (s *Service) readyWorker(ctx context.Context) (*worker, string, error) {
 	}
 }
 
-func (s *Service) Translate(ctx context.Context, text, target string) (translated string, err error) {
+func (s *Service) Translate(ctx context.Context, text, target string) (string, error) {
+	return s.translate(ctx, text, target, "")
+}
+
+func (s *Service) translate(ctx context.Context, text, target, reference string) (translated string, err error) {
 	started := time.Now()
-	metric := timing{Event: "request", Model: s.Status().Model, Target: target, InputBytes: len(text)}
+	metric := timing{Event: "request", Model: s.Status().Model, Target: target, InputBytes: len(text), ContextBytes: len(reference)}
 	defer func() {
 		metric.ElapsedMS = milliseconds(time.Since(started))
 		metric.OutputBytes, metric.Outcome = len(translated), timingOutcome(err)
@@ -407,7 +417,7 @@ func (s *Service) Translate(ctx context.Context, text, target string) (translate
 	}
 	// Cache hits do not need a loaded model, even after a Gateway restart.
 	s.mu.Lock()
-	value, ok := s.cacheGetLocked(translationKey(s.status.Model, target, text))
+	value, ok := s.cacheGetLocked(translationKey(s.status.Model, target, text, reference))
 	s.mu.Unlock()
 	if ok {
 		metric.CacheHit = true
@@ -423,7 +433,7 @@ func (s *Service) Translate(ctx context.Context, text, target string) (translate
 	metric.QueueMS = milliseconds(time.Since(waitStarted))
 	// A duplicate may have completed while this request waited for the worker.
 	s.mu.Lock()
-	value, ok = s.cacheGetLocked(translationKey(s.status.Model, target, text))
+	value, ok = s.cacheGetLocked(translationKey(s.status.Model, target, text, reference))
 	s.mu.Unlock()
 	if ok {
 		metric.CacheHit = true
@@ -446,7 +456,7 @@ func (s *Service) Translate(ctx context.Context, text, target string) (translate
 		workCtx, cancel := context.WithTimeout(s.ctx, 2*time.Minute)
 		defer cancel()
 		workStarted := time.Now()
-		workMetric := timing{Event: "inference", Model: s.Status().Model, Target: target, InputBytes: len(text)}
+		workMetric := timing{Event: "inference", Model: s.Status().Model, Target: target, InputBytes: len(text), ContextBytes: len(reference)}
 		w, size, err := s.readyWorker(workCtx)
 		workMetric.StartupMS = milliseconds(time.Since(workStarted))
 		if err != nil {
@@ -460,7 +470,7 @@ func (s *Service) Translate(ctx context.Context, text, target string) (translate
 		inferenceStarted := time.Now()
 		replyCh := make(chan result, 1)
 		go func() {
-			req, _ := json.Marshal(map[string]string{"text": text, "target": target})
+			req, _ := json.Marshal(map[string]string{"text": text, "target": target, "context": reference})
 			_, err := w.in.Write(append(req, '\n'))
 			var reply struct{ Text, Error string }
 			if err == nil {
@@ -486,7 +496,7 @@ func (s *Service) Translate(ctx context.Context, text, target string) (translate
 			s.recordTiming(workMetric)
 			if r.err == nil {
 				s.mu.Lock()
-				s.cachePutLocked(translationKey(size, target, text), r.text)
+				s.cachePutLocked(translationKey(size, target, text, reference), r.text)
 				s.mu.Unlock()
 			}
 			resultCh <- r
@@ -589,7 +599,8 @@ func (s *Service) Messages(sessionID string, msgs []model.Message, _ bool, mode 
 	}
 	for _, pos := range reports[max(0, len(reports)-128):] {
 		block := &out[pos.message].Blocks[pos.block]
-		key := translationKey(s.status.Model, "ja", block.Text)
+		reference := contextBefore(msgs, pos.message, pos.block)
+		key := translationKey(s.status.Model, "ja", block.Text, reference)
 		v, ok := s.cache[key]
 		if translated, hit := s.cacheGetLocked(key); hit {
 			if translated != block.Text {
@@ -602,7 +613,7 @@ func (s *Service) Messages(sessionID string, msgs []model.Message, _ bool, mode 
 		}
 		if !s.pending[key] {
 			select {
-			case s.queue <- job{key, block.Text}:
+			case s.queue <- job{key: key, text: block.Text, reference: reference}:
 				s.pending[key] = true
 			default:
 			}
@@ -643,7 +654,7 @@ func (s *Service) runQueue() {
 		}
 		{
 			s.mu.Lock()
-			valid := s.canTranslateLocked() && j.key == translationKey(s.status.Model, "ja", j.text)
+			valid := s.canTranslateLocked() && j.key == translationKey(s.status.Model, "ja", j.text, j.reference)
 			if !valid {
 				delete(s.pending, j.key)
 			}
@@ -652,7 +663,7 @@ func (s *Service) runQueue() {
 				continue
 			}
 			ctx, cancel := context.WithTimeout(s.ctx, 2*time.Minute)
-			_, err := s.Translate(ctx, j.text, "ja")
+			_, err := s.translate(ctx, j.text, "ja", j.reference)
 			cancel()
 			s.mu.Lock()
 			delete(s.pending, j.key)

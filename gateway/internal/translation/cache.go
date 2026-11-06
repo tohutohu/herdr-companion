@@ -14,7 +14,11 @@ var workerVersion = cacheKey("worker-v1", string(workerSource))
 
 // Translation direction, model revision and worker code all affect the result.
 // Only hashes and translated text are persisted; prompt originals live separately.
-func translationKey(size, target, text string) string {
+func translationKey(size, target, text string, reference ...string) string {
+	if len(reference) > 0 && reference[0] != "" {
+		data, _ := json.Marshal([]string{text, reference[0]})
+		return cacheKey(workerVersion+":"+size+":"+revisions[size]+":"+target+":context-v1", string(data))
+	}
 	return cacheKey(workerVersion+":"+size+":"+revisions[size]+":"+target, text)
 }
 

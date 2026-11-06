@@ -26,6 +26,9 @@ func Test翻訳ライフサイクル補助プロセス(t *testing.T) {
 		f, _ := os.OpenFile(os.Getenv("HERDR_TRANSLATION_CALLS"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 		_, _ = f.WriteString("x")
 		_ = f.Close()
+		requests, _ := os.OpenFile(os.Getenv("HERDR_TRANSLATION_CALLS")+".requests", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+		_, _ = requests.Write(append(append([]byte(nil), sc.Bytes()...), '\n'))
+		_ = requests.Close()
 		if req["text"] == "slow private text" {
 			time.Sleep(200 * time.Millisecond)
 		}
