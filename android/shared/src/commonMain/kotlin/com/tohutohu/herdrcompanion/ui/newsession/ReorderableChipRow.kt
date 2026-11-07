@@ -194,6 +194,15 @@ fun <T> ReorderableChipRow(
         items(orderedItems, key = itemKey) { item ->
             val key = itemKey(item)
             val active = activeKey == key
+            // Built while composing: state read inside the semantics block is
+            // observed by the node, and a change during a drag would recompute
+            // the semantics of chips the row has scrolled away and detached,
+            // which crashes in Material's chip semantics.
+            val moveActions = if (!enabled || dragging || activeKey != null) emptyList() else buildList {
+                val index = orderedItems.indexOfFirst { itemKey(it) == key }
+                if (index > 0) add(CustomAccessibilityAction("Move earlier") { moveOne(key, -1) })
+                if (index in 0 until orderedItems.lastIndex) add(CustomAccessibilityAction("Move later") { moveOne(key, 1) })
+            }
             val reorderModifier = Modifier
                 // Lifted chips follow the finger, not a placement animation.
                 .animateItem(placementSpec = if (active) null else placementSpec)
@@ -216,13 +225,7 @@ fun <T> ReorderableChipRow(
                 )
                 // Keep accessibility bounds inside the visual transform so
                 // focus and hit targets follow a lifted or settling chip.
-                .semantics {
-                    customActions = if (!enabled || dragging || activeKey != null) emptyList() else buildList {
-                        val index = orderedItems.indexOfFirst { itemKey(it) == key }
-                        if (index > 0) add(CustomAccessibilityAction("Move earlier") { moveOne(key, -1) })
-                        if (index in 0 until orderedItems.lastIndex) add(CustomAccessibilityAction("Move later") { moveOne(key, 1) })
-                    }
-                }
+                .semantics { customActions = moveActions }
                 .onPreviewKeyEvent { event ->
                     if (event.type != KeyEventType.KeyDown || !event.isAltPressed) false
                     else when (event.key) {
