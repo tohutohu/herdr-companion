@@ -48,7 +48,7 @@ class TranscriptRowsTest {
         // The file the answer mentions stays with it, and the turn ends under it.
         val answer = rows[2] as MessageRow
         assertEquals(2, answer.message.blocks.size)
-        assertEquals(TurnEnd(failed = false, at = 87_000), answer.end)
+        assertEquals(TurnEnd(failed = false, at = 87_000, lastReport = finishedTurn.last()), answer.end)
         assertNull(work.end)
     }
 
@@ -89,7 +89,7 @@ class TranscriptRowsTest {
             lastTurn = LastTurn.WORKING,
         )
         assertEquals(listOf("message:u1", "work:u1#0", "message:a4", "message:u2", "tools:a5#0"), rows.map { it.key })
-        assertEquals(TurnEnd(failed = false, at = 87_000), rows[2].end)
+        assertEquals(TurnEnd(failed = false, at = 87_000, lastReport = finishedTurn.last()), rows[2].end)
         assertNull(rows[4].end)
     }
 
@@ -125,7 +125,7 @@ class TranscriptRowsTest {
         assertEquals(listOf("message:u1", "work:u1#0", "message:s1", "message:e1", "message:a3"), rows.map { it.key })
         assertEquals(listOf("tools:a1#0"), (rows[1] as WorkRow).rows.map { it.key })
         assertEquals(2, (rows[1] as WorkRow).callCount)
-        assertEquals(TurnEnd(failed = false, at = 9_000), rows[4].end)
+        assertEquals(TurnEnd(failed = false, at = 9_000, lastReport = (rows[4] as MessageRow).message), rows[4].end)
     }
 
     @Test

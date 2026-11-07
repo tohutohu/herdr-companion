@@ -20,7 +20,7 @@ sealed interface TranscriptRow {
 }
 
 /** How a turn ended; [at] is the time of its last message. */
-data class TurnEnd(val failed: Boolean, val at: Long)
+data class TurnEnd(val failed: Boolean, val at: Long, val lastReport: Message? = null)
 
 /** What the session tells about its newest turn; older turns are all over. */
 enum class LastTurn { WORKING, DONE, FAILED }
@@ -185,7 +185,9 @@ private fun turnRows(
     rows += groupRows(notices, messageKeys)
     rows += groupRows(shown, messageKeys)
     if (over && work.isNotEmpty()) {
-        rows[rows.lastIndex] = rows.last().withEnd(TurnEnd(failed, work.last().message.timestamp))
+        rows[rows.lastIndex] = rows.last().withEnd(TurnEnd(
+            failed, work.last().message.timestamp, work.lastOrNull { it.isReport }?.message,
+        ))
     }
     rows += groupRows(queued, messageKeys)
     return rows

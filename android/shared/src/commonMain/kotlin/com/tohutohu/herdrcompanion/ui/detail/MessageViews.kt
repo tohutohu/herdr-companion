@@ -10,7 +10,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -130,10 +129,7 @@ fun MessageItem(
     if (message.role == "user") {
         UserBubble(pending = false, delivery = if (message.queued) Delivery.Queued else null, modifier = modifier, content = content)
     } else {
-        Row(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp), verticalAlignment = Alignment.Top) {
-            Box(Modifier.weight(1f)) { content() }
-            MessageTranslationMenu(message)
-        }
+        Column(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp)) { content() }
     }
 }
 
@@ -283,12 +279,18 @@ internal fun workSummary(row: WorkRow): String {
 @Composable
 private fun TurnEndLine(end: TurnEnd, formatTime: (Long) -> String) {
     val label = if (end.failed) "✕ Failed" else "✓ Done"
-    Text(
-        listOfNotNull(label, end.at.takeIf { it > 0 }?.let(formatTime)).joinToString(" · "),
-        style = MaterialTheme.typography.labelSmall,
-        color = if (end.failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 6.dp),
-    )
+    Row(
+        Modifier.fillMaxWidth().padding(start = 16.dp, end = 12.dp, top = 4.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            listOfNotNull(label, end.at.takeIf { it > 0 }?.let(formatTime)).joinToString(" · "),
+            style = MaterialTheme.typography.labelSmall,
+            color = if (end.failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        end.lastReport?.let { MessageTranslationMenu(it) }
+    }
 }
 
 /**

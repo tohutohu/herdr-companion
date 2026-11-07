@@ -11,6 +11,7 @@ import androidx.compose.runtime.saveable.SaveableStateRegistry
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -38,7 +39,11 @@ class MessageTranslationTest {
                 SessionDetailScreen(
                     state = SessionDetailUiState(
                         "session", SessionDto("session", "claude", status = "idle", updatedAt = "", translation = false).toUiModel(),
-                        listOf(Message("a", "assistant", 0, listOf(BlockDto("text", text = "English report")))),
+                        listOf(
+                            Message("a0", "assistant", 0, listOf(BlockDto("text", text = "Earlier report"))),
+                            Message("a", "assistant", 0, listOf(BlockDto("text", text = "English report"))),
+                            Message("t", "tool", 0, listOf(BlockDto("text", text = "Tool output after report"))),
+                        ),
                         emptyList(), error = null, answering = false,
                     ),
                     resolveUrl = { it }, formatFileSize = { "$it bytes" }, formatTime = { "$it" },
@@ -46,10 +51,11 @@ class MessageTranslationTest {
                 )
             }
         }
-        val report = rule.onNodeWithText("English report").fetchSemanticsNode().boundsInRoot
+        rule.onAllNodesWithContentDescription("メッセージの操作").assertCountEquals(1)
+        val done = rule.onNodeWithText("✓ Done").fetchSemanticsNode().boundsInRoot
         val menu = rule.onNodeWithContentDescription("メッセージの操作").fetchSemanticsNode().boundsInRoot
-        check(menu.left >= report.right) { "Message actions must sit beside the text" }
-        check(menu.top < report.bottom) { "Message actions must not add a row below the reply" }
+        check(menu.left >= done.right) { "Actions must sit at the right of Done" }
+        check(menu.top < done.bottom && menu.bottom > done.top) { "Actions must share the Done line" }
         rule.onNodeWithText("English report").performTouchInput { longClick() }
         rule.onNodeWithText("日本語に翻訳").assertDoesNotExist()
         rule.onNodeWithContentDescription("メッセージの操作").performClick()
