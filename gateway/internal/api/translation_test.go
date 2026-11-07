@@ -20,6 +20,40 @@ type testTranslator struct {
 	rememberError error
 }
 
+func (t *testTranslator) Translate(_ context.Context, text, target string) (string, error) {
+	t.calls++
+	if t.fail {
+		return "", errors.New("PLaMo翻訳が停止中です")
+	}
+	if target != "ja" {
+		return "", errors.New("unexpected target")
+	}
+	return "日本語訳: " + text, nil
+}
+
+func Test手動翻訳はモードがオフでも利用でき停止中と不正入力を表示する(t *testing.T) {
+	tr := &testTranslator{}
+	ts, _, _, token := newTestServer(t, func(s *Server) { s.Translation = tr })
+	resp, data := do(t, ts, token, "POST", "/v1/translation/text", []byte(`{"text":"Final report"}`), "application/json")
+	if resp.StatusCode != 200 || string(data) != "{\"text\":\"日本語訳: Final report\"}\n" {
+		t.Fatal(resp.StatusCode, string(data))
+	}
+	if tr.st.Input || tr.st.Output || len(tr.remembered) != 0 {
+		t.Fatal("one-off translation changed settings/history")
+	}
+	for _, body := range []string{`{}`, `{"text":""}`, `{"text":"a"} {}`} {
+		resp, _ := do(t, ts, token, "POST", "/v1/translation/text", []byte(body), "application/json")
+		if resp.StatusCode != 400 {
+			t.Fatal(resp.StatusCode, body)
+		}
+	}
+	tr.fail = true
+	resp, _ = do(t, ts, token, "POST", "/v1/translation/text", []byte(`{"text":"Report"}`), "application/json")
+	if resp.StatusCode != 503 {
+		t.Fatal(resp.StatusCode)
+	}
+}
+
 func (t *testTranslator) Session(session model.Session, _ ...*bool) model.Session { return session }
 func (t *testTranslator) Status() translation.Status                              { return t.st }
 func (t *testTranslator) Start(size string) error                                 { t.st.Model = size; return nil }

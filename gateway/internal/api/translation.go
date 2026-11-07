@@ -22,6 +22,32 @@ type Translator interface {
 	Input(context.Context, string, string, ...*bool) (string, error)
 	RememberPrompt(string, string, string) error
 	Messages(string, []model.Message, bool, ...*bool) []model.Message
+	Translate(context.Context, string, string) (string, error)
+}
+
+// A one-off display translation never changes a session's mode or transcript.
+func (s *Server) translateText(w http.ResponseWriter, r *http.Request) {
+	if s.Translation == nil {
+		writeError(w, 503, "translation unavailable")
+		return
+	}
+	var req struct {
+		Text string `json:"text"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	dec := json.NewDecoder(r.Body)
+	if dec.Decode(&req) != nil || dec.Decode(new(any)) != io.EOF || req.Text == "" || len(req.Text) > 128<<10 {
+		writeError(w, 400, "翻訳対象は空でない128 KiB以下のテキストにしてください")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 140*time.Second)
+	defer cancel()
+	translated, err := s.Translation.Translate(ctx, req.Text, "ja")
+	if err != nil {
+		writeError(w, 503, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]string{"text": translated})
 }
 
 func (s *Server) translationStatus(w http.ResponseWriter, r *http.Request) {

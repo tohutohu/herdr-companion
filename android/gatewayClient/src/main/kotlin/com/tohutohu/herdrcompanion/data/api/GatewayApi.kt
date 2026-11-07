@@ -90,6 +90,9 @@ class GatewayApi(
     private suspend fun post(url: HttpUrl, body: RequestBody): String =
         execute(request(url).post(body).build())
 
+    suspend fun translateText(text: String): String =
+        slowPost<TranslateTextResponse>(url("v1", "translation", "text"), json.encodeToString(TranslateTextRequest(text))).text
+
     suspend fun sessions(): List<SessionDto> =
         get<SessionsResponse>(url("v1", "sessions")).sessions
 

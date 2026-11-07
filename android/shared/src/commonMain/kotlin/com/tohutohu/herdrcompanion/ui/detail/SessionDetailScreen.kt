@@ -146,6 +146,7 @@ fun SessionDetailScreen(
      * composer (a desktop pane), instead of a modal sheet over the screen.
      */
     sideQuestionsInPane: Boolean = false,
+    translateText: (suspend (String) -> String)? = null,
     onAction: (SessionDetailAction) -> Unit,
 ) {
     val session = state.session
@@ -548,6 +549,7 @@ fun SessionDetailScreen(
                     LocalRowResize provides onRowResize,
                     LocalAnsweredInteractions provides state.answeredInteractions,
                     LocalOriginalText provides showOriginal,
+                    LocalMessageTranslator provides translateText,
                 ) {
                     LazyColumn(
                         state = listState,

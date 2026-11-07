@@ -949,6 +949,7 @@ internal fun DesktopSessionContent(
             SessionDetailScreen(
                 state = detail,
                 resolveUrl = api::absolute,
+                translateText = api::translateText,
                 formatFileSize = ::formatFileSize,
                 formatTime = ::formatTime,
                 resolveAttachmentPreview = { id -> state.resolveAttachmentPreview(id) },

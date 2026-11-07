@@ -129,7 +129,10 @@ fun MessageItem(
     if (message.role == "user") {
         UserBubble(pending = false, delivery = if (message.queued) Delivery.Queued else null, modifier = modifier, content = content)
     } else {
-        Column(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp)) { content() }
+        Column(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp)) {
+            content()
+            MessageTranslationMenu(message)
+        }
     }
 }
 

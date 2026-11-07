@@ -114,6 +114,7 @@ fun SessionDetailRoute(
             state = uiState,
             focusLatest = focusLatest,
             resolveUrl = api::absolute,
+            translateText = api::translateText,
             formatFileSize = { Formatter.formatShortFileSize(context, it) },
             formatTime = { at ->
                 val date = if (DateUtils.isToday(at)) 0 else DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_NUMERIC_DATE

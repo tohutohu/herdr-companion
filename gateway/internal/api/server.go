@@ -72,6 +72,7 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("DELETE /v1/pairing", s.cancelPairing)
 	api.HandleFunc("GET /v1/translation", s.translationStatus)
 	api.HandleFunc("POST /v1/translation", s.configureTranslation)
+	api.HandleFunc("POST /v1/translation/text", s.translateText)
 	api.HandleFunc("GET /v1/sessions", s.listSessions)
 	api.HandleFunc("POST /v1/sessions", s.startSession)
 	api.HandleFunc("POST /v1/sessions/archive", s.archiveSessions)

@@ -17,6 +17,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.unit.dp
 import com.tohutohu.herdrcompanion.data.Message
 import com.tohutohu.herdrcompanion.data.api.BlockDto
@@ -27,6 +29,55 @@ import org.junit.Test
 
 class MessageTranslationTest {
     @get:Rule val rule = createComposeRule()
+
+    @Test
+    fun 本文の長押しは操作メニューと競合せず返信単位で翻訳し原文へ戻せる() {
+        val requests = mutableListOf<String>()
+        rule.setContent {
+            MaterialTheme {
+                SessionDetailScreen(
+                    state = SessionDetailUiState(
+                        "session", SessionDto("session", "claude", status = "idle", updatedAt = "", translation = false).toUiModel(),
+                        listOf(Message("a", "assistant", 0, listOf(BlockDto("text", text = "English report")))),
+                        emptyList(), error = null, answering = false,
+                    ),
+                    resolveUrl = { it }, formatFileSize = { "$it bytes" }, formatTime = { "$it" },
+                    translateText = { requests += it; "日本語の報告" }, onAction = {},
+                )
+            }
+        }
+        rule.onNodeWithText("English report").performTouchInput { longClick() }
+        rule.onNodeWithText("日本語に翻訳").assertDoesNotExist()
+        rule.onNodeWithContentDescription("メッセージの操作").performClick()
+        rule.onNodeWithText("日本語に翻訳").performClick()
+        rule.onNodeWithText("日本語の報告").assertExists()
+        rule.runOnIdle { check(requests == listOf("English report")) }
+        rule.onNodeWithText("原文を表示").performClick()
+        rule.onNodeWithText("日本語訳を表示").performClick()
+        rule.onNodeWithText("日本語の報告").assertExists()
+        rule.onNodeWithText("閉じる").performClick()
+        rule.onNodeWithText("English report").assertExists()
+    }
+
+    @Test
+    fun 手動翻訳の停止エラーから再試行できる() {
+        var attempts = 0
+        rule.setContent {
+            MaterialTheme {
+                CompositionLocalProvider(LocalMessageTranslator provides { _: String ->
+                    if (attempts++ == 0) error("Gatewayメニューから翻訳を起動してください")
+                    "翻訳できました"
+                }) {
+                    MessageTranslationMenu(Message("a", "assistant", 0, listOf(BlockDto("text", text = "Report"))))
+                }
+            }
+        }
+        rule.onNodeWithContentDescription("メッセージの操作").performClick()
+        rule.onNodeWithText("日本語に翻訳").performClick()
+        rule.onNodeWithText("Gatewayメニューから翻訳を起動してください").assertExists()
+        rule.onNodeWithText("再試行").performClick()
+        rule.onNodeWithText("翻訳できました").assertExists()
+    }
 
     @Test
     fun メニューから会話全体とタイトルを切り替え再生成と新着でも原文表示を保つ() {

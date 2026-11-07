@@ -389,3 +389,10 @@ data class DirectoryCheckRequest(val cwd: String, val prompt: String)
 
 @Serializable
 data class DirectoryCheckResult(val verdict: String = "unknown", val historyCount: Int = 0)
+
+/** One-off local display translation, independent of session translation mode. */
+@Serializable
+data class TranslateTextRequest(val text: String)
+
+@Serializable
+data class TranslateTextResponse(val text: String)
