@@ -97,8 +97,6 @@ func (s *Server) translatedSession(session model.Session) model.Session {
 	mode := s.sessionTranslation(session.ID)
 	enabled := false
 	if s.Translation != nil {
-		status := s.Translation.Status()
-		enabled = status.Input || status.Output
 		session = s.Translation.Session(session, mode)
 	}
 	if mode != nil {

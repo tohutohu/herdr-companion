@@ -31,8 +31,8 @@ func Testセッション一覧のプレビューは設定に従って非同期�
 	if err := s.Configure(false, true); err != nil {
 		t.Fatal(err)
 	}
-	if got := s.Session(original); got.LastMessage != "ja:Build succeeded." {
-		t.Fatal("global on ignored", got)
+	if got := s.Session(original); !reflect.DeepEqual(got, original) {
+		t.Fatal("legacy global setting enabled translation", got)
 	}
 	if got := s.Session(original, &off); !reflect.DeepEqual(got, original) {
 		t.Fatal("session off ignored", got)
@@ -117,11 +117,11 @@ func Test通知は送信前に全表示文を翻訳し会話のキャッシュ�
 	if got := s.Notification(context.Background(), "session", content, &off); got.Title != content.Title || got.Report != content.Report {
 		t.Fatal("session off ignored")
 	}
-	// Resident notifications inherit the global display setting.
+	// Notifications without an explicit choice ignore legacy global settings.
 	if err := s.Configure(false, true); err != nil {
 		t.Fatal(err)
 	}
-	if got := s.Notification(context.Background(), "", content); got.Title != "ja:Codex completed" {
+	if got := s.Notification(context.Background(), "", content); got.Title != content.Title {
 		t.Fatal(got)
 	}
 	if err := s.Stop(); err != nil {

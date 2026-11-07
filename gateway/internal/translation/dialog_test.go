@@ -18,7 +18,7 @@ func Test承認の原文と操作値を保持しコマンドを翻訳しない(t
 	}
 	ia := &model.Interaction{ID: "approval-id", Type: model.InteractionApproval, State: model.InteractionPending, Title: "Allow command?", Detail: "rm -rf /tmp/example\nNeeds write permission", DetailProse: "Needs write permission", Decisions: []string{model.DecisionApprove, model.DecisionDeny}, Questions: []model.Question{{ID: "question-id", Type: model.QuestionSelect, Question: "Choose", Options: []model.Option{{Label: "A", Preview: "code()"}, {Label: "B"}}}}}
 	raw := []model.Message{{Role: model.RoleAssistant, Blocks: []model.Block{{Type: model.BlockInteraction, Interaction: ia}}}}
-	got := s.Messages("session", raw, false)[0].Blocks[0].Interaction
+	got := s.Messages("session", raw, false, boolPointer(true))[0].Blocks[0].Interaction
 	if got.Translation == nil {
 		t.Fatal("no translated view")
 	}
@@ -48,7 +48,7 @@ func Testセッションタイトルを表示だけ翻訳して原文を保持�
 	s.status.Output = true
 	s.cache[translationKey(s.status.Model, "ja", "Fix login")] = cached{Text: "ログインを修正"}
 	original := model.Session{ID: "session", Title: "Fix login"}
-	got := s.Session(original)
+	got := s.Session(original, boolPointer(true))
 	if got.Title != "ログインを修正" || got.OriginalTitle != "Fix login" || original.Title != "Fix login" {
 		t.Fatal(got, original)
 	}

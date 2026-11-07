@@ -313,7 +313,7 @@ func hasJapanese(text string) bool {
 	return false
 }
 func (s *Service) Input(ctx context.Context, sessionID, text string, mode ...*bool) (string, error) {
-	if !modeEnabled(s.Status().Input, mode) || !hasJapanese(text) || strings.HasPrefix(strings.TrimSpace(text), "/") {
+	if !modeEnabled(mode) || !hasJapanese(text) || strings.HasPrefix(strings.TrimSpace(text), "/") {
 		return text, nil
 	}
 	messages := s.conversation(ctx, sessionID)
@@ -529,7 +529,7 @@ func (s *Service) Messages(sessionID string, msgs []model.Message, _ bool, mode 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := append([]model.Message(nil), msgs...)
-	if s.status.InputEverEnabled || modeEnabled(false, mode) {
+	if s.status.InputEverEnabled || modeEnabled(mode) {
 		for i := range out {
 			if out[i].Role != model.RoleUser {
 				continue
@@ -562,7 +562,7 @@ func (s *Service) Messages(sessionID string, msgs []model.Message, _ bool, mode 
 		}
 	}
 
-	if !modeEnabled(s.status.Output, mode) {
+	if !modeEnabled(mode) {
 		return out
 	}
 	for i := range out {
@@ -682,10 +682,10 @@ func (s *Service) runQueue() {
 	}
 }
 
-// A session choice overrides the global default without changing other sessions.
-func modeEnabled(fallback bool, mode []*bool) bool {
+// Translation requires an explicit session choice; legacy global settings are ignored.
+func modeEnabled(mode []*bool) bool {
 	if len(mode) > 0 && mode[0] != nil {
 		return *mode[0]
 	}
-	return fallback
+	return false
 }

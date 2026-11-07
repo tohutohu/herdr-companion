@@ -43,7 +43,7 @@ func Test翻訳ワーカープロトコル(t *testing.T) {
 	s.status.InputEverEnabled = true
 	s.mu.Unlock()
 	for _, tt := range []struct{ in, want string }{{"変更して", "en:変更して"}, {"hello", "hello"}, {"/command 日本語", "/command 日本語"}} {
-		got, err := s.Input(ctx, "test-session", tt.in)
+		got, err := s.Input(ctx, "test-session", tt.in, boolPointer(true))
 		if err != nil || got != tt.want {
 			t.Fatal(got, err)
 		}
@@ -59,12 +59,12 @@ func Test翻訳ワーカープロトコル(t *testing.T) {
 		{Role: model.RoleUser, Blocks: []model.Block{model.ReportBlock("日本語プロンプト")}},
 		{Role: model.RoleTool, Blocks: []model.Block{model.TextBlock("tool output")}},
 	}
-	if got := s.Messages("test-session", original, false); got[0].Blocks[0].Text != "翻訳中…" || got[0].Blocks[0].OriginalText != "Hello" {
+	if got := s.Messages("test-session", original, false, boolPointer(true)); got[0].Blocks[0].Text != "翻訳中…" || got[0].Blocks[0].OriginalText != "Hello" {
 		t.Fatal(got)
 	}
 	deadline := time.Now().Add(time.Second)
 	for {
-		got := s.Messages("test-session", original, false)
+		got := s.Messages("test-session", original, false, boolPointer(true))
 		if got[0].Blocks[0].Text != "翻訳中…" {
 			if got[0].Blocks[0].Text != "ja:Hello" {
 				t.Fatal(got)
@@ -190,5 +190,24 @@ func Testセッションの翻訳選択はグローバル設定を上書きす�
 	}
 	if session.Title != "Hello" || msgs[0].Blocks[0].Text != "Hello" {
 		t.Fatal("provider data mutated")
+	}
+}
+
+func boolPointer(value bool) *bool { return &value }
+
+func Test未設定は保存済みの全体設定が有効でも翻訳しない(t *testing.T) {
+	s := New(context.Background(), t.TempDir())
+	defer s.Close()
+	if err := s.Configure(true, true); err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range [][]*bool{nil, {nil}, {boolPointer(false)}} {
+		got, err := s.Input(context.Background(), "session", "変更して", mode...)
+		if err != nil || got != "変更して" {
+			t.Fatal(got, err)
+		}
+		if s.OutputEnabled(mode...) {
+			t.Fatal("unconfigured translation enabled")
+		}
 	}
 }

@@ -660,7 +660,7 @@ func (m *Manager) Sessions() map[string]Session {
 	return out
 }
 
-// Translation returns a copy of the persisted choice, or nil for Gateway defaults.
+// Translation returns a copy of the persisted choice, or nil when translation is not configured (disabled).
 func (m *Manager) Translation(id string) *bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()

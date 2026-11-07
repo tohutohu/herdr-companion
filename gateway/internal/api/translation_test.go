@@ -216,7 +216,7 @@ func Test翻訳状態は既定設定と翻訳機能なしでも一覧と詳細�
 				s.Translation = &testTranslator{st: translation.Status{Options: *options}}
 			}
 		})
-		want := options != nil && (options.Input || options.Output)
+		want := false
 		for _, path := range []string{"/v1/sessions/fake:s1", "/v1/sessions", "/v1/sessions/fake:s1/messages"} {
 			code, result := call(t, ts, token, "GET", path, nil)
 			if code != http.StatusOK {

@@ -9,9 +9,9 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/notifications"
 )
 
-// OutputEnabled includes the per-session override; resident pushes use defaults.
+// OutputEnabled requires an explicit translation choice.
 func (s *Service) OutputEnabled(mode ...*bool) bool {
-	return modeEnabled(s.Status().Output, mode)
+	return modeEnabled(mode)
 }
 
 // Notification translates before payload truncation and device fan-out. It uses

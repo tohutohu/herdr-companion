@@ -98,7 +98,7 @@ func (s *Service) dialogLocked(ia *model.Interaction) *model.Interaction {
 func (s *Service) Session(session model.Session, mode ...*bool) model.Session {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !modeEnabled(s.status.Output, mode) {
+	if !modeEnabled(mode) {
 		return session
 	}
 	translated := s.cachedDisplayLocked(session.Title, false)
