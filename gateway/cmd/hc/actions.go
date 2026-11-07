@@ -340,6 +340,7 @@ func (a *app) cmdStart(args []string) error {
 	mode := fs.String("mode", "", "start mode id, e.g. plan")
 	worktree := fs.Bool("worktree", false, "start in a new git worktree of cwd")
 	noTrust := fs.Bool("no-trust", false, "do not start in a folder the agent was never trusted in")
+	translation := fs.Bool("translation", false, "translation mode: translate prompts to English and replies to Japanese")
 	var files stringList
 	fs.Var(&files, "file", "attach a local file to the first prompt (repeatable)")
 	wf := addWaitFlags(fs)
@@ -371,6 +372,10 @@ func (a *app) cmdStart(args []string) error {
 	}
 	if len(uploads) > 0 {
 		body["uploads"] = uploads
+	}
+	// Without the flag the Gateway keeps its own default for the session.
+	if *translation {
+		body["translation"] = true
 	}
 	var res startResult
 	if err := a.client.do(ctx, http.MethodPost, "/v1/sessions", body, &res); err != nil {

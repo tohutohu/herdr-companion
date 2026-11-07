@@ -67,6 +67,20 @@ func Test起動はセッションIDをすぐに表示する(t *testing.T) {
 	}
 }
 
+func Test翻訳モードを指定した起動だけがtranslationを送る(t *testing.T) {
+	g := directGateway()
+	g.replies = map[string]any{"/v1/sessions": map[string]any{"sessionId": "dsh:ffff6666-0000"}}
+	a, _ := newTestApp(t, g)
+	a.mustRun(t, "start", "--cwd", "/tmp/x", "--provider", "dsh", "--translation", "hello")
+	if body := g.posted[0].Body; body["translation"] != true || body["provider"] != "dsh" {
+		t.Errorf("body %v", body)
+	}
+	a.mustRun(t, "start", "--cwd", "/tmp/x", "hello")
+	if body := g.posted[1].Body; body["translation"] != nil {
+		t.Errorf("翻訳を指定しない起動が Gateway の既定を上書きした: %v", body)
+	}
+}
+
 func Test信頼されていないフォルダの起動は理由を示す(t *testing.T) {
 	g := directGateway()
 	g.replies = map[string]any{"/v1/sessions": map[string]any{"launchId": "launch-claude-1", "trustRequired": true}}

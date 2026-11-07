@@ -366,7 +366,8 @@ USE WHEN
 
 USAGE
   hc start --cwd DIR [--provider claude] [--model M] [--effort E] [--mode M]
-           [--worktree] [--no-trust] [--file F]... [--wait [--timeout 110s]] PROMPT... | -
+           [--worktree] [--no-trust] [--translation] [--file F]... [--wait [--timeout 110s]]
+           PROMPT... | -
 
 FLAGS
   --cwd DIR      working directory on the Gateway's Mac (default: current directory; required
@@ -377,6 +378,8 @@ FLAGS
   --worktree     start in a new git worktree of DIR
   --no-trust     do not trust a folder the agent was never trusted in (the start is then
                  not made)
+  --translation  translation mode: the Gateway translates prompts into English and shows
+                 the agent's English replies in Japanese (the app's translation must be set up)
   --file F       attach a local file to the first prompt (repeatable)
   --wait         wait for the first turn to end and print what the agent said
   --timeout D    how long --wait waits (default 110s)
