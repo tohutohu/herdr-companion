@@ -3,6 +3,9 @@ package com.tohutohu.herdrcompanion.ui.detail
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
@@ -50,9 +53,16 @@ internal fun MessageTranslationMenu(message: Message) {
     var translated by remember(message.id, source) { mutableStateOf<String?>(null) }
     var error by remember(message.id, source) { mutableStateOf<String?>(null) }
     var attempt by remember(message.id, source) { mutableIntStateOf(0) }
-    Box {
-        IconButton(onClick = { menu = true }) {
-            Icon(Icons.Default.MoreVert, contentDescription = "メッセージの操作", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    // Keep the visible icon small, with a gutter for its expanded touch target.
+    // The target extends into the outer margin, rather than into selectable text.
+    Box(Modifier.width(44.dp).padding(start = 12.dp)) {
+        IconButton(onClick = { menu = true }, modifier = Modifier.size(32.dp)) {
+            Icon(
+                Icons.Default.MoreVert,
+                contentDescription = "メッセージの操作",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(16.dp),
+            )
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
             DropdownMenuItem(text = { Text("日本語に翻訳") }, onClick = {

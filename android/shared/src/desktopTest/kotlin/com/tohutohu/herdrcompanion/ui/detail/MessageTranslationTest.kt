@@ -46,6 +46,10 @@ class MessageTranslationTest {
                 )
             }
         }
+        val report = rule.onNodeWithText("English report").fetchSemanticsNode().boundsInRoot
+        val menu = rule.onNodeWithContentDescription("メッセージの操作").fetchSemanticsNode().boundsInRoot
+        check(menu.left >= report.right) { "Message actions must sit beside the text" }
+        check(menu.top < report.bottom) { "Message actions must not add a row below the reply" }
         rule.onNodeWithText("English report").performTouchInput { longClick() }
         rule.onNodeWithText("日本語に翻訳").assertDoesNotExist()
         rule.onNodeWithContentDescription("メッセージの操作").performClick()
