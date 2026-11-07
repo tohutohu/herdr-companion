@@ -35,6 +35,15 @@ Firebase APIキーをAndroidアプリに制限する場合、配布APKのパッ�
 
 メニューバーの「フォルダ確認」にTypeSafe APIキーを入力して保存します。「キーを削除」で無効化できます。指示・フォルダ情報・READMEなど・最近の会話の抜粋をTypeSafeへ送る機能です。詳しい対象は[ルートREADME](../README.ja.md#開始前のフォルダ確認jev任意)を参照してください。キーなし・判定失敗でもセッションを開始できます。
 
+## DeepSeek Harness（任意）
+
+「DeepSeek Harness」で、DSHの実行ファイル・APIキー・アプリに出すモデルを設定します。
+
+- **実行ファイル**: `dsh`を自動で探します（PATH、mise・nvm・fnm・asdfのNode（新しい順）、Volta、pnpm、Bun、`~/.local/bin`、Homebrew）。見つからない場合は`npm install --global @deepseek-ai/dsh@0.2.2-rc.1`でインストールして「再検出」、または「選択…」で指定します。DSHはインストールに使ったNodeで起動します。
+- **サービス**: OpenCode Go、またはDeepSeek API（公式）のAPIキーを保存します。キーはこのMacのGateway設定（権限600）だけに保存し、DSHの起動時に環境変数で渡します。
+- **モデル**: OpenCode Goの公開モデル一覧から、ツールを使えるモデルを選んでアプリのモデル選択に出します。DeepSeekのモデルを使うには、OpenCode ConsoleのSettings › Privacy › RegionsでGlobalを有効にします。
+- 保存するとアプリが所有するGatewayだけを再起動します。詳細は[DeepSeek Harness](../docs/deepseek-harness.md)を参照してください。
+
 ## 会話履歴のキャッシュ
 
 Gatewayは詳細画面がポーリングする会話をデコード済みのまま保持します。「会話履歴のキャッシュ」で上限（Claude Code・Codexそれぞれ、既定2 GB）を選び、保存するとアプリが所有するGatewayだけを再起動します。設定は`historyCacheMB`（`herdr-mobile-gateway set-history-cache MB`、0で既定）です。長い会話が上限を超えると、別の会話を開くたびに最初から読み直すため表示が遅くなります。

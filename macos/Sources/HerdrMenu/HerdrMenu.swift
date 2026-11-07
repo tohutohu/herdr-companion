@@ -79,6 +79,16 @@ struct SetupError: LocalizedError {
     /// Saved history cache size in MiB; 0 means the Gateway default.
     @Published var historyCacheMB = 0
     @Published var historyCacheChoice = 0
+    @Published var dsh = DSHStatus()
+    @Published var dshLoaded = false
+    @Published var dshService = DSHService.openCodeGo
+    @Published var dshKey = ""
+    /// OpenCode Go model ids to offer in the app.
+    @Published var dshSelected: Set<String> = []
+    @Published var dshDefault = "deepseek-flash"
+    @Published var goModels: [GoModel] = []
+    @Published var goModelsError: String?
+    var goModelsLoading = false
     @Published var qr: NSImage?
     @Published var pairingLink: String?
     @Published var expires: Date?
@@ -93,7 +103,7 @@ struct SetupError: LocalizedError {
     private var quitObserver: NSObjectProtocol?
     private var commandObserver: NSObjectProtocol?
     private let fm = FileManager.default
-    private var home: URL { fm.homeDirectoryForCurrentUser }
+    var home: URL { fm.homeDirectoryForCurrentUser }
     var configURL: URL { home.appendingPathComponent(".config/herdr-mobile/desktop/config.json") }
     var stateURL: URL { home.appendingPathComponent(".local/state/herdr-mobile/desktop") }
     var baseURL: URL? {
@@ -523,6 +533,7 @@ struct Panel: View {
                         }
                     }.padding(6)
                 }
+                DSHBox(model: model)
                 GroupBox("会話履歴のキャッシュ") {
                     VStack(alignment: .leading, spacing: 8) {
                         Picker("上限（エージェントごと）", selection: $model.historyCacheChoice) {
