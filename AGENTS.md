@@ -145,7 +145,7 @@ open "/Applications/Herdr Companion Gateway.app"
 - Session costs are priced by `gateway/internal/pricing` from list rates as of
   2026-09; add a row when an agent starts using a new model (an unknown model
   is left unpriced, so the app then shows no cost).
-- Subscription limits come from the CodexBar CLI (`brew install --cask codexbar`); neither agent reports them itself. `herdr-mobile-gateway usage` prints one read.
+- Subscription limits come from the CodexBar CLI (`brew install --cask codexbar`); neither agent reports them itself. OpenCode Go is read with CodexBar's API source using `dshProviderKeys["opencode-go"]`. `herdr-mobile-gateway usage` prints one read.
 - Commit at each logical step. Commit messages end with the Co-Authored-By trailer; no "Generated with Claude Code" line.
 
 ## Android skills

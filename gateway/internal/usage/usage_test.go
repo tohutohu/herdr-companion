@@ -230,3 +230,83 @@ func Test使用状況の取得を無効にできる(t *testing.T) {
 		t.Errorf("無効時のスナップショット = %+v", snap)
 	}
 }
+
+// fakeOpenCodeGoCommand answers the normal read with sample and the OpenCode
+// Go read with goOut, recording the key it was given in keyFile.
+func fakeOpenCodeGoCommand(t *testing.T, goOut string, goCode int) (cmd, keyFile string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("シェルスクリプトを使うためUnixのみ")
+	}
+	dir := t.TempDir()
+	keyFile = filepath.Join(dir, "key")
+	cmd = filepath.Join(dir, "fake-codexbar")
+	script := "#!/bin/sh\ncase \"$*\" in\n*opencodego*)\n" +
+		"printf '%s' \"$OPENCODE_API_KEY\" > '" + keyFile + "'\ncat <<'OUT'\n" + goOut + "\nOUT\nexit " + strconv.Itoa(goCode) + ";;\n" +
+		"*)\ncat <<'OUT'\n" + sample + "\nOUT\n;;\nesac\n"
+	if err := os.WriteFile(cmd, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return cmd, keyFile
+}
+
+func TestOpenCodeGoのキーがあれば使用量を追加する(t *testing.T) {
+	const goOut = `[{"provider":"opencodego","source":"api","usage":{
+	  "primary":{"resetsAt":"2026-11-07T20:46:45Z","usedPercent":12,"windowMinutes":300},
+	  "secondary":{"resetsAt":"2026-11-08T23:59:59Z","usedPercent":3,"windowMinutes":10080},
+	  "tertiary":{"resetsAt":"2026-12-07T13:17:40Z","usedPercent":1,"windowMinutes":43200}}}]`
+	cmd, keyFile := fakeOpenCodeGoCommand(t, goOut, 0)
+	svc := New(cmd, time.Hour).WithOpenCodeGoKey(func() string { return " go-key\n" })
+	snap := svc.Refresh(context.Background())
+	if snap.Error != "" || len(snap.Providers) != 3 {
+		t.Fatalf("refresh = %+v", snap)
+	}
+	got := snap.Providers[2]
+	if got.Provider != "opencodego" || got.DisplayName != "OpenCode Go" || got.Error != "" {
+		t.Fatalf("opencodego = %+v", got)
+	}
+	var labels []string
+	for _, w := range got.Windows {
+		labels = append(labels, w.Label+":"+strconv.Itoa(w.UsedPercent))
+	}
+	if strings.Join(labels, ",") != "5h:12,7d:3,30d:1" {
+		t.Errorf("windows = %v", labels)
+	}
+	if key, _ := os.ReadFile(keyFile); string(key) != "go-key" {
+		t.Errorf("渡したキー = %q", key)
+	}
+}
+
+func TestOpenCodeGoのキーがなければ取得しない(t *testing.T) {
+	cmd, keyFile := fakeOpenCodeGoCommand(t, "[]", 0)
+	svc := New(cmd, time.Hour).WithOpenCodeGoKey(func() string { return "" })
+	snap := svc.Refresh(context.Background())
+	if snap.Error != "" || len(snap.Providers) != 2 {
+		t.Fatalf("refresh = %+v", snap)
+	}
+	if _, err := os.Stat(keyFile); !os.IsNotExist(err) {
+		t.Error("キーがないのにOpenCode Goを取得した")
+	}
+}
+
+func TestOpenCodeGoの取得に失敗してもほかの使用量は表示しキーを隠す(t *testing.T) {
+	cmd, _ := fakeOpenCodeGoCommand(t, `[{"provider":"opencodego","error":{"message":"rejected key secret-go"}}]`, 1)
+	svc := New(cmd, time.Hour).WithOpenCodeGoKey(func() string { return "secret-go" })
+	snap := svc.Refresh(context.Background())
+	if snap.Error != "" || len(snap.Providers) != 3 {
+		t.Fatalf("refresh = %+v", snap)
+	}
+	if snap.Providers[0].Error != "" || snap.Providers[1].Error != "" {
+		t.Errorf("Claude/Codex = %+v", snap.Providers[:2])
+	}
+	if got := snap.Providers[2]; got.Error != "rejected key …" || len(got.Windows) != 0 {
+		t.Errorf("opencodego = %+v", got)
+	}
+
+	cmd, _ = fakeOpenCodeGoCommand(t, "not json", 2)
+	svc.cmd = cmd
+	snap = svc.Refresh(context.Background())
+	if snap.Error != "" || len(snap.Providers) != 3 || snap.Providers[2].Error == "" || snap.Providers[2].DisplayName != "OpenCode Go" {
+		t.Fatalf("壊れた出力のrefresh = %+v", snap)
+	}
+}

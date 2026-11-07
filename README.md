@@ -137,7 +137,7 @@ workspaceRoots (default: ~/workspace, or the home directory if it does not exist
 
 ### Subscription usage limits
 
-The app can show Claude and Codex plan usage on the session list. Neither Claude Code nor Codex exposes these limits directly through the CLI, so the Gateway uses the CodexBar CLI, which reads both dashboards. If a Codex account reports a Luna Reserve (gpt-reserve) allowance, that separate window is shown under Limits too.
+The app can show Claude and Codex plan usage on the session list. Neither Claude Code nor Codex exposes these limits directly through the CLI, so the Gateway uses the CodexBar CLI, which reads both dashboards. If a Codex account reports a Luna Reserve (gpt-reserve) allowance, that separate window is shown under Limits too. When an OpenCode Go API key is saved for DeepSeek Harness, the same key is used to show OpenCode Go's 5-hour, weekly and monthly windows.
 
 ```bash
 brew install --cask codexbar     # installs /opt/homebrew/bin/codexbar

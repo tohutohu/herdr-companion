@@ -199,7 +199,8 @@ func serve(args []string) error {
 	}
 	dirCheck := &directorycheck.Checker{APIKey: jevKey, Providers: []directorycheck.History{claudeProvider, codexProvider, dshProvider}}
 
-	limits := usage.New(cfg.UsageCommand, time.Duration(cfg.UsageRefreshMinutes)*time.Minute, codexProvider)
+	limits := usage.New(cfg.UsageCommand, time.Duration(cfg.UsageRefreshMinutes)*time.Minute, codexProvider).
+		WithOpenCodeGoKey(func() string { return openCodeGoKey(store.Get()) })
 	go limits.Run(ctx)
 
 	translator := translation.New(ctx, filepath.Join(config.StateDir(), "translation"), svc)
@@ -309,6 +310,12 @@ func devicesCmd() error {
 	return nil
 }
 
+// openCodeGoKey is the key DSH uses for its OpenCode Go route; the same key
+// reads that subscription's limits.
+func openCodeGoKey(cfg config.Config) string {
+	return cfg.DSHProviderKeys["opencode-go"]
+}
+
 // usageCmd reads the limits once, for checking that the reporter is set up.
 func usageCmd() error {
 	store, err := config.Load(config.DefaultPath())
@@ -316,7 +323,8 @@ func usageCmd() error {
 		return err
 	}
 	cfg := store.Get()
-	limits := usage.New(cfg.UsageCommand, time.Duration(cfg.UsageRefreshMinutes)*time.Minute)
+	limits := usage.New(cfg.UsageCommand, time.Duration(cfg.UsageRefreshMinutes)*time.Minute).
+		WithOpenCodeGoKey(func() string { return openCodeGoKey(cfg) })
 	snap := limits.Refresh(context.Background())
 	if snap.Error != "" {
 		return errors.New(snap.Error)

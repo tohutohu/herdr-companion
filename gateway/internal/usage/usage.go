@@ -5,7 +5,9 @@
 // here would duplicate two OAuth flows, so the gateway shells out to CodexBar
 // (`brew install --cask codexbar`), which already speaks to both dashboards.
 // Codex's separate Luna Reserve window is read through the existing Codex
-// app-server connection when the account reports it. A fetch takes several
+// app-server connection when the account reports it. OpenCode Go is read
+// through CodexBar's API source with the key DSH already uses, only while that
+// key is configured. A fetch takes several
 // seconds, so the result is polled in the background and served from cache;
 // Android can force a fresh read.
 package usage
@@ -18,6 +20,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"os"
 	"os/exec"
 	"slices"
 	"strings"
@@ -40,6 +43,13 @@ const (
 // DefaultArgs asks CodexBar for Claude and Codex as JSON on stdout.
 var DefaultArgs = []string{"usage", "--provider", "both", "--format", "json"}
 
+// openCodeGoArgs reads OpenCode Go with an API key rather than browser
+// cookies, so it works with the key the Gateway stores for DSH.
+var openCodeGoArgs = []string{"usage", "--provider", "opencodego", "--source", "api", "--format", "json"}
+
+// OpenCodeGoProvider is CodexBar's id for the OpenCode Go subscription.
+const OpenCodeGoProvider = "opencodego"
+
 // ReserveWindowReader reads Codex's model-specific reserve quota. It is kept
 // as a small interface so normal CodexBar usage remains testable without
 // starting an app-server process.
@@ -53,6 +63,8 @@ type Service struct {
 	interval time.Duration
 	timeout  time.Duration
 	reserve  ReserveWindowReader
+	// openCodeGoKey returns the current OpenCode Go API key, or "".
+	openCodeGoKey func() string
 
 	mu       sync.Mutex
 	snap     model.Usage
@@ -81,6 +93,15 @@ func New(command string, interval time.Duration, reserve ...ReserveWindowReader)
 		timeout:  fetchTimeout,
 		reserve:  reader,
 	}
+}
+
+// WithOpenCodeGoKey also reports OpenCode Go whenever key returns a non-empty
+// API key. It is read on every refresh, so a key added later is picked up.
+func (s *Service) WithOpenCodeGoKey(key func() string) *Service {
+	if s != nil {
+		s.openCodeGoKey = key
+	}
+	return s
 }
 
 // Snapshot returns the cached reading without touching the network.
@@ -154,7 +175,20 @@ func (s *Service) Run(ctx context.Context) {
 func (s *Service) fetch(ctx context.Context) ([]model.UsageProvider, error) {
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, s.cmd, s.args...)
+	providers, err := s.run(ctx, s.args, nil)
+	if err != nil {
+		return nil, err
+	}
+	providers = s.addReserve(ctx, providers)
+	return s.addOpenCodeGo(ctx, providers), nil
+}
+
+// run executes CodexBar with args and env added to the Gateway's environment.
+func (s *Service) run(ctx context.Context, args, env []string) ([]model.UsageProvider, error) {
+	cmd := exec.CommandContext(ctx, s.cmd, args...)
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	runErr := cmd.Run()
@@ -168,7 +202,7 @@ func (s *Service) fetch(ctx context.Context) ([]model.UsageProvider, error) {
 		// successful readings and provider-specific errors as JSON.
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && ctx.Err() == nil && parseErr == nil && len(providers) > 0 {
-			return s.addReserve(ctx, providers), nil
+			return providers, nil
 		}
 		if msg := firstLine(stderr.String()); msg != "" {
 			return nil, fmt.Errorf("%s: %w: %s", s.cmd, err, msg)
@@ -178,7 +212,36 @@ func (s *Service) fetch(ctx context.Context) ([]model.UsageProvider, error) {
 	if parseErr != nil {
 		return nil, parseErr
 	}
-	return s.addReserve(ctx, providers), nil
+	return providers, nil
+}
+
+// addOpenCodeGo appends the OpenCode Go reading. Its failure is shown on that
+// provider alone so it never hides the Claude and Codex limits.
+func (s *Service) addOpenCodeGo(ctx context.Context, providers []model.UsageProvider) []model.UsageProvider {
+	if s.openCodeGoKey == nil || hasProvider(providers, OpenCodeGoProvider) {
+		return providers
+	}
+	key := strings.TrimSpace(s.openCodeGoKey())
+	if key == "" {
+		return providers
+	}
+	got, err := s.run(ctx, openCodeGoArgs, []string{"OPENCODE_API_KEY=" + key})
+	if err != nil {
+		slog.Debug("OpenCode Go usage refresh failed", "operation", "usage.opencodego", "error", err)
+		got = []model.UsageProvider{{
+			Provider:    OpenCodeGoProvider,
+			DisplayName: displayName(OpenCodeGoProvider),
+			Windows:     []model.UsageWindow{},
+			Error:       strings.ReplaceAll(err.Error(), key, "…"),
+		}}
+	}
+	for _, p := range got {
+		if p.Provider == OpenCodeGoProvider {
+			p.Error = strings.ReplaceAll(p.Error, key, "…")
+			providers = append(providers, p)
+		}
+	}
+	return providers
 }
 
 func (s *Service) addReserve(ctx context.Context, providers []model.UsageProvider) []model.UsageProvider {
@@ -297,10 +360,10 @@ type cbWindow struct {
 	ResetsAt      string  `json:"resetsAt"`
 }
 
-var displayNames = map[string]string{"claude": "Claude", "codex": "Codex"}
+var displayNames = map[string]string{"claude": "Claude", "codex": "Codex", OpenCodeGoProvider: "OpenCode Go"}
 
 // providerOrder keeps the list stable; the reporter's own order is not.
-var providerOrder = []string{"claude", "codex"}
+var providerOrder = []string{"claude", "codex", OpenCodeGoProvider}
 
 func parse(b []byte) ([]model.UsageProvider, error) {
 	var entries []cbEntry

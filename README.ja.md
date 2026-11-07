@@ -134,7 +134,7 @@ go build -o ~/.local/bin/herdr-mobile-gateway ./cmd/herdr-mobile-gateway
 
 ### サブスクの残量表示
 
-Claude / Codex のプラン上限の消費率をアプリの一覧画面に表示します。Claude Code も Codex も残量を CLI から出せないため、両方のダッシュボードを見に行く CodexBar の CLI を使います。Codex が Luna Reserve（`gpt-reserve`）を返すアカウントでは、その別枠も Limits に表示します。
+Claude / Codex のプラン上限の消費率をアプリの一覧画面に表示します。Claude Code も Codex も残量を CLI から出せないため、両方のダッシュボードを見に行く CodexBar の CLI を使います。Codex が Luna Reserve（`gpt-reserve`）を返すアカウントでは、その別枠も Limits に表示します。DeepSeek Harness 用に OpenCode Go の API キーを保存していれば、同じキーで OpenCode Go の 5 時間・週・月の枠も表示します。
 
 ```bash
 brew install --cask codexbar     # /opt/homebrew/bin/codexbar が入る

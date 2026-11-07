@@ -542,6 +542,10 @@ normalises its JSON into windows (`5h`, `7d`, and Claude's per-model weekly
 bucket). When Codex reports the separate Luna Reserve allocation,
 `internal/usage` reads `base_model_inference` from the existing Codex
 app-server connection and appends it as a `gpt-reserve` window.
+When `dshProviderKeys["opencode-go"]` is set, it also runs
+`codexbar usage --provider opencodego --source api` with that key in
+`OPENCODE_API_KEY` and appends OpenCode Go (`5h`, `7d`, `30d`). That read fails
+on its own provider only, and the key is masked in its error text.
 
 A read takes several seconds, so it runs in the background every
 `usageRefreshMinutes` (default 5) and `GET /v1/usage` answers from the cache.

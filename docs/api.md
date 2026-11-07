@@ -642,7 +642,7 @@ URI のストリームから送る。サイズ不明の文書も chunked で送�
 
 ### `GET /v1/usage`
 
-バックグラウンドで定期取得（既定 5 分ごと）したキャッシュを返す。取得には CodexBar CLI を使う。
+バックグラウンドで定期取得（既定 5 分ごと）したキャッシュを返す。取得には CodexBar CLI を使う。`provider` は `claude`・`codex` のほか、DSH の OpenCode Go キー（`dshProviderKeys["opencode-go"]`）があれば `opencodego`（5h・7d・30d の枠）も入る。
 
 ```json
 {
