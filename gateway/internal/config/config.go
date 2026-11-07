@@ -52,6 +52,8 @@ type Config struct {
 	DSHModel  string     `json:"dshModel,omitempty"`
 	DSHAPIKey string     `json:"dshApiKey,omitempty"`
 	DSHModels []DSHModel `json:"dshModels,omitempty"`
+	// API keys for DSH's pi-ai provider routes, by route (e.g. "opencode-go").
+	DSHProviderKeys map[string]string `json:"dshProviderKeys,omitempty"`
 	// ClaudeBinary is the Claude Code CLI that directly managed sessions run
 	// (default: claude on PATH, then ~/.local/bin/claude).
 	ClaudeBinary string `json:"claudeBinary,omitempty"`

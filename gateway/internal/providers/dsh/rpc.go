@@ -51,16 +51,39 @@ type conn struct {
 	closeOnce sync.Once
 }
 
-func launch(binary, home, cwd, apiKey, mode string, unattended bool) (*conn, error) {
-	cmd := exec.Command(binary, "--profile", "sdk")
+type launchSpec struct {
+	binary, home, cwd, mode string
+	unattended              bool
+	// env is added to the child's environment; it carries API keys.
+	env   map[string]string
+	patch string
+}
+
+func (p *Provider) launchSpec(cwd, mode string) launchSpec {
+	env := map[string]string{}
+	if p.cfg.APIKey != "" {
+		env["DEEPSEEK_API_KEY"] = p.cfg.APIKey
+	}
+	for route, key := range p.cfg.ProviderKeys {
+		env[keyEnv(route)] = key
+	}
+	return launchSpec{binary: p.cfg.Binary, home: p.cfg.Home, cwd: cwd, mode: mode, unattended: p.unattended != nil, env: env, patch: p.patch}
+}
+
+func launch(spec launchSpec) (*conn, error) {
+	args := []string{"--profile", "sdk"}
+	if spec.patch != "" {
+		args = append(args, "--patch", spec.patch)
+	}
+	cmd := exec.Command(spec.binary, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Dir = cwd
-	set := map[string]string{"DSH_HOME": home, "DSH_PERMISSION_MODE": mode}
-	if unattended {
+	cmd.Dir = spec.cwd
+	set := map[string]string{"DSH_HOME": spec.home, "DSH_PERMISSION_MODE": spec.mode, "PATH": ChildPath(spec.binary, os.Getenv("PATH"))}
+	if spec.unattended {
 		set["HC_RESIDENT"] = "1"
 	}
-	if apiKey != "" {
-		set["DEEPSEEK_API_KEY"] = apiKey
+	for k, v := range spec.env {
+		set[k] = v
 	}
 	cmd.Env = providers.ChildEnv(os.Environ(), set)
 	// Runtime diagnostics can contain credentials. Protocol failures are

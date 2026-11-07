@@ -23,11 +23,24 @@ The Gateway's private config accepts these optional fields:
 
 | Field | Default | Purpose |
 |---|---|---|
-| `dshBinary` | `dsh` on PATH | Absolute executable path is recommended for the Mac menu-bar app. |
+| `dshBinary` | found automatically | Absolute path to `dsh`. Without it the Gateway uses `dsh` on PATH, then the global npm commands of mise, nvm, fnm and asdf Node installs (newest Node first), Volta, pnpm, Bun, `~/.local/bin` and Homebrew. |
 | `dshHome` | `<Gateway state>/dsh/home` | Dedicated Harness home, native history, credentials and SDK profile. |
 | `dshModel` | `deepseek-flash` | Default catalog model ID. |
 | `dshModels` | built-in DeepSeek models | Additional catalog entries with `id`, `name`, `provider`, `model`, optional `efforts`. |
 | `dshApiKey` | unset | Private API key passed only to the DSH child as `DEEPSEEK_API_KEY`. |
+| `dshProviderKeys` | unset | API keys for DSH's pi-ai provider routes, by route (for example `{"opencode-go": "…"}`). See [Model routes](#model-routes-and-subscriptions). |
+
+The Gateway starts `dsh` with its own directory first on PATH, so the
+package's `#!/usr/bin/env node` uses the Node it was installed with even when
+the Gateway's PATH has no Node (the menu-bar app's case).
+
+**On the Mac, use the menu-bar app's "DeepSeek Harness" section** instead of
+editing the config: it shows the `dsh` it found (or lets you pick one), saves
+an OpenCode Go or DeepSeek API key, lists OpenCode Go's tool-capable models to
+offer in the app, and sets the default model. It runs
+`herdr-mobile-gateway dsh status` and `herdr-mobile-gateway dsh configure`
+(JSON on stdin: `binary`, `keys`, `models`, `defaultModel`), which refuse
+settings that would stop the Gateway from starting, then restarts its Gateway.
 
 The active Mac config is `~/.config/herdr-mobile/desktop/config.json` (mode
 600). Keep keys out of source control, command output and shared config
@@ -122,7 +135,32 @@ The pinned DSH pi-ai adapter explicitly does not offer ChatGPT sign-in: its
 is a separate integration; the Gateway does not implement that login or install
 community OAuth plugins. Do not label an `openai` API-key route as a subscription.
 
-DSH can use additional **already installed and authenticated** provider routes
+**Keyed pi-ai routes.** For each route in `dshProviderKeys` the Gateway
+enables DSH's bundled pi-ai adapter: it writes
+`<state>/dsh/gateway-providers.patch.yml`, which names only an environment
+variable (`HERDR_DSH_KEY_<ROUTE>`, e.g. `HERDR_DSH_KEY_OPENCODE_GO`), passes it
+with `dsh --patch`, and sets that variable in the child's environment. The key
+is never written to DSH's home. The installed pi-ai catalog supplies the
+route's endpoint and models. This overlay replaces any `llm-pi-ai`
+configuration made in the DSH home or its Web Models page; without keys no
+overlay is passed. OpenCode Go example:
+
+```json
+{
+  "dshProviderKeys": { "opencode-go": "…" },
+  "dshModel": "go-deepseek-v4.1-flash",
+  "dshModels": [
+    { "id": "go-deepseek-v4.1-flash", "name": "DeepSeek V4.1 Flash (Go)", "provider": "opencode-go", "model": "deepseek-v4.1-flash" },
+    { "id": "go-kimi-k3", "name": "Kimi K3 (Go)", "provider": "opencode-go", "model": "kimi-k3" }
+  ]
+}
+```
+
+OpenCode Go serves DeepSeek models only after **Global** is allowed under
+Settings › Privacy › Regions in the OpenCode Console. A model OpenCode lists
+but the installed pi-ai catalog does not know fails at initialization.
+
+DSH can also use other **already installed and authenticated** provider routes
 through `dshModels`. For example, for an OpenAI **API-key** route configured in
 DSH's SDK profile:
 

@@ -52,6 +52,8 @@ Usage:
                                           import Firebase files while gateway is stopped
   herdr-mobile-gateway set-jev-key         read optional Jev key from stdin (empty removes it)
   herdr-mobile-gateway set-history-cache MB  memory per agent for conversation histories (0 = default 2048)
+  herdr-mobile-gateway dsh status          print the DeepSeek Harness executable, version, keyed routes and models (JSON)
+  herdr-mobile-gateway dsh configure       apply a JSON change from stdin: {"binary","keys","models","defaultModel"}
   herdr-mobile-gateway debug replay FILE   re-parse dead-letter entries with the current adapters
 
 Environment:
@@ -73,6 +75,8 @@ func main() {
 		err = setJevKeyCmd()
 	case "set-history-cache":
 		err = setHistoryCacheCmd(args)
+	case "dsh":
+		err = dshCmd(args)
 	case "import-firebase":
 		err = importFirebaseCmd(args)
 	case "serve":
@@ -148,11 +152,7 @@ func serve(args []string) error {
 
 	claudeProvider := claude.New(cfg.ClaudeConfigDir, sink)
 	codexProvider := codex.New(cfg.CodexBinary, sink)
-	dshModels := make([]dsh.ModelRoute, 0, len(cfg.DSHModels))
-	for _, m := range cfg.DSHModels {
-		dshModels = append(dshModels, dsh.ModelRoute{ID: m.ID, Name: m.Name, Provider: m.Provider, Model: m.Model, Efforts: m.Efforts})
-	}
-	dshProvider, err := dsh.New(dsh.Config{Binary: cfg.DSHBinary, Home: cfg.DSHHome, Model: cfg.DSHModel, APIKey: cfg.DSHAPIKey, Models: dshModels}, filepath.Join(config.StateDir(), "dsh"), sink)
+	dshProvider, err := dsh.New(dshConfig(cfg), filepath.Join(config.StateDir(), "dsh"), sink)
 	if err != nil {
 		return fmt.Errorf("open DSH sessions: %w", err)
 	}
@@ -272,7 +272,7 @@ func serve(args []string) error {
 		codexResident.Close()
 	}()
 	slog.Info("gateway listening", "operation", "serve", "addr", cfg.Listen, "config", store.Path(),
-		"claude_sidecar", sidecarPath(cfg.ClaudeSidecar), "claude", claudePath(cfg.ClaudeBinary))
+		"claude_sidecar", sidecarPath(cfg.ClaudeSidecar), "claude", claudePath(cfg.ClaudeBinary), "dsh", dsh.FindBinary(cfg.DSHBinary))
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}

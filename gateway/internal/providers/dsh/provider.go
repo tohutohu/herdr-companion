@@ -31,7 +31,24 @@ var nativeID = regexp.MustCompile(`^[a-f0-9]{32}$`)
 type Config struct {
 	Binary, Home, Model, APIKey string
 	Models                      []ModelRoute
+	// ProviderKeys enables pi-ai provider routes (e.g. "opencode-go") with
+	// these API keys; see providerPatch.
+	ProviderKeys map[string]string
 }
+
+// Validate reports a configuration New would reject, so settings can be
+// checked before they are saved.
+func Validate(cfg Config) error {
+	if cfg.Model == "" {
+		cfg.Model = DefaultModel
+	}
+	if err := validateProviderKeys(cfg.ProviderKeys); err != nil {
+		return err
+	}
+	_, err := modelRoutes(cfg)
+	return err
+}
+
 type savedSession struct {
 	Summary     providers.Summary `json:"summary"`
 	Turns       int               `json:"turns"`
@@ -51,6 +68,7 @@ type Provider struct {
 	mu         sync.Mutex
 	cfg        Config
 	dir        string
+	patch      string
 	sessions   map[string]*session
 	listener   func(string)
 	sink       deadletter.Sink
@@ -63,7 +81,7 @@ var _ providers.Provider = (*Provider)(nil)
 var _ providers.DirectRuntime = (*Provider)(nil)
 
 func New(cfg Config, dir string, sink deadletter.Sink) (*Provider, error) {
-	if cfg.Binary == "" {
+	if cfg.Binary = FindBinary(cfg.Binary); cfg.Binary == "" {
 		cfg.Binary = "dsh"
 	}
 	if cfg.Home == "" {
@@ -72,12 +90,18 @@ func New(cfg Config, dir string, sink deadletter.Sink) (*Provider, error) {
 	if cfg.Model == "" {
 		cfg.Model = DefaultModel
 	}
+	if err := validateProviderKeys(cfg.ProviderKeys); err != nil {
+		return nil, err
+	}
 	routes, err := modelRoutes(cfg)
 	if err != nil {
 		return nil, err
 	}
 	p := &Provider{cfg: cfg, dir: dir, sessions: map[string]*session{}, sink: sink, routes: routes}
 	if err := os.MkdirAll(dir, 0700); err != nil {
+		return nil, err
+	}
+	if p.patch, err = writePatch(dir, cfg.ProviderKeys); err != nil {
 		return nil, err
 	}
 	entries, err := os.ReadDir(dir)
@@ -270,7 +294,7 @@ func (p *Provider) startLocked(ctx context.Context, s *session, resume bool) err
 	if err := os.MkdirAll(p.cfg.Home, 0700); err != nil {
 		return err
 	}
-	c, err := launch(p.cfg.Binary, p.cfg.Home, summary.Cwd, p.cfg.APIKey, summary.Mode, p.unattended != nil)
+	c, err := launch(p.launchSpec(summary.Cwd, summary.Mode))
 	if err != nil {
 		return err
 	}
