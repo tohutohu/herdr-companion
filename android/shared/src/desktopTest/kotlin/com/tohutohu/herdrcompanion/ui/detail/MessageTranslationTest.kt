@@ -10,6 +10,10 @@ import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
 import androidx.compose.runtime.saveable.SaveableStateRegistry
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.Clipboard
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
@@ -27,9 +31,46 @@ import com.tohutohu.herdrcompanion.data.api.SessionDto
 import com.tohutohu.herdrcompanion.model.toUiModel
 import org.junit.Rule
 import org.junit.Test
+import java.awt.datatransfer.DataFlavor
+import java.awt.datatransfer.Transferable
 
 class MessageTranslationTest {
     @get:Rule val rule = createComposeRule()
+
+    @OptIn(ExperimentalComposeUiApi::class)
+    @Test
+    fun 翻訳機能がなくても表示言語の全文とコードをコピーできる() {
+        var copied: ClipEntry? = null
+        val clipboard = object : Clipboard {
+            override suspend fun getClipEntry(): ClipEntry? = copied
+            override suspend fun setClipEntry(clipEntry: ClipEntry?) { copied = clipEntry }
+        }
+        var original by mutableStateOf(false)
+        val code = "```kotlin\nval answer = 42\n```"
+        rule.setContent {
+            MaterialTheme {
+                CompositionLocalProvider(LocalClipboard provides clipboard, LocalOriginalText provides original) {
+                    MessageActionsMenu(Message("a", "assistant", 0, listOf(
+                        BlockDto("text", text = "日本語の**報告**", originalText = "English **report**"),
+                        BlockDto("text", text = code),
+                    )))
+                }
+            }
+        }
+        rule.onNodeWithContentDescription("メッセージの操作").performClick()
+        rule.onNodeWithText("日本語に翻訳").assertDoesNotExist()
+        rule.onNodeWithText("全文をコピー").performClick()
+        rule.onNodeWithText("全文をコピー").assertDoesNotExist()
+        rule.runOnIdle {
+            check((copied!!.nativeClipEntry as Transferable).getTransferData(DataFlavor.stringFlavor) == "日本語の**報告**\n\n$code")
+            original = true
+        }
+        rule.onNodeWithContentDescription("メッセージの操作").performClick()
+        rule.onNodeWithText("全文をコピー").performClick()
+        rule.runOnIdle {
+            check((copied!!.nativeClipEntry as Transferable).getTransferData(DataFlavor.stringFlavor) == "English **report**\n\n$code")
+        }
+    }
 
     @Test
     fun 本文の長押しは操作メニューと競合せず返信単位で翻訳し原文へ戻せる() {
@@ -78,7 +119,7 @@ class MessageTranslationTest {
                     if (attempts++ == 0) error("Gatewayメニューから翻訳を起動してください")
                     "翻訳できました"
                 }) {
-                    MessageTranslationMenu(Message("a", "assistant", 0, listOf(BlockDto("text", text = "Report"))))
+                    MessageActionsMenu(Message("a", "assistant", 0, listOf(BlockDto("text", text = "Report"))))
                 }
             }
         }

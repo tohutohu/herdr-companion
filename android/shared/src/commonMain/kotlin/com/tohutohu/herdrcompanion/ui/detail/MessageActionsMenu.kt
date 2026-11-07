@@ -27,26 +27,32 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.unit.dp
 import com.tohutohu.herdrcompanion.data.Message
 import com.tohutohu.herdrcompanion.ui.markdown.MarkdownText
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 internal val LocalMessageTranslator = compositionLocalOf<(suspend (String) -> String)?> { null }
 
-internal fun messageTranslationSource(message: Message): String =
+internal fun messageActionText(message: Message, original: Boolean): String =
     if (message.role != "assistant" || message.id.startsWith("streaming:")) ""
     else message.blocks.filter { it.type == "text" && !isToolCallText(it.originalText ?: it.text.orEmpty()) }
-        .mapNotNull { (it.originalText ?: it.text)?.takeIf(String::isNotBlank) }.joinToString("\n\n")
+        .mapNotNull { (if (original) it.originalText ?: it.text else it.text)?.takeIf(String::isNotBlank) }.joinToString("\n\n")
 
 /** Outside SelectionContainer: the text's long press and drag still belong to selection. */
 @Composable
-internal fun MessageTranslationMenu(message: Message) {
-    val translate = LocalMessageTranslator.current ?: return
-    val source = messageTranslationSource(message)
+internal fun MessageActionsMenu(message: Message) {
+    val translate = LocalMessageTranslator.current
+    val source = messageActionText(message, original = true)
     if (source.isBlank()) return
+    val copyText = messageActionText(message, original = LocalOriginalText.current)
+    val clipboard = LocalClipboard.current
+    val scope = rememberCoroutineScope()
     var menu by remember(message.id) { mutableStateOf(false) }
     var dialog by remember(message.id, source) { mutableStateOf(false) }
     var original by remember(message.id, source) { mutableStateOf(false) }
@@ -65,14 +71,18 @@ internal fun MessageTranslationMenu(message: Message) {
             )
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-            DropdownMenuItem(text = { Text("日本語に翻訳") }, onClick = {
+            DropdownMenuItem(text = { Text("全文をコピー") }, onClick = {
+                menu = false
+                scope.launch { clipboard.setClipEntry(plainTextClipEntry(copyText)) }
+            })
+            if (translate != null) DropdownMenuItem(text = { Text("日本語に翻訳") }, onClick = {
                 menu = false
                 original = false
                 dialog = true
             })
         }
     }
-    if (dialog) {
+    if (dialog && translate != null) {
         LaunchedEffect(source, attempt) {
             if (translated != null) return@LaunchedEffect
             error = null

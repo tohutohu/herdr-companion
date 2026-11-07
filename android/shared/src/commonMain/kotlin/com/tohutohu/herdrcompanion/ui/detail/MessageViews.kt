@@ -289,7 +289,7 @@ private fun TurnEndLine(end: TurnEnd, formatTime: (Long) -> String) {
             color = if (end.failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(1f),
         )
-        end.lastReport?.let { MessageTranslationMenu(it) }
+        end.lastReport?.let { MessageActionsMenu(it) }
     }
 }
 
