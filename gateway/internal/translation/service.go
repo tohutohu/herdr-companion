@@ -17,6 +17,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unicode"
@@ -57,6 +58,7 @@ type cached struct {
 	Text  string `json:"text,omitempty"`
 	Used  uint64 `json:"used,omitempty"`
 	retry time.Time
+	fails int
 }
 type job struct{ key, text, reference string }
 type Service struct {
@@ -71,6 +73,7 @@ type Service struct {
 	done          chan struct{}
 	worker        *worker
 	gate          chan struct{}
+	urgent        atomic.Int32 // user requests waiting for gate; background work yields
 	cache         map[string]cached
 	cacheBytes    int
 	cacheClock    uint64
@@ -318,7 +321,7 @@ func (s *Service) Input(ctx context.Context, sessionID, text string, mode ...*bo
 	}
 	messages := s.conversation(ctx, sessionID)
 	reference := contextBefore(messages, len(messages), 0)
-	translated, err := s.translate(ctx, text, "en", reference)
+	translated, err := s.translateAs(ctx, text, "en", reference, true)
 	if err != nil {
 		return "", err
 	}
@@ -397,11 +400,47 @@ func (s *Service) readyWorker(ctx context.Context) (*worker, string, error) {
 	}
 }
 
+// Translate serves a user waiting on the result, ahead of background work.
 func (s *Service) Translate(ctx context.Context, text, target string) (string, error) {
-	return s.translate(ctx, text, target, "")
+	return s.translateAs(ctx, text, target, "", true)
 }
 
-func (s *Service) translate(ctx context.Context, text, target, reference string) (translated string, err error) {
+func (s *Service) translate(ctx context.Context, text, target, reference string) (string, error) {
+	return s.translateAs(ctx, text, target, reference, false)
+}
+
+// acquire takes the single worker. Background work hands the worker to any
+// user request that is waiting, so a long report never delays a prompt send.
+func (s *Service) acquire(ctx context.Context, urgent bool) error {
+	if urgent {
+		s.urgent.Add(1)
+		defer s.urgent.Add(-1)
+		select {
+		case s.gate <- struct{}{}:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	for {
+		select {
+		case s.gate <- struct{}{}:
+			if s.urgent.Load() == 0 {
+				return nil
+			}
+			<-s.gate
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		select {
+		case <-time.After(20 * time.Millisecond):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+func (s *Service) translateAs(ctx context.Context, text, target, reference string, urgent bool) (translated string, err error) {
 	started := time.Now()
 	metric := timing{Event: "request", Model: s.Status().Model, Target: target, InputBytes: len(text), ContextBytes: len(reference)}
 	defer func() {
@@ -423,12 +462,24 @@ func (s *Service) translate(ctx context.Context, text, target, reference string)
 		metric.CacheHit = true
 		return value, nil
 	}
+	if parts := segments(text); len(parts) > 1 {
+		var out strings.Builder
+		for _, part := range parts {
+			value, err := s.translateAs(ctx, part, target, reference, urgent)
+			if err != nil {
+				return "", err
+			}
+			out.WriteString(value)
+		}
+		s.mu.Lock()
+		s.cachePutLocked(translationKey(s.status.Model, target, text, reference), out.String())
+		s.mu.Unlock()
+		return out.String(), nil
+	}
 	waitStarted := time.Now()
-	select {
-	case s.gate <- struct{}{}:
-	case <-ctx.Done():
+	if err := s.acquire(ctx, urgent); err != nil {
 		metric.QueueMS = milliseconds(time.Since(waitStarted))
-		return "", ctx.Err()
+		return "", err
 	}
 	metric.QueueMS = milliseconds(time.Since(waitStarted))
 	// A duplicate may have completed while this request waited for the worker.
@@ -504,6 +555,15 @@ func (s *Service) translate(ctx context.Context, text, target, reference string)
 			_ = w.cmd.Cancel()
 			// Drain the old reader before letting another call use the protocol.
 			<-replyCh
+			// The exit watcher runs later; without this the next request would
+			// write to the killed process and fail instead of waiting for restart.
+			s.mu.Lock()
+			if s.worker == w {
+				s.worker = nil
+				s.status.State, s.status.Detail = "failed", "翻訳プロセスを再起動します"
+				s.status.Error = "翻訳がタイムアウトしたためプロセスを終了しました"
+			}
+			s.mu.Unlock()
 			workMetric.InferenceMS = milliseconds(time.Since(inferenceStarted))
 			workMetric.ElapsedMS = milliseconds(time.Since(workStarted))
 			workMetric.Outcome = timingOutcome(workCtx.Err())
@@ -662,15 +722,14 @@ func (s *Service) runQueue() {
 			if !valid {
 				continue
 			}
-			ctx, cancel := context.WithTimeout(s.ctx, 2*time.Minute)
-			_, err := s.translate(ctx, j.text, "ja", j.reference)
-			cancel()
+			// Each segment has its own inference deadline; a long reply needs several.
+			_, err := s.translate(s.ctx, j.text, "ja", j.reference)
 			s.mu.Lock()
 			delete(s.pending, j.key)
 			if err != nil {
 				// Do not replace a success that finished after the caller timed out.
 				if _, hit := s.cacheGetLocked(j.key); !hit {
-					s.cache[j.key] = cached{retry: time.Now().Add(30 * time.Second)}
+					s.cache[j.key] = failedEntry(s.cache[j.key])
 					s.trimCacheLocked()
 				}
 				if s.status.State == "ready" {
@@ -688,4 +747,11 @@ func modeEnabled(mode []*bool) bool {
 		return *mode[0]
 	}
 	return false
+}
+
+// failedEntry backs off from 30 s up to 32 min, so a text that keeps failing
+// does not occupy the worker every half minute.
+func failedEntry(previous cached) cached {
+	fails := min(previous.fails+1, 7)
+	return cached{retry: time.Now().Add(30 * time.Second << (fails - 1)), fails: fails}
 }
