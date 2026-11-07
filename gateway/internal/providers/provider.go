@@ -29,6 +29,8 @@ type DirectStart struct {
 	Model  string
 	Effort string
 	Mode   string
+	// Translation requests English replies for local Japanese display translation.
+	Translation bool
 	// Resume is the native id of an existing session to continue; empty
 	// starts a new one.
 	Resume string

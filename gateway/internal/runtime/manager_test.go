@@ -312,15 +312,22 @@ func Test翻訳選択は再起動と再開後も保持し古いセッション�
 		if err != nil {
 			t.Fatal(err)
 		}
+		if rt.starts[0].Translation != (choice != nil && *choice) {
+			t.Fatal("translation not passed to runtime", rt.starts)
+		}
 		if err := m.Stop(context.Background(), id); err != nil {
 			t.Fatal(err)
 		}
-		restored, err := New(path, time.Hour, &fakeRuntime{})
+		resumedRuntime := &fakeRuntime{}
+		restored, err := New(path, time.Hour, resumedRuntime)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if err := restored.Resume(context.Background(), id, providers.DirectStart{}); err != nil {
 			t.Fatal(err)
+		}
+		if resumedRuntime.starts[0].Translation != (choice != nil && *choice) {
+			t.Fatal("translation not restored for runtime", resumedRuntime.starts)
 		}
 		got := restored.Translation(id)
 		if choice == nil {

@@ -26,6 +26,7 @@ import {
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { readFileSync } from "node:fs";
+import { responseLanguageOptions } from "./response-language";
 import { residentPermissionHandler, residentResultFields } from "./resident";
 import { createInterface } from "node:readline";
 
@@ -262,6 +263,7 @@ async function start(p: Json) {
   const pending = new Map<string, Pending>();
   const env = (p.env ?? {}) as Record<string, string>;
   const resident = p.resident === true;
+  const languageOptions = resident ? {} : await responseLanguageOptions(String(p.cwd), p.translation === true);
   const q = query({
     prompt: input,
     options: {
@@ -282,6 +284,7 @@ async function start(p: Json) {
       // permission rules) and Claude Code's own system prompt.
       settingSources: ["user", "project", "local"],
       systemPrompt: { type: "preset", preset: "claude_code" },
+      ...languageOptions,
       // The gateway's own skills (the herdr-companion plugin, internal/agentplugin).
       ...(Array.isArray(p.plugins) ? { plugins: (p.plugins as string[]).map((path) => ({ type: "local" as const, path })) } : {}),
       // Sessions keep their transcript, the history the gateway reads.

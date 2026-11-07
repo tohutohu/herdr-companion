@@ -206,12 +206,12 @@ var direct = &providers.Live{State: "working"}
 func Testサイドカーで開始したセッションはIDを先に決め応答をストリーミング表示する(t *testing.T) {
 	p, log := newSidecarProvider(t)
 	ctx := context.Background()
-	id, err := p.DirectStart(ctx, providers.DirectStart{Cwd: "/w", Model: "haiku", Mode: "manual", Prompt: model.Input{Text: "stream please"}})
+	id, err := p.DirectStart(ctx, providers.DirectStart{Cwd: "/w", Model: "haiku", Mode: "manual", Translation: true, Prompt: model.Input{Text: "stream please"}})
 	if err != nil || !sessionIDPattern.MatchString(id) {
 		t.Fatalf("start = %q, %v", id, err)
 	}
 	start := sidecarRequests(t, log, "start")[0]
-	if start["sessionId"] != id || start["resume"] != false || start["model"] != "haiku" || start["permissionMode"] != "default" {
+	if start["sessionId"] != id || start["resume"] != false || start["model"] != "haiku" || start["permissionMode"] != "default" || start["translation"] != true {
 		t.Errorf("start params = %v", start)
 	}
 	env, _ := start["env"].(map[string]any)

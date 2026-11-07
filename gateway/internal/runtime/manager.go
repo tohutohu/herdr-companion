@@ -305,6 +305,7 @@ func (m *Manager) StartWithTranslation(ctx context.Context, provider string, opt
 		return "", providers.ErrNotFound
 	}
 	opts.Resume = ""
+	opts.Translation = translation != nil && *translation
 	native, err := rt.DirectStart(ctx, opts)
 	if native == "" {
 		return "", err
@@ -364,6 +365,7 @@ func (m *Manager) Resume(ctx context.Context, id string, opts providers.DirectSt
 	}
 	m.mu.Lock()
 	if r := m.records[id]; r != nil {
+		opts.Translation = r.Translation != nil && *r.Translation
 		if opts.Cwd == "" {
 			opts.Cwd = r.Cwd
 		}

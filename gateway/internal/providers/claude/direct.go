@@ -245,6 +245,7 @@ func (p *Provider) DirectStart(ctx context.Context, opts providers.DirectStart) 
 		"sessionId": id, "resume": opts.Resume != "", "cwd": opts.Cwd,
 		"model": opts.Model, "effort": opts.Effort, "permissionMode": sdkMode(opts.Mode),
 		"claudePath": cfg.Claude, "env": envMap, "plugins": cfg.plugins(),
+		"translation": opts.Translation,
 	}
 	// Mark the session before the start returns: the sidecar's events for
 	// it (state, permission requests) may arrive first.
