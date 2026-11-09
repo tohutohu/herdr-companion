@@ -24,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -60,7 +61,9 @@ import com.tohutohu.herdrcompanion.ui.exceptBottom
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ArchivedSessionsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
-    val repo = LocalContext.current.container.repository
+    val container = LocalContext.current.container
+    val repo = container.repository
+    val colors by container.sessionColors.colors.collectAsState(emptyMap())
     val scope = rememberCoroutineScope()
     val pager = remember(repo) { ArchivedSessionsPager { offset, limit -> repo.archivedSessions(offset, limit) } }
     val sessions = pager.sessions
@@ -100,11 +103,11 @@ fun ArchivedSessionsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
     actions.Dialogs()
     LaunchedEffect(Unit) { load(keepLoaded = false) }
 
-    val allRows = remember(sessions) {
+    val allRows = remember(sessions, colors) {
         val now = System.currentTimeMillis()
         sessions.orEmpty().map {
             val entity = it.toEntity(now, listed = false)
-            SessionListItemUiState(entity.toUiModel(), DateUtils.getRelativeTimeSpanString(entity.updatedAt).toString())
+            SessionListItemUiState(entity.toUiModel(), DateUtils.getRelativeTimeSpanString(entity.updatedAt).toString(), color = colors[entity.id])
         }
     }
     val rows = remember(allRows, query) { allRows.filter { it.session.matchesSessionSearch(query) } }
@@ -141,6 +144,8 @@ fun ArchivedSessionsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
                         onArchive = actions::archive,
                         onUnarchive = actions::unarchive,
                         onResume = actions::resume,
+                        onSetColor = actions::setColor,
+                        colors = colors,
                     )
                 },
             ) {

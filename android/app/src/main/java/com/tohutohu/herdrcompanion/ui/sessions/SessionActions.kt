@@ -55,6 +55,21 @@ class SessionActions internal constructor(
     /** Busy or awaiting confirmation: a swiped row stays open while this holds. */
     fun engaged(id: String) = busy(id) || pending(id)
 
+    fun setColor(targets: List<SessionRef>, color: SessionColor?) {
+        // Container scope lets a local save finish even when this screen closes.
+        context.container.scope.launch {
+            try {
+                context.container.sessionColors.set(targets.map { it.id }, color)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    Toast.makeText(context, "Could not save session color", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
     fun archive(targets: List<SessionRef>) {
         if (targets.isEmpty()) return
         // Archiving a running session kills the agent: ask first.

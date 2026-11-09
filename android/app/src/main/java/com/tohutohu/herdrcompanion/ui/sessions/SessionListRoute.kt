@@ -37,6 +37,7 @@ fun SessionListRoute(
     val context = LocalContext.current
     val container = context.container
     val repo = container.repository
+    val colors by container.sessionColors.colors.collectAsState(emptyMap())
     val loaded by container.sessions.collectAsState()
     val sessions = loaded.orEmpty()
     val starts by container.sessionStarts.entries.collectAsState()
@@ -78,6 +79,7 @@ fun SessionListRoute(
         sessions = sessions.map { session ->
             SessionListItemUiState(
                 session = session.toUiModel(),
+                color = colors[session.id],
                 relativeUpdatedAt = DateUtils.getRelativeTimeSpanString(session.updatedAt).toString(),
             )
         },
@@ -109,6 +111,7 @@ fun SessionListRoute(
                 is SessionListAction.Archive -> actions.archive(action.sessions)
                 is SessionListAction.Unarchive -> actions.unarchive(action.sessions)
                 is SessionListAction.Resume -> actions.resume(action.session)
+                is SessionListAction.SetColor -> actions.setColor(action.sessions, action.color)
             }
         },
         topContent = { UsageCardRoute() },

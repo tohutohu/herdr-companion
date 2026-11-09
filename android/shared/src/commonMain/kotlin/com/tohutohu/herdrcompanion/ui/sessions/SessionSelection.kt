@@ -5,6 +5,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Unarchive
@@ -71,11 +72,27 @@ fun SelectionTopBar(
     onArchive: (List<SessionRef>) -> Unit,
     onUnarchive: (List<SessionRef>) -> Unit,
     onResume: (SessionRef) -> Unit,
+    onSetColor: (List<SessionRef>, SessionColor?) -> Unit,
+    colors: Map<String, SessionColor?> = emptyMap(),
 ) {
     val selected = all.filter { selection.contains(it.id) }
     val toArchive = selected.filter { !it.archived }
     val toUnarchive = selected.filter { it.archived }
     var menu by remember { mutableStateOf(false) }
+    var choosingColor by remember { mutableStateOf(false) }
+    if (choosingColor && selected.isNotEmpty()) {
+        val selectedColors = selected.map { colors[it.id] }.distinct()
+        SessionColorDialog(
+            onDismiss = { choosingColor = false },
+            current = selectedColors.singleOrNull(),
+            mixed = selectedColors.size > 1,
+            onSelect = { color ->
+                choosingColor = false
+                onSetColor(selected, color)
+                selection.clear()
+            },
+        )
+    }
     // Keep the last count while the bar fades out after the selection clears.
     var shownCount by remember { mutableIntStateOf(selected.size) }
     if (selected.isNotEmpty()) shownCount = selected.size
@@ -87,6 +104,9 @@ fun SelectionTopBar(
         },
         title = { Text("$shownCount selected") },
         actions = {
+            IconButton(onClick = { choosingColor = true }) {
+                Icon(Icons.Default.Palette, contentDescription = "Set session color")
+            }
             if (toArchive.isNotEmpty()) {
                 IconButton(onClick = {
                     selection.clear()

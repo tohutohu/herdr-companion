@@ -1,5 +1,6 @@
 package com.tohutohu.herdrcompanion.desktop
 
+import com.tohutohu.herdrcompanion.ui.sessions.SessionColor
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.WindowPlacement
@@ -88,6 +89,21 @@ object DesktopPreferences {
 
     private val store: Preferences
         get() = Preferences.userRoot().node(NODE)
+
+    fun loadSessionColors(): Map<String, SessionColor> {
+        val colors = store.node("sessionColors")
+        return colors.keys().mapNotNull { id ->
+            SessionColor.fromKey(colors.get(id, null))?.let { id to it }
+        }.toMap()
+    }
+
+    fun saveSessionColor(ids: Collection<String>, color: SessionColor?) {
+        val colors = store.node("sessionColors")
+        ids.forEach { id ->
+            if (color == null) colors.remove(id) else colors.put(id, color.key)
+        }
+        colors.flush()
+    }
 
     fun loadWindow(): DesktopWindowSnapshot {
         val stored = DesktopWindowSnapshot.decode(store.get(WINDOW_KEY, null)) ?: DesktopWindowSnapshot()

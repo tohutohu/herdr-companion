@@ -17,6 +17,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.PointerButton
 import com.tohutohu.herdrcompanion.ui.sessions.SessionListItemUiState
+import com.tohutohu.herdrcompanion.ui.sessions.SessionColor
+import com.tohutohu.herdrcompanion.ui.sessions.SessionColorDialog
 
 /** Compose's internal ContextMenuArea is not public in the pinned 1.12.0 API. */
 @OptIn(ExperimentalComposeUiApi::class)
@@ -27,12 +29,21 @@ fun DesktopSessionContextMenu(
     onSplit: () -> Unit,
     onOpenInWindow: () -> Unit,
     onArchive: () -> Unit,
+    onSetColor: (SessionColor?) -> Unit,
     onRefresh: () -> Unit,
     onCopyId: () -> Unit,
     onOpenDirectory: () -> Unit,
     content: @Composable () -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    var choosingColor by remember { mutableStateOf(false) }
+    if (choosingColor) {
+        SessionColorDialog(
+            current = item.color,
+            onDismiss = { choosingColor = false },
+            onSelect = { color -> choosingColor = false; onSetColor(color) },
+        )
+    }
     Box(
         Modifier
             .fillMaxWidth()
@@ -50,6 +61,10 @@ fun DesktopSessionContextMenu(
     ) {
         content()
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text("Session color") },
+                onClick = { expanded = false; choosingColor = true },
+            )
             DropdownMenuItem(
                 text = { Text("Open") },
                 onClick = { expanded = false; onOpen() },

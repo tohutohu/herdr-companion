@@ -1,5 +1,6 @@
 package com.tohutohu.herdrcompanion.desktop
 
+import com.tohutohu.herdrcompanion.ui.sessions.SessionColor
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -103,6 +104,21 @@ class DesktopAppState(
 
     var connection by mutableStateOf(connectionSource.current)
         private set
+
+    var sessionColors by mutableStateOf(runCatching { DesktopPreferences.loadSessionColors() }.getOrDefault(emptyMap()))
+        private set
+
+    fun setSessionColor(targets: List<SessionRef>, color: SessionColor?) {
+        val ids = targets.map { it.id }
+        try {
+            DesktopPreferences.saveSessionColor(ids, color)
+            sessionColors = sessionColors.toMutableMap().apply {
+                ids.forEach { id -> if (color == null) remove(id) else put(id, color) }
+            }
+        } catch (error: Exception) {
+            reportError("Could not save session color.")
+        }
+    }
 
     var sessions by mutableStateOf<List<SessionListItemUiState>>(emptyList())
         private set

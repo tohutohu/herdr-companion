@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -62,6 +63,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -148,6 +150,8 @@ fun SessionListScreen(
                             onArchive = { selected -> onAction(SessionListAction.Archive(selected)) },
                             onUnarchive = { selected -> onAction(SessionListAction.Unarchive(selected)) },
                             onResume = { onAction(SessionListAction.Resume(it)) },
+                            onSetColor = { selected, color -> onAction(SessionListAction.SetColor(selected, color)) },
+                            colors = sessions.associate { it.session.id to it.color },
                         )
                     },
                 ) {
@@ -309,6 +313,7 @@ fun LazyItemScope.SessionItem(
                 SessionRow(
                     s = s,
                     relativeUpdatedAt = item.relativeUpdatedAt,
+                    color = item.color,
                     selected = rowShownSelected(item.selected, selection.active, selection.contains(s.id)),
                     selecting = selection.active,
                     onClick = { if (selection.active) selection.toggle(s.id) else onOpen(s.id) },
@@ -349,10 +354,13 @@ internal fun SessionRow(
     selecting: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    color: SessionColor? = null,
 ) {
     val style = statusStyle(s.status)
     val background by animateColorAsState(
-        if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
+        if (selected) MaterialTheme.colorScheme.secondaryContainer
+        else color?.tint?.copy(alpha = 0.12f)?.compositeOver(MaterialTheme.colorScheme.surface)
+            ?: MaterialTheme.colorScheme.surface,
         label = "rowBackground",
     )
     Box {
@@ -451,6 +459,14 @@ internal fun SessionRow(
                     fontWeight = if (s.unread) FontWeight.Medium else null,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (color != null) {
+            Box(Modifier.matchParentSize()) {
+                Spacer(
+                    Modifier.fillMaxHeight().width(4.dp).background(color.tint)
+                        .semantics { contentDescription = "Session color: ${color.label}" },
                 )
             }
         }

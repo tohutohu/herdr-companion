@@ -261,7 +261,7 @@ private fun FrameWindowScope.DesktopShell(
     var splitAreaInWindow by remember { mutableStateOf<Rect?>(null) }
     val searchFocusRequester = remember { FocusRequester() }
     val listed = if (state.showingArchived) state.archivedSessions else state.sessions
-    val sessions = listed.filterDesktopSessions(query)
+    val sessions = listed.filterDesktopSessions(query).map { it.copy(color = state.sessionColors[it.session.id]) }
     val highlightedId = if (searchFocused) sessions.getOrNull(highlightedIndex)?.session?.id else null
 
     LaunchedEffect(sessions.size, query) {
@@ -501,6 +501,7 @@ private fun FrameWindowScope.DesktopShell(
                                             handleListAction(state, SessionListAction.Archive(listOf(item.session.toRef())))
                                         }
                                     },
+                                    onSetColor = { color -> state.setSessionColor(listOf(item.session.toRef()), color) },
                                     onRefresh = actions::refresh,
                                     onCopyId = { actions.copySessionId(item.session.id) },
                                     onOpenDirectory = {
@@ -1305,6 +1306,7 @@ private fun handleListAction(state: DesktopAppState, action: SessionListAction, 
         is SessionListAction.Archive -> state.requestArchive(action.sessions)
         is SessionListAction.Unarchive -> state.unarchive(action.sessions)
         is SessionListAction.Resume -> state.resume(action.session)
+        is SessionListAction.SetColor -> state.setSessionColor(action.sessions, action.color)
         SessionListAction.OpenNewSession -> state.openNewSession()
         SessionListAction.Refresh -> state.refreshSessions(userInitiated = true)
         SessionListAction.OpenArchived -> state.showArchived(true)

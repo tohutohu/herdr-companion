@@ -1,5 +1,6 @@
 package com.tohutohu.herdrcompanion
 
+import com.tohutohu.herdrcompanion.data.SessionColorsStore
 import android.app.Application
 import coil3.ImageLoader
 import coil3.PlatformContext
@@ -48,6 +49,7 @@ import java.util.concurrent.TimeUnit
 class AppContainer(private val app: Application) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val settings = SettingsStore(app, scope)
+    val sessionColors = SessionColorsStore(app)
     val directoryShortcuts = DirectoryShortcutsStore(app)
     val agentPresets = AgentPresetsStore(app)
     val projectVocabulary = ProjectVocabularyStore(java.io.File(app.filesDir, "dictate/project-vocabulary.json"))

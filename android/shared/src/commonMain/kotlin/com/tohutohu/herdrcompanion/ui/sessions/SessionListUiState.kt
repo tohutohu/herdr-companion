@@ -8,6 +8,7 @@ data class SessionListItemUiState(
     val session: SessionUiModel,
     val relativeUpdatedAt: String,
     val selected: Boolean = false,
+    val color: SessionColor? = null,
 )
 
 /** The state needed to render the session list without accessing the app container. */
@@ -35,4 +36,5 @@ sealed interface SessionListAction {
     data class Archive(val sessions: List<SessionRef>) : SessionListAction
     data class Unarchive(val sessions: List<SessionRef>) : SessionListAction
     data class Resume(val session: SessionRef) : SessionListAction
+    data class SetColor(val sessions: List<SessionRef>, val color: SessionColor?) : SessionListAction
 }
