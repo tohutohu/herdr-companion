@@ -232,7 +232,7 @@ func (p *Provider) DirectStart(ctx context.Context, opts providers.DirectStart) 
 		// starts by itself when background work ends never shows as running.
 		"CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS": "1",
 	}
-	env := providers.ChildEnv(os.Environ(), drop)
+	env := providers.ChildEnvIn(ctx, opts.Cwd, os.Environ(), drop)
 	if !cfg.AllowAPIKey {
 		env = withoutAPIKeys(env)
 	}

@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -78,14 +79,18 @@ func launch(spec launchSpec) (*conn, error) {
 	cmd := exec.Command(spec.binary, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Dir = spec.cwd
-	set := map[string]string{"DSH_HOME": spec.home, "DSH_PERMISSION_MODE": spec.mode, "PATH": ChildPath(spec.binary, os.Getenv("PATH"))}
+	// What direnv loads for the folder comes first, so dsh's own PATH
+	// entry is put in front of the folder's PATH rather than replacing it.
+	environ := os.Environ()
+	environ = providers.LoadDirEnv(context.Background(), spec.cwd, providers.ChildEnv(environ, nil)).Apply(environ)
+	set := map[string]string{"DSH_HOME": spec.home, "DSH_PERMISSION_MODE": spec.mode, "PATH": ChildPath(spec.binary, envValue(environ, "PATH"))}
 	if spec.unattended {
 		set["HC_RESIDENT"] = "1"
 	}
 	for k, v := range spec.env {
 		set[k] = v
 	}
-	cmd.Env = providers.ChildEnv(os.Environ(), set)
+	cmd.Env = providers.ChildEnv(environ, set)
 	// Runtime diagnostics can contain credentials. Protocol failures are
 	// reported through RPC; never copy arbitrary stderr into gateway logs.
 	cmd.Stderr = io.Discard
@@ -215,4 +220,13 @@ func (c *conn) close() {
 			<-c.done
 		}
 	})
+}
+
+func envValue(environ []string, key string) string {
+	for _, kv := range environ {
+		if k, v, ok := strings.Cut(kv, "="); ok && k == key {
+			return v
+		}
+	}
+	return ""
 }

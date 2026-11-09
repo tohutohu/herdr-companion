@@ -105,7 +105,7 @@ func RunPrecheck(ctx context.Context, req PrecheckRequest) (*PrecheckResult, err
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", req.Precheck.Command)
 	cmd.Dir = req.Cwd
-	cmd.Env = providers.ChildEnv(os.Environ(), map[string]string{
+	cmd.Env = providers.ChildEnvIn(ctx, req.Cwd, os.Environ(), map[string]string{
 		"HC_RESIDENT":          "1",
 		"HC_RESIDENT_TASK":     req.TaskID,
 		"HC_RESIDENT_RUN":      req.RunID,

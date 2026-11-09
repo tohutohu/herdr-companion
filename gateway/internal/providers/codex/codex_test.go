@@ -783,6 +783,8 @@ func (f *fakeServer) serve(p *pipeTransport, send func(any)) {
 					})
 				}
 			}
+		case "command/exec":
+			result = map[string]any{"exitCode": 0, "stdout": "/codex/arg0:" + os.Getenv("PATH") + "\n"}
 		case "account/rateLimits/read":
 			result = map[string]any{
 				"rateLimitsByLimitId": map[string]any{

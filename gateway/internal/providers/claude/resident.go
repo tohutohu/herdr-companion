@@ -165,7 +165,7 @@ func (r *ResidentRunner) Run(ctx context.Context, req resident.RunRequest, hooks
 
 	// The agent's tools see which run they belong to (hc and herdr keep
 	// working as tools); no session id, since this is not a session.
-	env := providers.ChildEnv(os.Environ(), map[string]string{"HC_RESIDENT_RUN": req.RunID})
+	env := providers.ChildEnvIn(ctx, req.Cwd, os.Environ(), map[string]string{"HC_RESIDENT_RUN": req.RunID})
 	if !cfg.AllowAPIKey {
 		env = withoutAPIKeys(env)
 	}

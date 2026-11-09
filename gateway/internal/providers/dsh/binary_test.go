@@ -169,3 +169,38 @@ func TestDSH設定の検証は起動できない設定を拒む(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestDSH子プロセスにはdirenvの変数を渡しPATHは実行ファイルの場所を先頭にする(t *testing.T) {
+	isolatedHome(t)
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out")
+	bin := filepath.Join(t.TempDir(), "bin", "dsh")
+	writeExec(t, bin, "#!/bin/sh\n/usr/bin/env > '"+out+"'\n")
+	fake := t.TempDir()
+	writeExec(t, filepath.Join(fake, "direnv"), "#!/bin/sh\nprintf '{\"HC_DRX_FOO\":\"bar\",\"PATH\":\"/proj/bin:%s\"}' \"$PATH\"\n")
+	t.Setenv("PATH", fake+":/usr/bin:/bin")
+	cwd := t.TempDir()
+	if err := os.WriteFile(filepath.Join(cwd, ".envrc"), []byte("export HC_DRX_FOO=bar\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, err := New(Config{Binary: bin}, dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	c, err := launch(p.launchSpec(cwd, workspaceMode))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.cmd.Wait()
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(b)
+	for _, want := range []string{"\nHC_DRX_FOO=bar\n", "\nPATH=" + filepath.Dir(bin) + ":/proj/bin:" + fake + ":/usr/bin:/bin\n"} {
+		if !strings.Contains("\n"+got, want) {
+			t.Errorf("child is missing %q:\n%s", want, got)
+		}
+	}
+}

@@ -149,6 +149,17 @@ with ids, responses, and session events); nothing listens on a port.
   gateway runs inside one during development, and sets `HC_SESSION_ID=claude:<id>`, so `hc` knows
   its own session. Herdr's own configuration (`HERDR_SESSION`, the default socket) is kept, so the
   agent can still use Herdr from its Bash tool as a separate tool.
+- direnv: when the session's folder or a parent has an `.envrc` (or `.env`) and `direnv` is
+  installed, the gateway runs `direnv export json` there at session start (resume included) and
+  gives the agent what a terminal that cd'd into the folder would get
+  (`providers.LoadDirEnv`). Only an `.envrc` approved with `direnv allow` loads; a blocked or
+  failing one, or one that takes over 15 s, is skipped with a warning and the session starts
+  as before. The gateway's own variables (`HC_SESSION_ID`, …) still win, and the `.envrc` is
+  read once per start. Claude Code, DSH processes, resident runs and resident prechecks get
+  it in their process environment. Codex threads share one app-server, so they get it as
+  per-thread `shell_environment_policy.set.<NAME>` overrides (applies to the commands it runs;
+  variables direnv unsets are not removed), and PATH keeps the folders the app-server puts in
+  front (its `apply_patch` alias), read with `command/exec`.
 - The gateway's own skills (`gateway/internal/agentplugin`) are one Claude Code plugin,
   `herdr-companion`: `reply-in-app` (showing images and files in the app), `drive-sessions` (other
   sessions through hc) and `schedule-resident-tasks` (designing resident tasks; what a run itself must

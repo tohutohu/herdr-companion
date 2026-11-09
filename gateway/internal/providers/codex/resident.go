@@ -207,6 +207,9 @@ func (r *ResidentRunner) Run(ctx context.Context, req resident.RunRequest, hooks
 	if req.Model != "" {
 		params["model"] = req.Model
 	}
+	if cfg := dirEnvConfig(ctx, c, req.Cwd); cfg != nil {
+		params["config"] = cfg
+	}
 	cctx, cancel := context.WithTimeout(ctx, callTimeout)
 	var opened threadOpened
 	err = c.call(cctx, "thread/start", params, &opened)

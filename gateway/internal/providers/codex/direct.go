@@ -78,6 +78,8 @@ func (p *Provider) DirectStart(ctx context.Context, opts providers.DirectStart) 
 	if opts.Mode != "" && opts.Mode != "default" && opts.Mode != "plan" {
 		return "", fmt.Errorf("unknown Codex mode %q", opts.Mode)
 	}
+	// Before the call's timeout starts: an .envrc may take a while.
+	envCfg := dirEnvConfig(ctx, d.c, opts.Cwd)
 	cctx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
 	var r threadOpened
@@ -88,6 +90,9 @@ func (p *Provider) DirectStart(ctx context.Context, opts providers.DirectStart) 
 		params := map[string]any{"threadId": opts.Resume}
 		if opts.Cwd != "" {
 			params["cwd"] = opts.Cwd
+			if envCfg != nil {
+				params["config"] = envCfg
+			}
 		}
 		if err := d.c.call(cctx, "thread/resume", params, &r); err != nil {
 			var rerr *rpcError
@@ -103,6 +108,9 @@ func (p *Provider) DirectStart(ctx context.Context, opts providers.DirectStart) 
 		// Everything not chosen comes from the user's Codex config, as for
 		// the CLI: approval policy, sandbox, model.
 		params := map[string]any{"cwd": opts.Cwd}
+		if envCfg != nil {
+			params["config"] = envCfg
+		}
 		if opts.Model != "" {
 			params["model"] = opts.Model
 		}
