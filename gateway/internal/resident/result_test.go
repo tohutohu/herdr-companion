@@ -73,3 +73,26 @@ func TestApplyPatch(t *testing.T) {
 		}
 	})
 }
+
+func Test結果のJSONをセッションで読める文章にする(t *testing.T) {
+	t.Run("要約と報告と質問を並べる", func(t *testing.T) {
+		got, ok := DisplayText([]byte(`{"schemaVersion":1,"outcome":"blocked","summary":"CIが失敗しています。","report":"## 詳細\n- test が落ちた","notification":{"requested":true,"key":"k"},"statePatch":[],"memorySummary":null,"nextWakeAt":null,"question":{"text":"再実行しますか？","options":["する","しない"]},"artifacts":[]}`))
+		want := "CIが失敗しています。\n\n## 詳細\n- test が落ちた\n\n**質問:** 再実行しますか？\n- する\n- しない"
+		if !ok || got != want {
+			t.Errorf("got %q, %v\nwant %q", got, ok, want)
+		}
+	})
+	t.Run("報告が空なら要約だけにしコードフェンスも外す", func(t *testing.T) {
+		got, ok := DisplayText([]byte("```json\n{\"schemaVersion\":1,\"outcome\":\"unchanged\",\"summary\":\"変化なし\",\"report\":\"\"}\n```"))
+		if !ok || got != "変化なし" {
+			t.Errorf("got %q, %v", got, ok)
+		}
+	})
+	t.Run("結果の形でない文章やJSONはそのままにする", func(t *testing.T) {
+		for _, in := range []string{"直しました。", `{"summary":"x"}`, `{"schemaVersion":1,"outcome":"done","summary":"x"}`, ""} {
+			if got, ok := DisplayText([]byte(in)); ok {
+				t.Errorf("DisplayText(%q) = %q, want not a result", in, got)
+			}
+		}
+	})
+}

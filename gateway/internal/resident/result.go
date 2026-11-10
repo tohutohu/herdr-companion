@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -307,4 +308,48 @@ func FitSummary(s string) (string, bool) {
 		return s, false
 	}
 	return truncateBytes(s, MaxSummaryBytes-len("…")), true
+}
+
+// DisplayText renders a run's final answer as the prose a session shows once
+// the run's conversation is promoted: the summary, the report, and the
+// question it asked. Agents leave the answer as contract JSON (Claude as a
+// StructuredOutput tool call), which is unreadable in a transcript. ok is
+// false when raw is not such an answer.
+func DisplayText(raw []byte) (text string, ok bool) {
+	raw = bytes.TrimSpace(raw)
+	if bytes.HasPrefix(raw, []byte("```")) {
+		if i := bytes.IndexByte(raw, '\n'); i > 0 {
+			raw = bytes.TrimSpace(bytes.TrimSuffix(bytes.TrimSpace(raw[i+1:]), []byte("```")))
+		}
+	}
+	if len(raw) == 0 || raw[0] != '{' {
+		return "", false
+	}
+	var r Result
+	if json.Unmarshal(raw, &r) != nil || r.SchemaVersion != 1 {
+		return "", false
+	}
+	switch r.Outcome {
+	case OutcomeChanged, OutcomeUnchanged, OutcomeBlocked, OutcomeFailed:
+	default:
+		return "", false
+	}
+	var parts []string
+	for _, s := range []string{r.Summary, r.Report} {
+		if s = strings.TrimSpace(s); s != "" && !slices.Contains(parts, s) {
+			parts = append(parts, s)
+		}
+	}
+	if q := r.Question; q != nil && strings.TrimSpace(q.Text) != "" {
+		var b strings.Builder
+		b.WriteString("**質問:** " + strings.TrimSpace(q.Text))
+		for _, o := range q.Options {
+			b.WriteString("\n- " + o)
+		}
+		parts = append(parts, b.String())
+	}
+	if len(parts) == 0 {
+		return "", false
+	}
+	return strings.Join(parts, "\n\n"), true
 }

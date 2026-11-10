@@ -213,8 +213,8 @@ SQLite（`modernc.org/sqlite`、純 Go で cgo 不要）、WAL、`synchronous=FU
   （Claude は transcript に `custom-title`、Codex は `thread/name/set`）、`promoted` にしてセッション一覧に出し、
   通常セッションとして再開する（`Launcher.Resume`）。以後は普通のセッションで、承認はアプリに来る。2 回目以降は同じセッションを返す
   （止まっていれば再開する）。
-- 昇格したセッションの先頭は常駐のプロンプト、最後の応答は結果契約の JSON（Claude は StructuredOutput ツール）になる。
-  続けて話しかけると通常の文章で答える。
+- 昇格したセッションの先頭は常駐のプロンプト、最後の応答は結果契約の JSON（Claude は StructuredOutput ツール）だが、
+  会話には要約・報告・質問を通常の返答として表示する（`resident.DisplayText`）。続けて話しかけると通常の文章で答える。
 - 残した会話は Gateway のセッション一覧には昇格するまで出ないが、Claude Code の `claude --resume` 一覧や
   `~/.codex/sessions` には通常のセッションと同じように現れる。
 

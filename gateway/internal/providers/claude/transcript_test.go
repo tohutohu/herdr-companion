@@ -612,3 +612,26 @@ func Test報告とインラインツール呼び出しを翻訳対象として�
 		t.Fatalf("reports %d, tools %d", reports, tools)
 	}
 }
+
+func Test常駐の結果を返すStructuredOutputは返答として表示する(t *testing.T) {
+	rec := &deadletter.Recorder{}
+	line := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"StructuredOutput","input":{"schemaVersion":1,"outcome":"changed","summary":"CIが復旧しました。","report":"## 詳細\n3件のジョブが成功","notification":{"requested":true,"key":"k"},"statePatch":[],"memorySummary":null,"nextWakeAt":null,"question":null,"artifacts":[]}}]},"uuid":"a1","timestamp":"2026-09-17T10:00:01.000Z"}`
+	tr, err := Decode(strings.NewReader(line), "claude:test", rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgs := tr.Messages(ParseOptions{SessionID: "claude:test", Sink: rec})
+	if len(msgs) != 1 || len(msgs[0].Blocks) != 1 {
+		t.Fatalf("messages = %+v", msgs)
+	}
+	b := msgs[0].Blocks[0]
+	if want := "CIが復旧しました。\n\n## 詳細\n3件のジョブが成功"; b.Text != want || !b.Report {
+		t.Errorf("block = %+v, want report text %q", b, want)
+	}
+	if len(rec.Entries) != 0 {
+		t.Errorf("dead letters = %+v, want none", rec.Entries)
+	}
+	if got := tr.summary(ParseOptions{}).LastMessage; got != "CIが復旧しました。 ## 詳細 3件のジョブが成功" {
+		t.Errorf("last message = %q", got)
+	}
+}

@@ -16,6 +16,7 @@ import (
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/resident"
 )
 
 type contentBlock struct {
@@ -160,6 +161,11 @@ func (p *Provider) eventLocked(s *session, e event) error {
 		m.Blocks = displayBlocks(d.Message.Content)
 		if p.unattended != nil {
 			p.unattended.text = messageText(m)
+			// The journal becomes a session's transcript when the run is
+			// promoted: keep what the answer says, not its contract JSON.
+			if shown, ok := resident.DisplayText([]byte(p.unattended.text)); ok {
+				m.Blocks = []model.Block{model.TextBlock(shown)}
+			}
 			p.unattended.usage.InputTokens += d.Usage.InputTokens + d.Usage.CacheReadTokens + d.Usage.CacheWriteTokens
 			p.unattended.usage.CachedInputTokens += d.Usage.CacheReadTokens
 			p.unattended.usage.OutputTokens += d.Usage.OutputTokens

@@ -13,6 +13,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/resident"
 )
 
 // Thread mirrors the parts of app-server v2 Thread we use.
@@ -249,7 +250,12 @@ func convertItem(raw json.RawMessage, ts time.Time, opt convertOptions) (model.M
 		if strings.TrimSpace(it.Text) == "" {
 			return model.Message{}, false
 		}
-		return msg(model.RoleAssistant, append([]model.Block{model.ReportBlock(it.Text)}, model.ExtractFileRefs(it.Text, opt.Root)...)...)
+		text := it.Text
+		// A resident run's final answer is contract JSON; show what it says.
+		if shown, ok := resident.DisplayText([]byte(text)); ok {
+			text = shown
+		}
+		return msg(model.RoleAssistant, append([]model.Block{model.ReportBlock(text)}, model.ExtractFileRefs(text, opt.Root)...)...)
 	case "plan":
 		return msg(model.RoleAssistant, model.TextBlock("Plan:\n"+it.Text))
 	case "reasoning", "hookPrompt", "sleep", "subAgentActivity":

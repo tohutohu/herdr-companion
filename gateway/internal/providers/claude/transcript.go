@@ -15,6 +15,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/pricing"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/resident"
 )
 
 // entry is one line of a Claude Code session transcript
@@ -1285,6 +1286,13 @@ func (t *Transcript) toolUseBlocks(b contentBlock, res toolResult, answered, pen
 		blocks = append(blocks, model.TextBlock(text))
 	case "Artifact":
 		blocks = append(blocks, artifactBlocks(in, res, answered, opt)...)
+	case "StructuredOutput":
+		// A resident run's final answer: shown as the reply it is once the
+		// run's conversation is promoted to a session.
+		if text, ok := resident.DisplayText(b.Input); ok {
+			return t.textWithRefs(text, opt)
+		}
+		blocks = append(blocks, model.TextBlock("▸ "+b.Name+" "+compactJSON(b.Input, 200)))
 	case "ToolSearch", "SlashCommand", "BashOutput", "KillShell", "KillBash", "TaskOutput", "TaskStop",
 		"Monitor", "SendUserFile", "ListMcpResourcesTool", "ReadMcpResourceTool", "EnterPlanMode", "LSP", "SendMessage",
 		"ListAgents":
@@ -1515,6 +1523,11 @@ func (t *Transcript) lastReport(msgs []model.Message) string {
 		for j := len(blocks) - 1; j >= 0; j-- {
 			if b := blocks[j]; b.Type == "text" && strings.TrimSpace(b.Text) != "" {
 				return providers.OneLine(b.Text, 160)
+			}
+			if b := blocks[j]; b.Type == "tool_use" && b.Name == "StructuredOutput" {
+				if text, ok := resident.DisplayText(b.Input); ok {
+					return providers.OneLine(text, 160)
+				}
 			}
 		}
 	}
