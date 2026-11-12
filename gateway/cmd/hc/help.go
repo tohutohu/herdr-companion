@@ -156,11 +156,11 @@ USAGE
   hc search WORD... [--text] [--active | --archived] [--limit N]
 
   Every WORD must appear (any order, case ignored) in the session's title, project, folder,
-  id or last message. Quote a phrase to keep its words together: hc search "login bug".
+  id, provider, model or last message. Quote a phrase to keep its words together:
+  hc search "login bug".
 
 FLAGS
-  --text       also search what was said in the conversations. Reads every session that
-               did not match already, so it takes longer.
+  --text       also search what was said in the conversations
   --active     only sessions that are not archived
   --archived   only archived sessions
   --limit N    most results to print (default 20, newest first; 0 = all)
@@ -171,6 +171,9 @@ OUTPUT
   The line is the one hc ls prints, with "(archived)" where it applies. The indented line
   shows where the words were found when that is not on the line itself. --json adds
   "match": {"field", "snippet"} to each session.
+  The Gateway searches its own index of the sessions. "(the Gateway is still reading
+  sessions…)" means that index is not complete yet (its first build takes some seconds):
+  what was found is printed, and a later search finds the rest.
 
 SEE ALSO
   hc show ID · hc read ID · hc resume ID (continue an archived session)

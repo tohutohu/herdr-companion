@@ -34,6 +34,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/dsh"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/resident"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/runtime"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/search"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/sessions"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/translation"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/uploads"
@@ -249,9 +250,25 @@ func serve(args []string) error {
 	residentDone := make(chan struct{})
 	go func() { residents.Run(ctx); close(residentDone) }()
 
+	// The search index is a cache; without it only /v1/sessions/search is missing.
+	searchIndex, err := search.Open(ctx, filepath.Join(config.StateDir(), "search.db"), svc)
+	if err != nil {
+		slog.Warn("search index unavailable", "operation", "serve", "error", err)
+		searchIndex = nil
+	} else {
+		defer searchIndex.Close()
+		// Read what is new since the last run before the first search asks.
+		go func() {
+			select {
+			case <-ctx.Done():
+			case <-time.After(15 * time.Second):
+				searchIndex.Refresh()
+			}
+		}()
+	}
 	srv := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           (&api.Server{Translation: translator, MessageDelivery: delivery, AgentUpdates: agentupdate.New(ctx, cfg.CodexBinary), Sessions: svc, Uploads: up, Config: store, Sink: sink, Launcher: launch, Archive: archived, Usage: limits, DirectoryCheck: dirCheck, Direct: direct, Resident: residents, Listen: cfg.Listen}).Handler(),
+		Handler:           (&api.Server{Search: searchIndex, Translation: translator, MessageDelivery: delivery, AgentUpdates: agentupdate.New(ctx, cfg.CodexBinary), Sessions: svc, Uploads: up, Config: store, Sink: sink, Launcher: launch, Archive: archived, Usage: limits, DirectoryCheck: dirCheck, Direct: direct, Resident: residents, Listen: cfg.Listen}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	shutdownDone := make(chan struct{})

@@ -51,7 +51,7 @@ func (s *Server) residentRoutes(api *http.ServeMux) {
 }
 
 func (s *Server) capabilities(w http.ResponseWriter, r *http.Request) {
-	caps := map[string]any{"messageIdempotency": s.MessageDelivery != nil}
+	caps := map[string]any{"messageIdempotency": s.MessageDelivery != nil, "sessionSearch": s.Search != nil}
 	if proxy := forward.DirectAddress(s.Listen, r); proxy != "" {
 		caps["localhostProxy"] = proxy
 	}

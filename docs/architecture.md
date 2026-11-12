@@ -54,6 +54,11 @@ it in the gateway under the same id.
   gateway state root. Delivery receipts contain hashes and status, never text.
   `resident.db` holds the resident tasks (settings, conversation, memory, wake-ups,
   runs, notification outbox).
+  `search.db` is the session search index (`internal/search`): a cache of each
+  session's list fields and the text of its conversation, mode 600, so
+  `GET /v1/sessions/search` does not read the transcripts again. Only sessions that
+  changed, and newly archived ones, are read again; deleting the file costs the next
+  search a full read.
 - **In-memory only:** last seen status and completion revision per session
   (push de-duplication), bounded Codex display and rollout projections,
   the FCM access token, and the pending approvals and questions of running

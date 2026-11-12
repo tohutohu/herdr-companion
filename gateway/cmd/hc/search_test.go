@@ -2,11 +2,13 @@ package main
 
 import (
 	"encoding/json"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/search"
 )
 
 func searchGateway() *fakeGateway {
@@ -29,7 +31,7 @@ func searchGateway() *fakeGateway {
 	}
 }
 
-func TestSearchはアーカイブ済みも含めて新しい順に出す(t *testing.T) {
+func TestSearchは検索のないGatewayでもアーカイブ済みを含めて新しい順に出す(t *testing.T) {
 	a, _ := newTestApp(t, searchGateway())
 	out := a.mustRun(t, "search", "LOGIN")
 	lines := strings.Split(strings.TrimSpace(out), "\n")
@@ -79,7 +81,7 @@ func TestSearchは本文をtext指定のときだけ探す(t *testing.T) {
 	if !strings.Contains(out, "dddd4444") || !strings.Contains(out, "(archived)") {
 		t.Errorf("アーカイブ済みの本文から見つかるはず:\n%s", out)
 	}
-	if !strings.Contains(out, "assistant: 前置きです。 ⏎ Passkey の移行手順をまとめました。") {
+	if !strings.Contains(out, "assistant: 前置きです。 Passkey の移行手順をまとめました。") {
 		t.Errorf("本文の抜粋が出るはず:\n%s", out)
 	}
 }
@@ -100,7 +102,7 @@ func TestSearchのJSONは一致箇所を含む(t *testing.T) {
 			ID       string
 			Short    string
 			Archived bool
-			Match    *searchMatch
+			Match    *search.Match
 		}
 	}
 	if err := json.Unmarshal([]byte(out), &res); err != nil {
@@ -119,13 +121,41 @@ func TestSearchは語がなければ使い方の誤りにする(t *testing.T) {
 	}
 }
 
-func TestSnippetは一致箇所の前後を切り出す(t *testing.T) {
-	text := strings.Repeat("あ", 50) + "needle" + strings.Repeat("い", 200)
-	got := snippet(text, "needle")
-	if !strings.HasPrefix(got, "…"+strings.Repeat("あ", 30)+"needle") {
-		t.Errorf("前は 30 文字まで: %q", got)
+func TestSearchはGatewayの検索を使う(t *testing.T) {
+	g := searchGateway()
+	var asked url.Values
+	g.search = func(q url.Values) any {
+		asked = q
+		hit := g.archived[1]
+		hit.Archived = true
+		return map[string]any{
+			"sessions": []map[string]any{{"id": hit.ID, "provider": hit.Provider, "project": hit.Project, "title": hit.Title,
+				"status": hit.Status, "updatedAt": hit.UpdatedAt, "archived": true,
+				"match": map[string]string{"field": "assistant", "snippet": "Passkey の移行手順"}}},
+			"more": 3, "indexing": true,
+		}
 	}
-	if n := len([]rune(got)); n > 102 {
-		t.Errorf("長すぎる: %d 文字", n)
+	a, _ := newTestApp(t, g)
+	out := a.mustRun(t, "search", "passkey", "移行 手順", "--text", "--archived", "--limit", "1")
+	if got := asked["q"]; len(got) != 2 || got[0] != "passkey" || got[1] != `"移行 手順"` {
+		t.Errorf("q = %q。引用符で囲んだ引数はフレーズのまま送る", got)
+	}
+	if asked.Get("text") != "true" || asked.Get("scope") != "archived" || asked.Get("limit") != "1" {
+		t.Errorf("問い合わせ: %v", asked)
+	}
+	for _, want := range []string{"dddd4444", "(archived)", "assistant: Passkey の移行手順", "(+3 more: --limit 0)", "still reading sessions"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("%q が出るはず:\n%s", want, out)
+		}
+	}
+}
+
+func TestSearchは検索のないGatewayでもフレーズを探す(t *testing.T) {
+	a, _ := newTestApp(t, searchGateway())
+	if out := a.mustRun(t, "search", "login 調査"); !strings.Contains(out, "cccc3333") || strings.Contains(out, "aaaa1111") {
+		t.Errorf("フレーズは cccc3333 だけ:\n%s", out)
+	}
+	if out := a.mustRun(t, "search", "調査 login"); !strings.Contains(out, "no session matches") {
+		t.Errorf("語順の違うフレーズは一致しない:\n%s", out)
 	}
 }

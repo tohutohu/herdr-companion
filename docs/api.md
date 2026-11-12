@@ -172,6 +172,7 @@ Gateway が動かすセッションは、プロセスが無い間（Gateway の�
 | POST | `/pair` | 不要 | 招待コードを交換してトークンを得る |
 | POST / DELETE | `/v1/pairing` | 要 | 招待の発行／取り消し |
 | GET | `/v1/sessions` | 要 | セッション一覧（`?archived=true` でアーカイブ済み） |
+| GET | `/v1/sessions/search` | 要 | 語でセッションを探す（アーカイブ済みも対象） |
 | POST | `/v1/sessions` | 要 | 新しいセッションを起動 |
 | GET | `/v1/sessions/{id}` | 要 | セッション 1 件 |
 | GET | `/v1/sessions/{id}/messages` | 要 | セッションとメッセージ |
@@ -203,7 +204,7 @@ Gateway が動かすセッションは、プロセスが無い間（Gateway の�
 | GET | `/v1/usage` | 要 | サブスクリプション利用枠（キャッシュ） |
 | POST | `/v1/usage/refresh` | 要 | 利用枠を今すぐ読み直す |
 | POST / DELETE | `/v1/devices` | 要 | FCM トークンの登録／解除 |
-| GET | `/v1/capabilities` | 要 | 対応機能（常駐タスクの有無と版） |
+| GET | `/v1/capabilities` | 要 | 対応機能（常駐タスクの有無と版、セッション検索の有無） |
 | * | `/v1/resident/…` | 要 | 常駐タスク（[下記](#常駐タスク)） |
 
 ## ペアリング
@@ -294,6 +295,36 @@ Gateway が動かすセッションは、プロセスが無い間（Gateway の�
 ```json
 { "sessions": [Session, …], "nextOffset": 50 }
 ```
+
+### `GET /v1/sessions/search?q=…`
+
+語でセッションを探す。動作中・最近のオフライン・アーカイブ済みをまとめて対象にし、更新の新しい順に返す。
+
+| パラメータ | 意味 |
+|---|---|
+| `q` | 探す語（必須、複数指定可）。空白で区切った語はすべて含むものだけが一致する（AND）。`"…"` で囲むとフレーズになる。ASCII の大文字小文字は区別しない |
+| `text` | `true` で会話の本文も対象にする。なければタイトル・プロジェクト・フォルダ・ID・プロバイダ・モデル・最後のメッセージだけ |
+| `scope` | `all`（既定）/ `active`（アーカイブ済み以外）/ `archived` |
+| `limit` | 返す件数の上限。0 か省略で全件 |
+
+```json
+{
+  "sessions": [
+    { …Session, "match": { "field": "assistant", "snippet": "…原因は login bug で、トークンの更新が…" } }
+  ],
+  "more": 12,
+  "indexing": false
+}
+```
+
+- `match` は、一覧に出ない項目（フォルダ・最後のメッセージ・翻訳前のタイトル・モデル・会話の本文）で語が見つかったときだけ付く。
+  `field` は `cwd` / `lastMessage` / `title` / `model`、本文なら発言の役割（`user` / `assistant`）。`snippet` は一致箇所の前後。
+- `more` は `limit` で省いた件数。
+- `indexing` が `true` のときは Gateway がまだ会話を読んでいる途中で、結果が欠けていることがある（3 秒待って読み終わらなければ、
+  読めた分で答える）。初回は全セッションを読むので数秒から十数秒かかる。
+- Gateway は検索用の文面を `search.db`（状態ディレクトリ）に持つ。更新のあったセッションと新しくアーカイブされたセッションだけを
+  検索のたびに読み直す。これはキャッシュで、消しても次の検索で作り直される。
+- 対応は `GET /v1/capabilities` の `sessionSearch` で分かる。対応前の Gateway はこのパスに 404 を返す。
 
 ### `POST /v1/sessions`
 
@@ -755,7 +786,7 @@ Run と会話のメッセージには `conversation`（`kept`: 昇格できる�
 ### 対応の判別: `GET /v1/capabilities`
 
 ```json
-{"messageIdempotency": true, "resident": {"version": 1, "providers": ["claude", "codex", "dsh"], "defaultTimezone": "Asia/Tokyo"}}
+{"messageIdempotency": true, "sessionSearch": true, "resident": {"version": 1, "providers": ["claude", "codex", "dsh"], "defaultTimezone": "Asia/Tokyo"}}
 ```
 
 `resident` がない（または `/v1/capabilities` が 404 の）Gateway は常駐タスクに対応していない。アプリは 404 や通信エラーを

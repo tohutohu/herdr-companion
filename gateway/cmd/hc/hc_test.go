@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -22,6 +23,8 @@ type fakeGateway struct {
 	mu       sync.Mutex
 	sessions []model.Session
 	archived []model.Session
+	// search answers /v1/sessions/search; nil is a Gateway without it (404).
+	search   func(q url.Values) any
 	messages map[string][]model.Message
 	posted   []postedRequest
 	// onPost lets a test change state when a command posts.
@@ -75,6 +78,14 @@ func (g *fakeGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			g.onList()
 		}
 		writeJSON(map[string]any{"sessions": g.sessions})
+		return
+	case path == "/v1/sessions/search":
+		if g.search == nil {
+			w.WriteHeader(http.StatusNotFound)
+			writeJSON(map[string]string{"error": "session not found"})
+			return
+		}
+		writeJSON(g.search(r.URL.Query()))
 		return
 	case strings.HasSuffix(path, "/messages"):
 		id := strings.TrimSuffix(strings.TrimPrefix(path, "/v1/sessions/"), "/messages")

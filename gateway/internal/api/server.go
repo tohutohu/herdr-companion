@@ -32,6 +32,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/resident"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/runtime"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/search"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/sessions"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/uploads"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/usage"
@@ -50,6 +51,8 @@ type Server struct {
 	Sink            deadletter.Sink
 	Launcher        *launcher.Launcher
 	Archive         *archive.Store
+	// Search is the session search index; nil leaves /v1/sessions/search out.
+	Search *search.Index
 	// Usage is nil when subscription limit reporting is turned off.
 	Usage *usage.Service
 	// Direct runs the sessions.
@@ -76,6 +79,9 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("GET /v1/sessions", s.listSessions)
 	api.HandleFunc("POST /v1/sessions", s.startSession)
 	api.HandleFunc("POST /v1/sessions/archive", s.archiveSessions)
+	if s.Search != nil {
+		api.HandleFunc("GET /v1/sessions/search", s.searchSessions)
+	}
 	api.HandleFunc("POST /v1/launches/{launch}/trust", s.answerTrust)
 	api.HandleFunc("GET /v1/models", s.listModels)
 	api.HandleFunc("GET /v1/agents", s.listAgents)
@@ -308,6 +314,50 @@ func (s *Server) listArchived(w http.ResponseWriter, r *http.Request) {
 		resp["nextOffset"] = next
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// searchSessions finds sessions by words, archived ones included.
+func (s *Server) searchSessions(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	query := search.Query{Text: q.Get("text") == "true"}
+	for _, raw := range q["q"] {
+		query.Terms = append(query.Terms, search.ParseQuery(raw)...)
+	}
+	if len(query.Terms) == 0 {
+		s.fail(w, r, "", "search_sessions", badRequest("q is required"))
+		return
+	}
+	switch q.Get("scope") {
+	case "", "all":
+	case "active":
+		query.Scope = search.ScopeActive
+	case "archived":
+		query.Scope = search.ScopeArchived
+	default:
+		s.fail(w, r, "", "search_sessions", badRequest("scope must be all, active or archived"))
+		return
+	}
+	if raw := q.Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 {
+			s.fail(w, r, "", "search_sessions", badRequest("limit must be a non-negative integer"))
+			return
+		}
+		query.Limit = n
+	}
+	res, err := s.Search.Search(r.Context(), query)
+	if err != nil {
+		s.fail(w, r, "", "search_sessions", err)
+		return
+	}
+	hits := res.Hits
+	if hits == nil {
+		hits = []search.Hit{}
+	}
+	for i := range hits {
+		hits[i].Session = s.translatedSession(hits[i].Session)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sessions": hits, "more": res.More, "indexing": res.Indexing})
 }
 
 func (s *Server) getSession(w http.ResponseWriter, r *http.Request) {

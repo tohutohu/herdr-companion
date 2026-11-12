@@ -13,10 +13,12 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/search"
 )
 
 type connection struct {
@@ -196,6 +198,37 @@ func (c *client) sessions(ctx context.Context, archived bool) ([]model.Session, 
 	}
 	err := c.do(ctx, http.MethodGet, path, nil, &res)
 	return res.Sessions, err
+}
+
+// search asks the Gateway's session search. A Gateway from before it had
+// one answers 404.
+func (c *client) search(ctx context.Context, queries []string, text, active, archived bool, limit int) (searchResult, error) {
+	v := url.Values{"q": queries, "limit": {strconv.Itoa(limit)}}
+	if text {
+		v.Set("text", "true")
+	}
+	switch {
+	case active:
+		v.Set("scope", "active")
+	case archived:
+		v.Set("scope", "archived")
+	}
+	var body struct {
+		Sessions []struct {
+			model.Session
+			Match *search.Match `json:"match"`
+		} `json:"sessions"`
+		More     int  `json:"more"`
+		Indexing bool `json:"indexing"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/v1/sessions/search?"+v.Encode(), nil, &body); err != nil {
+		return searchResult{}, err
+	}
+	res := searchResult{more: body.More, indexing: body.Indexing}
+	for _, s := range body.Sessions {
+		res.hits = append(res.hits, searchHit{s.Session, s.Match})
+	}
+	return res, nil
 }
 
 func (c *client) session(ctx context.Context, id string) (model.Session, error) {

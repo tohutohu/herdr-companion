@@ -342,6 +342,15 @@ func (s *Service) Archived(ctx context.Context, offset, limit int) (out []model.
 	return out, next
 }
 
+// ArchivedIDs returns the ids of archived sessions, most recently archived
+// first.
+func (s *Service) ArchivedIDs() []string {
+	if s.Archive == nil {
+		return nil
+	}
+	return s.Archive.IDs()
+}
+
 func (s *Service) archived(id string) bool { return s.Archive != nil && s.Archive.Has(id) }
 
 func (s *Service) toSession(r *Resolved, sum *providers.Summary) model.Session {
