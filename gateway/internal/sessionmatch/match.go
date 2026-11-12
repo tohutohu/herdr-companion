@@ -1,6 +1,8 @@
-// Package search finds sessions by words: in what the session list shows
-// (title, folder, last message) and in what was said in them.
-package search
+// Package sessionmatch decides whether a session holds the words of a
+// search: in what the session list shows (title, folder, last message) and
+// in what was said in it. It depends on the model only, so the hc client can
+// use it as well as the gateway's index (internal/search).
+package sessionmatch
 
 import (
 	"strings"
@@ -18,16 +20,25 @@ type Match struct {
 	Snippet string `json:"snippet"`
 }
 
-type field struct {
-	name string
-	text string
-	// shown fields are on the session's list entry, so a match in one needs
+// Field is one searchable piece of a session.
+type Field struct {
+	Name string
+	Text string
+	// Shown fields are on the session's list entry, so a match in one needs
 	// no excerpt.
-	shown bool
+	Shown bool
 }
 
-func sessionFields(s model.Session) []field {
-	return []field{
+const (
+	// FieldSep and BlockSep never occur in a term, so text joined with them
+	// cannot match across the join.
+	FieldSep = '\x1f'
+	BlockSep = '\x1e'
+)
+
+// SessionFields are the fields of a session's list entry.
+func SessionFields(s model.Session) []Field {
+	return []Field{
 		{"title", s.Title, true},
 		{"title", s.OriginalTitle, false},
 		{"project", s.Project, true},
@@ -40,12 +51,13 @@ func sessionFields(s model.Session) []field {
 	}
 }
 
-func messageFields(msgs []model.Message) []field {
-	var out []field
+// MessageFields are the texts of a conversation, named by who said them.
+func MessageFields(msgs []model.Message) []Field {
+	var out []Field
 	for _, m := range msgs {
 		for _, b := range m.Blocks {
 			if b.Text != "" {
-				out = append(out, field{string(m.Role), b.Text, false})
+				out = append(out, Field{string(m.Role), b.Text, false})
 			}
 		}
 	}
@@ -69,7 +81,7 @@ func ParseQuery(q string) []string {
 		case r == '"':
 			flush()
 			quoted = !quoted
-		case r == fieldSep || r == blockSep:
+		case r == FieldSep || r == BlockSep:
 		case !quoted && (r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '　'):
 			flush()
 		default:
@@ -80,24 +92,26 @@ func ParseQuery(q string) []string {
 	return terms
 }
 
-// MatchSession reports whether every term is somewhere in the session or
-// its messages, with an excerpt of the first match that the session's list
-// entry does not show. Terms must be lower case; ASCII case is ignored.
-func MatchSession(s model.Session, msgs []model.Message, terms []string) (*Match, bool) {
-	return matchFields(append(sessionFields(s), messageFields(msgs)...), terms)
+// Session reports whether every term is somewhere in the session or its
+// messages; see Fields.
+func Session(s model.Session, msgs []model.Message, terms []string) (*Match, bool) {
+	return Fields(append(SessionFields(s), MessageFields(msgs)...), terms)
 }
 
-func matchFields(fields []field, terms []string) (*Match, bool) {
+// Fields reports whether every term is in one of fields, with an excerpt of
+// the first match that the session's list entry does not show. Terms must be
+// lower case, as ParseQuery returns them.
+func Fields(fields []Field, terms []string) (*Match, bool) {
 	var match *Match
 	for _, term := range terms {
 		found := false
 		for _, f := range fields {
-			if !strings.Contains(strings.ToLower(f.text), term) {
+			if !strings.Contains(strings.ToLower(f.Text), term) {
 				continue
 			}
 			found = true
-			if !f.shown && match == nil {
-				match = &Match{Field: f.name, Snippet: snippet(f.text, term)}
+			if !f.Shown && match == nil {
+				match = &Match{Field: f.Name, Snippet: snippet(f.Text, term)}
 			}
 			break
 		}

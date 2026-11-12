@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
-	"github.com/tohutohu/herdr-android-client/gateway/internal/search"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/sessionmatch"
 )
 
 type connection struct {
@@ -216,7 +216,7 @@ func (c *client) search(ctx context.Context, queries []string, text, active, arc
 	var body struct {
 		Sessions []struct {
 			model.Session
-			Match *search.Match `json:"match"`
+			Match *sessionmatch.Match `json:"match"`
 		} `json:"sessions"`
 		More     int  `json:"more"`
 		Indexing bool `json:"indexing"`

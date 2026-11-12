@@ -1,3 +1,5 @@
+// Package search is the gateway's session search: an index of what
+// internal/sessionmatch looks at, so a search does not read the transcripts.
 package search
 
 import (
@@ -15,6 +17,7 @@ import (
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/sessionmatch"
 )
 
 // Source is where the index reads sessions from.
@@ -33,6 +36,12 @@ const (
 	ScopeActive
 	ScopeArchived
 )
+
+// Match says where the words were found.
+type Match = sessionmatch.Match
+
+// ParseQuery splits what a person typed into the terms that must all be found.
+func ParseQuery(q string) []string { return sessionmatch.ParseQuery(q) }
 
 type Query struct {
 	// Terms must all be found; see ParseQuery.
@@ -66,8 +75,8 @@ const (
 )
 
 const (
-	fieldSep = '\x1f' // between a block's role and its text
-	blockSep = '\x1e' // between blocks, and between metadata fields
+	fieldSep = sessionmatch.FieldSep // between a block's role and its text
+	blockSep = sessionmatch.BlockSep // between blocks, and between metadata fields
 
 	schemaVersion = 1
 	// freshFor is how long a finished refresh answers the next searches,
@@ -292,9 +301,9 @@ func (x *Index) put(id string, state int, s model.Session, msgs *[]model.Message
 		}
 		doc = string(b)
 		var parts []string
-		for _, f := range sessionFields(s) {
-			if f.text != "" {
-				parts = append(parts, f.text)
+		for _, f := range sessionmatch.SessionFields(s) {
+			if f.Text != "" {
+				parts = append(parts, f.Text)
 			}
 		}
 		meta = strings.Join(parts, string(blockSep))
@@ -305,13 +314,13 @@ func (x *Index) put(id string, state int, s model.Session, msgs *[]model.Message
 			state, s.UpdatedAt.UnixNano(), doc, meta, id)
 	} else {
 		var body strings.Builder
-		for _, f := range messageFields(*msgs) {
+		for _, f := range sessionmatch.MessageFields(*msgs) {
 			if body.Len() > 0 {
 				body.WriteRune(blockSep)
 			}
-			body.WriteString(f.name)
+			body.WriteString(f.Name)
 			body.WriteRune(fieldSep)
-			body.WriteString(f.text)
+			body.WriteString(f.Text)
 		}
 		_, err = x.db.Exec(`INSERT INTO sessions (id, state, updated_at, session, meta, body) VALUES (?, ?, ?, ?, ?, ?)
 			ON CONFLICT(id) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at,
@@ -410,8 +419,8 @@ var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 // match finds the excerpt for a hit, reading its conversation only when the
 // session's own fields do not hold every term.
 func (x *Index) match(ctx context.Context, s model.Session, q Query) *Match {
-	fields := sessionFields(s)
-	if m, ok := matchFields(fields, q.Terms); ok || !q.Text {
+	fields := sessionmatch.SessionFields(s)
+	if m, ok := sessionmatch.Fields(fields, q.Terms); ok || !q.Text {
 		return m
 	}
 	var body string
@@ -420,9 +429,9 @@ func (x *Index) match(ctx context.Context, s model.Session, q Query) *Match {
 	}
 	for _, block := range strings.Split(body, string(blockSep)) {
 		if role, text, ok := strings.Cut(block, string(fieldSep)); ok {
-			fields = append(fields, field{role, text, false})
+			fields = append(fields, sessionmatch.Field{Name: role, Text: text})
 		}
 	}
-	m, _ := matchFields(fields, q.Terms)
+	m, _ := sessionmatch.Fields(fields, q.Terms)
 	return m
 }

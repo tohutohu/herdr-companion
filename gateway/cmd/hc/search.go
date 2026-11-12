@@ -11,12 +11,12 @@ import (
 	"sync"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
-	"github.com/tohutohu/herdr-android-client/gateway/internal/search"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/sessionmatch"
 )
 
 type searchHit struct {
 	session model.Session
-	match   *search.Match
+	match   *sessionmatch.Match
 }
 
 // searchResult is what the Gateway's search answers, or what hc found
@@ -83,7 +83,7 @@ func (a *app) cmdSearch(args []string) error {
 	if a.json {
 		type hitJSON struct {
 			sessionJSON
-			Match *search.Match `json:"match,omitempty"`
+			Match *sessionmatch.Match `json:"match,omitempty"`
 		}
 		out := []hitJSON{}
 		for _, h := range hits {
@@ -125,7 +125,7 @@ func (a *app) searchLocally(ctx context.Context, queries []string, text, active,
 	var res searchResult
 	var terms []string
 	for _, q := range queries {
-		terms = append(terms, search.ParseQuery(q)...)
+		terms = append(terms, sessionmatch.ParseQuery(q)...)
 	}
 	var all []model.Session
 	for _, arch := range []bool{false, true} {
@@ -143,7 +143,7 @@ func (a *app) searchLocally(ctx context.Context, queries []string, text, active,
 	}
 	var rest []model.Session
 	for _, s := range all {
-		if m, ok := search.MatchSession(s, nil, terms); ok {
+		if m, ok := sessionmatch.Session(s, nil, terms); ok {
 			res.hits = append(res.hits, searchHit{s, m})
 		} else {
 			rest = append(rest, s)
@@ -166,7 +166,7 @@ func (a *app) searchLocally(ctx context.Context, queries []string, text, active,
 					res.unread++
 					return
 				}
-				if m, ok := search.MatchSession(s, msgs, terms); ok {
+				if m, ok := sessionmatch.Session(s, msgs, terms); ok {
 					res.hits = append(res.hits, searchHit{s, m})
 				}
 			}(s)

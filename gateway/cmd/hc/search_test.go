@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
-	"github.com/tohutohu/herdr-android-client/gateway/internal/search"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/sessionmatch"
 )
 
 func searchGateway() *fakeGateway {
@@ -102,7 +102,7 @@ func TestSearchのJSONは一致箇所を含む(t *testing.T) {
 			ID       string
 			Short    string
 			Archived bool
-			Match    *search.Match
+			Match    *sessionmatch.Match
 		}
 	}
 	if err := json.Unmarshal([]byte(out), &res); err != nil {
