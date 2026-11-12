@@ -27,7 +27,9 @@ class DesktopSessionSettingsTest {
             assertEquals(listOf("opus", "sonnet"), f.state.detailFor(SESSION_ID)!!.settings.catalog!!.models.map { it.id })
 
             f.state.setModel(SESSION_ID, "gpt-9")
-            f.waitFor { f.state.detailFor(SESSION_ID)?.settings?.changeError != null }
+            // The refusal is shown before the change is over, and a second
+            // change is ignored until then.
+            f.waitFor { f.state.detailFor(SESSION_ID)?.settings?.let { it.changeError != null && !it.changing } == true }
             assertEquals(REFUSAL, f.state.detailFor(SESSION_ID)!!.settings.changeError)
             assertNull(f.state.detailFor(SESSION_ID)!!.session!!.pendingModel)
 
