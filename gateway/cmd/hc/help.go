@@ -50,7 +50,7 @@ var commandGroups = []struct {
 	title string
 	names []string
 }{
-	{"Look", []string{"ls", "show", "read", "export"}},
+	{"Look", []string{"ls", "search", "show", "read", "export"}},
 	{"Wait", []string{"until", "wait", "changes"}},
 	{"Act", []string{"send", "answer", "start", "archive", "resume"}},
 	{"Settings", []string{"model", "effort", "mode", "interrupt"}},
@@ -144,7 +144,36 @@ OUTPUT
   running (see "hc help states").
 
 SEE ALSO
-  hc show ID · hc help ids · hc help states
+  hc search WORD · hc show ID · hc help ids · hc help states
+`},
+	{"search", "find sessions by words, archived ones included", `hc search — find sessions by words
+
+USE WHEN
+  You need a session you cannot name: "the one about the login bug", possibly archived
+  long ago. hc ls only lists; this looks through active and archived sessions at once.
+
+USAGE
+  hc search WORD... [--text] [--active | --archived] [--limit N]
+
+  Every WORD must appear (any order, case ignored) in the session's title, project, folder,
+  id or last message. Quote a phrase to keep its words together: hc search "login bug".
+
+FLAGS
+  --text       also search what was said in the conversations. Reads every session that
+               did not match already, so it takes longer.
+  --active     only sessions that are not archived
+  --archived   only archived sessions
+  --limit N    most results to print (default 20, newest first; 0 = all)
+
+OUTPUT
+    a9b7233a offline            3d  claude proj · ログイン修正  (archived)
+        assistant: …原因は login bug で、トークンの更新が
+  The line is the one hc ls prints, with "(archived)" where it applies. The indented line
+  shows where the words were found when that is not on the line itself. --json adds
+  "match": {"field", "snippet"} to each session.
+
+SEE ALSO
+  hc show ID · hc read ID · hc resume ID (continue an archived session)
 `},
 	{"show", "one session: status, pending question with answer command, last report", `hc show — one session at a glance
 

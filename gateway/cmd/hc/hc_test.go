@@ -21,6 +21,7 @@ import (
 type fakeGateway struct {
 	mu       sync.Mutex
 	sessions []model.Session
+	archived []model.Session
 	messages map[string][]model.Message
 	posted   []postedRequest
 	// onPost lets a test change state when a command posts.
@@ -67,7 +68,7 @@ func (g *fakeGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case path == "/v1/sessions":
 		if r.URL.Query().Get("archived") == "true" {
-			writeJSON(map[string]any{"sessions": []model.Session{}})
+			writeJSON(map[string]any{"sessions": append([]model.Session{}, g.archived...)})
 			return
 		}
 		if g.onList != nil {

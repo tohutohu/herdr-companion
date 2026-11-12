@@ -11,6 +11,8 @@ PURPOSE
 BEFORE YOU START
   hc ls                     sessions and their short IDs ("!" = waiting for an answer;
                             "(you)" = your own session, which hc never acts on)
+  hc search WORD...         find a session by title, folder or last message, archived ones
+                            included (--text also searches the conversations)
   Long waits: give your shell tool a timeout above hc's --timeout (Claude Code Bash:
   timeout 600000 with --timeout 9m), or run the wait in the background.  hc help timeouts
 

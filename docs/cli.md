@@ -17,13 +17,14 @@
 
 | 分類 | コマンド |
 |---|---|
-| 見る | `ls` `show` `read` `export` |
+| 見る | `ls` `search` `show` `read` `export` |
 | 待つ | `until` `wait` `changes` |
 | 操作 | `send` `answer` `start` `archive` `resume` |
 | 設定 | `model` `effort` `mode` `interrupt` |
 | 常駐 | `resident`（`ls` `show` `create` `update` `preview` `pause` `resume` `run` `runs` `log` `cancel` `dismiss` `promote` `send` `answer` `messages` `memory` `delete`） |
 | その他 | `usage` `guide` `version` |
 
+- `hc search WORD...` はアーカイブ済みも含めてセッションを探す。すべての語がタイトル・プロジェクト・フォルダ・ID・最後のメッセージのどこかに含まれるものを新しい順に出す。`--text` で会話の本文も対象にする（未一致のセッションを全部読むので時間がかかる）。`--active` / `--archived` で片方に絞り、`--limit N`（既定 20、0 で全件）で件数を変える。
 - `hc start` は Gateway が起動し、すぐにセッション ID を返す（`started claude:<id>`）。`--provider` は `claude`（既定）/ `codex` / `dsh`。
 - `hc start --translation` は翻訳モードで起動する。プロンプトは Gateway の翻訳で英語にして送られ、英語の返答はアプリで日本語に訳して表示される。付けなければ Gateway の既定のまま。
 - `hc model ID MODEL` / `hc effort ID LEVEL` はセッション ID と履歴を保ったまま変える。カタログに無い値は理由付きで拒否され、別の値には置き換わらない。Claude Code は次のモデル呼び出しから、Codex は次のターンから効き、それまで `hc show` に「switching to …」と出る。
