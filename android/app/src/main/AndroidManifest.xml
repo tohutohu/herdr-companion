@@ -30,6 +30,13 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- hc://session/<id> opens that session; it only navigates. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="hc" android:host="session" />
+            </intent-filter>
         </activity>
 
         <!-- Dictate reads and adds per-project dictation words; callers are checked in code. -->

@@ -129,6 +129,19 @@ curl -s -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
 `native-id` は各エージェント自身のセッション（スレッド）ID。ターミナルや 1.x の Herdr のペインで始めた
 セッションも同じ ID のまま一覧に出て、再開できる。
 
+### セッションを開くリンク
+
+`hc://session/<セッション ID>`（例: `hc://session/claude:13bb9f71-9127-4f73-b4b4-af4545fe89c4`）を開くと、
+Android アプリと Mac UI がそのセッションを表示する。ID の `:` はそのままでも `%3A` でもよく、クエリとフラグメントは無視する。
+開く先はアプリが今つないでいる Gateway で、Gateway の指定は含まない。リンクは画面を切り替えるだけで、送信などの操作はしない。
+`herdr-companion://` は Gateway Manager（`gateway/start`）とペアリング QR のもので、セッションは開かない。
+Linux の `.deb` はこのリンクを登録しない。
+
+```bash
+open 'hc://session/claude:13bb9f71-9127-4f73-b4b4-af4545fe89c4'                                   # Mac
+adb shell am start -a android.intent.action.VIEW -d 'hc://session/claude:13bb9f71-9127-4f73-b4b4-af4545fe89c4'  # Android
+```
+
 ### 実行の仕組み
 
 Gateway が動かすセッションは、Claude Code なら Agent SDK のサイドカー、Codex なら Gateway 自身の

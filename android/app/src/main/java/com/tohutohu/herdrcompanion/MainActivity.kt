@@ -10,6 +10,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import com.tohutohu.herdrcompanion.data.SessionLink
 import com.tohutohu.herdrcompanion.push.Notifications
 import com.tohutohu.herdrcompanion.ui.AppNavigation
 import com.tohutohu.herdrcompanion.ui.HerdrTheme
@@ -18,7 +19,7 @@ import com.tohutohu.herdrcompanion.ui.SettingsRoute
 import kotlinx.coroutines.flow.MutableStateFlow
 
 class MainActivity : ComponentActivity() {
-    /** Session to open, set from notification taps. */
+    /** Session to open, set from notification taps and `hc://session/<id>` links. */
     private val pendingSession = MutableStateFlow<String?>(null)
     /** Resident task to open, set from notification taps. */
     private val pendingResident = MutableStateFlow<String?>(null)
@@ -63,6 +64,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIntent(intent: Intent?) {
+        if (intent?.action == Intent.ACTION_VIEW) {
+            // Any app or web page can send this, so it does nothing but navigate.
+            val id = intent.dataString?.let(SessionLink::sessionId)
+            intent.data = null
+            if (id != null && container.settings.current.isConfigured) pendingSession.value = id
+            return
+        }
         if (intent?.getStringExtra("connection_id").orEmpty() != container.settings.current.connectionId) return
         intent?.getStringExtra(Notifications.EXTRA_RESIDENT_TASK)?.let { task ->
             intent.removeExtra(Notifications.EXTRA_RESIDENT_TASK)

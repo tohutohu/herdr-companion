@@ -81,6 +81,16 @@ compose.desktop {
                 bundleID = "com.tohutohu.herdrcompanion.desktop"
                 minimumSystemVersion = "13.0"
                 iconFile.set(rootProject.projectDir.parentFile.resolve("macos/assets/Herdr.icns"))
+                // hc://session/<id> opens a session. `herdr-companion://` belongs to the Gateway Manager.
+                infoPlist {
+                    extraKeysRawXml = """
+                        <key>CFBundleURLTypes</key>
+                        <array><dict>
+                            <key>CFBundleURLName</key><string>com.tohutohu.herdrcompanion.desktop.session</string>
+                            <key>CFBundleURLSchemes</key><array><string>hc</string></array>
+                        </dict></array>
+                    """.trimIndent()
+                }
 
                 val signingIdentity = providers.gradleProperty("compose.desktop.mac.signing.identity")
                     .orElse(providers.environmentVariable("MACOS_SIGNING_IDENTITY"))

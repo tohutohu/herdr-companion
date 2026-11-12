@@ -169,6 +169,11 @@ fun main() {
             }
             LaunchedEffect(appState) {
                 appState.restoreLayout(DesktopPreferences.loadLayout(), currentScreenBounds())
+                // After the restore, so a link that launched the app is not replaced by the saved layout.
+                installSessionLinkHandler { id ->
+                    windowState.isMinimized = false
+                    appState.openSession(id)
+                }
             }
             val residentState = remember { DesktopResidentState({ connectionSource.current.settings }, http).also { it.start() } }
             val tearOff = remember { DesktopTearOff(appState) }
