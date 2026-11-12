@@ -89,6 +89,16 @@ data class SessionsResponse(
     val nextOffset: Int? = null,
 )
 
+/** `GET /v1/sessions/search`: sessions that hold every word of the query, newest first. */
+@Serializable
+data class SessionSearchResponse(
+    val sessions: List<SessionDto>,
+    /** How many more matched than the limit let through. */
+    val more: Int = 0,
+    /** The gateway is still reading sessions, so some may be missing. */
+    val indexing: Boolean = false,
+)
+
 @Serializable
 data class ArchiveSessionsRequest(val ids: List<String>)
 

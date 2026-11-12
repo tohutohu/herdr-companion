@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.tohutohu.herdrcompanion.data.Message
 import com.tohutohu.herdrcompanion.data.SendState
+import com.tohutohu.herdrcompanion.data.api.SessionDto
 import com.tohutohu.herdrcompanion.data.api.GatewayApi
 import com.tohutohu.herdrcompanion.data.api.GatewayException
 import com.tohutohu.herdrcompanion.data.api.InteractionResponseDto
@@ -24,6 +25,7 @@ import com.tohutohu.herdrcompanion.ui.detail.SessionDetailUiState
 import com.tohutohu.herdrcompanion.ui.detail.SessionSettingsUiState
 import com.tohutohu.herdrcompanion.ui.detail.pendingInteractionIds
 import com.tohutohu.herdrcompanion.ui.detail.reloadNotice
+import com.tohutohu.herdrcompanion.ui.sessions.ArchivedSessionSearch
 import com.tohutohu.herdrcompanion.ui.sessions.ArchivedSessionsPager
 import com.tohutohu.herdrcompanion.ui.sessions.SessionListItemUiState
 import com.tohutohu.herdrcompanion.ui.sessions.SessionRef
@@ -101,6 +103,13 @@ class DesktopAppState(
     private var detailsBySession by mutableStateOf<Map<String, SessionDetailUiState>>(emptyMap())
     private var previousStatuses = emptyMap<String, String>()
     private val archivedPager = ArchivedSessionsPager { offset, limit -> repository.archivedSessions(offset, limit) }
+
+    /** The gateway's search of the archive, for the query typed while browsing it. */
+    val archivedSearch = ArchivedSessionSearch { repository.searchArchivedSessions(it) }
+
+    /** Grows when archived sessions were reloaded, so a search of them is asked again. */
+    var archivedRevision by mutableStateOf(0)
+        private set
 
     var connection by mutableStateOf(connectionSource.current)
         private set
@@ -252,6 +261,7 @@ class DesktopAppState(
                 archivedPager.load(keepLoaded)
                 archivedError = null
                 updateArchivedRows()
+                archivedRevision++
             } catch (cancel: CancellationException) {
                 throw cancel
             } catch (error: Exception) {
@@ -270,8 +280,13 @@ class DesktopAppState(
     }
 
     private fun updateArchivedRows() {
+        archivedSessions = archivedRows(archivedPager.sessions.orEmpty())
+    }
+
+    /** List rows for archived sessions, such as the ones a search found. */
+    fun archivedRows(sessions: List<SessionDto>): List<SessionListItemUiState> {
         val open = shownSessionIds().toSet()
-        archivedSessions = archivedPager.sessions.orEmpty().map { row ->
+        return sessions.map { row ->
             SessionListItemUiState(
                 session = row.toUiModel(),
                 relativeUpdatedAt = relativeTime(row.updatedAt),

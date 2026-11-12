@@ -149,6 +149,10 @@ class SessionRepository(
 
     suspend fun archivedSessions(offset: Int, limit: Int): SessionsResponse = api.archivedSessions(offset, limit)
 
+    /** Null when the gateway cannot search. */
+    suspend fun searchArchivedSessions(query: String): List<SessionDto>? =
+        api.searchArchivedSessions(query)?.sessions
+
     suspend fun archive(sessionId: String) = archive(listOf(sessionId))
 
     /** Returns the gateway's warnings, e.g. a worktree kept because it has changes. */

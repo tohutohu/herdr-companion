@@ -107,6 +107,17 @@ class GatewayApi(
         get(url("v1", "sessions", query = mapOf("archived" to "true", "offset" to "$offset", "limit" to "$limit")))
 
     /**
+     * Archived sessions whose list fields (title, project, folder, id, last
+     * message) hold every word of [query], newest first and at most [limit].
+     * Null from a gateway that cannot search: it answers 404.
+     */
+    suspend fun searchArchivedSessions(query: String, limit: Int = 200): SessionSearchResponse? = try {
+        get(url("v1", "sessions", "search", query = mapOf("q" to query, "scope" to "archived", "limit" to "$limit")))
+    } catch (error: GatewayException) {
+        if (error.code == 404) null else throw error
+    }
+
+    /**
      * Archiving a running session stops its agent and removes the worktree it
      * ran in; [SessionDto.warning] says why one was kept.
      */

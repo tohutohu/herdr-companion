@@ -212,6 +212,21 @@ class GatewayApiTest {
     }
 
     @Test
+    fun `アーカイブ済みの検索をGatewayに問い合わせ検索のないGatewayではnullを返す`() = runBlocking {
+        val session = """{"id":"claude:s1","provider":"claude","status":"offline","updatedAt":"2026-09-17T10:00:00Z","archived":true,"match":{"field":"cwd","snippet":"/w/app"}}"""
+        server.enqueue(MockResponse.Builder().body("""{"sessions":[$session],"more":2,"indexing":true}""").build())
+        val found = api.searchArchivedSessions("login bug")!!
+        assertEquals("/v1/sessions/search?q=login%20bug&scope=archived&limit=200", server.takeRequest().target)
+        assertEquals("claude:s1", found.sessions.single().id)
+        assertEquals(2, found.more)
+        assertTrue(found.indexing)
+
+        server.enqueue(MockResponse.Builder().code(404).body("""{"error":"session not found"}""").build())
+        assertEquals(null, api.searchArchivedSessions("login"))
+        assertEquals("/v1/sessions/search?q=login&scope=archived&limit=200", server.takeRequest().target)
+    }
+
+    @Test
     fun `アーカイブ一覧の取得とアーカイブ解除と再開のリクエストを送る`() = runBlocking {
         val session = """{"id":"claude:s1","provider":"claude","status":"offline","updatedAt":"2026-09-17T10:00:00Z","archived":true}"""
         server.enqueue(MockResponse.Builder().body("""{"sessions":[$session],"nextOffset":30}""").build())

@@ -13,6 +13,10 @@ class DesktopGatewayRepository(private val api: GatewayApi) {
 
     suspend fun archivedSessions(offset: Int, limit: Int) = api.archivedSessions(offset, limit)
 
+    /** Null when the gateway cannot search. */
+    suspend fun searchArchivedSessions(query: String): List<SessionDto>? =
+        api.searchArchivedSessions(query)?.sessions
+
     suspend fun messages(id: String, after: String? = null): List<MessageDto> =
         api.messages(id, after).messages
 

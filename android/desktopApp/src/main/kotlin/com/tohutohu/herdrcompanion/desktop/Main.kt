@@ -265,16 +265,28 @@ private fun FrameWindowScope.DesktopShell(
     var updateDialogOpen by remember { mutableStateOf(false) }
     var splitAreaInWindow by remember { mutableStateOf<Rect?>(null) }
     val searchFocusRequester = remember { FocusRequester() }
-    val listed = if (state.showingArchived) state.archivedSessions else state.sessions
-    val sessions = listed.filterDesktopSessions(query).map { it.copy(color = state.sessionColors[it.session.id]) }
+    // The gateway searches the archive; until it answers, and when it cannot,
+    // the pages loaded so far are filtered here.
+    val foundArchived = if (state.showingArchived) state.archivedSearch.resultsFor(query) else null
+    val listed = when {
+        foundArchived != null -> remember(foundArchived, state.openSessionIds) { state.archivedRows(foundArchived) }
+        state.showingArchived -> state.archivedSessions.filterDesktopSessions(query)
+        else -> state.sessions.filterDesktopSessions(query)
+    }
+    val sessions = listed.map { it.copy(color = state.sessionColors[it.session.id]) }
     val highlightedId = if (searchFocused) sessions.getOrNull(highlightedIndex)?.session?.id else null
 
     LaunchedEffect(sessions.size, query) {
         highlightedIndex = highlightedIndex.coerceIn(0, (sessions.size - 1).coerceAtLeast(0))
     }
-    // A search covers every archived session, so it loads the remaining pages.
-    LaunchedEffect(state.showingArchived, query, state.archivedSessions.size, state.archivedHasMore) {
-        if (state.showingArchived && query.isNotBlank()) state.loadMoreArchived()
+    LaunchedEffect(state.showingArchived, query, state.archivedRevision) {
+        if (state.showingArchived) state.archivedSearch.search(query)
+    }
+    // A search covers every archived session: the gateway's does, and without
+    // it the remaining pages are loaded.
+    val archivedNeedsAllPages = state.archivedSearch.needsAllPages(query)
+    LaunchedEffect(state.showingArchived, query, archivedNeedsAllPages, state.archivedSessions.size, state.archivedHasMore) {
+        if (state.showingArchived && query.isNotBlank() && archivedNeedsAllPages) state.loadMoreArchived()
     }
 
     fun focusSearch() {
@@ -470,7 +482,7 @@ private fun FrameWindowScope.DesktopShell(
                                     emptyMessage = "No archived sessions. Right-click a session to archive it.",
                                     busySessionIds = state.busySessionIds,
                                     engagedSessionIds = state.busySessionIds,
-                                    hasMore = state.archivedHasMore,
+                                    hasMore = foundArchived == null && state.archivedHasMore,
                                 )
                             } else SessionListUiState(
                                 sessions = sessions.map { item ->

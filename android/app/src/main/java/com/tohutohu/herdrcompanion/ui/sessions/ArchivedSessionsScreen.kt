@@ -28,6 +28,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -54,7 +55,8 @@ import com.tohutohu.herdrcompanion.ui.exceptBottom
 
 /**
  * Archived sessions, read directly from the gateway (not cached) one page at a
- * time as the list scrolls; searching loads the rest. Swipe a session sideways
+ * time as the list scrolls. A search is answered by the gateway; one that
+ * cannot search has the rest of the pages loaded. Swipe a session sideways
  * to unarchive it, or long press to select several and unarchive or resume
  * from the selection bar.
  */
@@ -99,18 +101,32 @@ fun ArchivedSessionsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
         }
     }
 
-    val actions = rememberSessionActions(snackbar = snackbar, onChanged = { load(keepLoaded = true) })
+    val search = remember(repo) { ArchivedSessionSearch { repo.searchArchivedSessions(it) } }
+    // Unarchiving or resuming a found session changes what the search finds.
+    var searchRevision by remember { mutableIntStateOf(0) }
+    val actions = rememberSessionActions(snackbar = snackbar, onChanged = {
+        load(keepLoaded = true)
+        searchRevision++
+    })
     actions.Dialogs()
     LaunchedEffect(Unit) { load(keepLoaded = false) }
+    LaunchedEffect(query, searchRevision) { search.search(query) }
 
-    val allRows = remember(sessions, colors) {
+    // Until the gateway answers, the pages loaded so far are filtered here.
+    val found = search.resultsFor(query)
+    val shown = found ?: sessions
+    val allRows = remember(shown, colors) {
         val now = System.currentTimeMillis()
-        sessions.orEmpty().map {
+        shown.orEmpty().map {
             val entity = it.toEntity(now, listed = false)
             SessionListItemUiState(entity.toUiModel(), DateUtils.getRelativeTimeSpanString(entity.updatedAt).toString(), color = colors[entity.id])
         }
     }
-    val rows = remember(allRows, query) { allRows.filter { it.session.matchesSessionSearch(query) } }
+    val rows = remember(allRows, query, found != null) {
+        if (found != null) allRows else allRows.filter { it.session.matchesSessionSearch(query) }
+    }
+    // More rows may follow: the gateway has not answered and pages remain.
+    val incomplete = found == null && pager.hasMore
     val rowsResized = pausePlacementOnChange(rows) { a, b -> changedInPlace(a, b) { it.session.id } }
     val listState = rememberLazyListState()
     val nearEnd by remember {
@@ -120,9 +136,11 @@ fun ArchivedSessionsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
         }
     }
     val searching = query.isNotBlank()
-    // A search covers every archived session, so it loads the remaining pages.
-    LaunchedEffect(nearEnd, searching, pager.nextOffset) {
-        if (nearEnd || searching) loadMore()
+    // A search covers every archived session: the gateway's does, and without
+    // it the remaining pages are loaded.
+    val needsAllPages = search.needsAllPages(query)
+    LaunchedEffect(nearEnd, searching, needsAllPages, pager.nextOffset) {
+        if (if (searching) needsAllPages else nearEnd) loadMore()
     }
     val selection = rememberSessionSelection()
     val refs = remember(rows) { rows.map { it.session.toSessionRef() } }
@@ -184,6 +202,7 @@ fun ArchivedSessionsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
                 scope.launch {
                     refreshing = true
                     load(keepLoaded = false)
+                    searchRevision++
                     refreshing = false
                 }
             },
@@ -196,7 +215,7 @@ fun ArchivedSessionsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
                             Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.animateItem().padding(16.dp))
                         }
                     }
-                    if (sessions != null && rows.isEmpty() && !pager.hasMore) {
+                    if (sessions != null && rows.isEmpty() && !incomplete) {
                         item(key = "empty") {
                             Text(
                                 if (query.isBlank()) {
@@ -220,7 +239,7 @@ fun ArchivedSessionsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
                             onUnarchive = actions::unarchive,
                         )
                     }
-                    if (pager.hasMore) {
+                    if (incomplete) {
                         item(key = "more") {
                             Box(Modifier.animateItem().fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
                                 CircularProgressIndicator(Modifier.size(24.dp))
