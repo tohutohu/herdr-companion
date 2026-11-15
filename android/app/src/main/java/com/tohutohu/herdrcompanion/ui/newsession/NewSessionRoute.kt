@@ -47,6 +47,7 @@ fun NewSessionRoute(
     val api = container.api
     val starts = container.sessionStarts
     val shortcutStore = container.directoryShortcuts
+    val favoriteDirectories = container.favoriteDirectories
     val presetStore = container.agentPresets
     val shortcuts by shortcutStore.shortcuts.collectAsState(initial = null)
     val presets by presetStore.presets.collectAsState(initial = null)
@@ -136,6 +137,29 @@ fun NewSessionRoute(
         if (directoryRestored) return@LaunchedEffect
         directoryRestored = true
         load(path.ifEmpty { lastUsedDirectory(loaded) })
+    }
+
+    // The cached favorites show at once; the gateway's list replaces them.
+    LaunchedEffect(Unit) {
+        try {
+            favoriteDirectories.refresh()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // The cache stays; the folder listing reports an unreachable gateway.
+        }
+    }
+
+    fun changeFavorites(change: suspend () -> Unit) {
+        scope.launch {
+            try {
+                change()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                error = "Could not change favorites: ${e.message}"
+            }
+        }
     }
 
     LaunchedEffect(presets) {
@@ -235,10 +259,10 @@ fun NewSessionRoute(
                     mode = action.preset.mode
                 }
                 is NewSessionAction.ReorderPresets -> scope.launch { presetStore.setOrder(action.presets) }
-                is NewSessionAction.ReorderFavoriteDirectories -> scope.launch { shortcutStore.setFavoriteOrder(action.paths) }
+                is NewSessionAction.ReorderFavoriteDirectories -> changeFavorites { favoriteDirectories.reorder(action.paths) }
                 NewSessionAction.CustomizeAgent -> showPicker = true
                 NewSessionAction.ToggleFavorite -> scope.launch { presetStore.toggle(current) }
-                NewSessionAction.ToggleFavoriteDirectory -> scope.launch { shortcutStore.toggleFavorite(path) }
+                NewSessionAction.ToggleFavoriteDirectory -> changeFavorites { favoriteDirectories.toggle(path) }
                 NewSessionAction.ToggleWorktree -> worktree = !worktree
                 is NewSessionAction.SetTranslation -> translation = action.enabled
                 is NewSessionAction.OpenDirectory -> scope.launch { load(action.path) }

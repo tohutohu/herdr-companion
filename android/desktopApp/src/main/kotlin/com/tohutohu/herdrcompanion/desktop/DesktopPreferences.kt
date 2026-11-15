@@ -141,15 +141,21 @@ object DesktopPreferences {
         store.putFloat(SIDEBAR_KEY, width.coerceIn(MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH))
     }
 
-    /** New-session shortcuts are local Desktop preferences, not Gateway data. */
+    /**
+     * Recent folders are local Desktop preferences. The favorites are the
+     * Gateway's; this keeps the last list it gave ([FavoriteDirectoriesSync]).
+     */
     fun loadDirectoryShortcuts(): DirectoryShortcuts = DirectoryShortcuts(
         favorites = decodeLines(store.get(DIRECTORY_FAVORITES_KEY, null)),
         recents = decodeLines(store.get(DIRECTORY_RECENTS_KEY, null)),
     )
 
-    fun saveDirectoryShortcuts(shortcuts: DirectoryShortcuts) {
-        store.put(DIRECTORY_FAVORITES_KEY, encodeLines(shortcuts.favorites))
-        store.put(DIRECTORY_RECENTS_KEY, encodeLines(shortcuts.recents))
+    fun saveDirectoryFavorites(paths: List<String>) {
+        store.put(DIRECTORY_FAVORITES_KEY, encodeLines(paths))
+    }
+
+    fun saveDirectoryRecents(paths: List<String>) {
+        store.put(DIRECTORY_RECENTS_KEY, encodeLines(paths))
     }
 
     fun loadAgentPresets(): AgentPresets = decodeAgentPresets(store.get(AGENT_PRESETS_KEY, null))

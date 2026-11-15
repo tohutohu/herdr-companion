@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 private val Context.shortcutStore by preferencesDataStore("directory_shortcuts")
@@ -20,9 +21,16 @@ class DirectoryShortcutsStore(private val context: Context) {
 
     suspend fun recordUsed(path: String) = update(recentsKey) { pushRecent(it, path) }
 
-    suspend fun toggleFavorite(path: String) = update(favoritesKey) { toggleFavorite(it, path) }
-
-    suspend fun setFavoriteOrder(favorites: List<String>) = update(favoritesKey) { favorites }
+    /**
+     * The favorites are the gateway's ([FavoriteDirectoriesSync]); this store
+     * keeps the last list it gave, so New Session shows them at once.
+     */
+    val favoritesCache = object : FavoriteDirectoriesSync.Cache {
+        override suspend fun read(): List<String> = context.shortcutStore.data.first().list(favoritesKey)
+        override suspend fun write(paths: List<String>) {
+            update(favoritesKey) { paths }
+        }
+    }
 
     private suspend fun update(key: Preferences.Key<String>, f: (List<String>) -> List<String>) {
         context.shortcutStore.edit { it[key] = f(it.list(key)).joinToString("\n") }

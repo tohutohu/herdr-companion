@@ -8,6 +8,7 @@ import coil3.SingletonImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import com.tohutohu.herdrcompanion.data.AgentPresetsStore
 import com.tohutohu.herdrcompanion.data.DirectoryShortcutsStore
+import com.tohutohu.herdrcompanion.data.FavoriteDirectoriesSync
 import com.tohutohu.herdrcompanion.data.FileDownloads
 import com.tohutohu.herdrcompanion.data.Outbox
 import com.tohutohu.herdrcompanion.data.SessionRepository
@@ -78,6 +79,7 @@ class AppContainer(private val app: Application) {
         .build()
 
     val api = GatewayApi(baseHttp) { settings.current }
+    val favoriteDirectories = FavoriteDirectoriesSync(api, directoryShortcuts.favoritesCache)
     /** btw conversations, kept while the app runs. */
     val sideQuestions = SideQuestions(scope) { id, question, history -> api.sideQuestion(id, question, history) }
     val db = AppDatabase.create(app)

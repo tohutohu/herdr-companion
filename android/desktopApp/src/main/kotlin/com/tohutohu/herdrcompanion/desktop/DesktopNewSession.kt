@@ -32,9 +32,9 @@ import androidx.compose.ui.window.DialogModalityType
 import androidx.compose.ui.window.DialogWindow
 import androidx.compose.ui.window.rememberDialogState
 import com.tohutohu.herdrcompanion.data.AgentPreset
+import com.tohutohu.herdrcompanion.data.FavoriteDirectoriesSync
 import com.tohutohu.herdrcompanion.data.lastUsedDirectory
 import com.tohutohu.herdrcompanion.data.pushRecent
-import com.tohutohu.herdrcompanion.data.toggleFavorite
 import com.tohutohu.herdrcompanion.data.togglePreset
 import com.tohutohu.herdrcompanion.data.api.DirListingDto
 import com.tohutohu.herdrcompanion.data.api.GatewayApi
@@ -66,6 +66,18 @@ fun DesktopNewSessionWindow(
     val scope = rememberCoroutineScope()
     val promptFocusRequester = remember { FocusRequester() }
     var shortcuts by remember { mutableStateOf(DesktopPreferences.loadDirectoryShortcuts()) }
+    val favoriteDirectories = remember(api) {
+        FavoriteDirectoriesSync(
+            api,
+            object : FavoriteDirectoriesSync.Cache {
+                override suspend fun read() = DesktopPreferences.loadDirectoryShortcuts().favorites
+                override suspend fun write(paths: List<String>) {
+                    DesktopPreferences.saveDirectoryFavorites(paths)
+                    shortcuts = shortcuts.copy(favorites = paths)
+                }
+            },
+        )
+    }
     var presets by remember { mutableStateOf(DesktopPreferences.loadAgentPresets()) }
     var provider by rememberSaveable { mutableStateOf("claude") }
     var path by rememberSaveable { mutableStateOf("") }
@@ -128,7 +140,7 @@ fun DesktopNewSessionWindow(
         // Match Android: remember what was actually started, including the
         // last-used selection even when it is not one of the favorites.
         shortcuts = shortcuts.copy(recents = pushRecent(shortcuts.recents, request.cwd))
-        DesktopPreferences.saveDirectoryShortcuts(shortcuts)
+        DesktopPreferences.saveDirectoryRecents(shortcuts.recents)
         presets = presets.copy(lastUsed = preset, lastWorktree = request.worktree, lastTranslation = request.translation == true)
         DesktopPreferences.saveAgentPresets(presets)
         scope.launch {
@@ -160,6 +172,31 @@ fun DesktopNewSessionWindow(
                 onError(mapped.message)
             } finally {
                 starting = false
+            }
+        }
+    }
+
+    // The cached favorites show at once; the Gateway's list replaces them.
+    LaunchedEffect(favoriteDirectories) {
+        try {
+            favoriteDirectories.refresh()
+        } catch (cause: CancellationException) {
+            throw cause
+        } catch (_: Exception) {
+            // The cache stays; the folder listing reports an unreachable Gateway.
+        }
+    }
+
+    fun changeFavorites(change: suspend () -> Unit) {
+        scope.launch {
+            try {
+                change()
+            } catch (cause: CancellationException) {
+                throw cause
+            } catch (cause: Exception) {
+                val mapped = cause.toDesktopGatewayError()
+                error = mapped.message
+                onError(mapped.message)
             }
         }
     }
@@ -363,18 +400,14 @@ fun DesktopNewSessionWindow(
                                 presets = presets.copy(presets = action.presets)
                                 DesktopPreferences.saveAgentPresets(presets)
                             }
-                            is NewSessionAction.ReorderFavoriteDirectories -> {
-                                shortcuts = shortcuts.copy(favorites = action.paths)
-                                DesktopPreferences.saveDirectoryShortcuts(shortcuts)
-                            }
+                            is NewSessionAction.ReorderFavoriteDirectories ->
+                                changeFavorites { favoriteDirectories.reorder(action.paths) }
                             NewSessionAction.ToggleFavorite -> {
                                 presets = presets.copy(presets = togglePreset(presets.presets, currentPreset))
                                 DesktopPreferences.saveAgentPresets(presets)
                             }
-                            NewSessionAction.ToggleFavoriteDirectory -> {
-                                shortcuts = shortcuts.copy(favorites = toggleFavorite(shortcuts.favorites, path))
-                                DesktopPreferences.saveDirectoryShortcuts(shortcuts)
-                            }
+                            NewSessionAction.ToggleFavoriteDirectory ->
+                                changeFavorites { favoriteDirectories.toggle(path) }
                             NewSessionAction.CustomizeAgent -> showPicker = true
                             NewSessionAction.ToggleWorktree -> worktree = !worktree
                             is NewSessionAction.SetTranslation -> translation = action.enabled

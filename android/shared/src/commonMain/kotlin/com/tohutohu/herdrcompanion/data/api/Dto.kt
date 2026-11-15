@@ -296,6 +296,16 @@ data class MkdirRequest(val parent: String, val name: String)
 @Serializable
 data class MkdirResponse(val path: String)
 
+/** The favorite folders the gateway keeps, in the user's order. [saved] is false until anyone wrote them. */
+@Serializable
+data class FavoriteDirectoriesDto(val paths: List<String> = emptyList(), val saved: Boolean = false)
+
+@Serializable
+data class FavoriteDirectoriesRequest(val paths: List<String>)
+
+@Serializable
+data class AddFavoriteDirectoryRequest(val path: String, val position: Int? = null)
+
 @Serializable
 data class StartSessionRequest(
     val provider: String,

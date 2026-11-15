@@ -377,6 +377,33 @@ class GatewayApi(
         return json.decodeFromString<MkdirResponse>(body).path
     }
 
+    /** The gateway's favorite folders; null from a gateway that keeps none (404). */
+    suspend fun favoriteDirectories(): FavoriteDirectoriesDto? = try {
+        get(favoritesUrl())
+    } catch (error: GatewayException) {
+        if (error.code == 404) null else throw error
+    }
+
+    /** Replaces the list, as a reorder does. */
+    suspend fun setFavoriteDirectories(paths: List<String>): FavoriteDirectoriesDto = json.decodeFromString(
+        execute(request(favoritesUrl()).put(json.encodeToString(FavoriteDirectoriesRequest(paths)).toRequestBody(jsonType)).build()),
+    )
+
+    suspend fun addFavoriteDirectory(path: String, position: Int? = null): FavoriteDirectoriesDto = json.decodeFromString(
+        post(favoritesUrl(), json.encodeToString(AddFavoriteDirectoryRequest(path, position)).toRequestBody(jsonType)),
+    )
+
+    suspend fun removeFavoriteDirectory(path: String): FavoriteDirectoriesDto = json.decodeFromString(
+        execute(request(url("v1", "directories", "favorites", query = mapOf("path" to path))).delete().build()),
+    )
+
+    /** Moves the device's own favorites to the gateway; it takes them only while it never saved a list. */
+    suspend fun importFavoriteDirectories(paths: List<String>): FavoriteDirectoriesDto = json.decodeFromString(
+        post(url("v1", "directories", "favorites", "import"), json.encodeToString(FavoriteDirectoriesRequest(paths)).toRequestBody(jsonType)),
+    )
+
+    private fun favoritesUrl() = url("v1", "directories", "favorites")
+
     suspend fun checkDirectory(cwd: String, prompt: String): DirectoryCheckResult = withContext(Dispatchers.IO) {
         val body = json.encodeToString(DirectoryCheckRequest(cwd, prompt)).toRequestBody(jsonType)
         val req = request(url("v1", "directories", "check")).post(body).build()
