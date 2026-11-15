@@ -27,6 +27,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/launcher"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/logging"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/notes"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/notifications"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/claude"
@@ -176,6 +177,10 @@ func serve(args []string) error {
 		return err
 	}
 	svc.Archive = archived
+	sessionNotes, err := notes.Open(filepath.Join(config.StateDir(), "notes.json"))
+	if err != nil {
+		return err
+	}
 	offlineWindow := time.Duration(cfg.OfflineSessionDays) * 24 * time.Hour
 	direct, err := runtime.New(filepath.Join(config.StateDir(), "direct-sessions.json"), offlineWindow, claudeProvider, codexProvider, dshProvider)
 	if err != nil {
@@ -268,7 +273,7 @@ func serve(args []string) error {
 	}
 	srv := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           (&api.Server{Search: searchIndex, Translation: translator, MessageDelivery: delivery, AgentUpdates: agentupdate.New(ctx, cfg.CodexBinary), Sessions: svc, Uploads: up, Config: store, Sink: sink, Launcher: launch, Archive: archived, Usage: limits, DirectoryCheck: dirCheck, Direct: direct, Resident: residents, Listen: cfg.Listen}).Handler(),
+		Handler:           (&api.Server{Search: searchIndex, Translation: translator, MessageDelivery: delivery, AgentUpdates: agentupdate.New(ctx, cfg.CodexBinary), Sessions: svc, Uploads: up, Config: store, Sink: sink, Launcher: launch, Archive: archived, Usage: limits, DirectoryCheck: dirCheck, Direct: direct, Resident: residents, Notes: sessionNotes, Listen: cfg.Listen}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	shutdownDone := make(chan struct{})

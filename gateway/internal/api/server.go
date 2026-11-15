@@ -29,6 +29,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/forward"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/launcher"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/notes"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/resident"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/runtime"
@@ -60,6 +61,8 @@ type Server struct {
 	// Resident owns the resident tasks; nil leaves /v1/resident out (and
 	// /v1/capabilities says so).
 	Resident *resident.Service
+	// Notes are the notes left on sessions; nil leaves /v1/notes out.
+	Notes *notes.Store
 	// Listen is the address the server listens on, for telling clients behind
 	// a tunnel where to reach the localhost proxy directly.
 	Listen string
@@ -114,6 +117,7 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("GET /v1/usage", s.getUsage)
 	api.HandleFunc("POST /v1/usage/refresh", s.refreshUsage)
 	s.residentRoutes(api)
+	s.noteRoutes(api)
 	api.HandleFunc("POST /v1/devices", s.registerDevice)
 	api.HandleFunc("DELETE /v1/devices", s.unregisterDevice)
 	mux.Handle("/v1/", s.auth(api))

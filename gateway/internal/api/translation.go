@@ -129,7 +129,7 @@ func (s *Server) translatedSession(session model.Session) model.Session {
 		enabled = *mode
 	}
 	session.Translation = &enabled
-	return session
+	return s.withNotes(session)
 }
 func (s *Server) translatedSessions(list []model.Session) []model.Session {
 	out := append([]model.Session{}, list...)

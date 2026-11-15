@@ -66,6 +66,25 @@ type Session struct {
 	// Status says: the status follows the turn, and a task such as a dev
 	// server may never end.
 	Background []BackgroundTask `json:"background,omitempty"`
+	// Notes are what people and watching agents left on the session for
+	// whoever looks after it next (docs/api.md#メモ). The session's own
+	// agent does not receive them.
+	Notes []Note `json:"notes,omitempty"`
+}
+
+// Note is a short instruction left on a session for the agents that watch
+// it, e.g. "answer review comments on its PR".
+type Note struct {
+	ID        string `json:"id"`
+	SessionID string `json:"sessionId"`
+	Text      string `json:"text"`
+	// Author / UpdatedBy are the session id of the agent that wrote or last
+	// changed the note (empty for a person or an unknown client).
+	Author    string     `json:"author,omitempty"`
+	UpdatedBy string     `json:"updatedBy,omitempty"`
+	CreatedAt time.Time  `json:"createdAt"`
+	UpdatedAt time.Time  `json:"updatedAt"`
+	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
 }
 
 // Kinds of BackgroundTask.
