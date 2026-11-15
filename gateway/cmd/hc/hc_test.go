@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/notes"
 )
 
 // fakeGateway serves the few Gateway endpoints hc uses from memory.
@@ -33,6 +34,8 @@ type fakeGateway struct {
 	replies map[string]any
 	// onList lets a test change state when the session list is read.
 	onList func()
+	// notes, when set, serves the note endpoints and puts notes on sessions.
+	notes *notes.Store
 }
 
 type postedRequest struct {
@@ -52,6 +55,9 @@ func (g *fakeGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(v)
 	}
 	path := r.URL.Path
+	if g.notes != nil && g.serveNotes(w, r) {
+		return
+	}
 	if r.Method == http.MethodPost {
 		var body map[string]any
 		b, _ := io.ReadAll(r.Body)
@@ -77,7 +83,7 @@ func (g *fakeGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if g.onList != nil {
 			g.onList()
 		}
-		writeJSON(map[string]any{"sessions": g.sessions})
+		writeJSON(map[string]any{"sessions": g.withNotes(g.sessions)})
 		return
 	case path == "/v1/sessions/search":
 		if g.search == nil {
@@ -99,7 +105,7 @@ func (g *fakeGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *fakeGateway) find(id string) model.Session {
-	for _, s := range g.sessions {
+	for _, s := range g.withNotes(g.sessions) {
 		if s.ID == id {
 			return s
 		}

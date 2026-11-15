@@ -204,7 +204,10 @@ Gateway が動かすセッションは、プロセスが無い間（Gateway の�
 | GET | `/v1/usage` | 要 | サブスクリプション利用枠（キャッシュ） |
 | POST | `/v1/usage/refresh` | 要 | 利用枠を今すぐ読み直す |
 | POST / DELETE | `/v1/devices` | 要 | FCM トークンの登録／解除 |
-| GET | `/v1/capabilities` | 要 | 対応機能（常駐タスクの有無と版、セッション検索の有無） |
+| GET / POST / DELETE | `/v1/sessions/{id}/notes` | 要 | セッションのメモの一覧／追加／全削除（[下記](#メモ)） |
+| GET | `/v1/notes` | 要 | 全セッションのメモ |
+| GET / PATCH / DELETE | `/v1/notes/{noteId}` | 要 | メモ 1 件の取得／更新／削除 |
+| GET | `/v1/capabilities` | 要 | 対応機能（常駐タスクの有無と版、セッション検索・メモの有無） |
 | * | `/v1/resident/…` | 要 | 常駐タスク（[下記](#常駐タスク)） |
 
 ## ペアリング
@@ -280,6 +283,7 @@ Gateway が動かすセッションは、プロセスが無い間（Gateway の�
 | `error` | `failed` のセッションの理由（プロセスの終了など） |
 | `context` | コンテキストウィンドウの使用量。未報告なら省略 |
 | `cost` | API 定価換算の金額。`estimated: true` はトークン数から Gateway が算出した値 |
+| `notes` | セッションに残されたメモ（[下記](#メモ)）。古い順、無ければ省略 |
 
 ### `GET /v1/sessions`
 
@@ -394,6 +398,53 @@ DELETE: アーカイブを解除し Session を返す。
 ターミナルや 1.x の Herdr のペインで始めたセッションも再開できる（そこでまだ動いていれば先に終了させる。2 つのプロセスが
 同じ履歴に書き込むため）。ボディは `{}` か省略（1.x の `trust` / `backend` は無視する）。
 `201` で StartResult（`sessionId`）。プロセスが動いていれば `409`。
+
+## メモ
+
+セッションに残す書き置き。セッションを見張るエージェント（`hc wait` で監視するもの、常駐タスクなど）や人に向けて、
+「PR にレビューが来たら対応させて」「待機させておく」「マージされたらアーカイブしてよい」のような扱いを伝える。
+Gateway が状態ディレクトリの `notes.json` に保存し、どのクライアントからも同じものが見える。
+**セッション自身のエージェントには送られない**（伝えるならメッセージを送る）。
+対応は `GET /v1/capabilities` の `notes: true` で分かる。
+
+### Note オブジェクト
+
+```json
+{
+  "id": "n3f9a01c2",
+  "sessionId": "claude:0f3c…",
+  "text": "PRにレビューが来たら対応させて。マージされたらアーカイブしてよい",
+  "author": "claude:5b27…",
+  "updatedBy": "codex:…",
+  "createdAt": "2026-11-15T03:00:00Z",
+  "updatedAt": "2026-11-15T04:00:00Z",
+  "expiresAt": "2026-11-17T03:00:00Z"
+}
+```
+
+- `author` / `updatedBy` は書いた・最後に変えたエージェントのセッション ID（クライアントが申告する。人や不明なら省略）。
+- `expiresAt` を過ぎたメモは消える（一覧にも出ない）。省略なら消えるまで残る。
+- 本文は前後の空白を除いて 1 文字以上 8 KiB 以下、1 セッション 50 件まで。超えると `400`。
+- セッションをアーカイブしてもメモは残る（`GET /v1/notes` の既定の一覧には出ない）。
+- Session オブジェクトの `notes` にも同じものが載る。
+
+### `GET /v1/sessions/{id}/notes` / `POST /v1/sessions/{id}/notes` / `DELETE /v1/sessions/{id}/notes`
+
+GET: `{"notes": [Note, …]}`（古い順）。
+POST: `{"text": "…", "author"?: "claude:…", "expiresAt"?: "RFC 3339"}` で追加し、`201` で Note。
+Gateway が知らないセッションは `404`（アーカイブ済みには付けられる）。
+DELETE: そのセッションのメモをすべて消し、消したものを `{"notes": [...]}` で返す。
+
+### `GET /v1/notes`
+
+アーカイブしていないセッションのメモをすべて、セッションごと・古い順に `{"notes": [Note, …]}`。
+`?archived=true` でアーカイブ済みセッションのメモも含める。
+
+### `GET /v1/notes/{noteId}` / `PATCH /v1/notes/{noteId}` / `DELETE /v1/notes/{noteId}`
+
+PATCH: `{"text"?: "…", "expiresAt"?: "RFC 3339" | null, "author"?: "…"}`。省いた項目は変えない。
+`expiresAt: null`（または `""`）で期限を外す。`author` は `updatedBy` に入る。どちらも無ければ `400`。
+DELETE は消した Note を返す。無いメモは `404`。
 
 ## メッセージ
 
@@ -786,7 +837,7 @@ Run と会話のメッセージには `conversation`（`kept`: 昇格できる�
 ### 対応の判別: `GET /v1/capabilities`
 
 ```json
-{"messageIdempotency": true, "sessionSearch": true, "resident": {"version": 1, "providers": ["claude", "codex", "dsh"], "defaultTimezone": "Asia/Tokyo"}}
+{"messageIdempotency": true, "sessionSearch": true, "notes": true, "resident": {"version": 1, "providers": ["claude", "codex", "dsh"], "defaultTimezone": "Asia/Tokyo"}}
 ```
 
 `resident` がない（または `/v1/capabilities` が 404 の）Gateway は常駐タスクに対応していない。アプリは 404 や通信エラーを

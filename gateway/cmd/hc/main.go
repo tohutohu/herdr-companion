@@ -196,6 +196,7 @@ func (a *app) commands() map[string]func([]string) error {
 		"resume":    a.cmdResume,
 		"usage":     a.cmdUsage,
 		"resident":  a.cmdResident,
+		"note":      a.cmdNote,
 	}
 }
 

@@ -42,3 +42,4 @@ Run は毎回新しい会話で動く。Memory・前回の結果・結果の JSO
 - 定期実行で変化が無ければ、会話にも通知にも出ない。報告が来ないときは `hc resident runs TASK` で確かめる。
 - Run が判断待ちなら `hc resident answer TASK "回答"`。報告の続きを話すなら `hc resident promote RUN` でセッションにする。
 - Gateway の再起動で切れた Run は再送されず `needs_reconciliation` になる。状況を確かめて `hc resident dismiss RUN`。
+- 他のセッションを見張るタスク（PR のコメントを見て対応させるなど）は、指示に「`hc note ls` でセッションごとのメモを読み、書かれた扱い（レビューが来たら対応させる・待機・マージ後はアーカイブ）に従う。対応し終えたメモは `hc note rm`」と書く。セッション側の扱いはタスクの指示ではなくメモで変えられる。

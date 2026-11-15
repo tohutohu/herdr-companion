@@ -186,6 +186,7 @@ func (a *app) cmdList(args []string) error {
 	}
 	for _, s := range list {
 		fmt.Fprintln(a.out, a.sessionLine(s, shorts[s.ID]))
+		noteSummary(a.out, s, "    ")
 	}
 	if hidden > 0 {
 		fmt.Fprintf(a.out, "(+%d offline: hc ls --all)\n", hidden)
@@ -282,6 +283,12 @@ func (a *app) cmdShow(args []string) error {
 		fmt.Fprintf(w, "background (%d, may start a new turn when it ends):\n", len(s.Background))
 		for _, t := range s.Background {
 			fmt.Fprintf(w, "  %-5s %4s  %s\n", t.Kind, age(t.StartedAt), clip(oneLine(t.Description), 100))
+		}
+	}
+	if len(s.Notes) > 0 {
+		fmt.Fprintf(w, "notes (%d, for whoever watches this session; hc note edit / rm NOTE):\n", len(s.Notes))
+		for _, n := range s.Notes {
+			writeNote(w, n, "  ")
 		}
 	}
 	o := renderOpts{short: short, maxChars: max}
@@ -569,6 +576,9 @@ func (a *app) printEvents(w io.Writer, evs []event) {
 			line += " · " + clip(oneLine(s.Title), 50)
 		}
 		fmt.Fprintln(w, line)
+		if ev.Kind != "gone" {
+			noteSummary(w, s, "    ")
+		}
 		if ev.Attention && s.LastMessage != "" && ev.Kind != "gone" && len(ev.Pending) == 0 {
 			fmt.Fprintf(w, "    last: %s\n", clip(oneLine(s.LastMessage), 300))
 		}

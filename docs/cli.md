@@ -21,6 +21,7 @@
 | 待つ | `until` `wait` `changes` |
 | 操作 | `send` `answer` `start` `archive` `resume` |
 | 設定 | `model` `effort` `mode` `interrupt` |
+| メモ | `note`（`ls` `show` `add` `edit` `rm` `clear`） |
 | 常駐 | `resident`（`ls` `show` `create` `update` `preview` `pause` `resume` `run` `runs` `log` `cancel` `dismiss` `promote` `send` `answer` `messages` `memory` `delete`） |
 | その他 | `usage` `guide` `version` |
 
@@ -31,6 +32,26 @@
 - `hc mode ID [MODE]` は巡回、または直接指定。`hc interrupt ID` は実行中のターンだけを止める。
 - `hc resume ID` は停止中（offline）・アーカイブ済みのセッションを、どこで始めたものでも同じ ID のまま新しいプロセスで再開する。Gateway が一覧で動作中と出すセッションはプロセスが止まっていても `hc send` だけで再開する。
 - `hc answer` で答えられない要求（`not supported here`）は、`hc interrupt` でターンを止めて次の指示を送る。
+
+### メモ（`hc note`）
+
+セッションに書き置きを残し、そのセッションを見張るエージェント（`hc wait` で監視するもの、常駐タスク）に扱いを伝える。
+例: 「PR にレビューが来たら対応させて」「ずっと待機させておく」「PR が何事もなくマージされたらアーカイブしてよい」。
+Gateway が保存する（[api.md](api.md#メモ)）ので、どの端末・どのエージェントからも同じメモが見える。セッション自身のエージェントには送られない。
+
+```bash
+hc note add a9b7 "PRにレビューが来たら対応させる。マージされたらアーカイブしてよい"
+hc note add self --ttl 2d "PR #42 を出した。CI が落ちたら直させて"   # 自分のセッションに。--ttl で期限
+hc note ls                     # アーカイブしていない全セッションのメモ（--archived でアーカイブ済みも）
+hc note ls a9b7                # 1 セッション分
+hc note edit n3f9 "ずっと待機させておく"   # NOTE は n+8 桁の ID か一意な前方一致。--ttl / --no-expiry で期限
+hc note rm n3f9                # 対応し終えたら消す。hc note clear ID で全部
+```
+
+- `hc ls` / `show` / `changes` / `wait` / `until` は各セッションの下にメモ（`note n…: …`）を出す。監視役は反応する変化と一緒に指示を読める。
+- 書いたエージェントは `HC_SESSION_ID` などから分かる自分のセッション ID で記録される（`by …`）。
+- メモは指示であってロックではない。対応したら消すか書き換える。
+- メモに対応しない Gateway では「update the Gateway」と出て終了コード 1。
 
 ### 常駐タスク（`hc resident`）
 

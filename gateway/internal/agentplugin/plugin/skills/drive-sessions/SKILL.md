@@ -27,5 +27,6 @@ ID は短い前方一致でよい。並列の起動と合流、全セッショ�
 - 答える前に `hc show` を見る。ユーザーが先にアプリで答えていることがある。
 - ユーザーが操作中のセッションには、頼まれない限り送らない。`hc archive` はエージェントを止めるので、終わった作業にだけ使う。
 - `not supported here` で答えられない質問は、`hc interrupt ID` で止めてから `hc send` で指示し直す。
+- セッションの下に出る `note n…: …` は、ユーザーや他のエージェントが見張り役に残した扱いの指示（「レビューが来たら対応させて」「マージされたらアーカイブしてよい」など）。そのセッションに手を出す前に従う。残すのは `hc note add ID "…"`（自分には `self`）、対応後は `hc note rm NOTE`。メモはそのセッションのエージェントには届かない。
 - 自分自身のセッションへの操作は拒否される。常駐タスクの Run は `hc ls` に出ない。
 - `hc` が無ければ入れる: `curl -fsSL -o ~/.local/bin/hc "https://github.com/tohutohu/herdr-companion/releases/latest/download/hc-darwin-$(uname -m | sed s/x86_64/amd64/)" && chmod +x ~/.local/bin/hc`

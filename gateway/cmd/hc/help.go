@@ -54,6 +54,7 @@ var commandGroups = []struct {
 	{"Wait", []string{"until", "wait", "changes"}},
 	{"Act", []string{"send", "answer", "start", "archive", "resume"}},
 	{"Settings", []string{"model", "effort", "mode", "interrupt"}},
+	{"Notes", []string{"note"}},
 	{"Resident", []string{"resident"}},
 	{"Other", []string{"usage", "guide", "version"}},
 }
@@ -122,6 +123,55 @@ NOTES
 
 EXIT STATUS
   0 ok · 1 refused or failed (stderr says why) · 2 wrong command line
+`},
+	{"note", "notes left on a session for the agents that watch it", `hc note — leave notes on a session for whoever watches it
+
+USE WHEN
+  You want an agent that watches sessions (hc wait, a resident task) to know what to do
+  with one session: "answer review comments on its PR", "leave it waiting",
+  "archive it once the PR is merged without changes". Also to leave yourself such a note:
+  hc note add self "...".
+  Notes are kept by the Gateway, so every client sees them. The session's own agent does
+  not receive them; to tell it something, hc send.
+
+USAGE
+  hc note [ls] [ID] [--archived]      notes of one session, or of every session
+  hc note show NOTE                   one note in full
+  hc note add ID TEXT [--ttl D]       TEXT "-" reads stdin; D like 90m, 12h, 3d
+  hc note edit NOTE [TEXT] [--ttl D | --no-expiry]
+  hc note rm NOTE...                  remove notes
+  hc note clear ID                    remove every note of a session
+
+  ID is a session (hc help ids) or "self" for the session running hc. NOTE is a note id
+  (n + 8 hex) or a unique prefix of it.
+
+FLAGS
+  --archived   (ls) include notes on archived sessions; they are kept, only not listed
+  --ttl D      forget the note D from now
+  --no-expiry  (edit) keep the note until it is removed
+
+OUTPUT
+    a9b7233a idle               2h  claude app · ログイン修正
+      note n3f9a01c2 · 2h ago · by claude:5b27a61d-…
+        PRにレビューが来たら対応させて。マージされたらアーカイブしてよい
+  hc ls, show, changes, wait and until print each session's notes under it
+  ("note n3f9a01c2: …"), so a watcher sees them next to the change it reacts to.
+  The author is the session that ran hc (empty when a person or a plain shell wrote it).
+
+EXAMPLES
+  hc note add a9b7 "PRにレビューが来たら対応させる。マージされたらアーカイブしてよい"
+  hc note add self --ttl 2d "PR #42 を出した。CI が落ちたら直させて"
+  hc note edit n3f9 "ずっと待機させておく。触らない"
+  hc note rm n3f9                     done with it
+
+NOTES
+  - A note is an instruction for watchers, not a lock: two watchers may both act on it.
+    Remove or edit it once it is handled.
+  - Up to 50 notes of up to 8 KiB per session.
+  - A Gateway without notes answers "update the Gateway" (exit 1).
+
+SEE ALSO
+  hc guide (workflow 8), hc help wait
 `},
 	{"ls", "list sessions, one line each (\"!\" = needs you)", `hc ls — list sessions, one line each
 

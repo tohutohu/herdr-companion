@@ -299,6 +299,7 @@ func (a *app) reportUntil(ctx context.Context, rows []untilSession, started time
 			line += "  (not yet)"
 		}
 		fmt.Fprintln(w, line)
+		noteSummary(w, r.Session, "    ")
 		if !r.Reached {
 			continue
 		}
