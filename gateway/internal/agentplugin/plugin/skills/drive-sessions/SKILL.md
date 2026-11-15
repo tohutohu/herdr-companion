@@ -7,7 +7,8 @@ description: このセッションから、この Mac の別の Claude Code / Co
 
 ```bash
 hc ls                                  # 一覧。"!" は回答待ち、"(you)" は自分
-hc start --cwd DIR "指示"               # → started claude:<id>。Codex は --provider codex、軽い作業は --model haiku
+hc fav                                 # ユーザーのお気に入りのプロジェクト（番号・フォルダ名・パス）
+hc start --cwd DIR "指示"               # → started claude:<id>。DIR はお気に入りのフォルダ名でもよい。Codex は --provider codex、軽い作業は --model haiku
 hc until ID --timeout 9m               # 質問・承認・ターン終了・失敗まで待つ
 hc read ID                             # 新着を読む
 hc send ID "次の指示"
@@ -23,7 +24,7 @@ ID は短い前方一致でよい。並列の起動と合流、全セッショ�
 - `hc until` の時間切れは終了コード 3 で、失敗ではない。表示された `continue:` のコマンドで待ち続ける。`hc send` の直後に呼んでよい（着手前の idle を終わりと誤認しない）。
 - `completed` でも裏でサブエージェントやコマンドが動いていることがある。`hc ls` の `[N in background]` が目印で、終わると新しいターンが自動で始まる。結果まで待つなら `hc until ID --for settled`。
 - `hc read` は読むたびに既読位置が進み、同じ内容は二度出ない。全体は `--all`、位置を動かさないなら `--peek`。
-- `--cwd` を省くと今のディレクトリで起動する。別のプロジェクトでは必ず指定する。
+- `--cwd` を省くと今のディレクトリで起動する。別のプロジェクトでは必ず指定する。どのプロジェクトか分からなければ `hc fav` から選ぶ。お気に入りの追加・削除（`hc fav add` / `rm`）はユーザーの一覧を変えるので、頼まれたときだけ。
 - 答える前に `hc show` を見る。ユーザーが先にアプリで答えていることがある。
 - ユーザーが操作中のセッションには、頼まれない限り送らない。`hc archive` はエージェントを止めるので、終わった作業にだけ使う。
 - `not supported here` で答えられない質問は、`hc interrupt ID` で止めてから `hc send` で指示し直す。

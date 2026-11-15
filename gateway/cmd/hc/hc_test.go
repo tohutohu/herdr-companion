@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	favstore "github.com/tohutohu/herdr-android-client/gateway/internal/favorites"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/notes"
 )
@@ -36,6 +37,8 @@ type fakeGateway struct {
 	onList func()
 	// notes, when set, serves the note endpoints and puts notes on sessions.
 	notes *notes.Store
+	// favorites, when set, serves the favorite folder endpoints.
+	favorites *favstore.Store
 }
 
 type postedRequest struct {
@@ -56,6 +59,9 @@ func (g *fakeGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	path := r.URL.Path
 	if g.notes != nil && g.serveNotes(w, r) {
+		return
+	}
+	if g.favorites != nil && g.serveFavorites(w, r) {
 		return
 	}
 	if r.Method == http.MethodPost {

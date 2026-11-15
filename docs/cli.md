@@ -22,6 +22,7 @@
 | 操作 | `send` `answer` `start` `archive` `resume` |
 | 設定 | `model` `effort` `mode` `interrupt` |
 | メモ | `note`（`ls` `show` `add` `edit` `rm` `clear`） |
+| プロジェクト | `fav`（`ls` `add` `rm` `mv`） |
 | 常駐 | `resident`（`ls` `show` `create` `update` `preview` `pause` `resume` `run` `runs` `log` `cancel` `dismiss` `promote` `send` `answer` `messages` `memory` `delete`） |
 | その他 | `usage` `guide` `version` |
 
@@ -53,6 +54,22 @@ hc note rm n3f9                # 対応し終えたら消す。hc note clear ID 
 - 書いたエージェントは `HC_SESSION_ID` などから分かる自分のセッション ID で記録される（`by …`）。
 - メモは指示であってロックではない。対応したら消すか書き換える。
 - メモに対応しない Gateway では「update the Gateway」と出て終了コード 1。
+
+### お気に入りのフォルダ（`hc fav`）
+
+ユーザーがプロジェクトとして使うフォルダのお気に入り。Gateway が並び順ごと保存し（[api.md](api.md#お気に入りのフォルダ)）、
+アプリの新規セッション画面と同じ一覧が出る。エージェントが起動先のプロジェクトを選ぶときに使う。
+
+```bash
+hc fav                          # 1  bot  /Users/…/workspace/bot のように番号・フォルダ名・パス
+hc start --cwd herdr-android-client "…"   # --cwd にお気に入りのフォルダ名（今のディレクトリに同名のフォルダが無いとき）
+hc fav add ~/workspace/new-app --at 1     # 起動できるフォルダ（workspaceRoots の中）だけ。省略で今のディレクトリ、末尾
+hc fav rm 3                     # 番号・一意なフォルダ名・パスで指定
+hc fav mv new-app 2             # 並べ替え
+```
+
+- `hc resident create/update --cwd` も同じくお気に入りのフォルダ名を受け付ける。
+- お気に入りに対応しない Gateway では「update the Gateway」と出て終了コード 1。
 
 ### 常駐タスク（`hc resident`）
 

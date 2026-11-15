@@ -55,6 +55,7 @@ var commandGroups = []struct {
 	{"Act", []string{"send", "answer", "start", "archive", "resume"}},
 	{"Settings", []string{"model", "effort", "mode", "interrupt"}},
 	{"Notes", []string{"note"}},
+	{"Projects", []string{"fav"}},
 	{"Resident", []string{"resident"}},
 	{"Other", []string{"usage", "guide", "version"}},
 }
@@ -175,6 +176,42 @@ NOTES
 
 SEE ALSO
   hc guide (workflow 8), hc help wait
+`},
+	{"fav", "the user's favorite project folders, to pick where to start", `hc fav — the user's favorite project folders
+
+USE WHEN
+  You start a session (hc start) or a resident task and need the folder: the user's
+  favorites are the projects they work in, in the order they put them. The Gateway keeps
+  the list, and the apps show the same one in New Session.
+
+USAGE
+  hc fav [ls]                   the favorites: position, folder name, path
+  hc fav add [DIR] [--at N]     add DIR (default: the current directory) at position N
+                                (default: last); it must be a folder a session can start in
+  hc fav rm FAV...              take favorites out of the list (the folders stay)
+  hc fav mv FAV N               move a favorite to position N (1 = first)
+
+  FAV is a position from hc fav ls, a folder name only one favorite has, or a path.
+
+OUTPUT
+  1  bot                   /Users/me/workspace/bot
+  2  herdr-android-client  /Users/me/workspace/herdr-android-client
+
+EXAMPLES
+  hc fav                                      pick a project
+  hc start --cwd herdr-android-client "..."  --cwd takes a favorite's folder name
+  hc fav add ~/workspace/new-app --at 1
+  hc fav mv new-app 3
+
+NOTES
+  - hc start --cwd and hc resident create/update --cwd take a favorite's folder name when it
+    is not a folder in the current directory.
+  - Ask before changing the list unless the user asked you to: it is theirs, and every
+    device shows it.
+  - A Gateway without favorites answers "update the Gateway" (exit 1).
+
+SEE ALSO
+  hc start, hc resident
 `},
 	{"ls", "list sessions, one line each (\"!\" = needs you)", `hc ls — list sessions, one line each
 
@@ -459,7 +496,8 @@ USAGE
 
 FLAGS
   --cwd DIR      working directory on the Gateway's Mac (default: current directory; required
-                 when hc talks to a Gateway on another machine)
+                 when hc talks to a Gateway on another machine), or the folder name of one of
+                 the user's favorites (hc fav)
   --provider P   claude (default), codex or dsh
   --model M      model id (as in the app); --effort E reasoning effort id
   --mode M       start mode id, e.g. plan
@@ -478,9 +516,10 @@ OUTPUT
 EXAMPLES
   hc start --cwd ~/workspace/app "fix the login bug" --wait --timeout 9m
   hc start --cwd ~/workspace/app --worktree --mode plan - < task.md
+  hc start --cwd herdr-android-client "update the docs"     a favorite (hc fav)
 
 SEE ALSO
-  hc until · hc archive
+  hc until · hc archive · hc fav
 `},
 	{"archive", "stop sessions", `hc archive — stop sessions
 

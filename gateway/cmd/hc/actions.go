@@ -334,7 +334,7 @@ type startResult struct {
 func (a *app) cmdStart(args []string) error {
 	fs := flag.NewFlagSet("start", flag.ContinueOnError)
 	provider := fs.String("provider", "claude", "claude, codex or dsh")
-	cwd := fs.String("cwd", "", "working directory (default: current directory)")
+	cwd := fs.String("cwd", "", "working directory or favorite folder name (default: current directory)")
 	modelID := fs.String("model", "", "model id (see the app or GET /v1/models)")
 	effort := fs.String("effort", "", "reasoning effort id")
 	mode := fs.String("mode", "", "start mode id, e.g. plan")
@@ -352,16 +352,19 @@ func (a *app) cmdStart(args []string) error {
 	if err != nil {
 		return err
 	}
-	dir := *cwd
+	ctx := context.Background()
+	dir, err := a.resolveCwd(ctx, *cwd)
+	if err != nil {
+		return err
+	}
 	if dir == "" {
 		if !a.client.conn.local {
-			return usagef("--cwd is required when the Gateway runs on another machine: give a directory on that machine")
+			return usagef("--cwd is required when the Gateway runs on another machine: give a directory on that machine or a favorite (hc fav ls)")
 		}
 		if dir, err = os.Getwd(); err != nil {
 			return err
 		}
 	}
-	ctx := context.Background()
 	uploads, err := a.uploadAll(ctx, files)
 	if err != nil {
 		return err

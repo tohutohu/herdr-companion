@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -364,7 +363,8 @@ func newTaskFlags(name string) *taskFlags {
 }
 
 // body builds the JSON fields the flags set, on top of --file.
-func (f *taskFlags) body(set map[string]bool) (map[string]any, error) {
+// resolveCwd turns --cwd into a folder on the Gateway's machine.
+func (f *taskFlags) body(set map[string]bool, resolveCwd func(string) (string, error)) (map[string]any, error) {
 	m := map[string]any{}
 	if *f.file != "" {
 		b, err := readInput(*f.file)
@@ -385,11 +385,11 @@ func (f *taskFlags) body(set map[string]bool) (map[string]any, error) {
 	str("model", "model", f.model)
 	str("effort", "effort", f.effort)
 	if set["cwd"] {
-		abs, err := filepath.Abs(*f.cwd)
+		dir, err := resolveCwd(*f.cwd)
 		if err != nil {
 			return nil, err
 		}
-		m["cwd"] = abs
+		m["cwd"] = dir
 	}
 	str("instruction", "instruction", f.instr)
 	if set["instruction-file"] {
@@ -534,7 +534,7 @@ func (a *app) resCreate(args []string) error {
 	if _, err := parseFlags(f.fs, args); err != nil {
 		return err
 	}
-	body, err := f.body(flagsSet(f.fs))
+	body, err := f.body(flagsSet(f.fs), a.taskCwd)
 	if err != nil {
 		return err
 	}
@@ -591,7 +591,7 @@ func (a *app) resUpdate(args []string) error {
 	if err != nil {
 		return err
 	}
-	body, err := f.body(flagsSet(f.fs))
+	body, err := f.body(flagsSet(f.fs), a.taskCwd)
 	if err != nil {
 		return err
 	}
@@ -945,7 +945,7 @@ func (a *app) resPreview(args []string) error {
 	if _, err := parseFlags(f.fs, args); err != nil {
 		return err
 	}
-	body, err := f.body(flagsSet(f.fs))
+	body, err := f.body(flagsSet(f.fs), a.taskCwd)
 	if err != nil {
 		return err
 	}

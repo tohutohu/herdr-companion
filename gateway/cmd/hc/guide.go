@@ -23,7 +23,8 @@ WORKFLOW 1 — delegate a task and collect the result
   One step for short tasks:  hc send ID "..." --wait --timeout 9m
 
 WORKFLOW 2 — start new work
-  hc start --cwd ~/workspace/app "fix the login bug"
+  hc fav                     the user's favorite project folders, to pick the folder from
+  hc start --cwd ~/workspace/app "fix the login bug"     (or --cwd app, a favorite's name)
   hc until ID --timeout 9m   →  hc read ID
   The id is printed at once ("started claude:<id>").
   Add --worktree for a separate checkout, --mode plan to review a plan first.
