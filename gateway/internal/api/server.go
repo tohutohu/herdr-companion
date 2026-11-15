@@ -25,6 +25,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/config"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/directorycheck"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/favorites"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/files"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/forward"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/launcher"
@@ -63,6 +64,9 @@ type Server struct {
 	Resident *resident.Service
 	// Notes are the notes left on sessions; nil leaves /v1/notes out.
 	Notes *notes.Store
+	// Favorites are the favorite working folders; nil leaves
+	// /v1/directories/favorites out.
+	Favorites *favorites.Store
 	// Listen is the address the server listens on, for telling clients behind
 	// a tunnel where to reach the localhost proxy directly.
 	Listen string
@@ -118,6 +122,7 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("POST /v1/usage/refresh", s.refreshUsage)
 	s.residentRoutes(api)
 	s.noteRoutes(api)
+	s.favoriteRoutes(api)
 	api.HandleFunc("POST /v1/devices", s.registerDevice)
 	api.HandleFunc("DELETE /v1/devices", s.unregisterDevice)
 	mux.Handle("/v1/", s.auth(api))

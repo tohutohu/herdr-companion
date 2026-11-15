@@ -461,6 +461,12 @@ remembered and preselected next time. The working directory used by the last
 session is restored too; if that directory is a favorite, its favorite chip
 is selected.
 
+Favorite folders are Gateway data (`favorites.json`, `/v1/directories/favorites`), shared by
+the apps and `hc fav`. Each app keeps the last list it received as a cache, so the chips show
+as soon as New Session opens, applies a change on screen first and then takes the Gateway's
+answer. The first app to reach a Gateway without a saved list imports the favorites it kept
+on the device before. Recent folders stay per device.
+
 Sessions report the model they last used (`model`), the reasoning effort
 (`effort`) and a display label for the mode (`mode`):
 
@@ -620,6 +626,7 @@ Full request and response shapes, auth and connection details: [api.md](api.md).
 | GET | `/v1/models?provider=` | models and efforts offered for new sessions `{models[{id, name, description?, default?, efforts?[]}], efforts?[{id, name, description?, default?}]}` |
 | GET | `/v1/directories?path=` | workspace roots, or subfolders of `path` (`git` when `path` is in a repository) |
 | POST | `/v1/directories` | create `{parent, name}` under a root |
+| GET / PUT / POST / DELETE | `/v1/directories/favorites` | favorite folders in order (`favorites.json`); `POST …/import` moves a device's own list once, while none is saved |
 | GET | `/v1/sessions?archived=true` | archived sessions |
 | GET | `/v1/sessions/{id}` | one session |
 | POST / DELETE | `/v1/sessions/{id}/archive` | archive (stops a running session, removes its worktree) → session + `warning?` / unarchive |

@@ -198,6 +198,8 @@ Gateway が動かすセッションは、プロセスが無い間（Gateway の�
 | GET | `/v1/models` | 要 | 起動時に選べるモデル・effort・モード |
 | GET / POST | `/v1/directories` | 要 | 作業フォルダの一覧／作成 |
 | POST | `/v1/directories/check` | 要 | 作業フォルダの事前チェック（Jev） |
+| GET / PUT / POST / DELETE | `/v1/directories/favorites` | 要 | お気に入りのフォルダの一覧／置き換え／追加／削除（[下記](#お気に入りのフォルダ)） |
+| POST | `/v1/directories/favorites/import` | 要 | 端末に残っているお気に入りの初回取り込み |
 | GET | `/v1/agents` | 要 | インストール済み CLI のバージョンと更新状況 |
 | POST | `/v1/agents/{provider}/update` | 要 | CLI の更新を開始 |
 | POST | `/v1/uploads` | 要 | 添付ファイルのアップロード |
@@ -207,7 +209,7 @@ Gateway が動かすセッションは、プロセスが無い間（Gateway の�
 | GET / POST / DELETE | `/v1/sessions/{id}/notes` | 要 | セッションのメモの一覧／追加／全削除（[下記](#メモ)） |
 | GET | `/v1/notes` | 要 | 全セッションのメモ |
 | GET / PATCH / DELETE | `/v1/notes/{noteId}` | 要 | メモ 1 件の取得／更新／削除 |
-| GET | `/v1/capabilities` | 要 | 対応機能（常駐タスクの有無と版、セッション検索・メモの有無） |
+| GET | `/v1/capabilities` | 要 | 対応機能（常駐タスクの有無と版、セッション検索・メモ・お気に入りのフォルダの有無） |
 | * | `/v1/resident/…` | 要 | 常駐タスク（[下記](#常駐タスク)） |
 
 ## ペアリング
@@ -702,6 +704,29 @@ Gateway は **Mac のループバック宛てに限った HTTP プロキシ**と
 `200 {"verdict": "match", "historyCount": 3}`。`verdict` は `match` / `mismatch` / `unknown` / `unavailable` / `disabled`。
 読み取り専用の助言で、起動を止めたりフォルダを変えたりはしない。Jev の API キーが無ければ `disabled`。
 
+### お気に入りのフォルダ
+
+新しいセッションを始めるフォルダのお気に入り。並び順ごと Gateway が状態ディレクトリの `favorites.json` に保存し、
+アプリ（Android / Mac UI）と `hc fav` が同じ一覧を使う。対応は `GET /v1/capabilities` の `favoriteDirectories: true` で分かる。
+応答はどれも同じ形で、`paths` は表示順、`saved` は一度でも保存されたか（`false` ならまだ誰も書いていない）。
+
+```json
+{ "paths": ["/Users/…/workspace/app", "/Users/…/workspace/bot"], "saved": true }
+```
+
+- `GET /v1/directories/favorites`: 一覧。
+- `PUT /v1/directories/favorites`: `{"paths": [...]}` で一覧を置き換える（並べ替え）。重複は先のものを残す。
+  いま存在しないフォルダもそのまま残す。絶対パスでなければ `400`、200 件まで。
+- `POST /v1/directories/favorites`: `{"path": "…", "position"?: 0}` で 1 件追加。セッションを起動できるフォルダ
+  （`workspaceRoots` の中に実在するもの）だけを受け付け、実パスで保存する（外は `403`、無ければ `404`）。
+  既にあるものは `position` を付けたときだけその位置へ動かす。省略なら末尾。
+- `DELETE /v1/directories/favorites?path=…`: 1 件外す。一覧に無くても `200`。
+- `POST /v1/directories/favorites/import`: `{"paths": [...]}`。`saved: false` のときだけ一覧をそれに置き換え、
+  `imported: true` を足して返す。アプリが端末に持っていたお気に入りを移すためのもので、最初に送った端末の一覧が残る。
+
+アプリは最後に受け取った一覧を端末にキャッシュして画面を開いた直後から出し、Gateway の応答で差し替える。
+追加・削除・並べ替えは画面に先に反映し、Gateway の応答で確定する（失敗すれば Gateway の一覧に戻す）。
+
 ## エージェント CLI の更新
 
 ### `GET /v1/agents`
@@ -837,7 +862,7 @@ Run と会話のメッセージには `conversation`（`kept`: 昇格できる�
 ### 対応の判別: `GET /v1/capabilities`
 
 ```json
-{"messageIdempotency": true, "sessionSearch": true, "notes": true, "resident": {"version": 1, "providers": ["claude", "codex", "dsh"], "defaultTimezone": "Asia/Tokyo"}}
+{"messageIdempotency": true, "sessionSearch": true, "notes": true, "favoriteDirectories": true, "resident": {"version": 1, "providers": ["claude", "codex", "dsh"], "defaultTimezone": "Asia/Tokyo"}}
 ```
 
 `resident` がない（または `/v1/capabilities` が 404 の）Gateway は常駐タスクに対応していない。アプリは 404 や通信エラーを
