@@ -76,7 +76,10 @@ fi
 if ((ui)); then
   (
     cd "$ROOT/android"
-    export JAVA_HOME="$HOME/Library/Java/JavaVirtualMachines/jbr-17.0.14/Contents/Home"
+    JAVA_HOME="$HOME/Library/Java/JavaVirtualMachines/jbr-17.0.14/Contents/Home"
+    # Without that JBR, any installed JDK 17.
+    [[ -d "$JAVA_HOME" ]] || JAVA_HOME="$(/usr/libexec/java_home -v 17)"
+    export JAVA_HOME
     ./gradlew --console=plain :desktopApp:createReleaseDistributable
   )
   built="$(find "$ROOT/android/desktopApp/build/compose/binaries" -type d -name 'Herdr Companion.app' -print | sort | tail -n 1)"
