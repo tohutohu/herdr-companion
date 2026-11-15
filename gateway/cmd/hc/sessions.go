@@ -166,7 +166,9 @@ func (a *app) cmdList(args []string) error {
 	if !*all && !*archived {
 		var live []model.Session
 		for _, s := range list {
-			if s.Status == model.StatusOffline {
+			// A note says what to do with the session, so a stopped
+			// session that has one stays in the list.
+			if s.Status == model.StatusOffline && len(s.Notes) == 0 {
 				hidden++
 				continue
 			}
@@ -186,7 +188,7 @@ func (a *app) cmdList(args []string) error {
 	}
 	for _, s := range list {
 		fmt.Fprintln(a.out, a.sessionLine(s, shorts[s.ID]))
-		noteSummary(a.out, s, "    ")
+		writeNotes(a.out, s, "    ")
 	}
 	if hidden > 0 {
 		fmt.Fprintf(a.out, "(+%d offline: hc ls --all)\n", hidden)
@@ -287,9 +289,7 @@ func (a *app) cmdShow(args []string) error {
 	}
 	if len(s.Notes) > 0 {
 		fmt.Fprintf(w, "notes (%d, for whoever watches this session; hc note edit / rm NOTE):\n", len(s.Notes))
-		for _, n := range s.Notes {
-			writeNote(w, n, "  ")
-		}
+		writeNotes(w, s, "  ")
 	}
 	o := renderOpts{short: short, maxChars: max}
 	for _, ia := range pending {
@@ -577,7 +577,7 @@ func (a *app) printEvents(w io.Writer, evs []event) {
 		}
 		fmt.Fprintln(w, line)
 		if ev.Kind != "gone" {
-			noteSummary(w, s, "    ")
+			writeNotes(w, s, "    ")
 		}
 		if ev.Attention && s.LastMessage != "" && ev.Kind != "gone" && len(ev.Pending) == 0 {
 			fmt.Fprintf(w, "    last: %s\n", clip(oneLine(s.LastMessage), 300))

@@ -199,24 +199,50 @@ func (a *app) noteList(args []string) error {
 	return nil
 }
 
-// writeNote prints a note in full: a header line, then its text.
+// writeNote prints a note in full, wherever hc shows one (ls, search,
+// show, changes, wait, until, note): the reader never needs another command
+// to know what the note says, who left it and how long it stays. A one-line
+// note stays on one line.
 func writeNote(w io.Writer, n model.Note, prefix string) {
 	when := age(n.UpdatedAt)
 	if when != "now" {
 		when += " ago"
 	}
-	head := fmt.Sprintf("%snote %s · %s", prefix, n.ID, when)
+	facts := []string{when}
 	if n.Author != "" {
-		head += " · by " + n.Author
+		facts = append(facts, "by "+shortSession(n.Author))
 	}
 	if n.UpdatedBy != "" && n.UpdatedBy != n.Author {
-		head += " · edited by " + n.UpdatedBy
+		facts = append(facts, "edited by "+shortSession(n.UpdatedBy))
 	}
 	if n.ExpiresAt != nil {
-		head += " · expires in " + until(*n.ExpiresAt)
+		facts = append(facts, "expires in "+until(*n.ExpiresAt))
+	}
+	head := fmt.Sprintf("%snote %s (%s):", prefix, n.ID, strings.Join(facts, ", "))
+	text := strings.TrimSpace(n.Text)
+	if !strings.Contains(text, "\n") {
+		fmt.Fprintln(w, head+" "+text)
+		return
 	}
 	fmt.Fprintln(w, head)
-	fmt.Fprintln(w, indent(n.Text, prefix+"  "))
+	fmt.Fprintln(w, indent(text, prefix+"  "))
+}
+
+// writeNotes prints every note of a session under it.
+func writeNotes(w io.Writer, s model.Session, prefix string) {
+	for _, n := range s.Notes {
+		writeNote(w, n, prefix)
+	}
+}
+
+// shortSession is a session id with its native part cut to 8 characters,
+// as hc prints ids elsewhere: "claude:2964188e".
+func shortSession(id string) string {
+	provider, native, ok := strings.Cut(id, ":")
+	if !ok {
+		return clipID(id, 8)
+	}
+	return provider + ":" + clipID(native, 8)
 }
 
 // until is how long until t, in the units age uses.
@@ -231,14 +257,6 @@ func until(t time.Time) string {
 		return fmt.Sprintf("%dh", int(d.Hours()))
 	}
 	return fmt.Sprintf("%dd", int(d.Hours()/24))
-}
-
-// noteSummary is the short form shown under a session in ls, wait, until
-// and changes: one line per note.
-func noteSummary(w io.Writer, s model.Session, prefix string) {
-	for _, n := range s.Notes {
-		fmt.Fprintf(w, "%snote %s: %s\n", prefix, n.ID, clip(oneLine(n.Text), 200))
-	}
 }
 
 func (a *app) noteShow(args []string) error {

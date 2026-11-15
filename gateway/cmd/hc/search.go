@@ -100,6 +100,7 @@ func (a *app) cmdSearch(args []string) error {
 		if h.match != nil {
 			fmt.Fprintf(a.out, "      %s: %s\n", h.match.Field, h.match.Snippet)
 		}
+		writeNotes(a.out, h.session, "    ")
 	}
 	if len(hits) == 0 {
 		fmt.Fprintf(a.out, "no session matches %s\n", strings.Join(queries, " "))

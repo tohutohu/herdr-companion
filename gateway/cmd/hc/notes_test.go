@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -129,12 +130,11 @@ func Testメモを残すと一覧と詳細と待機結果に表示される(t *t
 	n := g.notes.For("claude:aaaa1111-0000")[0]
 
 	out = a.mustRun(t, "ls")
-	if !strings.Contains(out, "ログイン修正\n    note "+n.ID+": PRにレビューが来たら対応させて\n") {
+	if !strings.Contains(out, "ログイン修正\n    note "+n.ID+" (now, by claude:ffff0000): PRにレビューが来たら対応させて\n") {
 		t.Errorf("ls =\n%s", out)
 	}
 	out = a.mustRun(t, "note", "ls")
-	if !strings.Contains(out, "aaaa1111") || !strings.Contains(out, "note "+n.ID) || !strings.Contains(out, "by claude:ffff0000-self") ||
-		!strings.Contains(out, "\n      PRにレビューが来たら対応させて\n") {
+	if !strings.Contains(out, "aaaa1111") || !strings.Contains(out, "note "+n.ID+" (now, by claude:ffff0000): PRにレビューが来たら対応させて\n") {
 		t.Errorf("note ls =\n%s", out)
 	}
 	out = a.mustRun(t, "show", "aaaa1111")
@@ -146,7 +146,7 @@ func Testメモを残すと一覧と詳細と待機結果に表示される(t *t
 	a.mustRun(t, "changes")
 	g.setStatus("claude:aaaa1111-0000", model.StatusWaitingInput)
 	out = a.mustRun(t, "wait", "--timeout", "1s")
-	if !strings.Contains(out, "note "+n.ID+": PRにレビューが来たら対応させて") {
+	if !strings.Contains(out, "note "+n.ID+" (now, by claude:ffff0000): PRにレビューが来たら対応させて") {
 		t.Errorf("wait =\n%s", out)
 	}
 	out = a.mustRun(t, "until", "aaaa1111", "--for", "input")
@@ -174,7 +174,7 @@ func Testメモを前方一致のIDで更新して削除できる(t *testing.T) 
 		t.Fatalf("after edit = %+v", got)
 	}
 	out = a.mustRun(t, "note", "show", n.ID)
-	if !strings.Contains(out, "session codex:bbbb3333") || !strings.Contains(out, "  PRがマージされたら\n  アーカイブしてよい\n") {
+	if !strings.Contains(out, "session codex:bbbb3333") || !strings.Contains(out, "(now, by claude:ffff0000):\n  PRがマージされたら\n  アーカイブしてよい\n") {
 		t.Errorf("show =\n%s", out)
 	}
 
@@ -235,5 +235,48 @@ func Testメモに対応しないGatewayでは更新を促す(t *testing.T) {
 	a, out := newTestApp(t, sampleGateway())
 	if code := a.run([]string{"note", "ls"}); code != 1 || !strings.Contains(out.String(), "update the Gateway") {
 		t.Errorf("old gateway: %d %s", code, out)
+	}
+}
+
+func Testセッション一覧だけでメモの全文と期限が分かる(t *testing.T) {
+	g := notesGateway(t)
+	g.sessions = append(g.sessions, model.Session{ID: "claude:cccc4444-0000", Provider: "claude", Project: "app", Title: "待機中", Status: model.StatusOffline, UpdatedAt: t0})
+	g.sessions = append(g.sessions, model.Session{ID: "claude:dddd5555-0000", Provider: "claude", Project: "old", Status: model.StatusOffline, UpdatedAt: t0})
+	a, _ := newTestApp(t, g)
+	long := strings.Repeat("レビューコメントに一つずつ返信し、直したらプッシュする。", 20)
+	a.mustRun(t, "note", "add", "aaaa1111", long)
+	a.mustRun(t, "note", "add", "aaaa1111", "--ttl", "3d", "レビュー待ち")
+	a.in = strings.NewReader("1. CI が通るまで待つ\n2. マージされたらアーカイブしてよい\n")
+	a.mustRun(t, "note", "add", "aaaa1111", "-")
+	a.mustRun(t, "note", "add", "cccc4444", "ずっと待機させておく")
+
+	out := a.mustRun(t, "ls")
+	if !strings.Contains(out, long) {
+		t.Errorf("ls cut a long note:\n%s", out)
+	}
+	if !strings.Contains(out, ", expires in 2d): レビュー待ち\n") && !strings.Contains(out, ", expires in 3d): レビュー待ち\n") {
+		t.Errorf("ls does not say when the note expires:\n%s", out)
+	}
+	if !strings.Contains(out, "):\n      1. CI が通るまで待つ\n      2. マージされたらアーカイブしてよい\n") {
+		t.Errorf("ls does not keep the lines of a note:\n%s", out)
+	}
+	// 止まっているセッションでも、メモがあれば一覧に残る。メモの無いものは数えるだけ
+	if !strings.Contains(out, "cccc4444 offline") || !strings.Contains(out, "ずっと待機させておく") || strings.Contains(out, "dddd5555") ||
+		!strings.Contains(out, "(+1 offline: hc ls --all)") {
+		t.Errorf("ls with an offline session that has a note:\n%s", out)
+	}
+}
+
+func Test検索結果にもメモが出る(t *testing.T) {
+	g := notesGateway(t)
+	a, _ := newTestApp(t, g)
+	a.mustRun(t, "note", "add", "aaaa1111", "マージされたらアーカイブしてよい")
+	g.search = func(url.Values) any {
+		s := g.withNotes(g.sessions)[0]
+		return map[string]any{"sessions": []any{s}}
+	}
+	out := a.mustRun(t, "search", "ログイン")
+	if !strings.Contains(out, "ログイン修正\n    note n") || !strings.Contains(out, "マージされたらアーカイブしてよい") {
+		t.Errorf("search =\n%s", out)
 	}
 }

@@ -61,8 +61,8 @@ WORKFLOW 7 — when the structured answer is not enough
   hc interrupt ID             stop the turn, then hc send ID with new instructions
 
 WORKFLOW 8 — notes: what to do with a session later
-  Sessions can carry notes the Gateway keeps for watchers ("note n…: …" under a session in
-  hc ls / wait / until / show). Before you act on a session, read its notes and follow them:
+  Sessions can carry notes the Gateway keeps for watchers ("note n…(…): …" under a session,
+  in full, in hc ls / search / wait / until / show; no extra command needed). Before you act on a session, read its notes and follow them:
   "PRのレビューが来たら対応させて" → when review comments arrive, hc send ID to handle them.
   "待機させておく" → leave it alone.  "マージされたらアーカイブしてよい" → hc archive ID then.
   hc note add ID "..."        leave one (hc note add self "..." for your own session)

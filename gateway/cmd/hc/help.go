@@ -152,11 +152,14 @@ FLAGS
 
 OUTPUT
     a9b7233a idle               2h  claude app · ログイン修正
-      note n3f9a01c2 · 2h ago · by claude:5b27a61d-…
-        PRにレビューが来たら対応させて。マージされたらアーカイブしてよい
-  hc ls, show, changes, wait and until print each session's notes under it
-  ("note n3f9a01c2: …"), so a watcher sees them next to the change it reacts to.
-  The author is the session that ran hc (empty when a person or a plain shell wrote it).
+      note n3f9a01c2 (2h ago, by claude:5b27a61d, expires in 2d): PRのレビューに対応させる
+      note n7c01d2e4 (now):
+        1. CI が通るまで待つ
+        2. マージされたらアーカイブしてよい
+  hc ls, search, show, changes, wait and until print every note of a session under it,
+  in full and in this form, so a watcher has what it needs from the one command it ran.
+  hc ls keeps a stopped (offline) session in the list when it has a note.
+  "by" is the session that ran hc (left out when a person or a plain shell wrote it).
 
 EXAMPLES
   hc note add a9b7 "PRにレビューが来たら対応させる。マージされたらアーカイブしてよい"
@@ -182,16 +185,19 @@ USAGE
   hc ls [--all | --archived]
 
 FLAGS
-  --all        include sessions that are not running (offline); they are only counted otherwise
+  --all        include sessions that are not running (offline); they are only counted otherwise,
+               except those with a note (hc help note), which are always listed
   --archived   list archived sessions instead
 
 OUTPUT
   ! a9b7233a waiting_input      now  claude proj · 色の選択ツール
     5b27a61d running            now  claude herdr-android-client · CLI設計  (you)
+      note n3f9a01c2 (2h ago, by claude:5b27a61d): マージされたらアーカイブしてよい
   (+47 offline: hc ls --all)
   Columns: "!" when it waits for an answer, short ID, status, last update, provider,
   project · title. "(you)" is the session hc runs in; "[2 in background]" is work it left
-  running (see "hc help states").
+  running (see "hc help states"). Notes left on a session follow it in full, one line each
+  unless the note has several lines (hc help note).
 
 SEE ALSO
   hc search WORD · hc show ID · hc help ids · hc help states
