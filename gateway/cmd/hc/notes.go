@@ -201,7 +201,11 @@ func (a *app) noteList(args []string) error {
 
 // writeNote prints a note in full: a header line, then its text.
 func writeNote(w io.Writer, n model.Note, prefix string) {
-	head := fmt.Sprintf("%snote %s · %s ago", prefix, n.ID, age(n.UpdatedAt))
+	when := age(n.UpdatedAt)
+	if when != "now" {
+		when += " ago"
+	}
+	head := fmt.Sprintf("%snote %s · %s", prefix, n.ID, when)
 	if n.Author != "" {
 		head += " · by " + n.Author
 	}
