@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.outlined.QuestionAnswer
+import androidx.compose.material.icons.automirrored.outlined.StickyNote2
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -67,7 +68,7 @@ fun AttachmentPreviewRow(
     }
 }
 
-/** A "+" button that offers to attach an image or a file. */
+/** A "+" button that offers to attach an image or a file, and the session's side tools. */
 @Composable
 fun AttachButton(
     enabled: Boolean,
@@ -75,9 +76,13 @@ fun AttachButton(
     onPickFile: () -> Unit,
     /** Opens the side conversation (btw); null leaves it out of the menu. */
     onAskOnTheSide: (() -> Unit)? = null,
+    /** Opens the session's notes; null leaves them out of the menu. */
+    onNotes: (() -> Unit)? = null,
+    /** How many notes the session has, when known. */
+    noteCount: Int = 0,
 ) {
-    // btw keeps the menu open to a session that takes no attachments.
-    val menuEnabled = enabled || onAskOnTheSide != null
+    // btw and notes keep the menu open to a session that takes no attachments.
+    val menuEnabled = enabled || onAskOnTheSide != null || onNotes != null
     Box {
         var menuOpen by remember { mutableStateOf(false) }
         IconButton(enabled = menuEnabled, onClick = { menuOpen = true }) {
@@ -102,14 +107,24 @@ fun AttachButton(
                     onPickFile()
                 },
             )
+            if (onAskOnTheSide != null || onNotes != null) HorizontalDivider()
             onAskOnTheSide?.let { ask ->
-                HorizontalDivider()
                 DropdownMenuItem(
                     text = { Text("Ask on the side (btw)") },
                     leadingIcon = { Icon(Icons.Outlined.QuestionAnswer, contentDescription = null) },
                     onClick = {
                         menuOpen = false
                         ask()
+                    },
+                )
+            }
+            onNotes?.let { open ->
+                DropdownMenuItem(
+                    text = { Text(if (noteCount > 0) "Notes ($noteCount)" else "Notes") },
+                    leadingIcon = { Icon(Icons.AutoMirrored.Outlined.StickyNote2, contentDescription = null) },
+                    onClick = {
+                        menuOpen = false
+                        open()
                     },
                 )
             }

@@ -250,6 +250,24 @@ class GatewayApi(
         slow.newCall(req).awaitBody { resp -> json.decodeFromString(bodyOrThrow(resp)) }
     }
 
+    /** The notes left on a session, oldest first. A gateway without notes answers 404. */
+    suspend fun sessionNotes(id: String): List<NoteDto> =
+        get<NotesResponse>(url("v1", "sessions", id, "notes")).notes
+
+    /** [expiresAt] is RFC 3339; null keeps the note until it is removed. */
+    suspend fun addNote(id: String, text: String, expiresAt: String? = null): NoteDto = json.decodeFromString(
+        post(url("v1", "sessions", id, "notes"), json.encodeToString(CreateNoteRequest(text, expiresAt)).toRequestBody(jsonType)),
+    )
+
+    /** Replaces a note's text; its expiry stays. */
+    suspend fun updateNote(noteId: String, text: String): NoteDto = json.decodeFromString(
+        execute(request(url("v1", "notes", noteId)).patch(json.encodeToString(UpdateNoteRequest(text)).toRequestBody(jsonType)).build()),
+    )
+
+    suspend fun deleteNote(noteId: String) {
+        execute(request(url("v1", "notes", noteId)).delete().build())
+    }
+
     /** Marks the session seen, which clears its unread state. */
     suspend fun markSeen(id: String) {
         post(url("v1", "sessions", id, "seen"), ByteArray(0).toRequestBody(jsonType))

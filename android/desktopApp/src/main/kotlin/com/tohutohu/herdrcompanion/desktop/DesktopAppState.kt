@@ -8,6 +8,7 @@ import com.tohutohu.herdrcompanion.data.Message
 import com.tohutohu.herdrcompanion.data.SendState
 import com.tohutohu.herdrcompanion.data.api.SessionDto
 import com.tohutohu.herdrcompanion.data.api.GatewayApi
+import com.tohutohu.herdrcompanion.data.api.GatewayNotesBackend
 import com.tohutohu.herdrcompanion.data.api.GatewayException
 import com.tohutohu.herdrcompanion.data.api.InteractionResponseDto
 import com.tohutohu.herdrcompanion.data.api.MessageDto
@@ -20,6 +21,7 @@ import com.tohutohu.herdrcompanion.model.toUiModel
 import com.tohutohu.herdrcompanion.ui.detail.AttachmentUiState
 import com.tohutohu.herdrcompanion.ui.detail.PendingMessageUiState
 import com.tohutohu.herdrcompanion.ui.detail.ReloadNotice
+import com.tohutohu.herdrcompanion.ui.detail.SessionNotes
 import com.tohutohu.herdrcompanion.ui.detail.SideQuestions
 import com.tohutohu.herdrcompanion.ui.detail.SessionDetailUiState
 import com.tohutohu.herdrcompanion.ui.detail.SessionSettingsUiState
@@ -161,6 +163,8 @@ class DesktopAppState(
     val archivedLoaded: Boolean get() = archivedPager.sessions != null
     /** btw conversations, kept while the app runs; each pane shows its session's. */
     val sideQuestions = SideQuestions(scope) { id, question, history -> api.sideQuestion(id, question, history) }
+    /** Notes on sessions (hc note), as last read from the gateway. */
+    val sessionNotes = SessionNotes(scope, GatewayNotesBackend(api))
     val archivedHasMore: Boolean get() = archivedPager.hasMore
     var newSessionOpen by mutableStateOf(false)
         private set

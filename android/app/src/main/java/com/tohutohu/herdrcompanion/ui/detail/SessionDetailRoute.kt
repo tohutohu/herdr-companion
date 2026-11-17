@@ -123,6 +123,7 @@ fun SessionDetailRoute(
             resolveAttachmentPreview = { id -> id.toUri() },
             drafts = context.container.composerDrafts,
             sideQuestions = context.container.sideQuestions,
+            notes = context.container.sessionNotes,
             onAction = { action ->
                 when (action) {
                     SessionDetailAction.Back -> onBack()

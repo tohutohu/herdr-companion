@@ -38,6 +38,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.outlined.StickyNote2
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.PlayArrow
@@ -152,6 +153,8 @@ fun SessionDetailScreen(
      * composer (a desktop pane), instead of a modal sheet over the screen.
      */
     sideQuestionsInPane: Boolean = false,
+    /** Notes left on the session for whoever watches it; null leaves the feature out. */
+    notes: SessionNotes? = null,
     translateText: (suspend (String) -> String)? = null,
     onAction: (SessionDetailAction) -> Unit,
 ) {
@@ -308,6 +311,10 @@ fun SessionDetailScreen(
     if (sideOpen && !sideQuestionsInPane && sideQuestions != null) {
         SideQuestionSheet(state.sessionId, conversation, sideQuestions)
     }
+    val notesState = notes?.sessions?.collectAsState()?.value?.get(state.sessionId) ?: SessionNotesState()
+    if (notes != null) SessionNotesHost(state.sessionId, notes, notesState)
+    val openNotes: (() -> Unit)? = notes?.let { n -> { n.setOpen(state.sessionId, true) } }
+    val noteCount = notesState.notes?.size ?: 0
 
     Scaffold(
         modifier = Modifier.onSizeChanged { screenHeight = with(density) { it.height.toDp() } },
@@ -415,6 +422,17 @@ fun SessionDetailScreen(
                                             onAction(SessionDetailAction.Reload)
                                         },
                                     )
+                                    // The composer's + menu has them too; a stopped session has no composer.
+                                    openNotes?.let { open ->
+                                        DropdownMenuItem(
+                                            text = { Text(if (noteCount > 0) "Notes ($noteCount)" else "Notes") },
+                                            leadingIcon = { Icon(Icons.AutoMirrored.Outlined.StickyNote2, contentDescription = null) },
+                                            onClick = {
+                                                menu = false
+                                                open()
+                                            },
+                                        )
+                                    }
                                     SessionActionMenuItems(
                                         s = s.toSessionRef(),
                                         onResume = { onAction(SessionDetailAction.Resume) },
@@ -474,6 +492,8 @@ fun SessionDetailScreen(
                         } else {
                             null
                         },
+                        onNotes = openNotes,
+                        noteCount = noteCount,
                         // Only a side conversation with something in it gets a way back beside send.
                         sideQuestion = if (sideAvailable && sideQuestions != null && conversation.lanes.isNotEmpty()) {
                             { SideQuestionButton(conversation, onClick = { sideQuestions.toggle(state.sessionId) }) }
@@ -713,6 +733,8 @@ private fun Composer(
     onPasteImage: (() -> Boolean)?,
     /** Opens the side conversation (btw) from the attach menu. */
     onAskOnTheSide: (() -> Unit)?,
+    onNotes: (() -> Unit)?,
+    noteCount: Int,
     /** The way back to a side conversation, beside send. */
     sideQuestion: (@Composable () -> Unit)?,
     onAction: (SessionDetailAction) -> Unit,
@@ -760,6 +782,8 @@ private fun Composer(
                         onPickImage = { onAction(SessionDetailAction.PickImage) },
                         onPickFile = { onAction(SessionDetailAction.PickFile) },
                         onAskOnTheSide = onAskOnTheSide,
+                        onNotes = onNotes,
+                        noteCount = noteCount,
                     )
                 }
                 val clear = Color.Transparent

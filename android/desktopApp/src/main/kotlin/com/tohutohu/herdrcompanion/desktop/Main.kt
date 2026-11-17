@@ -977,6 +977,7 @@ internal fun DesktopSessionContent(
                 drafts = desktopComposerDrafts,
                 sideQuestions = state.sideQuestions,
                 sideQuestionsInPane = true,
+                notes = state.sessionNotes,
                 onAction = { action -> handleDetailAction(state, api, window, sessionId, action) },
             )
         }

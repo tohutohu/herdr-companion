@@ -416,3 +416,31 @@ data class TranslateTextRequest(val text: String)
 
 @Serializable
 data class TranslateTextResponse(val text: String)
+
+/**
+ * A note left on a session for whoever watches it (docs/api.md#メモ). The
+ * session's own agent never sees it. [author] / [updatedBy] are the session
+ * ids of the agents that wrote it; absent when a person did.
+ */
+@Serializable
+data class NoteDto(
+    val id: String,
+    val sessionId: String = "",
+    val text: String,
+    val author: String? = null,
+    val updatedBy: String? = null,
+    val createdAt: String = "",
+    val updatedAt: String = "",
+    /** RFC 3339; the gateway drops the note after it. */
+    val expiresAt: String? = null,
+)
+
+@Serializable
+data class NotesResponse(val notes: List<NoteDto> = emptyList())
+
+@Serializable
+data class CreateNoteRequest(val text: String, val expiresAt: String? = null)
+
+/** Changes only the text: an update without `expiresAt` keeps the expiry. */
+@Serializable
+data class UpdateNoteRequest(val text: String)

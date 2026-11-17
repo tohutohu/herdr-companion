@@ -28,7 +28,9 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.tasks.await
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import com.tohutohu.herdrcompanion.data.api.GatewayApi
+import com.tohutohu.herdrcompanion.data.api.GatewayNotesBackend
 import com.tohutohu.herdrcompanion.data.api.ResidentGatewayBackend
+import com.tohutohu.herdrcompanion.ui.detail.SessionNotes
 import com.tohutohu.herdrcompanion.ui.detail.SideQuestions
 import com.tohutohu.herdrcompanion.ui.resident.ResidentBackend
 import com.tohutohu.herdrcompanion.ui.resident.ResidentHomeState
@@ -82,6 +84,8 @@ class AppContainer(private val app: Application) {
     val favoriteDirectories = FavoriteDirectoriesSync(api, directoryShortcuts.favoritesCache)
     /** btw conversations, kept while the app runs. */
     val sideQuestions = SideQuestions(scope) { id, question, history -> api.sideQuestion(id, question, history) }
+    /** Notes on sessions (hc note), as last read from the gateway. */
+    val sessionNotes = SessionNotes(scope, GatewayNotesBackend(api))
     val db = AppDatabase.create(app)
     init {
         runBlocking {
