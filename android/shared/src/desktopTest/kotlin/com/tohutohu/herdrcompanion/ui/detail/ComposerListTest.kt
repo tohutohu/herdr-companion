@@ -42,6 +42,9 @@ class ComposerListTest {
 
     private val field get() = rule.onNode(hasSetTextAction())
 
+    /** Paste and copy are Cmd on the Mac and Ctrl elsewhere (the Linux CI). */
+    private val shortcutKey = if (System.getProperty("os.name").startsWith("Mac")) Key.MetaLeft else Key.CtrlLeft
+
     /** The text that is sent; what is shown has "•" for the marks. */
     private fun assertText(text: String) {
         field.assert(SemanticsMatcher.expectValue(SemanticsProperties.InputText, AnnotatedString(text)))
@@ -111,7 +114,7 @@ class ComposerListTest {
         val html = "<meta charset='utf-8'><ul><li>一<ul><li>子</li></ul></li><li>二</li></ul>"
         composer(FakeClipboard(ClipEntry(HtmlSelection("一\n子\n二", html))))
         field.performClick()
-        field.performKeyInput { withKeyDown(Key.MetaLeft) { pressKey(Key.V) } }
+        field.performKeyInput { withKeyDown(shortcutKey) { pressKey(Key.V) } }
         assertText("- 一\n  - 子\n- 二")
     }
 
@@ -119,7 +122,7 @@ class ComposerListTest {
     fun 中黒の箇条書きを貼るとMarkdownの項目になる() {
         composer(FakeClipboard(ClipEntry(StringSelection("・一\n・二"))))
         field.performClick()
-        field.performKeyInput { withKeyDown(Key.MetaLeft) { pressKey(Key.V) } }
+        field.performKeyInput { withKeyDown(shortcutKey) { pressKey(Key.V) } }
         assertText("- 一\n- 二")
     }
 
@@ -139,7 +142,7 @@ class ComposerListTest {
             moveTo(Offset(width - 1f, height - 1f))
             release()
         }
-        rule.onNodeWithTag("md").performKeyInput { withKeyDown(Key.MetaLeft) { pressKey(Key.C) } }
+        rule.onNodeWithTag("md").performKeyInput { withKeyDown(shortcutKey) { pressKey(Key.C) } }
         rule.waitForIdle()
         val copied = (clipboard.entry?.nativeClipEntry as Transferable).getTransferData(DataFlavor.stringFlavor) as String
         assertEquals("- 一\n  - 子\n- 二", normalizePastedList(copied))
