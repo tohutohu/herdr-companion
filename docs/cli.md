@@ -24,7 +24,7 @@
 | メモ | `note`（`ls` `show` `add` `edit` `rm` `clear`） |
 | プロジェクト | `fav`（`ls` `add` `rm` `mv`） |
 | 常駐 | `resident`（`ls` `show` `create` `update` `preview` `pause` `resume` `run` `runs` `log` `cancel` `dismiss` `promote` `send` `answer` `messages` `memory` `delete`） |
-| その他 | `usage` `guide` `version` |
+| その他 | `usage` `guide` `version` `update` |
 
 - `hc search WORD...` はアーカイブ済みも含めてセッションを探す。すべての語がタイトル・プロジェクト・フォルダ・ID・最後のメッセージのどこかに含まれるものを新しい順に出す。シェルで引用符に囲んだ引数（`hc search "login bug"`）はフレーズとして探す。`--text` で会話の本文も対象にする。`--active` / `--archived` で片方に絞り、`--limit N`（既定 20、0 で全件）で件数を変える。検索は Gateway の索引（`GET /v1/sessions/search`）で行い、対応前の Gateway には `hc` が一覧と会話を読んで自分で探す（`--text` は時間がかかる）。
 - `hc start` は Gateway が起動し、すぐにセッション ID を返す（`started claude:<id>`）。`--provider` は `claude`（既定）/ `codex` / `dsh`。
@@ -115,7 +115,18 @@ chmod +x ~/.local/bin/hc
 ```
 
 macOS のバイナリは署名していない。curl で取れば quarantine 属性は付かないが、ブラウザで落とした場合は
-`xattr -d com.apple.quarantine hc` が要る。ソースからは次のとおり。
+`xattr -d com.apple.quarantine hc` が要る。
+
+一度入れたあとは `hc update` で最新のリリースに置き換えられる（Gateway への接続は要らない）。
+
+```bash
+hc update --check   # 新しいリリースがあるかだけ見る
+hc update           # hc-<os>-<arch> を取り、SHA-256 と起動を確かめてから実行中の hc（シンボリックリンクは辿る）と入れ替える
+```
+
+- 照合には GitHub が返す asset の `digest`、なければ `.sha256` asset を使う。どちらも無い・合わない・`hc version` が期待の版を名乗らないときは何も置き換えない。
+- ソースからビルドした hc（`hc version` が `dev`）は `--force` を付けたときだけ置き換える。`--force` は同じ版の入れ直しにも使える。
+- hc のあるフォルダに書き込めないときは失敗する（`sudo` で入れた場合など）。ソースからは次のとおり。
 
 ```bash
 cd gateway

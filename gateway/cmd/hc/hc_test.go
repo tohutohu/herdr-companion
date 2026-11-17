@@ -726,7 +726,7 @@ func Test全コマンドに索引に載ったヘルプページがある(t *test
 			indexed[name] = true
 		}
 	}
-	names := []string{"guide", "version"}
+	names := []string{"guide", "version", "update"}
 	for name := range a.commands() {
 		names = append(names, name)
 	}

@@ -220,7 +220,7 @@ tag名と`version.properties`が一致しないreleaseはwrapperが停止しま�
 
 アプリ自身がダウンロードしたファイルにはquarantine属性が付かないため、ad-hoc署名のままでも更新後にGatekeeperの確認は出ません。初回インストールは従来どおりDMGから行います。
 
-**updaterはrelease assetの名前に依存します。** `Herdr-Companion-x.y.z.dmg`／`Herdr-Companion-Gateway-x.y.z.dmg`とその`.sha256`、tag `vx.y.z`の形式を変えると、既存の利用者が更新を受け取れなくなります。
+**updaterはrelease assetの名前に依存します。** `Herdr-Companion-x.y.z.dmg`／`Herdr-Companion-Gateway-x.y.z.dmg`とその`.sha256`、tag `vx.y.z`の形式を変えると、既存の利用者が更新を受け取れなくなります。`hc update`も同様に`hc-<os>-<arch>`（Windowsは`.exe`付き）とその`.sha256`、tag `vx.y.z`に依存します。
 
 ## Known limitations / 次フェーズ
 

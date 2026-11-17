@@ -51,6 +51,8 @@ type app struct {
 	// CODEX_THREAD_ID). That session is the caller itself: never reported as
 	// a change, never sent to, archived or waited for.
 	selfID string
+	// updater is where hc update gets releases; nil is GitHub.
+	updater *updater
 }
 
 func main() {
@@ -158,6 +160,13 @@ func (a *app) dispatch(cmd string, args []string, g globalFlags) error {
 	case "version", "--version", "-v":
 		fmt.Fprintf(a.out, "hc %s\n", version)
 		return nil
+	case "update":
+		if wantsHelp(args) {
+			page, _ := helpFor(cmd)
+			fmt.Fprint(a.out, page)
+			return nil
+		}
+		return a.cmdUpdate(args, g)
 	}
 	run, ok := a.commands()[cmd]
 	if !ok {

@@ -57,7 +57,7 @@ var commandGroups = []struct {
 	{"Notes", []string{"note"}},
 	{"Projects", []string{"fav"}},
 	{"Resident", []string{"resident"}},
-	{"Other", []string{"usage", "guide", "version"}},
+	{"Other", []string{"usage", "guide", "version", "update"}},
 }
 
 var commandHelp = []helpPage{
@@ -624,6 +624,29 @@ rules of thumb. Read it once before working with hc for a long time.
 
 USAGE
   hc version
+`},
+	{"update", "replace this hc with the latest release", `hc update — replace this hc with the latest release
+
+USE WHEN
+  A command or flag you expect is missing, or hc version is older than the release the
+  Mac apps run (they update themselves; hc does not).
+
+USAGE
+  hc update [--check] [--force]
+
+FLAGS
+  --check   only say whether a newer release exists; replace nothing
+  --force   install the latest release even if this hc is as new, or was built from
+            source (hc version prints "dev")
+
+OUTPUT
+  "updated hc 2.4.0 → 2.5.0 (/path/to/hc)", or "hc 2.5.0 is up to date".
+  --json: {"current", "latest", "updateAvailable", "updated", "path"}.
+
+NOTES
+  Downloads hc-<os>-<arch> from the latest GitHub Release of tohutohu/herdr-companion,
+  checks its SHA-256 and that it runs, then moves it over the hc being run (symlinks
+  are followed). Needs write access to that folder. Does not need the Gateway.
 `},
 }
 
