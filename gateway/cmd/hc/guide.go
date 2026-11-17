@@ -69,6 +69,10 @@ WORKFLOW 8 — notes: what to do with a session later
   hc note add ID "..."        leave one (hc note add self "..." for your own session)
   hc note edit NOTE "..."     keep it current · hc note rm NOTE once it is handled
   Notes do not reach the session's agent; tell it with hc send.
+  Ending a turn to wait on someone else (a review, a merge, a reply)? Rather than looping,
+  leave your own: what you wait for, the checkable condition (PR, reviewer, date), the one
+  line to send you when it holds, and what may be done after ("archive once merged").
+  Read hc note ls self when you are resumed, and remove what is handled.
 
 RULES OF THUMB
   - Read before you answer: the user may have answered meanwhile (hc answer refuses when

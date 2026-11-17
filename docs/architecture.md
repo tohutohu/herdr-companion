@@ -183,8 +183,9 @@ with ids, responses, and session events); nothing listens on a port.
   front (its `apply_patch` alias), read with `command/exec`.
 - The gateway's own skills (`gateway/internal/agentplugin`) are one Claude Code plugin,
   `herdr-companion`: `reply-in-app` (showing images and files in the app), `drive-sessions` (other
-  sessions through hc) and `schedule-resident-tasks` (designing resident tasks; what a run itself must
-  do stays in its prompt, `resident.BuildPrompt`). At start the gateway writes it to
+  sessions through hc), `schedule-resident-tasks` (designing resident tasks; what a run itself must
+  do stays in its prompt, `resident.BuildPrompt`) and `session-notes` (a session leaving notes on
+  itself: what it waits for and what its watcher should send it). At start the gateway writes it to
   `<state>/agent-plugin` and passes it as the SDK's `plugins` option; the Codex app-servers get its
   `skills/` directory with `skills/extraRoots/set` and name the skills the same way. Change a
   description only with `internal/agentplugin/evals/trigger.py`, which measures whether requests load

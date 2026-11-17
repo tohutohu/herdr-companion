@@ -10,7 +10,7 @@ import (
 	"unicode/utf8"
 )
 
-var skillNames = []string{"drive-sessions", "reply-in-app", "schedule-resident-tasks"}
+var skillNames = []string{"drive-sessions", "reply-in-app", "schedule-resident-tasks", "session-notes"}
 
 func TestInstallはプラグインとスキルを書き出して古い内容を置き換える(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "agent-plugin")

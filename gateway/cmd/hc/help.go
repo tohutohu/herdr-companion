@@ -133,7 +133,8 @@ USE WHEN
   "archive it once the PR is merged without changes". Also to leave yourself such a note:
   hc note add self "...".
   Notes are kept by the Gateway, so every client sees them. The session's own agent does
-  not receive them; to tell it something, hc send.
+  not receive them; to tell it something, hc send. A session can leave notes on itself
+  ("self"): what it waits for and what to send it then, for whoever watches it.
 
 USAGE
   hc note [ls] [ID] [--archived]      notes of one session, or of every session
@@ -165,6 +166,7 @@ OUTPUT
 EXAMPLES
   hc note add a9b7 "PRにレビューが来たら対応させる。マージされたらアーカイブしてよい"
   hc note add self --ttl 2d "PR #42 を出した。CI が落ちたら直させて"
+  hc note add self "待ち: owner/app#123 への alice のレビュー。コメントが付いたら「対応して push まで」と送る。マージされたらアーカイブしてよい"
   hc note edit n3f9 "ずっと待機させておく。触らない"
   hc note rm n3f9                     done with it
 

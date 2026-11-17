@@ -17,11 +17,19 @@
   {"split": "val", "expect": "schedule-resident-tasks", "query": "デプロイ終わったか2時間後にもう一度確認して"},
   {"split": "val", "expect": "schedule-resident-tasks", "query": "週1で古い Issue を棚卸しして教えてくれる仕組み作りたい"},
 
+  {"split": "train", "expect": "session-notes", "query": "PR 出したら、レビューは他チームの人がいつ見るか分からないから待たなくていい。止める前に何待ちか残しておいて"},
+  {"split": "train", "expect": "session-notes", "query": "この修正を PR にして CI が通ったら終わっていいよ。マージされたらこのセッションはアーカイブしていいって書いておいて"},
+  {"split": "train", "expect": "session-notes", "query": "alice のレビュー待ちになるはずだから、ループで待たずに再開の条件を書いて一旦終わって"},
+  {"split": "val", "expect": "session-notes", "query": "Issue に質問を書いたら、相手の返事待ちで止まっていい。戻ってきたとき何をすればいいか分かるようにしといて"},
+  {"split": "val", "expect": "session-notes", "query": "続きをお願い。まず自分が何待ちで止まってたか確認してから進めて"},
+  {"split": "train", "expect": "drive-sessions", "query": "a9b7 のセッションに、マージされたらアーカイブしてよいってメモを残して"},
+
   {"split": "train", "expect": null, "query": "crontab の `*/5 * * * *` ってどういう意味？"},
   {"split": "train", "expect": null, "query": ".github/workflows/nightly.yml の schedule を毎朝7時に変えて"},
   {"split": "train", "expect": null, "query": "README.md の誤字を直して"},
   {"split": "train", "expect": null, "query": "Android アプリの画像ビューアのズームのバグを直して"},
   {"split": "val", "expect": null, "query": "このリポジトリのテストと lint の失敗をサブエージェントで並列に調べて"},
   {"split": "val", "expect": null, "query": "./shot.png のレイアウト崩れの原因を分析して、CSS を直して"},
-  {"split": "val", "expect": null, "query": "FCM のプッシュ通知の本文を短くするコードを書いて"}
+  {"split": "val", "expect": null, "query": "FCM のプッシュ通知の本文を短くするコードを書いて"},
+  {"split": "val", "expect": null, "query": "PR #12 のレビューコメントに対応して push して"}
 ]
