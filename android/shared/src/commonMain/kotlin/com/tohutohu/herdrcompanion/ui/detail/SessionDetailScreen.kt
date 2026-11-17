@@ -89,7 +89,9 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -108,6 +110,10 @@ import com.tohutohu.herdrcompanion.ui.agentSettingsLabel
 import com.tohutohu.herdrcompanion.ui.changedInPlace
 import com.tohutohu.herdrcompanion.ui.pausePlacementOnChange
 import com.tohutohu.herdrcompanion.ui.costLabel
+import com.tohutohu.herdrcompanion.ui.input.ListBulletTransformation
+import com.tohutohu.herdrcompanion.ui.input.ListPasteScope
+import com.tohutohu.herdrcompanion.ui.input.applyListTyping
+import com.tohutohu.herdrcompanion.ui.input.listKeyEdit
 import com.tohutohu.herdrcompanion.ui.sessions.SessionActionMenuItems
 import com.tohutohu.herdrcompanion.ui.sessions.toSessionRef
 import com.tohutohu.herdrcompanion.ui.statusStyle
@@ -713,14 +719,19 @@ private fun Composer(
 ) {
     // Read back from the drafts, so it survives the session being left, going
     // offline (the resume bar replaces the composer) or the app restarting.
-    var text by remember(sessionId, drafts) { mutableStateOf(drafts[sessionId]) }
-    fun edit(value: String) {
-        text = value
-        drafts[sessionId] = value
+    var field by remember(sessionId, drafts) {
+        val draft = drafts[sessionId]
+        mutableStateOf(TextFieldValue(draft, TextRange(draft.length)))
     }
+    val text = field.text
+    fun edit(value: TextFieldValue) {
+        field = value
+        drafts[sessionId] = value.text
+    }
+    fun edit(value: String) = edit(TextFieldValue(value, TextRange(value.length)))
     // Text can arrive from elsewhere too (comments on an HTML page).
     LaunchedEffect(sessionId, drafts) {
-        drafts.observe(sessionId).collect { if (it != text) text = it }
+        drafts.observe(sessionId).collect { if (it != field.text) field = TextFieldValue(it, TextRange(it.length)) }
     }
     // No bar of its own: the field floats on the conversation's background as
     // one filled pill, with attach and send inside it.
@@ -752,50 +763,57 @@ private fun Composer(
                     )
                 }
                 val clear = Color.Transparent
-                TextField(
-                    value = text,
-                    onValueChange = { edit(it) },
-                    enabled = enabled,
-                    textStyle = MaterialTheme.typography.bodyMedium.copy(letterSpacing = 0.sp),
-                    placeholder = {
-                        Text(
-                            if (enabled || busy) "Message…" else "Session is not running",
-                            style = MaterialTheme.typography.bodyMedium.copy(letterSpacing = 0.sp),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    },
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = clear,
-                        unfocusedContainerColor = clear,
-                        disabledContainerColor = clear,
-                        focusedIndicatorColor = clear,
-                        unfocusedIndicatorColor = clear,
-                        disabledIndicatorColor = clear,
-                    ),
-                    maxLines = 6,
-                    modifier = Modifier.weight(1f).onPreviewKeyEvent { event ->
-                        if (event.type != KeyEventType.KeyDown) {
-                            false
-                        } else if (event.key == Key.V && event.isMetaPressed && !event.isShiftPressed && onPasteImage?.invoke() == true) {
-                            true
-                        } else if (event.key != Key.Enter) {
-                            false
-                        } else {
-                            val plainEnter = sendOnEnter && !event.isShiftPressed && !event.isMetaPressed && !event.isCtrlPressed
-                            val modifiedEnter = sendWithModifier && (event.isMetaPressed || event.isCtrlPressed)
-                            if (!plainEnter && !modifiedEnter) {
+                val markColor = MaterialTheme.colorScheme.onSurfaceVariant
+                ListPasteScope {
+                    TextField(
+                        value = field,
+                        onValueChange = { edit(applyListTyping(field, it)) },
+                        enabled = enabled,
+                        visualTransformation = remember(markColor) { ListBulletTransformation(markColor) },
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(letterSpacing = 0.sp),
+                        placeholder = {
+                            Text(
+                                if (enabled || busy) "Message…" else "Session is not running",
+                                style = MaterialTheme.typography.bodyMedium.copy(letterSpacing = 0.sp),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        },
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = clear,
+                            unfocusedContainerColor = clear,
+                            disabledContainerColor = clear,
+                            focusedIndicatorColor = clear,
+                            unfocusedIndicatorColor = clear,
+                            disabledIndicatorColor = clear,
+                        ),
+                        maxLines = 6,
+                        modifier = Modifier.weight(1f).onPreviewKeyEvent { event ->
+                            if (event.type != KeyEventType.KeyDown) {
                                 false
-                            } else if (enabled && (text.isNotBlank() || attachments.isNotEmpty())) {
-                                onAction(SessionDetailAction.Send(text))
-                                edit("")
+                            } else if (event.key == Key.V && event.isMetaPressed && !event.isShiftPressed && onPasteImage?.invoke() == true) {
                                 true
-                            } else {
+                            } else if (enabled && listKeyEdit(event, field)?.also { edit(it) } != null) {
+                                // On a list item Return starts the next item rather than sending.
+                                true
+                            } else if (event.key != Key.Enter) {
                                 false
+                            } else {
+                                val plainEnter = sendOnEnter && !event.isShiftPressed && !event.isMetaPressed && !event.isCtrlPressed
+                                val modifiedEnter = sendWithModifier && (event.isMetaPressed || event.isCtrlPressed)
+                                if (!plainEnter && !modifiedEnter) {
+                                    false
+                                } else if (enabled && (text.isNotBlank() || attachments.isNotEmpty())) {
+                                    onAction(SessionDetailAction.Send(text))
+                                    edit("")
+                                    true
+                                } else {
+                                    false
+                                }
                             }
-                        }
-                    },
-                )
+                        },
+                    )
+                }
                 sideQuestion?.let { Box(Modifier.padding(bottom = 4.dp)) { it() } }
                 SwapContent(busy, modifier = Modifier.padding(bottom = 4.dp).size(48.dp), iconOnly = true) { spinning ->
                     if (spinning) {

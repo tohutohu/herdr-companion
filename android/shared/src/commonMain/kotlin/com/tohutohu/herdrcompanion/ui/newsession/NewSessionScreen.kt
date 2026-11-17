@@ -77,6 +77,10 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.TextFieldValue
+import com.tohutohu.herdrcompanion.ui.input.ListBulletTransformation
+import com.tohutohu.herdrcompanion.ui.input.ListPasteScope
+import com.tohutohu.herdrcompanion.ui.input.applyListTyping
+import com.tohutohu.herdrcompanion.ui.input.listKeyEdit
 import androidx.compose.ui.unit.dp
 import com.tohutohu.herdrcompanion.ui.ExpandingContent
 import com.tohutohu.herdrcompanion.ui.SwapContent
@@ -225,29 +229,35 @@ fun NewSessionScreen(
                             )
                         }
                         Box(Modifier.weight(1f)) {
+                            val markColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            fun setPrompt(value: TextFieldValue) {
+                                promptValue = value
+                                if (value.text != state.prompt) {
+                                    onAction(NewSessionAction.SetPrompt(value.text))
+                                }
+                            }
                             promptFieldScope {
-                                OutlinedTextField(
-                                    value = promptValue,
-                                    onValueChange = { value ->
-                                        promptValue = value
-                                        if (value.text != state.prompt) {
-                                            onAction(NewSessionAction.SetPrompt(value.text))
-                                        }
-                                    },
-                                    enabled = editable,
-                                    label = { Text("First prompt (optional)") },
-                                    maxLines = 4,
-                                    modifier = (if (initialPromptFocusRequester != null) {
-                                        Modifier.fillMaxWidth().focusRequester(initialPromptFocusRequester)
-                                    } else {
-                                        Modifier.fillMaxWidth()
-                                    }).onPreviewKeyEvent { event ->
-                                        editable && state.attachmentsEnabled &&
-                                            event.type == KeyEventType.KeyDown &&
-                                            event.key == Key.V && event.isMetaPressed && !event.isShiftPressed &&
-                                            onPasteImage?.invoke() == true
-                                    },
-                                )
+                                ListPasteScope {
+                                    OutlinedTextField(
+                                        value = promptValue,
+                                        onValueChange = { setPrompt(applyListTyping(promptValue, it)) },
+                                        enabled = editable,
+                                        visualTransformation = remember(markColor) { ListBulletTransformation(markColor) },
+                                        label = { Text("First prompt (optional)") },
+                                        maxLines = 4,
+                                        modifier = (if (initialPromptFocusRequester != null) {
+                                            Modifier.fillMaxWidth().focusRequester(initialPromptFocusRequester)
+                                        } else {
+                                            Modifier.fillMaxWidth()
+                                        }).onPreviewKeyEvent { event ->
+                                            val image = editable && state.attachmentsEnabled &&
+                                                event.type == KeyEventType.KeyDown &&
+                                                event.key == Key.V && event.isMetaPressed && !event.isShiftPressed &&
+                                                onPasteImage?.invoke() == true
+                                            image || (editable && listKeyEdit(event, promptValue)?.also(::setPrompt) != null)
+                                        },
+                                    )
+                                }
                             }
                         }
                     }

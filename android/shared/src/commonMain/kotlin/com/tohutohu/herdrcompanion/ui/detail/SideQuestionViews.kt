@@ -1,5 +1,10 @@
 package com.tohutohu.herdrcompanion.ui.detail
 
+import androidx.compose.ui.text.input.TextFieldValue
+import com.tohutohu.herdrcompanion.ui.input.ListBulletTransformation
+import com.tohutohu.herdrcompanion.ui.input.ListPasteScope
+import com.tohutohu.herdrcompanion.ui.input.applyListTyping
+import com.tohutohu.herdrcompanion.ui.input.listKeyEdit
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -416,14 +421,15 @@ private fun SideQuestionInput(
     onAsk: (String) -> Unit,
     onClose: () -> Unit,
 ) {
-    var text by rememberSaveable(sessionId) { mutableStateOf("") }
+    var field by rememberSaveable(sessionId, stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue()) }
+    val text = field.text
     val focus = remember { FocusRequester() }
     // On a phone the keyboard would cover the answers, so it comes up only for a first question.
     LaunchedEffect(sessionId, lane) { if (desktopKeys || !followUp) runCatching { focus.requestFocus() } }
     fun submit() {
         if (text.isBlank()) return
         onAsk(text)
-        text = ""
+        field = TextFieldValue()
     }
     val clear = Color.Transparent
     val sendAlpha by animateFloatAsState(if (text.isBlank()) 0.38f else 1f, label = "btwSend")
@@ -436,42 +442,50 @@ private fun SideQuestionInput(
             .padding(start = 4.dp, end = 4.dp),
         verticalAlignment = Alignment.Bottom,
     ) {
-        TextField(
-            value = text,
-            onValueChange = { text = it },
-            placeholder = {
-                Text(
-                    if (followUp) "Ask more…" else "Ask on the side…",
-                    style = MaterialTheme.typography.bodyMedium.copy(letterSpacing = 0.sp),
-                )
-            },
-            textStyle = MaterialTheme.typography.bodyMedium.copy(letterSpacing = 0.sp, color = colors.onContainer),
-            colors = TextFieldDefaults.colors(
-                focusedContainerColor = clear,
-                unfocusedContainerColor = clear,
-                focusedIndicatorColor = clear,
-                unfocusedIndicatorColor = clear,
-            ),
-            maxLines = 4,
-            modifier = Modifier
-                .weight(1f)
-                .focusRequester(focus)
-                .onPreviewKeyEvent { event ->
-                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                    when {
-                        event.key == Key.Escape && desktopKeys -> {
-                            onClose()
-                            true
-                        }
-                        // Return asks (a desktop keyboard); Shift+Return breaks the line.
-                        event.key == Key.Enter && desktopKeys && !event.isShiftPressed && !event.isMetaPressed && !event.isCtrlPressed -> {
-                            submit()
-                            true
-                        }
-                        else -> false
-                    }
+        val markColor = colors.onContainer.copy(alpha = 0.6f)
+        ListPasteScope {
+            TextField(
+                value = field,
+                onValueChange = { field = applyListTyping(field, it) },
+                visualTransformation = remember(markColor) { ListBulletTransformation(markColor) },
+                placeholder = {
+                    Text(
+                        if (followUp) "Ask more…" else "Ask on the side…",
+                        style = MaterialTheme.typography.bodyMedium.copy(letterSpacing = 0.sp),
+                    )
                 },
-        )
+                textStyle = MaterialTheme.typography.bodyMedium.copy(letterSpacing = 0.sp, color = colors.onContainer),
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = clear,
+                    unfocusedContainerColor = clear,
+                    focusedIndicatorColor = clear,
+                    unfocusedIndicatorColor = clear,
+                ),
+                maxLines = 4,
+                modifier = Modifier
+                    .weight(1f)
+                    .focusRequester(focus)
+                    .onPreviewKeyEvent { event ->
+                        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                        listKeyEdit(event, field)?.let {
+                            field = it
+                            return@onPreviewKeyEvent true
+                        }
+                        when {
+                            event.key == Key.Escape && desktopKeys -> {
+                                onClose()
+                                true
+                            }
+                            // Return asks (a desktop keyboard); Shift+Return breaks the line.
+                            event.key == Key.Enter && desktopKeys && !event.isShiftPressed && !event.isMetaPressed && !event.isCtrlPressed -> {
+                                submit()
+                                true
+                            }
+                            else -> false
+                        }
+                    },
+            )
+        }
         IconButton(
             onClick = ::submit,
             enabled = text.isNotBlank(),
