@@ -348,9 +348,13 @@ jobs:
           path: |
             dist/hc-*
 
+  # The same checks as on main (Linux desktop UI tests, lint); a release is published only when they pass.
+  quality:
+    uses: ./.github/workflows/quality.yml
+
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [metadata, macos, linux, cli]
+    needs: [metadata, quality, macos, linux, cli]
     runs-on: ubuntu-24.04
 
     steps:

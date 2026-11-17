@@ -5,6 +5,8 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  # The Release workflow runs these checks and publishes only when they pass.
+  workflow_call:
 
 permissions:
   contents: read
@@ -26,6 +28,12 @@ jobs:
       - uses: android-actions/setup-android@v3
         with:
           packages: "platforms;android-37.0"
+      # Robolectric downloads its Android jars from Maven Central at test time; a failed download fails whole test classes.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-${{ runner.os }}-${{ hashFiles('android/gradle/libs.versions.toml') }}
+          restore-keys: robolectric-${{ runner.os }}-
       - name: Install desktop test runtime
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libegl1 libgl1 xvfb xauth
       - name: Test, lint and build optimized APK

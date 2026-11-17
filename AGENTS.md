@@ -57,6 +57,10 @@ Resident tasks (常駐, `gateway/internal/resident`, `docs/resident.md`) keep th
 through `internal/runtime`. The opt-in Mac UI flow test against a throwaway gateway is
 `HERDR_RESIDENT_E2E_URL=… HERDR_RESIDENT_E2E_TOKEN=… HERDR_RESIDENT_E2E_CWD=… ./gradlew :desktopApp:test --tests '*DesktopResidentFlowTest*' --rerun`.
 
+Releases: commit the bump in `version.properties` as `chore: release X.Y.Z`, then run `scripts/release.sh`. It pushes main, waits for Quality checks on
+that commit and pushes the tag `vX.Y.Z` only if they pass; do not push a release tag by hand. The Release workflow runs the same checks
+(`quality.yml` via `workflow_call`) and publishes only when they pass.
+
 Both Mac apps update themselves from the latest GitHub Release (`docs/macos-release.md#アプリ内アップデート`); keep the release asset names stable.
 Both Mac apps and hc are signed with one self-signed certificate (`scripts/setup-macos-signing.sh`, `scripts/macos-signing.sh`) so macOS keeps
 keychain/folder/screen-recording permissions across updates; never sign them ad hoc or with a new certificate (the updaters refuse it).

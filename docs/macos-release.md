@@ -223,6 +223,8 @@ git push origin v1.0.0
 
 tag名と`version.properties`が一致しないreleaseはwrapperが停止します。
 
+releaseは`version.properties`を上げて`chore: release X.Y.Z`としてコミットし、[`scripts/release.sh`](../scripts/release.sh)で出します。スクリプトはmainをpushし、そのコミットのQuality checksが通ったときだけtag `vX.Y.Z`をpushします。tag pushで動くRelease workflowも同じQuality checks（`quality.yml`を`workflow_call`で呼ぶ）を走らせ、通らなければGitHub Releaseを作りません。
+
 ## アプリ内アップデート
 
 `Herdr Companion.app`と`Herdr Companion Gateway.app`は、それぞれ自分でGitHub Releasesの最新版（`releases/latest`、draft・prereleaseを除く）を確認して更新します。
