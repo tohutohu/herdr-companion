@@ -1,14 +1,16 @@
 #!/bin/bash
-# Builds both Mac apps from this checkout and installs them into /Applications.
+# Builds both Mac apps from this checkout and installs them into /Applications,
+# and hc into ~/.local/bin, all signed with the same certificate.
 # The Mac UI is replaced right away. The Gateway Manager is replaced by a
 # detached job once no session is running or waiting for an answer and no
 # resident run is running or queued, because quitting it stops every agent turn,
 # including the one that ran this script.
 # Progress of the detached job: /tmp/herdr-gateway-swap.log
 #
-#   scripts/update-local-apps.sh            build and install both apps
+#   scripts/update-local-apps.sh            build and install both apps and hc
 #   scripts/update-local-apps.sh --gateway  only the Gateway Manager
 #   scripts/update-local-apps.sh --ui       only the Mac UI
+#   scripts/update-local-apps.sh --hc       only hc
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -16,6 +18,16 @@ GATEWAY_APP="/Applications/Herdr Companion Gateway.app"
 UI_APP="/Applications/Herdr Companion.app"
 LOG=/tmp/herdr-gateway-swap.log
 RESIDENT_DB="$HOME/.local/state/herdr-mobile/desktop/resident.db"
+
+# replace_app SRC DST: installs a fresh copy. ditto onto an existing bundle
+# keeps the old version's files, which breaks the bundle's code signature.
+replace_app() {
+  local next="$2.new"
+  rm -rf "$next"
+  ditto "$1" "$next"
+  rm -rf "$2"
+  mv "$next" "$2"
+}
 
 busy_work() {
   local sessions
@@ -45,7 +57,7 @@ swap_gateway() {
   osascript -e 'tell application id "com.tohutohu.herdrcompanion.gateway" to quit' || true
   for _ in $(seq 1 40); do pgrep -f "$GATEWAY_APP/" >/dev/null || break; sleep 0.5; done
   if pgrep -fl "$GATEWAY_APP/"; then echo "still running after quit; not replaced"; exit 1; fi
-  ditto "$ROOT/macos/build/Herdr Companion Gateway.app" "$GATEWAY_APP"
+  replace_app "$ROOT/macos/build/Herdr Companion Gateway.app" "$GATEWAY_APP"
   open "$GATEWAY_APP"
   for _ in $(seq 1 30); do
     if hc ls >/dev/null 2>&1; then echo "gateway is up"; break; fi
@@ -59,13 +71,24 @@ if [[ "${1:-}" == "--swap-gateway-when-idle" ]]; then
   exit
 fi
 
-gateway=1 ui=1
+gateway=1 ui=1 hc=1
 case "${1:-}" in
-  --gateway) ui=0 ;;
-  --ui) gateway=0 ;;
+  --gateway) ui=0 hc=0 ;;
+  --ui) gateway=0 hc=0 ;;
+  --hc) gateway=0 ui=0 ;;
   "") ;;
-  *) echo "usage: $0 [--gateway|--ui]" >&2; exit 2 ;;
+  *) echo "usage: $0 [--gateway|--ui|--hc]" >&2; exit 2 ;;
 esac
+
+# Every build is signed with the same certificate so macOS keeps the
+# permissions it granted (scripts/macos-signing.sh).
+# shellcheck source=macos-signing.sh
+source "$ROOT/scripts/macos-signing.sh"
+herdr_use_signing
+
+if ((hc)); then
+  bash "$ROOT/scripts/install-hc.sh"
+fi
 
 if ((gateway)); then
   # bun is managed by mise and is not on the default PATH.
@@ -80,12 +103,14 @@ if ((ui)); then
     # Without that JBR, any installed JDK 17.
     [[ -d "$JAVA_HOME" ]] || JAVA_HOME="$(/usr/libexec/java_home -v 17)"
     export JAVA_HOME
-    ./gradlew --console=plain :desktopApp:createReleaseDistributable
+    env -u MACOS_SIGNING_IDENTITY -u MACOS_SIGNING_KEYCHAIN \
+      ./gradlew --console=plain :desktopApp:createReleaseDistributable
   )
   built="$(find "$ROOT/android/desktopApp/build/compose/binaries" -type d -name 'Herdr Companion.app' -print | sort | tail -n 1)"
+  "$ROOT/scripts/sign-macos-ui.sh" "$built"
   osascript -e 'tell application id "com.tohutohu.herdrcompanion.desktop" to quit' || true
   for _ in $(seq 1 40); do pgrep -f "$UI_APP/" >/dev/null || break; sleep 0.5; done
-  ditto "$built" "$UI_APP"
+  replace_app "$built" "$UI_APP"
   open "$UI_APP"
   echo "Mac UI replaced ($(defaults read "$UI_APP/Contents/Info" CFBundleShortVersionString))"
 fi

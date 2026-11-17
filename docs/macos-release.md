@@ -84,6 +84,22 @@ macos/scripts/generate-icon.sh
 
 生成した`macos/assets/Herdr.icns`はCompose UIとSwiftUI Gateway Managerの両方で使用します。
 
+## 固定の証明書による署名
+
+macOSはキーチェーン項目・フォルダ・画面収録などの許可を、appのdesignated requirementに結び付けて記憶します。ad-hoc署名ではこれがビルドのハッシュ（`cdhash`）になるため、更新のたびに許可の確認が出直します。Gateway Manager・Mac UI・`hc`は、ローカルビルドもreleaseも同じ自己署名証明書「Herdr Companion Code Signing」で署名し、要件を`identifier "…" and certificate leaf = H"…"`に固定します。
+
+```bash
+scripts/setup-macos-signing.sh                  # 1回だけ。証明書（20年）と専用キーチェーンを作る
+scripts/setup-macos-signing.sh --github-secrets # releaseの MACOS_CERTIFICATE_P12_BASE64 / MACOS_CERTIFICATE_PASSWORD に登録
+scripts/setup-macos-signing.sh --export F.p12   # バックアップ（パスワードはstderr）
+```
+
+- 証明書は専用キーチェーン`~/Library/Keychains/herdr-companion-signing.keychain-db`にあり、そのパスワードはログインキーチェーンの`herdr-companion-signing`に入っています。[`scripts/macos-signing.sh`](../scripts/macos-signing.sh)がビルドのたびにこれを開いてユーザーの検索リストに加えるので、エージェントのビルドでもダイアログは出ません。
+- `macos/scripts/build-dmg.sh`、`scripts/build-macos-release.sh`、`scripts/update-local-apps.sh`、`scripts/install-hc.sh`はこの証明書を自動で使います。証明書がなければ警告を出してad-hoc署名に戻ります。Mac UIはComposeがDeveloper IDでしか署名しないため、[`scripts/sign-macos-ui.sh`](../scripts/sign-macos-ui.sh)が中のMach-O・同梱JRE・appの順に署名します（entitlementsは[`macos/assets/desktop-ui.entitlements`](../macos/assets/desktop-ui.entitlements)）。
+- 信頼された証明書ではないので、Gatekeeperの扱い（初回のquarantine）はad-hoc署名と同じです。
+- release workflowはtag pushでこの証明書（またはDeveloper ID）のsecretsがなければ失敗します。macOS向け`hc`もmacOS jobで同じ証明書で署名します。
+- 3つのアップデーター（Gateway Manager、Mac UI、`hc update`）は、インストール済みのものが証明書で署名されていれば、その要件を満たす更新だけを受け入れます。証明書を作り直すと既存の利用者は自動更新できなくなり、許可も一度出直すので、作り直さないでください。
+
 ## Developer ID署名
 
 証明書や秘密鍵はリポジトリへ置きません。ローカルではKeychainにDeveloper ID Application証明書を入れ、環境変数で参照します。
@@ -168,7 +184,7 @@ Gatewayも使う場合は、別途`Herdr-Companion-Gateway-x.y.z.dmg`を開い�
 
 ## GitHub Actions / GitHub Release
 
-[`.github/workflows/macos-release.yml`](../.github/workflows/macos-release.yml)は`v*` tag pushまたはmanual dispatchで動きます。`macos-15` arm64 runner上で、JDK 17、Gradle cache、Go 1.27、Bun、Android/shared regression、Gateway test/vet、Claudeサイドカーのtypecheck、release APK生成、temporary keychain、2つのrelease DMG生成、verification、artifact uploadを順に実行します。Linux .debとエージェント向けCLI `hc`（[cli.md](cli.md)）は別jobで作ります。tag push時は次のファイルをGitHub Releaseへ添付します（それぞれ`.sha256`付き）。
+[`.github/workflows/macos-release.yml`](../.github/workflows/macos-release.yml)は`v*` tag pushまたはmanual dispatchで動きます。`macos-15` arm64 runner上で、JDK 17、Gradle cache、Go 1.27、Bun、Android/shared regression、Gateway test/vet、Claudeサイドカーのtypecheck、release APK生成、temporary keychain、2つのrelease DMG生成、verification、artifact uploadを順に実行します。Linux .debとエージェント向けCLI `hc`（[cli.md](cli.md)）は別jobで作ります（macOS向け`hc`だけは署名のためmacOS jobで作ります）。tag push時は次のファイルをGitHub Releaseへ添付します（それぞれ`.sha256`付き）。
 
 ```text
 Herdr-Companion-x.y.z.dmg
@@ -179,7 +195,7 @@ Herdr-Companion-Linux-x.y.z-arm64.deb
 hc-darwin-arm64  hc-darwin-amd64  hc-linux-amd64  hc-linux-arm64  hc-windows-amd64.exe  hc-windows-arm64.exe
 ```
 
-`hc`はcgoなしの純Goなので、1台のUbuntu runnerで全プラットフォーム向けにクロスコンパイルし、`-X main.version`でreleaseのversionを埋め込みます（`hc version`で確認できる）。`releases/latest/download/hc-<os>-<arch>`で常に最新版を取れるよう、asset名にversionを入れません。
+`hc`はcgoなしの純Goなので、1台のUbuntu runnerでLinux・Windows向けにクロスコンパイルし（macOS向けはmacOS jobでビルドして署名）、`-X main.version`でreleaseのversionを埋め込みます（`hc version`で確認できる）。`releases/latest/download/hc-<os>-<arch>`で常に最新版を取れるよう、asset名にversionを入れません。
 
 Android APKは`assembleRelease`で生成し、R8とリソース圧縮を有効にした状態で配布します。ローカルでは既存debug署名キーを使い、配布CIでは同じMac鍵をGitHub Secretsから復元して固定署名します。Play Store提出用ではなく、直接インストールできる共有APKです。Firebase設定は内蔵せず、Macとのペアリング時に取り込みます。
 
@@ -191,7 +207,7 @@ CIへ設定するsecret名:
 - `APPLE_APP_SPECIFIC_PASSWORD`
 - `APPLE_TEAM_ID`
 
-MacのDeveloper ID証明書がない場合もCIはunsigned DMG生成まで進みます。Androidの固定署名用Secretsは必須です。notarization用3 secretの一部だけを設定する構成は拒否します。
+Macの署名証明書のsecretsがない場合、tag push以外のCIはad-hoc署名のDMG生成まで進みます（tag pushでは失敗します）。Androidの固定署名用Secretsは必須です。notarization用3 secretの一部だけを設定する構成は拒否します。
 
 ## Version tagの手順
 
@@ -213,7 +229,7 @@ tag名と`version.properties`が一致しないreleaseはwrapperが停止しま�
 
 - 確認: 起動5秒後と6時間ごと（設定でオフにできる）、およびUIの「Herdr Companion → Check for Updates…」／Gateway Managerの「アップデートを確認」。更新があるとUIはツールバー下にバナーを出し、Gateway Managerはメニューバーアイコンを`arrow.down.app`に変える。
 - インストールは利用者がボタンを押したときだけ行う。`Herdr-Companion-x.y.z.dmg`または`Herdr-Companion-Gateway-x.y.z.dmg`をダウンロードし、GitHubが返すassetの`digest`（なければ`.sha256` asset）とSHA-256を照合する。
-- DMGを読み取り専用でmountし、中のappのBundle ID・`CFBundleShortVersionString`・`codesign --verify --deep --strict`を確認する。インストール済みappにTeam IDがある場合は同じTeam IDの署名だけを受け入れる（ad-hoc署名の現行版からDeveloper ID版への移行は許可）。
+- DMGを読み取り専用でmountし、中のappのBundle ID・`CFBundleShortVersionString`・`codesign --verify --deep --strict`を確認する。インストール済みappが証明書で署名されていれば、そのdesignated requirementを満たす（同じ証明書で署名された）更新だけを受け入れる（ad-hoc署名の現行版からの移行は許可）。
 - 検証済みappをインストール先と同じフォルダの`.<App名>.app.update/`へコピーし、アプリ終了後に`/bin/sh`のhelperが旧bundleと入れ替えて開き直す。入れ替えに失敗したときは旧bundleを戻す。ログは同じフォルダの`update.log`に残る。
 - Gateway Managerは入れ替え前に子Gatewayを止め、`autoStart`を保ったまま再起動するので、新しいversionがGatewayを起動し直す。UIは開いていたsessionを起動時に復元する。
 - DMG上・App Translocation下で起動したapp、またはインストール先フォルダへ書き込めない場合は更新せず、Applicationsへの移動かリリースページからの更新を案内する。

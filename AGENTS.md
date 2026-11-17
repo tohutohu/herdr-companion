@@ -23,7 +23,7 @@ go vet ./...
 env -u GOROOT go test ./...                    # avoid inherited GOROOT/toolchain mismatch
 # Production updates: rebuild the Mac Gateway app, replace /Applications/Herdr Companion Gateway.app, reopen it.
 herdr-mobile-gateway token | devices | usage | notify-test | debug replay FILE
-env -u GOROOT go build -o ~/.local/bin/hc ./cmd/hc  # agent-facing client CLI (docs/cli.md); `hc guide`
+bash ../scripts/install-hc.sh                   # agent-facing client CLI (docs/cli.md), signed into ~/.local/bin/hc; `hc guide`, `hc update`
 
 # Claude sidecar (Bun + Claude Agent SDK; bundled next to the gateway in the Mac app)
 cd gateway/claude-sidecar
@@ -40,7 +40,8 @@ ANDROID_SERIAL=<serial> ./gradlew installDebug
 # Compose Mac UI (JDK 17; separate from the menu-bar Gateway Manager)
 cd android
 export JAVA_HOME=$HOME/Library/Java/JavaVirtualMachines/jbr-17.0.14/Contents/Home
-./gradlew --console=plain :desktopApp:createReleaseDistributable
+env -u MACOS_SIGNING_IDENTITY ./gradlew --console=plain :desktopApp:createReleaseDistributable
+../scripts/sign-macos-ui.sh "$(find desktopApp/build/compose/binaries -type d -name 'Herdr Companion.app' -print | sort | tail -n 1)"
 osascript -e 'tell application id "com.tohutohu.herdrcompanion.desktop" to quit'
 ditto "$(find desktopApp/build/compose/binaries -type d -name 'Herdr Companion.app' -print | sort | tail -n 1)" "/Applications/Herdr Companion.app"
 open "/Applications/Herdr Companion.app"
@@ -48,7 +49,7 @@ open "/Applications/Herdr Companion.app"
 ./gradlew --console=plain :desktopApp:packageReleaseDeb
 
 # Mac menu-bar app (macOS 13+, Swift and Go)
-bash macos/scripts/build-dmg.sh                 # native-architecture DMG, ad-hoc signed by default
+bash macos/scripts/build-dmg.sh                 # native-architecture DMG, signed with the fixed self-signed cert (scripts/setup-macos-signing.sh)
 swift test --package-path macos                 # updater logic tests
 ```
 
@@ -57,6 +58,8 @@ through `internal/runtime`. The opt-in Mac UI flow test against a throwaway gate
 `HERDR_RESIDENT_E2E_URL=… HERDR_RESIDENT_E2E_TOKEN=… HERDR_RESIDENT_E2E_CWD=… ./gradlew :desktopApp:test --tests '*DesktopResidentFlowTest*' --rerun`.
 
 Both Mac apps update themselves from the latest GitHub Release (`docs/macos-release.md#アプリ内アップデート`); keep the release asset names stable.
+Both Mac apps and hc are signed with one self-signed certificate (`scripts/setup-macos-signing.sh`, `scripts/macos-signing.sh`) so macOS keeps
+keychain/folder/screen-recording permissions across updates; never sign them ad hoc or with a new certificate (the updaters refuse it).
 
 ### APK build requests
 

@@ -18,12 +18,20 @@ for path in "$APP" "$DMG"; do
 done
 
 if codesign --verify --deep --strict "$APP" >/dev/null 2>&1; then
-  if [[ "$REQUIRE_SIGNED" == 1 ]]; then
+  if [[ "$EXPECT_NOTARIZED" == 1 ]]; then
     if ! codesign -dv --verbose=4 "$APP" 2>&1 | grep -q '^Authority=Developer ID Application:'; then
       echo "Developer ID Application signature missing: $APP" >&2
       exit 1
     fi
     echo "Developer ID signature valid: $APP"
+  elif [[ "$REQUIRE_SIGNED" == 1 ]]; then
+    # A certificate signature, not ad hoc: macOS then keeps the app's
+    # permissions across updates.
+    if ! codesign -d -r- "$APP" 2>/dev/null | grep -q '^designated => .*certificate'; then
+      echo "Certificate signature missing (ad hoc?): $APP" >&2
+      exit 1
+    fi
+    echo "certificate signature valid: $APP ($(codesign -dv --verbose=2 "$APP" 2>&1 | sed -n 's/^Authority=//p' | head -n 1))"
   else
     echo "codesign valid: $APP"
   fi

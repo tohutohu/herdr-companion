@@ -133,13 +133,21 @@ jobs:
           cp "$APK" "$OUTPUT"
           (cd ../dist && shasum -a 256 "$(basename "$OUTPUT")" > "$(basename "$OUTPUT").sha256")
 
-      - name: Import Developer ID certificate
+      # The certificate is either a Developer ID or the self-signed "Herdr Companion
+      # Code Signing" one from scripts/setup-macos-signing.sh. Every release must be
+      # signed with the same one: macOS keeps the permissions it granted the apps and
+      # hc by that certificate, and the updaters refuse a release signed with another.
+      - name: Import signing certificate
         env:
           MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
           MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
         run: |
           if [[ -z "${MACOS_CERTIFICATE_P12_BASE64:-}" || -z "${MACOS_CERTIFICATE_PASSWORD:-}" ]]; then
-            echo "Developer ID certificate secrets are not configured; producing an unsigned local-style artifact."
+            if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+              echo "MACOS_CERTIFICATE_P12_BASE64 / MACOS_CERTIFICATE_PASSWORD are missing. Refusing an ad-hoc signed release." >&2
+              exit 1
+            fi
+            echo "Signing certificate secrets are not configured; producing an ad-hoc signed local-style artifact."
             exit 0
           fi
 
@@ -161,7 +169,12 @@ jobs:
           IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
             | sed -n 's/.*"\(Developer ID Application:.*\)"/\1/p' | head -n 1)"
           if [[ -z "$IDENTITY" ]]; then
-            echo "No Developer ID Application identity was found in the imported keychain." >&2
+            # Self-signed: not trusted, so not listed with -v. Use its SHA-1.
+            IDENTITY="$(security find-identity -p codesigning "$KEYCHAIN_PATH" \
+              | awk '/"Herdr Companion Code Signing"/ && $2 ~ /^[0-9A-F]{40}$/ { print $2; exit }')"
+          fi
+          if [[ -z "$IDENTITY" ]]; then
+            echo "Neither a Developer ID Application nor the Herdr Companion Code Signing identity is in the imported keychain." >&2
             exit 1
           fi
 
@@ -174,6 +187,28 @@ jobs:
       - name: Build and verify separate macOS DMGs
         run: ./scripts/build-macos-release.sh
 
+      # The other platforms' hc are built in the cli job; macOS ones are signed here
+      # with the apps' certificate so hc update can check the release's signer.
+      - name: Build and sign hc for macOS
+        working-directory: gateway
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+          CGO_ENABLED: "0"
+        run: |
+          source ../scripts/macos-signing.sh
+          herdr_use_signing
+          for arch in arm64 amd64; do
+            OUTPUT="../dist/hc-darwin-$arch"
+            GOOS=darwin GOARCH="$arch" go build -trimpath \
+              -ldflags "-s -w -X main.version=$VERSION" -o "$OUTPUT" ./cmd/hc
+            herdr_codesign --options runtime --identifier com.tohutohu.herdrcompanion.hc "$OUTPUT"
+            codesign --verify --strict "$OUTPUT"
+            (cd ../dist && shasum -a 256 "$(basename "$OUTPUT")" > "$(basename "$OUTPUT").sha256")
+          done
+          ../dist/hc-darwin-arm64 version | grep -qx "hc $VERSION" \
+            || { echo "hc does not report version $VERSION" >&2; exit 1; }
+          codesign -d -r- ../dist/hc-darwin-arm64
+
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -184,6 +219,7 @@ jobs:
             dist/Herdr-*.dmg.sha256
             dist/Herdr-*.apk
             dist/Herdr-*.apk.sha256
+            dist/hc-darwin-*
 
       - name: Delete temporary keychain
         if: always()
@@ -278,8 +314,9 @@ jobs:
           go-version: "1.27.x"
           cache-dependency-path: gateway/go.sum
 
-      # hc is pure Go with no cgo, so one runner builds every platform.
-      - name: Test and build hc for every platform
+      # hc is pure Go with no cgo, so one runner builds every platform but macOS,
+      # whose binaries the macos job builds and signs.
+      - name: Test and build hc for Linux and Windows
         working-directory: gateway
         env:
           VERSION: ${{ needs.metadata.outputs.version }}
@@ -289,7 +326,7 @@ jobs:
           go vet ./cmd/hc
 
           mkdir -p ../dist
-          for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
+          for target in linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
             GOOS="${target%/*}" GOARCH="${target#*/}"
             EXT=""
             [[ "$GOOS" == windows ]] && EXT=".exe"

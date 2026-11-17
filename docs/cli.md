@@ -114,7 +114,7 @@ curl -fsSL -o ~/.local/bin/hc https://github.com/tohutohu/herdr-companion/releas
 chmod +x ~/.local/bin/hc
 ```
 
-macOS のバイナリは署名していない。curl で取れば quarantine 属性は付かないが、ブラウザで落とした場合は
+macOS のバイナリは Mac アプリと同じ自己署名証明書で署名している（[macos-release.md](macos-release.md#固定の証明書による署名)）。信頼された証明書ではないので、curl で取れば quarantine 属性は付かないが、ブラウザで落とした場合は
 `xattr -d com.apple.quarantine hc` が要る。
 
 一度入れたあとは `hc update` で最新のリリースに置き換えられる（Gateway への接続は要らない）。
@@ -126,7 +126,9 @@ hc update           # hc-<os>-<arch> を取り、SHA-256 と起動を確かめ�
 
 - 照合には GitHub が返す asset の `digest`、なければ `.sha256` asset を使う。どちらも無い・合わない・`hc version` が期待の版を名乗らないときは何も置き換えない。
 - ソースからビルドした hc（`hc version` が `dev`）は `--force` を付けたときだけ置き換える。`--force` は同じ版の入れ直しにも使える。
-- hc のあるフォルダに書き込めないときは失敗する（`sudo` で入れた場合など）。ソースからは次のとおり。
+- hc のあるフォルダに書き込めないときは失敗する（`sudo` で入れた場合など）。
+- macOS では、入っている hc が証明書で署名されていれば、同じ証明書で署名されたリリースしか入れない（ad-hoc 署名の hc はどのリリースにも置き換わる）。
+- ソースから入れるときは `scripts/install-hc.sh`（同じ証明書で署名して `~/.local/bin/hc` に置く）。ソースからは次のとおり。
 
 ```bash
 cd gateway

@@ -16,6 +16,14 @@ final class UpdaterTests: XCTestCase {
         return GitHubRelease(tagName: tag, htmlURL: "https://github.com/tohutohu/herdr-companion/releases/tag/\(tag)", prerelease: prerelease, assets: assets)
     }
 
+    func test_署名の要件は証明書の署名だけから読みアドホック署名では無視する() {
+        let signed = "Executable=/A.app/Contents/MacOS/A\ndesignated => identifier \"com.tohutohu.herdrcompanion.gateway\" and certificate leaf = H\"1ff2\"\n"
+        XCTAssertEqual(parseDesignatedRequirement(signed),
+                       "identifier \"com.tohutohu.herdrcompanion.gateway\" and certificate leaf = H\"1ff2\"")
+        XCTAssertNil(parseDesignatedRequirement("Executable=/A\n# designated => cdhash H\"9df9\"\n"))
+        XCTAssertNil(parseDesignatedRequirement("Executable=/A\n"))
+    }
+
     func test_バージョンは数値として比較し足りない桁は0とみなす() {
         XCTAssertEqual(compareVersions("1.10.0", "1.9.9"), 1)
         XCTAssertEqual(compareVersions("v1.2", "1.2.0"), 0)

@@ -232,6 +232,11 @@ func (u *updater) install(rel githubRelease, want string) (string, error) {
 	if err := os.Chmod(tmpPath, info.Mode().Perm()|0o111); err != nil {
 		return "", err
 	}
+	if u.goos == "darwin" {
+		if err := sameSigner(exe, tmpPath); err != nil {
+			return "", err
+		}
+	}
 	if err := checkRuns(tmpPath, want); err != nil {
 		return "", err
 	}
@@ -272,6 +277,40 @@ func isSHA256(s string) bool {
 	}
 	_, err := hex.DecodeString(s)
 	return err == nil
+}
+
+// sameSigner refuses a download signed with another certificate than the
+// installed hc: macOS keeps what it allowed hc by that signature, and only
+// the project's certificate should replace it. An ad-hoc signed hc (its
+// requirement is its own hash) accepts any release.
+func sameSigner(installed, downloaded string) error {
+	out, err := exec.Command("/usr/bin/codesign", "-d", "-r-", installed).CombinedOutput()
+	if err != nil {
+		return nil // unsigned: nothing to keep
+	}
+	req := designatedRequirement(string(out))
+	if req == "" {
+		return nil
+	}
+	if out, err := exec.Command("/usr/bin/codesign", "--verify", "--strict", "--test-requirement=="+req, downloaded).CombinedOutput(); err != nil {
+		return fmt.Errorf("the downloaded hc is not signed with the certificate of %s (%s); nothing was replaced",
+			installed, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// designatedRequirement is the requirement in "codesign -d -r-" output, or
+// "" for an ad-hoc signature, whose requirement is the build's own hash.
+func designatedRequirement(codesignOutput string) string {
+	for _, line := range strings.Split(codesignOutput, "\n") {
+		if req, ok := strings.CutPrefix(strings.TrimSpace(line), "designated => "); ok {
+			if strings.HasPrefix(req, "cdhash ") {
+				return ""
+			}
+			return req
+		}
+	}
+	return ""
 }
 
 // checkRuns runs the downloaded hc once, so a binary for the wrong platform

@@ -59,21 +59,22 @@ fi
   bun build --compile --minify src/main.ts --outfile "$APP/Contents/Resources/herdr-claude-sidecar"
 )
 
-# The UI app is signed by Compose/jpackage. The SwiftUI companion and its Go
-# helper are signed here in the required nested-code order.
-IDENTITY="${MACOS_SIGNING_IDENTITY:-${SIGNING_IDENTITY:--}}"
-KEYCHAIN="${MACOS_SIGNING_KEYCHAIN:-${SIGNING_KEYCHAIN:-}}"
-sign_args=(--force --options runtime)
-if [[ "$IDENTITY" != "-" ]]; then
-  sign_args+=(--timestamp)
+# The UI app is signed by scripts/sign-macos-ui.sh (or Compose for a
+# Developer ID). The SwiftUI companion and its Go helper are signed here in the
+# required nested-code order, with the same certificate every build so macOS
+# keeps the permissions it granted (scripts/macos-signing.sh).
+# shellcheck source=../../scripts/macos-signing.sh
+source "$ROOT/scripts/macos-signing.sh"
+if [[ -z "${MACOS_SIGNING_IDENTITY:-}" && -n "${SIGNING_IDENTITY:-}" ]]; then
+  MACOS_SIGNING_IDENTITY="$SIGNING_IDENTITY"
+  MACOS_SIGNING_KEYCHAIN="${MACOS_SIGNING_KEYCHAIN:-${SIGNING_KEYCHAIN:-}}"
 fi
-if [[ -n "$KEYCHAIN" ]]; then
-  sign_args+=(--keychain "$KEYCHAIN")
-fi
-codesign "${sign_args[@]}" --sign "$IDENTITY" "$APP/Contents/Resources/herdr-mobile-gateway"
-codesign "${sign_args[@]}" --entitlements "$ROOT/macos/assets/claude-sidecar.entitlements" \
-  --sign "$IDENTITY" "$APP/Contents/Resources/herdr-claude-sidecar"
-codesign "${sign_args[@]}" --sign "$IDENTITY" "$APP"
+herdr_use_signing
+IDENTITY="$MACOS_SIGNING_IDENTITY"
+herdr_codesign --options runtime "$APP/Contents/Resources/herdr-mobile-gateway"
+herdr_codesign --options runtime --entitlements "$ROOT/macos/assets/claude-sidecar.entitlements" \
+  "$APP/Contents/Resources/herdr-claude-sidecar"
+herdr_codesign --options runtime "$APP"
 codesign --verify --deep --strict "$APP"
 
 if [[ -n "$DMG_OUTPUT" ]]; then

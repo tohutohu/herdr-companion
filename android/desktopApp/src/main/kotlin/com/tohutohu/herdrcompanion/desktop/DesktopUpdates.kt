@@ -303,9 +303,13 @@ class DesktopUpdater(
                     "The update DMG does not contain version ${update.version}."
                 }
                 run("/usr/bin/codesign", "--verify", "--deep", "--strict", app.toString())
-                // Once the installed app carries a Developer ID, only the same team may replace it.
-                teamIdentifier(bundle)?.let { team ->
-                    check(teamIdentifier(app) == team) { "The update is signed by a different developer." }
+                // Once the installed app is signed with a certificate (the project's own or a
+                // Developer ID), only an update signed with it may replace it: macOS keeps the
+                // permissions it granted by that signature. An ad-hoc app accepts any update.
+                designatedRequirement(bundle)?.let { requirement ->
+                    check(runCatching {
+                        run("/usr/bin/codesign", "--verify", "--strict", "--test-requirement==$requirement", app.toString())
+                    }.isSuccess) { "The update is signed with a different certificate than the installed app." }
                 }
                 val stageDir = bundle.parent.resolve(".${bundle.fileName}.update")
                 stageDir.toFile().deleteRecursively()
@@ -366,13 +370,20 @@ private fun plistValue(app: Path, key: String): String? = runCatching {
     run("/usr/bin/plutil", "-extract", key, "raw", "-o", "-", app.resolve("Contents/Info.plist").toString())
 }.getOrNull()?.trim()?.takeIf { it.isNotEmpty() }
 
-/** The signing team, or null for an ad-hoc or unsigned app. */
-private fun teamIdentifier(app: Path): String? = runCatching {
-    run("/usr/bin/codesign", "-dv", app.toString())
-}.getOrNull()?.lineSequence()
-    ?.firstOrNull { it.startsWith("TeamIdentifier=") }
-    ?.removePrefix("TeamIdentifier=")
-    ?.takeIf { it.isNotBlank() && it != "not set" }
+/** The designated requirement of a certificate-signed app, or null for an ad-hoc or unsigned one. */
+private fun designatedRequirement(app: Path): String? = runCatching {
+    run("/usr/bin/codesign", "-d", "-r-", app.toString())
+}.getOrNull()?.let(::parseDesignatedRequirement)
+
+/**
+ * The requirement in `codesign -d -r-` output, or null for an ad-hoc signature,
+ * whose requirement is the build's own hash and no other build meets.
+ */
+internal fun parseDesignatedRequirement(output: String): String? = output.lineSequence()
+    .map { it.trim() }
+    .firstOrNull { it.startsWith("designated => ") }
+    ?.removePrefix("designated => ")
+    ?.takeUnless { it.startsWith("cdhash ") }
 
 /** Runs a system tool and returns its combined output, failing on a non-zero exit. */
 private fun run(vararg command: String): String {

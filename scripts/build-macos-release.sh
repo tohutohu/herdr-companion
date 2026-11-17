@@ -38,6 +38,9 @@ if [[ -z "${MACOS_SIGNING_KEYCHAIN:-}" && -n "${SIGNING_KEYCHAIN:-}" ]]; then
   MACOS_SIGNING_KEYCHAIN="$SIGNING_KEYCHAIN"
   export MACOS_SIGNING_KEYCHAIN
 fi
+# shellcheck source=macos-signing.sh
+source "$ROOT/scripts/macos-signing.sh"
+herdr_use_signing
 
 GRADLE_ARGS=(
   --console=plain
@@ -45,14 +48,16 @@ GRADLE_ARGS=(
   "-Pherdr.version=$VERSION"
   "-Pherdr.build=$BUILD"
 )
-if [[ -n "${MACOS_SIGNING_IDENTITY:-}" ]]; then
+# Compose signs (and notarization needs) only a Developer ID. Any other
+# identity signs the built app with scripts/sign-macos-ui.sh below.
+if herdr_is_developer_id; then
   GRADLE_ARGS+=(
     -Pcompose.desktop.mac.sign=true
     "-Pcompose.desktop.mac.signing.identity=$MACOS_SIGNING_IDENTITY"
   )
-fi
-if [[ -n "${MACOS_SIGNING_KEYCHAIN:-}" ]]; then
-  GRADLE_ARGS+=("-Pcompose.desktop.mac.signing.keychain=$MACOS_SIGNING_KEYCHAIN")
+  if [[ -n "${MACOS_SIGNING_KEYCHAIN:-}" ]]; then
+    GRADLE_ARGS+=("-Pcompose.desktop.mac.signing.keychain=$MACOS_SIGNING_KEYCHAIN")
+  fi
 fi
 
 NOTARY_COUNT=0
@@ -63,20 +68,25 @@ if (( NOTARY_COUNT > 0 && NOTARY_COUNT < 3 )); then
   echo "APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, and APPLE_TEAM_ID must be provided together." >&2
   exit 1
 fi
-if (( NOTARY_COUNT == 3 )) && [[ -z "${MACOS_SIGNING_IDENTITY:-}" || "${MACOS_SIGNING_IDENTITY}" == "-" ]]; then
+if (( NOTARY_COUNT == 3 )) && ! herdr_is_developer_id; then
   echo "Notarization requires a Developer ID signing identity." >&2
   exit 1
 fi
 
 (
   cd "$ROOT/android"
-  ./gradlew "${GRADLE_ARGS[@]}"
+  # build.gradle.kts would otherwise read these as a Compose signing identity.
+  env -u MACOS_SIGNING_IDENTITY -u MACOS_SIGNING_KEYCHAIN ./gradlew "${GRADLE_ARGS[@]}"
 )
 
 UI_APP="$(find "$ROOT/android/desktopApp/build/compose/binaries" -type d -name 'Herdr Companion.app' -print | sort | tail -n 1)"
 if [[ -z "$UI_APP" || ! -d "$UI_APP" ]]; then
   echo "Compose release app was not found under desktopApp/build/compose/binaries." >&2
   exit 1
+fi
+
+if ! herdr_is_developer_id; then
+  "$ROOT/scripts/sign-macos-ui.sh" "$UI_APP"
 fi
 
 DIST="$ROOT/dist"

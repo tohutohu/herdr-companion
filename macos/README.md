@@ -86,7 +86,7 @@ Gateway Managerだけを開発用に作る場合は、従来の次のコマン�
 bash macos/scripts/build-dmg.sh
 ```
 
-既定はローカル検証用のad-hoc署名です。一般配布では、`MACOS_SIGNING_IDENTITY`、`MACOS_SIGNING_KEYCHAIN`、`APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD`、`APPLE_TEAM_ID`を環境変数またはCI secretsから渡してDeveloper ID署名・Apple notarizationを行います。署名用秘密鍵や公証パスワードはソースに入れません。
+既定は`scripts/setup-macos-signing.sh`で作る自己署名証明書での署名です（なければad-hoc署名）。更新しても許可の確認が出直さないよう、毎回同じ証明書で署名します（[macOS release guide](../docs/macos-release.md#固定の証明書による署名)）。一般配布では、`MACOS_SIGNING_IDENTITY`、`MACOS_SIGNING_KEYCHAIN`、`APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD`、`APPLE_TEAM_ID`を環境変数またはCI secretsから渡してDeveloper ID署名・Apple notarizationを行います。署名用秘密鍵や公証パスワードはソースに入れません。
 
 ## ペアリング仕様
 

@@ -27,6 +27,18 @@ class DesktopUpdatesTest {
     )
 
     @Test
+    fun `署名の要件は証明書の署名だけから読みアドホック署名では無視する`() {
+        val signed = "Executable=/A.app/Contents/MacOS/A\n" +
+            "designated => identifier \"com.tohutohu.herdrcompanion.desktop\" and certificate leaf = H\"1ff2\"\n"
+        assertEquals(
+            "identifier \"com.tohutohu.herdrcompanion.desktop\" and certificate leaf = H\"1ff2\"",
+            parseDesignatedRequirement(signed),
+        )
+        assertNull(parseDesignatedRequirement("Executable=/A\n# designated => cdhash H\"9df9\"\n"))
+        assertNull(parseDesignatedRequirement("Executable=/A\n"))
+    }
+
+    @Test
     fun `バージョンは数値として比較し足りない桁は0とみなす`() {
         assertEquals(1, compareVersions("1.10.0", "1.9.9"))
         assertEquals(0, compareVersions("v1.2", "1.2.0"))

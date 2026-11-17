@@ -60,6 +60,18 @@ enum UpdateState: Equatable {
     case failed(String, AppUpdate?)
 }
 
+/// The requirement in `codesign -d -r-` output, or nil for an ad-hoc signature,
+/// whose requirement is the build's own hash and no other build meets.
+func parseDesignatedRequirement(_ output: String) -> String? {
+    for line in output.split(whereSeparator: \.isNewline) {
+        let text = line.trimmingCharacters(in: .whitespaces)
+        guard text.hasPrefix("designated => ") else { continue }
+        let requirement = String(text.dropFirst("designated => ".count))
+        return requirement.hasPrefix("cdhash ") ? nil : requirement
+    }
+    return nil
+}
+
 /// Numeric `MAJOR[.MINOR][.PATCH]` comparison; a missing part counts as 0.
 func compareVersions(_ a: String, _ b: String) -> Int? {
     guard let left = versionParts(a), let right = versionParts(b) else { return nil }
@@ -298,9 +310,15 @@ open "$target"
             throw SetupError(message: "更新DMGにバージョン\(update.version)が含まれていません。")
         }
         try run("/usr/bin/codesign", "--verify", "--deep", "--strict", app.path)
-        // Once the installed app carries a Developer ID, only the same team may replace it.
-        if let team = teamIdentifier(bundle), teamIdentifier(app) != team {
-            throw SetupError(message: "更新が別の開発者によって署名されています。")
+        // Once the installed app is signed with a certificate (the project's own or a
+        // Developer ID), only an update signed with it may replace it: macOS keeps the
+        // permissions it granted by that signature. An ad-hoc app accepts any update.
+        if let requirement = designatedRequirement(bundle) {
+            do {
+                try run("/usr/bin/codesign", "--verify", "--strict", "--test-requirement==\(requirement)", app.path)
+            } catch {
+                throw SetupError(message: "更新がインストール済みのアプリと別の証明書で署名されています。")
+            }
         }
         let stage = parent.appendingPathComponent(".\(bundle.lastPathComponent).update")
         try? fm.removeItem(at: stage)
@@ -310,13 +328,10 @@ open "$target"
         return staged
     }
 
-    /// The signing team, or nil for an ad-hoc or unsigned app.
-    private nonisolated static func teamIdentifier(_ app: URL) -> String? {
-        guard let output = try? run("/usr/bin/codesign", "-dv", app.path) else { return nil }
-        return output.split(whereSeparator: \.isNewline)
-            .first { $0.hasPrefix("TeamIdentifier=") }
-            .map { String($0.dropFirst("TeamIdentifier=".count)) }
-            .flatMap { $0.isEmpty || $0 == "not set" ? nil : $0 }
+    /// The designated requirement of a certificate-signed app, or nil for an ad-hoc or unsigned one.
+    private nonisolated static func designatedRequirement(_ app: URL) -> String? {
+        guard let output = try? run("/usr/bin/codesign", "-d", "-r-", app.path) else { return nil }
+        return parseDesignatedRequirement(output)
     }
 
     /// Runs a system tool and returns its combined output, failing on a non-zero exit.

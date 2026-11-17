@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -249,5 +250,42 @@ func Test版は数値で比べる(t *testing.T) {
 		if cmp != c.cmp || ok != c.ok {
 			t.Errorf("compareVersions(%q, %q) = %d, %v; want %d, %v", c.a, c.b, cmp, ok, c.cmp, c.ok)
 		}
+	}
+}
+
+func Test署名の要件はアドホック署名なら空になる(t *testing.T) {
+	signed := "Executable=/x/hc\ndesignated => identifier \"com.tohutohu.herdrcompanion.hc\" and certificate leaf = H\"1ff2\"\n"
+	if got := designatedRequirement(signed); got != `identifier "com.tohutohu.herdrcompanion.hc" and certificate leaf = H"1ff2"` {
+		t.Errorf("signed: %q", got)
+	}
+	if got := designatedRequirement("Executable=/x/hc\n# designated => cdhash H\"675a\"\n"); got != "" {
+		t.Errorf("ad hoc: %q", got)
+	}
+}
+
+func Test別の証明書で署名されたhcには置き換えない(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("codesign is macOS only")
+	}
+	dir := t.TempDir()
+	installed, other := filepath.Join(dir, "installed"), filepath.Join(dir, "other")
+	for _, p := range []string{installed, other} {
+		if err := os.WriteFile(p, fakeHC("2.6.0"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Ad hoc: any release may replace it.
+	if out, err := exec.Command("codesign", "--force", "--sign", "-", installed).CombinedOutput(); err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	if err := sameSigner(installed, other); err != nil {
+		t.Fatalf("ad hoc installed hc refused an update: %v", err)
+	}
+	// An installed hc whose requirement other can't meet.
+	if out, err := exec.Command("codesign", "--force", "--sign", "-", "-r=designated => identifier \"x\" and certificate leaf = H\"0000000000000000000000000000000000000000\"", installed).CombinedOutput(); err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	if err := sameSigner(installed, other); err == nil || !strings.Contains(err.Error(), "nothing was replaced") {
+		t.Fatalf("err = %v", err)
 	}
 }
