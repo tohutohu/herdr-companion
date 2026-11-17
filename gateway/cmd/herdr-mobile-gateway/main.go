@@ -38,6 +38,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/runtime"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/search"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/sessions"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/shellenv"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/translation"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/uploads"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/usage"
@@ -119,6 +120,9 @@ func serve(args []string) error {
 		return err
 	}
 	defer closer.Close()
+	// Before anything looks up or starts a tool: the menu-bar app starts the
+	// gateway with launchd's short PATH, not the terminal's.
+	shellenv.Apply(context.Background())
 
 	store, err := config.Load(config.DefaultPath())
 	if err != nil {

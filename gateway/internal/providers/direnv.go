@@ -79,13 +79,35 @@ var direnvBinary = func() string {
 	return ""
 }
 
-// LoadDirEnv runs `direnv export json` in dir against environ (the
-// environment the agent would otherwise get) and returns what it changes.
-// Only an .envrc the user has approved with `direnv allow` is loaded; that
-// approval is direnv's own. Without direnv, without an .envrc or .env in dir
-// or a parent, or when loading fails, nothing changes and the session starts
-// as before.
+// LoadDirEnv returns what a terminal that cd's into dir would get on top
+// of environ (the environment the agent would otherwise get): the tools and
+// variables mise selects there (LoadMiseEnv), then what direnv loads,
+// computed against the environment with mise's changes.
 func LoadDirEnv(ctx context.Context, dir string, environ []string) DirEnv {
+	m := LoadMiseEnv(ctx, dir, environ)
+	if m.Empty() {
+		return loadDirenv(ctx, dir, environ)
+	}
+	d := loadDirenv(ctx, dir, m.Apply(environ))
+	out := DirEnv{Set: map[string]string{}, Unset: d.Unset}
+	for k, v := range m.Set {
+		out.Set[k] = v
+	}
+	for k, v := range d.Set {
+		out.Set[k] = v
+	}
+	for _, k := range d.Unset {
+		delete(out.Set, k)
+	}
+	return out
+}
+
+// loadDirenv runs `direnv export json` in dir against environ and returns
+// what it changes. Only an .envrc the user has approved with `direnv allow`
+// is loaded; that approval is direnv's own. Without direnv, without an
+// .envrc or .env in dir or a parent, or when loading fails, nothing changes
+// and the session starts as before.
+func loadDirenv(ctx context.Context, dir string, environ []string) DirEnv {
 	if dir == "" || !hasEnvrc(dir) {
 		return DirEnv{}
 	}
@@ -180,8 +202,8 @@ func hasEnvrc(dir string) bool {
 	return false
 }
 
-// ChildEnvIn is ChildEnv for an agent working in dir: what direnv loads
-// there is added, and set still wins.
+// ChildEnvIn is ChildEnv for an agent working in dir: what mise and direnv
+// load there is added, and set still wins.
 func ChildEnvIn(ctx context.Context, dir string, environ []string, set map[string]string) []string {
 	env := ChildEnv(environ, set)
 	d := LoadDirEnv(ctx, dir, env)

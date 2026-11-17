@@ -154,6 +154,22 @@ with ids, responses, and session events); nothing listens on a port.
   gateway runs inside one during development, and sets `HC_SESSION_ID=claude:<id>`, so `hc` knows
   its own session. Herdr's own configuration (`HERDR_SESSION`, the default socket) is kept, so the
   agent can still use Herdr from its Bash tool as a separate tool.
+- Login shell: the menu-bar app starts the gateway with launchd's short PATH, so at `serve` start
+  the gateway runs the user's `$SHELL -i -l -c` once in the home folder (10 s limit, with
+  `HERDR_RESOLVING_ENVIRONMENT=1` set for startup files that want to skip terminal-only work)
+  and takes the environment it prints (`internal/shellenv`). The shell's variables win, its PATH
+  comes first with the gateway's remaining entries after it, and the shell's bookkeeping, mise /
+  direnv state and the gateway's own variables (`HOME`, `HERDR_*`, `CLAUDE_CODE_*`, …) are not
+  taken. A failing or slow shell leaves the environment as it was. `HERDR_LOGIN_SHELL_ENV=0`
+  turns it off. Everything the gateway starts afterwards (agents, sidecar, CodexBar, lookups)
+  sees it.
+- mise: when the session's folder or a parent (the home folder included) has a mise config file
+  (`mise.toml`, `.mise.toml`, `.tool-versions`, `.config/mise/config.toml`, …) and `mise` is
+  installed, the gateway runs `mise env --json` there at session start without the shell's
+  `__MISE_*` state, so the folder's tool versions come first on PATH and its `[env]` is set
+  (`providers.LoadMiseEnv`). An untrusted config (`mise trust`) or a failure is skipped with a
+  warning. direnv then runs against that environment and wins where both set a variable; the
+  delivery below is the same for both.
 - direnv: when the session's folder or a parent has an `.envrc` (or `.env`) and `direnv` is
   installed, the gateway runs `direnv export json` there at session start (resume included) and
   gives the agent what a terminal that cd'd into the folder would get
