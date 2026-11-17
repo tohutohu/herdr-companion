@@ -24,6 +24,7 @@ import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.unit.em
 import com.tohutohu.herdrcompanion.ui.detail.plainTextClipEntry
 
 /**
@@ -71,18 +72,22 @@ private class ListPasteClipboard(private val base: Clipboard) : Clipboard {
     override val nativeClipboard: NativeClipboard get() = base.nativeClipboard
 }
 
+private val INDENT = SpanStyle(letterSpacing = 0.45.em)
+
 /** Shows "-", "*" and "+" items with a bullet, and their marks dimmed. Offsets are unchanged. */
 internal class ListBulletTransformation(private val markColor: Color) : VisualTransformation {
     override fun filter(text: AnnotatedString): TransformedText {
         val source = text.text
         val chars = StringBuilder(source)
         val marks = mutableListOf<Pair<Int, Int>>()
+        val indents = mutableListOf<Pair<Int, Int>>()
         var start = 0
         for (line in source.split('\n')) {
             parseListItem(line)?.let { item ->
                 val at = start + item.indent.length
                 if (!item.ordered) chars.setCharAt(at, '•')
                 marks += at to start + item.length
+                if (item.indent.isNotEmpty()) indents += start to at
             }
             start += line.length + 1
         }
@@ -91,6 +96,8 @@ internal class ListBulletTransformation(private val markColor: Color) : VisualTr
         val shown = buildAnnotatedString {
             append(AnnotatedString(chars.toString(), text.spanStyles, text.paragraphStyles))
             marks.forEach { (from, to) -> addStyle(style, from, to) }
+            // Two spaces are barely a step in a proportional font; widen them so depth reads.
+            indents.forEach { (from, to) -> addStyle(INDENT, from, to) }
         }
         // One character for one, so the caret and selection map as they are.
         return TransformedText(shown, OffsetMapping.Identity)

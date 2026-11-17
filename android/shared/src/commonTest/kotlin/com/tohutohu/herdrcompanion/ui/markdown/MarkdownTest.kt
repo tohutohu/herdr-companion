@@ -34,7 +34,7 @@ class MarkdownTest {
         val blocks = parseMarkdown("- 親\n  - 子\n    - 孫\n- 親2")
         val items = blocks.map { it as MdBlock.ListItem }
         assertEquals(listOf(0, 1, 2, 0), items.map { it.depth })
-        assertEquals(listOf("•", "◦", "▪", "•"), items.map { it.marker })
+        assertEquals(listOf("•", "◦", "‣", "•"), items.map { it.marker })
         assertEquals("孫", text(items[2].spans))
     }
 

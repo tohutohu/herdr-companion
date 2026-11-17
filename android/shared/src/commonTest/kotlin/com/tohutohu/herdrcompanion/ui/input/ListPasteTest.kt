@@ -19,7 +19,7 @@ class ListPasteTest {
     @Test
     fun 会話からコピーした箇条書きは記号の種類で深さを戻す() {
         // MarkdownText puts each bullet in its own Text, so a copied selection has it on its own line.
-        assertEquals("- 一\n  - 子\n    - 孫\n- 二", normalizePastedList("•\n一\n◦\n子\n▪\n孫\n•\n二"))
+        assertEquals("- 一\n  - 子\n    - 孫\n- 二", normalizePastedList("•\n一\n◦\n子\n‣\n孫\n•\n二"))
         assertEquals("1. 手順\n   - 詳細\n2. 次", normalizePastedList("1.\n手順\n◦\n詳細\n2.\n次"))
         assertEquals("- [ ] 未\n- [x] 済み", normalizePastedList("☐\n未\n☑\n済み"))
     }

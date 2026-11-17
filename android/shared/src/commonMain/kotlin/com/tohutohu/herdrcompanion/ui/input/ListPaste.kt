@@ -7,7 +7,7 @@ package com.tohutohu.herdrcompanion.ui.input
  */
 
 private const val SPACE = " \t 　"
-private val DEPTH_GLYPHS = listOf('•', '◦', '▪')
+private val DEPTH_GLYPHS = listOf('•', '◦', '‣')
 private const val BULLETS = "•◦▪▫●○■□◆◇‣⁃∙·・➢➤▸▹►☐☑☒"
 private val GLYPH_ITEM = Regex("""^([$SPACE]*)[$BULLETS][$SPACE]*(\S.*)$""")
 private val GLYPH_ONLY = Regex("""^([$SPACE]*)[$BULLETS][$SPACE]*$""")
@@ -63,7 +63,7 @@ internal fun normalizePastedList(text: String): String {
     if (found.isEmpty()) return lines.joinToString("\n")
     val widths = found.map { it.width }.distinct().sorted()
     // Without any indent to go by (a list copied from this app's conversation),
-    // the bullets tell the depth: •, then ◦, then ▪.
+    // the bullets tell the depth: •, then ◦, then ‣.
     val byGlyph = widths.size == 1 && found.any { it.glyph in DEPTH_GLYPHS.drop(1) }
     fun depth(f: Found) = if (byGlyph) DEPTH_GLYPHS.indexOf(f.glyph).coerceAtLeast(0) else widths.indexOf(f.width)
     // Items nested under a numbered one need 3 columns; under "- ", 2.

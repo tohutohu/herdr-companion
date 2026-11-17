@@ -14,7 +14,7 @@ sealed interface MdBlock {
     /** ATX heading. The renderer keeps the `#` marks visible as an outline cue. */
     data class Heading(val level: Int, val spans: List<MdSpan>) : MdBlock
 
-    /** One list item. [marker] is already formatted ("•"/"◦"/"▪" by depth, "1.", "☐", "☑"). */
+    /** One list item. [marker] is already formatted ("•"/"◦"/"‣" by depth, "1.", "☐", "☑"). */
     data class ListItem(val depth: Int, val marker: String, val spans: List<MdSpan>) : MdBlock
 
     data class CodeBlock(val language: String?, val code: String) : MdBlock
@@ -51,7 +51,7 @@ private val HEADING = Regex("""^ {0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$""")
 private val RULE = Regex("""^ {0,3}([-*_])\s*(?:\1\s*){2,}$""")
 private val FENCE = Regex("""^ {0,3}(```+|~~~+)\s*(\S*).*$""")
 private val QUOTE = Regex("""^ {0,3}>\s?(.*)$""")
-private val BULLETS = listOf("•", "◦", "▪")
+private val BULLETS = listOf("•", "◦", "‣")
 private val LIST_ITEM = Regex("""^(\s*)(?:([-*+])|(\d{1,9})[.)])\s+(.*)$""")
 private val TASK = Regex("""^\[([ xX])]\s+(.*)$""")
 private val TABLE_SEPARATOR = Regex("""^:?-+:?$""")
