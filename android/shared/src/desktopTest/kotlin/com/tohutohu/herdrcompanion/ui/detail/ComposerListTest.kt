@@ -10,7 +10,6 @@ import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.Clipboard
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
@@ -18,9 +17,9 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performMouseInput
-import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
@@ -47,13 +46,14 @@ class ComposerListTest {
     private val shortcutKey = if (System.getProperty("os.name").startsWith("Mac")) Key.MetaLeft else Key.CtrlLeft
 
     /**
-     * Pastes through the field's paste action: a Ctrl+V sent right after the
-     * click sometimes reached the field before its focus on the Linux CI, and
-     * nothing was pasted.
+     * Pastes with the shortcut and waits for the text: Compose reads the
+     * clipboard on Dispatchers.IO, which the test's idle wait does not cover.
      */
-    private fun paste() {
-        field.performSemanticsAction(SemanticsActions.PasteText)
-        rule.waitForIdle()
+    private fun paste(expected: String) {
+        field.performClick()
+        field.performKeyInput { withKeyDown(shortcutKey) { pressKey(Key.V) } }
+        runCatching { rule.waitUntil(5_000) { runCatching { assertText(expected) }.isSuccess } }
+        assertText(expected)
     }
 
     /** The text that is sent; what is shown has "•" for the marks. */
@@ -124,15 +124,13 @@ class ComposerListTest {
     fun ブラウザからコピーしたリストは入れ子を保って貼られる() {
         val html = "<meta charset='utf-8'><ul><li>一<ul><li>子</li></ul></li><li>二</li></ul>"
         composer(FakeClipboard(ClipEntry(HtmlSelection("一\n子\n二", html))))
-        paste()
-        assertText("- 一\n  - 子\n- 二")
+        paste("- 一\n  - 子\n- 二")
     }
 
     @Test
     fun 中黒の箇条書きを貼るとMarkdownの項目になる() {
         composer(FakeClipboard(ClipEntry(StringSelection("・一\n・二"))))
-        paste()
-        assertText("- 一\n- 二")
+        paste("- 一\n- 二")
     }
 
     @Test
