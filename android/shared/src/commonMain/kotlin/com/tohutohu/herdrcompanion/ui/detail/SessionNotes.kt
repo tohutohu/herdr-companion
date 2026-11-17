@@ -172,10 +172,15 @@ class SessionNotes(
     }
 }
 
-/** "2h ago · by claude:5b27a61d · expires in 2d": when it was last written, by whom, until when. */
+/**
+ * "2h ago · by claude:5b27a61d · expires in 2d": when it was last written, by
+ * whom, until when. A note the session left on itself is "by this session".
+ */
 fun noteDetails(note: NoteDto, now: Instant): String {
     val written = parseInstant(note.updatedAt) ?: parseInstant(note.createdAt)
-    val by = (note.updatedBy ?: note.author)?.takeIf { it.isNotBlank() }?.let { shortSessionId(it) }
+    val by = (note.updatedBy ?: note.author)?.takeIf { it.isNotBlank() }?.let {
+        if (it == note.sessionId) "this session" else shortSessionId(it)
+    }
     val expires = note.expiresAt?.let(::parseInstant)
     return listOfNotNull(
         written?.let { if (now - it < 1.minutes) "just now" else "${span(now - it)} ago" },

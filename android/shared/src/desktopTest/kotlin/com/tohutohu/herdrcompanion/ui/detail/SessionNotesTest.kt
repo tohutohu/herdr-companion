@@ -128,6 +128,12 @@ class SessionNotesTest {
         assertEquals("just now", noteDetails(NoteDto("n2", text = "t", updatedAt = "2026-11-17T02:59:40Z"), now))
     }
 
+    @Test
+    fun セッションが自分に書いたメモはこのセッションが書いたと出す() {
+        val note = NoteDto("n1", "claude:a", "t", author = "claude:a", updatedAt = "2026-11-17T01:00:00Z")
+        assertEquals("2h ago · by this session", noteDetails(note, now))
+    }
+
     private fun show(status: String = "running") {
         rule.setContent {
             MaterialTheme {
