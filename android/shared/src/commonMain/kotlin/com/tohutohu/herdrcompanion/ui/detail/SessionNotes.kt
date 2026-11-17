@@ -57,7 +57,7 @@ data class SessionNotesState(
  * the session's own agent. The gateway keeps them, so every device and agent
  * sees the same ones; this holds what was last read and the unsent draft.
  *
- * Calls run on [scope], so a save still lands after the dialog was closed.
+ * Calls run on [scope], so a save still lands after the session was left.
  */
 class SessionNotes(
     private val scope: CoroutineScope,
@@ -91,7 +91,10 @@ class SessionNotes(
         }
     }
 
-    /** Opening reads the notes again; closing gives up an edit but keeps a new note's draft. */
+    /**
+     * Opens or closes the field above the composer. Opening reads the notes
+     * again; closing gives up an edit but keeps a new note's draft.
+     */
     fun setOpen(sessionId: String, open: Boolean) {
         edit(sessionId) { s ->
             if (open) s.copy(open = true, error = null) else if (s.editing != null) s.copy(open = false, editing = null, draft = "") else s.copy(open = false)
@@ -103,15 +106,15 @@ class SessionNotes(
 
     fun setExpiry(sessionId: String, expiry: NoteExpiry) = edit(sessionId) { it.copy(expiry = expiry) }
 
-    /** Puts a note's text in the field, to be saved over it. */
+    /** Opens the field with a note's text in it, to be saved over it. */
     fun startEdit(sessionId: String, noteId: String) = edit(sessionId) { s ->
         val note = s.notes?.firstOrNull { it.id == noteId } ?: return@edit s
-        s.copy(editing = note.id, draft = note.text, error = null)
+        s.copy(open = true, editing = note.id, draft = note.text, error = null)
     }
 
     fun cancelEdit(sessionId: String) = edit(sessionId) { it.copy(editing = null, draft = "") }
 
-    /** Adds the draft as a note, or saves it over the note being edited. */
+    /** Adds the draft as a note, or saves it over the note being edited, and closes the field. */
     fun save(sessionId: String) {
         val s = get(sessionId)
         if (!s.canSave) return
@@ -126,7 +129,7 @@ class SessionNotes(
                     onSuccess = { note ->
                         val list = cur.notes.orEmpty()
                         val notes = if (list.any { it.id == note.id }) list.map { if (it.id == note.id) note else it } else list + note
-                        cur.copy(notes = notes, saving = false, draft = "", editing = null, expiry = NoteExpiry.NONE)
+                        cur.copy(notes = notes, saving = false, open = false, draft = "", editing = null, expiry = NoteExpiry.NONE)
                     },
                     onFailure = { cur.copy(saving = false, error = it.reason("Could not save the note.")) },
                 )

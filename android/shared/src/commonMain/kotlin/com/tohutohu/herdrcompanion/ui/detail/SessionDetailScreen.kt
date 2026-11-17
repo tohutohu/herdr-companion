@@ -312,9 +312,7 @@ fun SessionDetailScreen(
         SideQuestionSheet(state.sessionId, conversation, sideQuestions)
     }
     val notesState = notes?.sessions?.collectAsState()?.value?.get(state.sessionId) ?: SessionNotesState()
-    if (notes != null) SessionNotesHost(state.sessionId, notes, notesState)
-    val openNotes: (() -> Unit)? = notes?.let { n -> { n.setOpen(state.sessionId, true) } }
-    val noteCount = notesState.notes?.size ?: 0
+    val addNote: (() -> Unit)? = notes?.let { n -> { n.setOpen(state.sessionId, true) } }
 
     Scaffold(
         modifier = Modifier.onSizeChanged { screenHeight = with(density) { it.height.toDp() } },
@@ -422,10 +420,10 @@ fun SessionDetailScreen(
                                             onAction(SessionDetailAction.Reload)
                                         },
                                     )
-                                    // The composer's + menu has them too; a stopped session has no composer.
-                                    openNotes?.let { open ->
+                                    // The composer's + menu has it too; a stopped session has no composer.
+                                    addNote?.let { open ->
                                         DropdownMenuItem(
-                                            text = { Text(if (noteCount > 0) "Notes ($noteCount)" else "Notes") },
+                                            text = { Text("Add note") },
                                             leadingIcon = { Icon(Icons.AutoMirrored.Outlined.StickyNote2, contentDescription = null) },
                                             onClick = {
                                                 menu = false
@@ -492,8 +490,7 @@ fun SessionDetailScreen(
                         } else {
                             null
                         },
-                        onNotes = openNotes,
-                        noteCount = noteCount,
+                        onAddNote = addNote,
                         // Only a side conversation with something in it gets a way back beside send.
                         sideQuestion = if (sideAvailable && sideQuestions != null && conversation.lanes.isNotEmpty()) {
                             { SideQuestionButton(conversation, onClick = { sideQuestions.toggle(state.sessionId) }) }
@@ -654,6 +651,8 @@ fun SessionDetailScreen(
             ExpandingContent(value = session?.background?.takeIf { it.isNotEmpty() }) {
                 BackgroundTasksBar(state.sessionId, it)
             }
+            // Right above the composer, where whoever answers the session sees them.
+            if (notes != null) SessionNotesBar(state.sessionId, notesState, notes, sendOnEnter = state.sendOnEnter)
         }
     }
 }
@@ -733,8 +732,8 @@ private fun Composer(
     onPasteImage: (() -> Boolean)?,
     /** Opens the side conversation (btw) from the attach menu. */
     onAskOnTheSide: (() -> Unit)?,
-    onNotes: (() -> Unit)?,
-    noteCount: Int,
+    /** Opens the note field above the composer. */
+    onAddNote: (() -> Unit)?,
     /** The way back to a side conversation, beside send. */
     sideQuestion: (@Composable () -> Unit)?,
     onAction: (SessionDetailAction) -> Unit,
@@ -782,8 +781,7 @@ private fun Composer(
                         onPickImage = { onAction(SessionDetailAction.PickImage) },
                         onPickFile = { onAction(SessionDetailAction.PickFile) },
                         onAskOnTheSide = onAskOnTheSide,
-                        onNotes = onNotes,
-                        noteCount = noteCount,
+                        onAddNote = onAddNote,
                     )
                 }
                 val clear = Color.Transparent

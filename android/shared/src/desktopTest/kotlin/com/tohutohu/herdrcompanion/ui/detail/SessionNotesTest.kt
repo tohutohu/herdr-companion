@@ -6,6 +6,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import com.tohutohu.herdrcompanion.data.api.NoteDto
 import com.tohutohu.herdrcompanion.data.api.SessionDto
@@ -72,6 +73,7 @@ class SessionNotesTest {
         assertEquals(listOf("PRがマージされたらアーカイブしてよい"), s.notes?.map { it.text })
         assertEquals("", s.draft)
         assertEquals(NoteExpiry.NONE, s.expiry)
+        assertEquals(false, s.open)
     }
 
     @Test
@@ -126,60 +128,76 @@ class SessionNotesTest {
         assertEquals("just now", noteDetails(NoteDto("n2", text = "t", updatedAt = "2026-11-17T02:59:40Z"), now))
     }
 
-    @Test
-    fun 追加メニューからメモを開いて既存のメモを見て新しく書ける() {
-        backend.notes += NoteDto("n1", "claude:a", "CIが落ちたら直させて")
+    private fun show(status: String = "running") {
         rule.setContent {
             MaterialTheme {
                 SessionDetailScreen(
-                    state = state("claude:a"),
+                    state = state("claude:a", status),
                     resolveUrl = { it }, formatFileSize = { "$it bytes" }, formatTime = { "$it" },
                     notes = notes,
                     onAction = {},
                 )
             }
         }
-        rule.onNodeWithContentDescription("Attach").performClick()
-        rule.onNodeWithText("Notes (1)").performClick()
+    }
+
+    @Test
+    fun メモは開かなくても入力欄の上に出ている() {
+        backend.notes += NoteDto("n1", "claude:a", "CIが落ちたら直させて")
+        show()
+        rule.onNodeWithTag("sessionNotes").assertExists()
         rule.onNodeWithText("CIが落ちたら直させて").assertExists()
+        rule.onNodeWithTag("noteDraft").assertDoesNotExist()
+    }
+
+    @Test
+    fun 追加メニューから入力欄の上にメモを書くと確定して欄が閉じる() {
+        backend.notes += NoteDto("n1", "claude:a", "CIが落ちたら直させて")
+        show()
+        rule.onNodeWithContentDescription("Attach").performClick()
+        rule.onNodeWithText("Add note").performClick()
         rule.onNodeWithTag("noteDraft").performTextInput("マージされたらアーカイブしてよい")
-        rule.onNodeWithText("Add").performClick()
+        rule.onNodeWithText("Add note").performClick()
         rule.onNodeWithText("マージされたらアーカイブしてよい").assertExists()
+        rule.onNodeWithText("CIが落ちたら直させて").assertExists()
+        rule.onNodeWithTag("noteDraft").assertDoesNotExist()
         assertEquals("マージされたらアーカイブしてよい", backend.added.single().second)
     }
 
     @Test
-    fun 停止中のセッションでもメニューからメモを開ける() {
-        rule.setContent {
-            MaterialTheme {
-                SessionDetailScreen(
-                    state = state("claude:a", status = "offline"),
-                    resolveUrl = { it }, formatFileSize = { "$it bytes" }, formatTime = { "$it" },
-                    notes = notes,
-                    onAction = {},
-                )
-            }
-        }
+    fun メモを押すと書き換えと削除ができる() {
+        backend.notes += NoteDto("n1", "claude:a", "待機させておく", updatedAt = "2026-11-17T01:00:00Z")
+        show()
+        rule.onNodeWithText("待機させておく").performClick()
+        rule.onNodeWithText("Edit").performClick()
+        rule.onNodeWithTag("noteDraft").performTextClearance()
+        rule.onNodeWithTag("noteDraft").performTextInput("レビューが来たら対応させる")
+        rule.onNodeWithText("Save").performClick()
+        rule.onNodeWithText("レビューが来たら対応させる").assertExists()
+        assertEquals("レビューが来たら対応させる", backend.notes.single().text)
+
+        rule.onNodeWithText("レビューが来たら対応させる").performClick()
+        rule.onNodeWithText("Remove").performClick()
+        rule.onNodeWithTag("sessionNotes").assertDoesNotExist()
+        assertTrue(backend.notes.isEmpty())
+    }
+
+    @Test
+    fun 停止中のセッションでもメモが見えてメニューから書ける() {
+        backend.notes += NoteDto("n1", "claude:a", "再開は不要")
+        show(status = "offline")
+        rule.onNodeWithText("再開は不要").assertExists()
         rule.onNodeWithContentDescription("Session actions").performClick()
-        rule.onNodeWithText("Notes").performClick()
-        rule.onNodeWithText("No notes yet.").assertExists()
+        rule.onNodeWithText("Add note").performClick()
+        rule.onNodeWithTag("noteDraft").assertExists()
     }
 
     @Test
     fun メモに対応しないGatewayでは更新を促し入力欄を出さない() {
         backend.unsupported = true
-        rule.setContent {
-            MaterialTheme {
-                SessionDetailScreen(
-                    state = state("claude:a"),
-                    resolveUrl = { it }, formatFileSize = { "$it bytes" }, formatTime = { "$it" },
-                    notes = notes,
-                    onAction = {},
-                )
-            }
-        }
+        show()
         rule.onNodeWithContentDescription("Attach").performClick()
-        rule.onNodeWithText("Notes").performClick()
+        rule.onNodeWithText("Add note").performClick()
         rule.onNodeWithText("This Gateway keeps no notes. Update the Gateway.").assertExists()
         rule.onNodeWithTag("noteDraft").assertDoesNotExist()
     }

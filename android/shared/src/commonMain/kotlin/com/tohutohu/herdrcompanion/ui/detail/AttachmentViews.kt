@@ -76,13 +76,11 @@ fun AttachButton(
     onPickFile: () -> Unit,
     /** Opens the side conversation (btw); null leaves it out of the menu. */
     onAskOnTheSide: (() -> Unit)? = null,
-    /** Opens the session's notes; null leaves them out of the menu. */
-    onNotes: (() -> Unit)? = null,
-    /** How many notes the session has, when known. */
-    noteCount: Int = 0,
+    /** Opens the note field above the composer; null leaves it out of the menu. */
+    onAddNote: (() -> Unit)? = null,
 ) {
     // btw and notes keep the menu open to a session that takes no attachments.
-    val menuEnabled = enabled || onAskOnTheSide != null || onNotes != null
+    val menuEnabled = enabled || onAskOnTheSide != null || onAddNote != null
     Box {
         var menuOpen by remember { mutableStateOf(false) }
         IconButton(enabled = menuEnabled, onClick = { menuOpen = true }) {
@@ -107,7 +105,7 @@ fun AttachButton(
                     onPickFile()
                 },
             )
-            if (onAskOnTheSide != null || onNotes != null) HorizontalDivider()
+            if (onAskOnTheSide != null || onAddNote != null) HorizontalDivider()
             onAskOnTheSide?.let { ask ->
                 DropdownMenuItem(
                     text = { Text("Ask on the side (btw)") },
@@ -118,9 +116,9 @@ fun AttachButton(
                     },
                 )
             }
-            onNotes?.let { open ->
+            onAddNote?.let { open ->
                 DropdownMenuItem(
-                    text = { Text(if (noteCount > 0) "Notes ($noteCount)" else "Notes") },
+                    text = { Text("Add note") },
                     leadingIcon = { Icon(Icons.AutoMirrored.Outlined.StickyNote2, contentDescription = null) },
                     onClick = {
                         menuOpen = false
