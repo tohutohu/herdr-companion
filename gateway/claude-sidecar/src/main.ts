@@ -294,6 +294,13 @@ async function start(p: Json) {
       persistSession: resident ? p.persist === true : true,
       includePartialMessages: !resident,
       pathToClaudeCodeExecutable: String(p.claudePath),
+      // Claude in Chrome: the interactive CLI turns it on from the user's
+      // settings, but a non-interactive (SDK) session only with --chrome.
+      // Without the extension the tools report that the browser is not
+      // connected. Resident runs are unattended and leave the browser alone.
+      // (Claude Code's own computer use is set up only in interactive
+      // sessions, so it cannot be offered here.)
+      ...(resident ? {} : { extraArgs: { chrome: null } }),
       env,
       ...(p.outputFormat ? { outputFormat: p.outputFormat as never } : {}),
       ...(Array.isArray(p.allowedTools) ? { allowedTools: p.allowedTools as string[] } : {}),
