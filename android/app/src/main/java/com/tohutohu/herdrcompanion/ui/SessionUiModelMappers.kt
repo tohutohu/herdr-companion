@@ -3,6 +3,7 @@ package com.tohutohu.herdrcompanion.ui
 import com.tohutohu.herdrcompanion.data.SessionStart
 import com.tohutohu.herdrcompanion.data.api.GatewayApi
 import com.tohutohu.herdrcompanion.data.backgroundTasksSerializer
+import com.tohutohu.herdrcompanion.data.noteTextsSerializer
 import com.tohutohu.herdrcompanion.data.api.Status
 import com.tohutohu.herdrcompanion.data.db.SessionEntity
 import com.tohutohu.herdrcompanion.model.PendingStartUiState
@@ -40,6 +41,9 @@ fun SessionEntity.toUiModel() = SessionUiModel(
         ?.let { runCatching { GatewayApi.json.decodeFromString(backgroundTasksSerializer, it) }.getOrNull() }
         .orEmpty()
         .map { it.toTaskUiModel() },
+    notes = notesJson
+        ?.let { runCatching { GatewayApi.json.decodeFromString(noteTextsSerializer, it) }.getOrNull() }
+        .orEmpty(),
 )
 
 /** Converts Android-owned launch tracking into the common list state. */

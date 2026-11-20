@@ -35,6 +35,8 @@ data class SessionUiModel(
     val originalTitle: String? = null,
     /** Effective translation mode; null when an older gateway has not reported it. */
     val translation: Boolean? = null,
+    /** The text of the notes left on the session, oldest first. */
+    val notes: List<String> = emptyList(),
 )
 
 data class BackgroundTaskUiModel(

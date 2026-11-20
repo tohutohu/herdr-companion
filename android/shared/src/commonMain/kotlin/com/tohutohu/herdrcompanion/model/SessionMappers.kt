@@ -32,6 +32,7 @@ fun SessionDto.toUiModel(): SessionUiModel = SessionUiModel(
     settingsApply = settingsApply,
     error = error,
     background = background.map { it.toUiModel() },
+    notes = notes.map { it.text },
 )
 
 fun BackgroundTaskDto.toUiModel() = BackgroundTaskUiModel(

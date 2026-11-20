@@ -20,6 +20,15 @@ class SessionSearchTest {
         assertEquals(2, rows.filterSessionSearch("").size)
     }
 
+    @Test
+    fun `メモの本文でもセッションを検索できる`() {
+        val waiting = row(id = "claude-1", project = "herdr-mobile", model = "opus-4", provider = "claude")
+            .let { it.copy(session = it.session.copy(notes = listOf("PRのレビュー待ち"))) }
+        val other = row(id = "codex-2", project = "billing-tools", model = "gpt-5-codex", provider = "codex")
+
+        assertEquals(listOf("claude-1"), listOf(waiting, other).filterSessionSearch("レビュー").map { it.session.id })
+    }
+
     private fun row(
         id: String,
         project: String,

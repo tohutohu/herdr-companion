@@ -45,6 +45,8 @@ data class SessionDto(
     val originalTitle: String? = null,
     /** Effective translation mode; null when an older gateway has not reported it. */
     val translation: Boolean? = null,
+    /** The notes left on the session, oldest first; empty from a gateway without notes. */
+    val notes: List<NoteDto> = emptyList(),
 ) {
     val isLive get() = status != Status.OFFLINE
 }

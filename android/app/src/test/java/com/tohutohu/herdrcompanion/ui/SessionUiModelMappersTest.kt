@@ -18,6 +18,22 @@ class SessionUiModelMappersTest {
     }
 
     @Test
+    fun `メモの本文をDTOからキャッシュを経由して一覧モデルへ渡し壊れていれば無視する`() {
+        val dto = com.tohutohu.herdrcompanion.data.api.SessionDto(
+            id = "s", provider = "codex", status = "idle", updatedAt = "",
+            notes = listOf(
+                com.tohutohu.herdrcompanion.data.api.NoteDto(id = "n1", text = "PRのレビュー待ち"),
+                com.tohutohu.herdrcompanion.data.api.NoteDto(id = "n2", text = "マージされたらアーカイブしてよい"),
+            ),
+        )
+        val entity = dto.toEntity(0, true)
+
+        assertEquals(listOf("PRのレビュー待ち", "マージされたらアーカイブしてよい"), entity.toUiModel().notes)
+        assertTrue(dto.copy(notes = emptyList()).toEntity(0, true).toUiModel().notes.isEmpty())
+        assertTrue(entity.copy(notesJson = "{broken").toUiModel().notes.isEmpty())
+    }
+
+    @Test
     fun `未読状態を一覧モデルへ引き継ぐ`() {
         val session = SessionEntity(
             id = "claude:session",

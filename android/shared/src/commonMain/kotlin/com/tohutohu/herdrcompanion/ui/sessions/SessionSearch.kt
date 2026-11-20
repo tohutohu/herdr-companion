@@ -18,7 +18,7 @@ fun SessionUiModel.matchesSessionSearch(query: String): Boolean {
         effort,
         mode,
         lastMessage,
-    ).any { it.lowercase().contains(needle) }
+    ).plus(notes).any { it.lowercase().contains(needle) }
 }
 
 /** In-flight starts are searchable before the gateway session exists. */

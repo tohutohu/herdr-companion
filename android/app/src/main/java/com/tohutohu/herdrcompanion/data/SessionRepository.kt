@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.serializer
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 
@@ -259,6 +260,10 @@ fun SessionDto.toEntity(now: Long, listed: Boolean) = SessionEntity(
     backgroundJson = background.takeIf { it.isNotEmpty() }?.let {
         GatewayApi.json.encodeToString(backgroundTasksSerializer, it)
     },
+    notesJson = notes.takeIf { it.isNotEmpty() }?.let { list ->
+        GatewayApi.json.encodeToString(noteTextsSerializer, list.map { it.text })
+    },
 )
 
 internal val backgroundTasksSerializer = ListSerializer(BackgroundTaskDto.serializer())
+internal val noteTextsSerializer = ListSerializer(String.serializer())

@@ -33,6 +33,7 @@ import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.StickyNote2
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Inventory2
@@ -64,6 +65,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -461,6 +463,7 @@ internal fun SessionRow(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            if (s.notes.isNotEmpty()) SessionRowNotes(s.notes)
         }
         if (color != null) {
             Box(Modifier.matchParentSize()) {
@@ -472,3 +475,46 @@ internal fun SessionRow(
         }
     }
 }
+
+/** How many of a session's latest notes its row shows; older ones are counted. */
+internal const val ROW_NOTES_SHOWN = 2
+
+/**
+ * The latest notes left on the session (`hc note`), oldest first as on the
+ * session screen, so the list shows what each session is waiting for
+ * without opening it.
+ */
+@Composable
+private fun SessionRowNotes(notes: List<String>) {
+    val shown = notes.takeLast(ROW_NOTES_SHOWN)
+    Column(Modifier.padding(top = 2.dp).testTag("sessionRowNotes")) {
+        shown.forEach { text ->
+            Row(Modifier.padding(vertical = 1.dp), verticalAlignment = Alignment.Top) {
+                Icon(
+                    Icons.AutoMirrored.Outlined.StickyNote2,
+                    contentDescription = "Note",
+                    tint = MaterialTheme.colorScheme.tertiary,
+                    modifier = Modifier.padding(top = 1.dp).size(14.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.tertiary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (notes.size > shown.size) {
+            Text(
+                moreNotesLabel(notes.size - shown.size),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 20.dp),
+            )
+        }
+    }
+}
+
+internal fun moreNotesLabel(count: Int) = if (count == 1) "+1 more note" else "+$count more notes"
