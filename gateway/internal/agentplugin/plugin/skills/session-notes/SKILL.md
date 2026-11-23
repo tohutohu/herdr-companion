@@ -1,6 +1,6 @@
 ---
 name: session-notes
-description: Leave a note on this session itself (hc note add self); the user and watching agents read it to decide when to resume or archive it. Read before ending a turn that waits on a review, a merge, or a reply or decision from others or the user, and before holding on with sleep or a loop. Read first when asked to "note what you are waiting for" or "write that it can be archived once merged", and on "continue" to check what you were waiting for. Notes on other sessions: drive-sessions.
+description: Leave a note on this session itself (hc note add self); the user and watching agents read it to decide when to resume or archive it. Read before ending a turn that waits on a review, a merge, or a reply or decision from others or the user, and before holding on with sleep or a loop. Read first when asked to "note what you are waiting for" or "write that it can be archived once merged", and on "continue" to check what you were waiting for. For notes on other sessions, see drive-sessions.
 ---
 
 # Leaving a note on your own session

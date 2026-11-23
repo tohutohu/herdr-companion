@@ -1,6 +1,6 @@
 ---
 name: schedule-resident-tasks
-description: Recurring runs, monitoring and checking again later can really be set up from this session as resident tasks (hc resident). Read before saying it cannot be done, and before using cron, launchd, /loop or /schedule. Use for "every morning", "every hour", "tell me when something new comes in", "check again later": checks done while the user is away that report only when needed. Also for changing, stopping or debugging an existing resident task. Not for cron syntax or editing CI schedules.
+description: Recurring runs, monitoring and checking again later can really be set up from this session as resident tasks (hc resident). Read before saying it cannot be done, and before using cron, launchd, /loop or /schedule. Use for "every morning", "every hour", "tell me when something new comes in", "check again later", i.e. checks done while the user is away that report only when needed. Also for changing, stopping or debugging an existing resident task. Not for cron syntax or editing CI schedules.
 ---
 
 # Creating a resident task

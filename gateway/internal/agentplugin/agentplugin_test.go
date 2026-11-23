@@ -80,6 +80,11 @@ func TestスキルはAgentSkillsの仕様と文字数の予算に収まる(t *te
 		if strings.ContainsAny(m[2], "<>") {
 			t.Errorf("%s: description contains XML-like text", e.Name())
 		}
+		// Strict YAML parsers (DeepSeek Harness) drop a skill whose plain
+		// description is not a valid scalar, without telling the model.
+		if strings.Contains(m[2], ": ") || strings.Contains(m[2], " #") || strings.ContainsAny(m[2][:1], "\"'[]{}>|*&!%@`#,?:-") {
+			t.Errorf("%s: description is not a plain YAML scalar (no \": \", \" #\" or leading indicator)", e.Name())
+		}
 		if n := strings.Count(string(b), "\n"); n > maxBodyLines {
 			t.Errorf("%s: %d lines (max %d): move details to hc help or a reference file", e.Name(), n, maxBodyLines)
 		}
