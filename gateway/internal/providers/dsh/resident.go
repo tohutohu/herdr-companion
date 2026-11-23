@@ -58,7 +58,11 @@ func (r *ResidentRunner) Run(ctx context.Context, req resident.RunRequest, hooks
 		return nil, errors.New("invalid resident result schema")
 	}
 	state := &residentState{questionReady: make(chan struct{})}
-	p := &Provider{cfg: r.p.cfg, dir: r.p.dir, routes: r.p.routes, sessions: map[string]*session{}, sink: r.p.sink, unattended: state}
+	r.p.mu.Lock()
+	patch := r.p.patch
+	r.p.mu.Unlock()
+	// The same overlay as sessions: provider keys and the Gateway's skills.
+	p := &Provider{cfg: r.p.cfg, dir: r.p.dir, patch: patch, routes: r.p.routes, sessions: map[string]*session{}, sink: r.p.sink, unattended: state}
 	var saved *session
 	var stop = func() {}
 	defer func() {

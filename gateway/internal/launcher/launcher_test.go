@@ -125,6 +125,7 @@ func (*fakeProvider) DirectSetEffort(context.Context, string, string) error { re
 func (*fakeProvider) DirectSetMode(context.Context, string, string) error   { return nil }
 func (*fakeProvider) SettingsApply() string                                 { return providers.ApplyNextRequest }
 func (*fakeProvider) SetDirectListener(func(string))                        {}
+func (*fakeProvider) SetAgentPlugin(string)                                 {}
 func (p *fakeProvider) DirectSessions() []providers.DirectInfo {
 	p.mu.Lock()
 	defer p.mu.Unlock()

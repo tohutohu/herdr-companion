@@ -106,7 +106,7 @@ func TestDSHプロバイダーのキーはパッチと環境変数で渡しフ�
 		t.Fatal(err)
 	}
 	defer p.Close()
-	c, err := launch(p.launchSpec(t.TempDir(), workspaceMode))
+	c, err := launch(p.launchSpec("", t.TempDir(), workspaceMode))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func TestDSHキーを消すとパッチも消えて付けない(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, patchName)); !os.IsNotExist(err) {
 		t.Fatalf("stale patch: %v", err)
 	}
-	if spec := p.launchSpec(dir, workspaceMode); spec.patch != "" || len(spec.env) != 0 {
+	if spec := p.launchSpec("", dir, workspaceMode); spec.patch != "" || len(spec.env) != 0 {
 		t.Fatalf("spec: %+v", spec)
 	}
 }
@@ -188,7 +188,7 @@ func TestDSH子プロセスにはdirenvの変数を渡しPATHは実行ファイ�
 		t.Fatal(err)
 	}
 	defer p.Close()
-	c, err := launch(p.launchSpec(cwd, workspaceMode))
+	c, err := launch(p.launchSpec("", cwd, workspaceMode))
 	if err != nil {
 		t.Fatal(err)
 	}

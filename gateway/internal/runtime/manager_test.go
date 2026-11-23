@@ -78,6 +78,7 @@ func (f *fakeRuntime) DirectSetEffort(context.Context, string, string) error { r
 func (f *fakeRuntime) DirectSetMode(context.Context, string, string) error   { return nil }
 func (f *fakeRuntime) SettingsApply() string                                 { return providers.ApplyNextRequest }
 func (f *fakeRuntime) SetDirectListener(l func(string))                      { f.listener = l }
+func (*fakeRuntime) SetAgentPlugin(string)                                   {}
 
 func (f *fakeRuntime) DirectSessions() []providers.DirectInfo {
 	f.mu.Lock()

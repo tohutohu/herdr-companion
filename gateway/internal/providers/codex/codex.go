@@ -22,6 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tohutohu/herdr-android-client/gateway/internal/agentplugin"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
@@ -93,9 +94,13 @@ func New(bin string, sink deadletter.Sink) *Provider {
 	return &Provider{bin: bin, sink: sink}
 }
 
-// SetSkillRoots gives every thread the skills in these directories, in
-// addition to the user's own; app-servers started afterwards get them.
-func (p *Provider) SetSkillRoots(roots []string) {
+// SetAgentPlugin gives every thread the plugin's skills, in addition to the
+// user's own; app-servers started afterwards get them.
+func (p *Provider) SetAgentPlugin(dir string) {
+	var roots []string
+	if dir != "" {
+		roots = []string{agentplugin.SkillsDir(dir)}
+	}
 	p.mu.Lock()
 	p.skillRoots = roots
 	p.mu.Unlock()

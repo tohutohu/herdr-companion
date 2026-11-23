@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -16,12 +17,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tohutohu/herdr-android-client/gateway/internal/agentplugin"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 )
 
 const DefaultModel = "deepseek-flash"
+const providerName = "dsh"
 const workspaceMode = "workspace-write"
 const fullMode = "danger-full-access"
 const readOnlyMode = "read-only"
@@ -101,7 +104,7 @@ func New(cfg Config, dir string, sink deadletter.Sink) (*Provider, error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
 	}
-	if p.patch, err = writePatch(dir, cfg.ProviderKeys); err != nil {
+	if p.patch, err = writePatch(dir, cfg.ProviderKeys, ""); err != nil {
 		return nil, err
 	}
 	entries, err := os.ReadDir(dir)
@@ -134,11 +137,30 @@ func New(cfg Config, dir string, sink deadletter.Sink) (*Provider, error) {
 	}
 	return p, nil
 }
-func (*Provider) Name() string                       { return "dsh" }
+func (*Provider) Name() string                       { return providerName }
 func (*Provider) DisplayName() string                { return "DeepSeek Harness" }
 func (*Provider) SettingsApply() string              { return providers.ApplyNextTurn }
 func (*Provider) FolderTrusted(string) bool          { return false }
 func (p *Provider) SetDirectListener(f func(string)) { p.mu.Lock(); p.listener = f; p.mu.Unlock() }
+
+// SetAgentPlugin adds the plugin's skills to the local skill roots of DSH
+// children started afterwards, sessions and resident runs, through the
+// Gateway's overlay. A failed write leaves the previous overlay and is logged:
+// the agents still run, without the skills.
+func (p *Provider) SetAgentPlugin(dir string) {
+	skills := ""
+	if dir != "" {
+		skills = agentplugin.SkillsDir(dir)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	patch, err := writePatch(p.dir, p.cfg.ProviderKeys, skills)
+	if err != nil {
+		slog.Warn("DSH agents do not get the Gateway's skills", "provider", providerName, "operation", "agent_plugin.patch", "error", err)
+		return
+	}
+	p.patch = patch
+}
 func (p *Provider) notify(id string) {
 	p.mu.Lock()
 	f := p.listener
@@ -294,7 +316,7 @@ func (p *Provider) startLocked(ctx context.Context, s *session, resume bool) err
 	if err := os.MkdirAll(p.cfg.Home, 0700); err != nil {
 		return err
 	}
-	c, err := launch(p.launchSpec(summary.Cwd, summary.Mode))
+	c, err := launch(p.launchSpec(summary.NativeID, summary.Cwd, summary.Mode))
 	if err != nil {
 		return err
 	}

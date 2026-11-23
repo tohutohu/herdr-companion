@@ -240,6 +240,7 @@ func (d *directStub) DirectSetEffort(context.Context, string, string) error { re
 func (d *directStub) DirectSetMode(context.Context, string, string) error   { return nil }
 func (d *directStub) SettingsApply() string                                 { return providers.ApplyNextTurn }
 func (d *directStub) SetDirectListener(func(string))                        {}
+func (*directStub) SetAgentPlugin(string)                                   {}
 func (d *directStub) DirectSessions() []providers.DirectInfo {
 	var out []providers.DirectInfo
 	for _, in := range d.infos {

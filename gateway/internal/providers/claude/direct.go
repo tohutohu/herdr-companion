@@ -29,17 +29,17 @@ type DirectConfig struct {
 	// apiKeyHelper) instead of the user's subscription. Off by default: the
 	// key is removed from the environment and such a session is refused.
 	AllowAPIKey bool
-	// Plugin is a Claude Code plugin directory loaded into every session
-	// (the Gateway's own skills); empty loads none.
-	Plugin string
+	// plugin is the Claude Code plugin directory loaded into every session
+	// and resident run (SetAgentPlugin); empty loads none.
+	plugin string
 }
 
 // plugins is the sidecar's "plugins" parameter for cfg.
 func (cfg DirectConfig) plugins() []string {
-	if cfg.Plugin == "" {
+	if cfg.plugin == "" {
 		return nil
 	}
-	return []string{cfg.Plugin}
+	return []string{cfg.plugin}
 }
 
 const (
@@ -102,7 +102,16 @@ type directState struct {
 // SetDirect configures how sessions are run.
 func (p *Provider) SetDirect(cfg DirectConfig) {
 	p.direct.mu.Lock()
+	cfg.plugin = p.direct.cfg.plugin
 	p.direct.cfg = cfg
+	p.direct.mu.Unlock()
+}
+
+// SetAgentPlugin loads the Gateway's plugin into sessions and resident runs
+// started afterwards.
+func (p *Provider) SetAgentPlugin(dir string) {
+	p.direct.mu.Lock()
+	p.direct.cfg.plugin = dir
 	p.direct.mu.Unlock()
 }
 

@@ -185,11 +185,16 @@ with ids, responses, and session events); nothing listens on a port.
   `herdr-companion`: `reply-in-app` (showing images and files in the app), `drive-sessions` (other
   sessions through hc), `schedule-resident-tasks` (designing resident tasks; what a run itself must
   do stays in its prompt, `resident.BuildPrompt`) and `session-notes` (a session leaving notes on
-  itself: what it waits for and what its watcher should send it). At start the gateway writes it to
-  `<state>/agent-plugin` and passes it as the SDK's `plugins` option; the Codex app-servers get its
-  `skills/` directory with `skills/extraRoots/set` and name the skills the same way. Change a
-  description only with `internal/agentplugin/evals/trigger.py`, which measures whether requests load
-  the right skill.
+  itself: what it waits for and what its watcher should send it). They are written in English
+  and tell the agent to write to the user in the user's language. Every agent runtime gets the same
+  skills, in sessions and resident runs: `providers.DirectRuntime.SetAgentPlugin` is part of the
+  interface, so a new runtime does not build without it. At start the gateway writes the plugin to
+  `<state>/agent-plugin`; Claude gets it as the SDK's `plugins` option, the Codex app-servers get its
+  `skills/` directory with `skills/extraRoots/set` and name the skills the same way, and DeepSeek
+  Harness gets it as `customSkillDirs` of `skill-filesystem` in the Gateway's `--patch` overlay
+  (bare names, e.g. `session-notes`). DSH drops a skill whose frontmatter is not strict YAML without
+  a warning to the model, so descriptions avoid `": "` (a test checks it). Change a description only
+  with `internal/agentplugin/evals/trigger.py`, which measures whether requests load the right skill.
 
 ### Codex: the gateway's app-server
 

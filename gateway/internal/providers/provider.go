@@ -88,6 +88,11 @@ type DirectRuntime interface {
 	SettingsApply() string
 	// SetDirectListener registers a callback run after any runtime change.
 	SetDirectListener(func(nativeID string))
+	// SetAgentPlugin gives the runtime's agents the Gateway's own skills:
+	// dir is the plugin agentplugin.Install wrote ("" gives none). Every
+	// runtime loads the same skills, in its sessions and its resident runs,
+	// for sessions and runs started afterwards.
+	SetAgentPlugin(dir string)
 }
 
 // SideTurn is an earlier question and answer of a side conversation.

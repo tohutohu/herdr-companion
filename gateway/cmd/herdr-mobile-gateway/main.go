@@ -164,16 +164,21 @@ func serve(args []string) error {
 		return fmt.Errorf("open DSH sessions: %w", err)
 	}
 	defer dshProvider.Close()
+	// Every provider the Gateway runs agents with. As a DirectRuntime each
+	// gives its agents the Gateway's skills (SetAgentPlugin).
+	agents := []agentRuntime{claudeProvider, codexProvider, dshProvider}
 	claudeProvider.SetCacheBytes(int64(cfg.HistoryCacheMB) << 20)
-	// The Gateway's own skills, for the agents it starts. Without them the
-	// agents still run.
+	claudeProvider.SetDirect(claude.DirectConfig{Sidecar: sidecarPath(cfg.ClaudeSidecar), Claude: claudePath(cfg.ClaudeBinary), AllowAPIKey: cfg.ClaudeAllowAPIKey})
+	// The Gateway's own skills, the same for every agent it runs, in sessions
+	// and resident runs. Without them the agents still run.
 	plugin, err := agentplugin.Install(filepath.Join(config.StateDir(), "agent-plugin"))
 	if err != nil {
 		slog.Warn("agent skills are not installed", "operation", "agent_plugin.install", "error", err)
 	} else {
-		codexProvider.SetSkillRoots([]string{agentplugin.SkillsDir(plugin)})
+		for _, rt := range agents {
+			rt.SetAgentPlugin(plugin)
+		}
 	}
-	claudeProvider.SetDirect(claude.DirectConfig{Sidecar: sidecarPath(cfg.ClaudeSidecar), Claude: claudePath(cfg.ClaudeBinary), AllowAPIKey: cfg.ClaudeAllowAPIKey, Plugin: plugin})
 	codexProvider.SetCacheBytes(cfg.HistoryCacheMB << 20)
 	go codexProvider.Run(ctx)
 	svc := sessions.New(time.Duration(cfg.OfflineSessionDays)*24*time.Hour, claudeProvider, codexProvider, dshProvider)
@@ -191,7 +196,7 @@ func serve(args []string) error {
 		return err
 	}
 	offlineWindow := time.Duration(cfg.OfflineSessionDays) * 24 * time.Hour
-	direct, err := runtime.New(filepath.Join(config.StateDir(), "direct-sessions.json"), offlineWindow, claudeProvider, codexProvider, dshProvider)
+	direct, err := runtime.New(filepath.Join(config.StateDir(), "direct-sessions.json"), offlineWindow, agentProviders(agents)...)
 	if err != nil {
 		return err
 	}
@@ -482,4 +487,18 @@ func (e residentEnv) FolderTrusted(provider, cwd string) bool {
 
 func (e residentEnv) Catalog(ctx context.Context, provider string) (providers.ModelCatalog, error) {
 	return e.launch.Models(ctx, provider)
+}
+
+// agentRuntime is a provider the Gateway runs agents with.
+type agentRuntime interface {
+	providers.Provider
+	providers.DirectRuntime
+}
+
+func agentProviders(agents []agentRuntime) []providers.Provider {
+	out := make([]providers.Provider, len(agents))
+	for i, a := range agents {
+		out[i] = a
+	}
+	return out
 }

@@ -60,15 +60,24 @@ type launchSpec struct {
 	patch string
 }
 
-func (p *Provider) launchSpec(cwd, mode string) launchSpec {
+// launchSpec is how to start the child for session id; a resident run's
+// provider (unattended) gives it no session id, since it is not a session.
+func (p *Provider) launchSpec(id, cwd, mode string) launchSpec {
 	env := map[string]string{}
+	if p.unattended == nil && id != "" {
+		// hc's "self": the session the agent's commands run in.
+		env["HC_SESSION_ID"] = providerName + ":" + id
+	}
 	if p.cfg.APIKey != "" {
 		env["DEEPSEEK_API_KEY"] = p.cfg.APIKey
 	}
 	for route, key := range p.cfg.ProviderKeys {
 		env[keyEnv(route)] = key
 	}
-	return launchSpec{binary: p.cfg.Binary, home: p.cfg.Home, cwd: cwd, mode: mode, unattended: p.unattended != nil, env: env, patch: p.patch}
+	p.mu.Lock()
+	patch := p.patch
+	p.mu.Unlock()
+	return launchSpec{binary: p.cfg.Binary, home: p.cfg.Home, cwd: cwd, mode: mode, unattended: p.unattended != nil, env: env, patch: patch}
 }
 
 func launch(spec launchSpec) (*conn, error) {

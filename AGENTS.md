@@ -53,6 +53,10 @@ bash macos/scripts/build-dmg.sh                 # native-architecture DMG, signe
 swift test --package-path macos                 # updater logic tests
 ```
 
+The Gateway's own skills (`gateway/internal/agentplugin/plugin/skills`) are written in English and given to every agent runtime
+(Claude Code, Codex, DeepSeek Harness), in sessions and resident runs, through `providers.DirectRuntime.SetAgentPlugin`. A new runtime
+must load them too; keep descriptions strict YAML (no `": "`), which `go test ./internal/agentplugin` checks.
+
 Resident tasks (常駐, `gateway/internal/resident`, `docs/resident.md`) keep their own state in `resident.db`; their runs never go
 through `internal/runtime`. The opt-in Mac UI flow test against a throwaway gateway is
 `HERDR_RESIDENT_E2E_URL=… HERDR_RESIDENT_E2E_TOKEN=… HERDR_RESIDENT_E2E_CWD=… ./gradlew :desktopApp:test --tests '*DesktopResidentFlowTest*' --rerun`.

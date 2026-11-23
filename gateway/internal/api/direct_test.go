@@ -127,6 +127,7 @@ func (d *directFake) DirectSetMode(_ context.Context, _, mode string) error {
 }
 func (d *directFake) SettingsApply() string            { return providers.ApplyNextTurn }
 func (d *directFake) SetDirectListener(l func(string)) { d.listener = l }
+func (*directFake) SetAgentPlugin(string)              {}
 func (d *directFake) FolderTrusted(string) bool        { return d.trusted }
 func (d *directFake) DirectSessions() []providers.DirectInfo {
 	d.mu.Lock()

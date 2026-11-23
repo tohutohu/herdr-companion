@@ -87,8 +87,12 @@ instructions, skills and MCP through DSH's own supported configuration.
   conversation. Pending RPC approvals are closed after a restart. A process
   nonce prevents a stale UI reply from answering a newly reused RPC ID.
 - Sessions created by an independent DSH terminal/Web client are not imported.
-  Subscription-limit/cost reporting, automatic CLI updates, and Gateway
-  companion-skill injection are not implemented in this provider.
+  Subscription-limit/cost reporting and automatic CLI updates are not
+  implemented in this provider.
+- The Gateway's own skills (`gateway/internal/agentplugin`) are added through
+  its `--patch` overlay (`skill-filesystem`'s `customSkillDirs`), in sessions
+  and resident runs. Sessions get `HC_SESSION_ID=dsh:<id>`, so `hc ... self`
+  works; resident runs get none.
 
 ## Resident tasks
 
