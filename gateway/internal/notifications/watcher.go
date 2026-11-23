@@ -16,6 +16,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/config"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/projects"
 )
 
 // Sender delivers one message to one device.
@@ -212,6 +213,11 @@ func (w *Watcher) Evaluate(ctx context.Context) {
 
 func (w *Watcher) dispatchPush(ctx context.Context, s model.Session, kind model.Status) {
 	if w.Sender == nil {
+		return
+	}
+	// The session's project may turn its notifications down.
+	if !projects.Wants(s.ProjectNotify, kind != model.StatusCompleted) {
+		slog.Info("push skipped: project notifications", "provider", s.Provider, "session_id", s.ID, "operation", "push", "status", kind, "notify", s.ProjectNotify)
 		return
 	}
 	w.mu.Lock()

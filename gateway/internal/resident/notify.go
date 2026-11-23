@@ -172,6 +172,9 @@ type Notifier struct {
 	Config  *config.Store
 	Now     func() time.Time
 	Prepare notifications.PrepareContent
+	// Wants decides whether a notification of kind for the task in folder
+	// cwd goes out (its project's notification level); nil sends all.
+	Wants func(cwd, kind string) bool
 }
 
 // MaxNotificationAttempts bounds retries of one entry.
@@ -223,6 +226,15 @@ func (n *Notifier) deliverOne(ctx context.Context, e Notification, delivered []s
 	if n.Sender == nil || n.Config == nil {
 		n.Store.db.ExecContext(ctx, `UPDATE notifications SET status = 'suppressed', reason = 'push notifications are not configured on the gateway' WHERE id = ?`, e.ID)
 		return
+	}
+	if n.Wants != nil {
+		var cwd string
+		n.Store.db.QueryRowContext(ctx, `SELECT COALESCE(json_extract(settings, '$.cwd'), '') FROM tasks WHERE id = ?`, e.TaskID).Scan(&cwd)
+		if !n.Wants(cwd, e.Kind) {
+			n.Store.db.ExecContext(ctx, `UPDATE notifications SET status = 'suppressed', reason = 'its project''s notifications are turned down' WHERE id = ?`, e.ID)
+			slog.Info("resident push skipped: project notifications", "operation", "resident.push", "task_id", e.TaskID, "notification_id", e.ID, "kind", e.Kind)
+			return
+		}
 	}
 	cfg := n.Config.Get()
 	content := notifications.Content{Title: e.Title, Body: e.Body}

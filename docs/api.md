@@ -287,6 +287,8 @@ Gateway が動かすセッションは、プロセスが無い間（Gateway の�
 | `context` | コンテキストウィンドウの使用量。未報告なら省略 |
 | `cost` | API 定価換算の金額。`estimated: true` はトークン数から Gateway が算出した値 |
 | `notes` | セッションに残されたメモ（[下記](#メモ)）。古い順、無ければ省略 |
+| `projectPath` | セッションが属するプロジェクト（お気に入りのフォルダ）。どこにも属さなければ省略（[下記](#プロジェクト)） |
+| `projectNotify` | そのプロジェクトの通知の段階が `all` 以外のとき `attention` / `off` |
 
 ### `GET /v1/sessions`
 
@@ -771,6 +773,34 @@ data: {"sessionId":"claude:…","messageId":"msg_…","text":"ここまでの全
 
 アプリは最後に受け取った一覧を端末にキャッシュして画面を開いた直後から出し、Gateway の応答で差し替える。
 追加・削除・並べ替えは画面に先に反映し、Gateway の応答で確定する（失敗すれば Gateway の一覧に戻す）。
+
+### プロジェクト
+
+お気に入りのフォルダはそのままプロジェクトでもある。セッションと常駐タスクは、`cwd` がそのフォルダか配下なら
+（複数当てはまれば最も深いものに）属する。どれにも当てはまらない `cwd` は、git の linked worktree なら元のリポジトリの
+フォルダで判定する（Gateway が作った worktree のセッションは元のプロジェクトに入る）。どこにも属さないものは
+「その他」として扱う。所属はセッション（`projectPath`、`projectNotify`）と常駐タスク（`projectPath`、`projectNotify`）に載る。
+プロジェクトの追加・削除・並べ替えはお気に入りの API で行い、一覧から外すと名前と通知の設定も消える。
+対応は `GET /v1/capabilities` の `projects: true` で分かる。
+
+```json
+{ "projects": [{ "path": "/Users/…/workspace/bot", "name": "bot", "notify": "off" }] }
+```
+
+- `GET /v1/projects`: お気に入りの順のプロジェクト。`name` は未設定ならフォルダ名、`notify` は未設定なら `all`。
+- `PATCH /v1/projects`: `{"path", "name"?, "notify"?}`。省略した項目は変えない。`name: ""` でフォルダ名に戻す。
+  `notify` は `all` / `attention` / `off` 以外なら `400`、お気に入りに無いフォルダは `404`。変更後のプロジェクトを返す。
+
+通知の段階は、そのプロジェクトのセッションと常駐タスクのプッシュに効く。
+
+| `notify` | セッション | 常駐タスク |
+|---|---|---|
+| `all` | すべて（今まで通り） | すべて |
+| `attention` | 回答待ち・承認待ち・失敗だけ（完了は送らない） | 判断待ち・失敗だけ（変化の報告は送らない） |
+| `off` | 送らない | 送らない |
+
+送らなかった常駐の通知は Outbox に `suppressed` として残る。`GET /v1/resident/notifications`（Mac UI が自前で通知を
+出すのに使う）も同じ基準で絞って返す。セッション一覧の表示と未読は段階に関係なく変わらない。
 
 ## エージェント CLI の更新
 

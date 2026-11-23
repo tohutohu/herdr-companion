@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/tohutohu/herdr-android-client/gateway/internal/files"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/favorites"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/forward"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/projects"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/resident"
 )
 
@@ -51,7 +53,7 @@ func (s *Server) residentRoutes(api *http.ServeMux) {
 }
 
 func (s *Server) capabilities(w http.ResponseWriter, r *http.Request) {
-	caps := map[string]any{"messageIdempotency": s.MessageDelivery != nil, "sessionSearch": s.Search != nil, "notes": s.Notes != nil, "favoriteDirectories": s.Favorites != nil, "events": s.Events != nil}
+	caps := map[string]any{"messageIdempotency": s.MessageDelivery != nil, "sessionSearch": s.Search != nil, "notes": s.Notes != nil, "favoriteDirectories": s.Favorites != nil, "events": s.Events != nil, "projects": s.Favorites != nil && s.Projects != nil}
 	if proxy := forward.DirectAddress(s.Listen, r); proxy != "" {
 		caps["localhostProxy"] = proxy
 	}
@@ -108,7 +110,23 @@ func (s *Server) residentList(w http.ResponseWriter, r *http.Request) {
 		s.residentFail(w, r, "resident.list", err)
 		return
 	}
+	for i := range tasks {
+		s.annotateTask(&tasks[i])
+	}
 	writeJSONWithETag(w, r, map[string]any{"tasks": tasks})
+}
+
+// annotateTask fills in the task's project.
+func (s *Server) annotateTask(t *resident.Task) {
+	if s.Projects == nil || t == nil {
+		return
+	}
+	if p, ok := s.Projects.Of(t.Cwd); ok {
+		t.ProjectPath = p.Path
+		if p.Notify != favorites.NotifyAll {
+			t.ProjectNotify = p.Notify
+		}
+	}
 }
 
 func (s *Server) residentCreate(w http.ResponseWriter, r *http.Request) {
@@ -142,6 +160,7 @@ func (s *Server) residentGet(w http.ResponseWriter, r *http.Request) {
 		s.residentFail(w, r, "resident.get", err)
 		return
 	}
+	s.annotateTask(t)
 	mem, err := s.Resident.GetMemory(r.Context(), id)
 	if err != nil {
 		s.residentFail(w, r, "resident.get", err)
@@ -331,6 +350,25 @@ func (s *Server) residentAllNotifications(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		s.residentFail(w, r, "resident.notifications", err)
 		return
+	}
+	// Clients that announce these themselves (the Mac UI) get only what
+	// the task's project lets through, as pushes do.
+	if s.Projects != nil && len(ns) > 0 {
+		if tasks, err := s.Resident.ListTasks(r.Context()); err == nil {
+			level := map[string]string{}
+			for _, t := range tasks {
+				if p, ok := s.Projects.Of(t.Cwd); ok {
+					level[t.ID] = p.Notify
+				}
+			}
+			kept := ns[:0]
+			for _, n := range ns {
+				if projects.Wants(level[n.TaskID], n.Kind != resident.NotifyChange) {
+					kept = append(kept, n)
+				}
+			}
+			ns = kept
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"notifications": ns})
 }

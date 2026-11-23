@@ -77,3 +77,23 @@ func Test常駐通知の翻訳待ちでも次の実行を開始できる(t *test
 		t.Fatal("push was sent before translation finished")
 	}
 }
+
+func Testプロジェクトが絞った常駐の通知は送らずに抑止として残す(t *testing.T) {
+	h := newHarness(t)
+	task := h.create(nil)
+	var asked []string
+	h.svc.Notifier.Wants = func(cwd, kind string) bool {
+		asked = append(asked, cwd+"|"+kind)
+		return false
+	}
+	h.runner.push(fakeStep{result: result(OutcomeChanged, "CI recovered", withKey("ci:recovered"))})
+	h.clock.Set(mustTime(t, "2026-10-30T07:00:10+09:00"))
+	h.settle()
+	entries := h.notifications(task.ID)
+	if h.sender.count() != 0 || len(entries) != 1 || entries[0].Status != "suppressed" {
+		t.Fatal(h.sender.count(), entries)
+	}
+	if len(asked) != 1 || asked[0] != task.Cwd+"|change" {
+		t.Fatal(asked)
+	}
+}

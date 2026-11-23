@@ -123,7 +123,12 @@ type Task struct {
 	PendingQuestion *Question  `json:"pendingQuestion,omitempty"`
 	Unread          int        `json:"unread"`
 	RunsToday       int        `json:"runsToday"`
-	Attention       string     `json:"attention,omitempty"`
+	// ProjectPath and ProjectNotify are the task's project and its
+	// notification level when not "all", filled in by the API
+	// (docs/api.md#プロジェクト).
+	ProjectPath   string `json:"projectPath,omitempty"`
+	ProjectNotify string `json:"projectNotify,omitempty"`
+	Attention     string `json:"attention,omitempty"`
 }
 
 // RunBrief summarizes a run for the task list.

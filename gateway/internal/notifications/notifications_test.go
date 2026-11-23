@@ -568,3 +568,31 @@ func Testランタイムの変化で再評価し完了を一度だけ通知す�
 		t.Fatalf("pushes = %d, want 2", n)
 	}
 }
+
+func Testプロジェクトの通知の段階で送る遷移を絞る(t *testing.T) {
+	for _, c := range []struct {
+		level string
+		want  string
+	}{
+		{"", "waiting_input,completed,failed"},
+		{"attention", "waiting_input,failed"},
+		{"off", ""},
+	} {
+		fs := &fakeSessions{}
+		sender := &fakeSender{}
+		w, _ := newWatcher(t, fs, sender)
+		for _, st := range []model.Status{model.StatusIdle, model.StatusRunning, model.StatusWaitingInput, model.StatusRunning, model.StatusCompleted, model.StatusRunning, model.StatusFailed} {
+			s := sess(st)
+			s.ProjectNotify = c.level
+			fs.list = []model.Session{s}
+			w.Evaluate(context.Background())
+		}
+		var got []string
+		for _, s := range sender.sent {
+			got = append(got, s.data["status"])
+		}
+		if strings.Join(got, ",") != c.want {
+			t.Errorf("%q: pushed %v, want %s", c.level, got, c.want)
+		}
+	}
+}

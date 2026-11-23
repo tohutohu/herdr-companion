@@ -508,7 +508,10 @@ session is restored too; if that directory is a favorite, its favorite chip
 is selected.
 
 Favorite folders are Gateway data (`favorites.json`, `/v1/directories/favorites`), shared by
-the apps and `hc fav`. Each app keeps the last list it received as a cache, so the chips show
+the apps and `hc fav`. Each favorite is also a project (`internal/projects`, `/v1/projects`): a
+session or resident task belongs to the deepest favorite containing its `cwd` (a linked worktree
+counts as its main checkout's), and the project's notification level (all / attention / off)
+filters the session watcher's pushes, the resident notifier and the resident notification list. Each app keeps the last list it received as a cache, so the chips show
 as soon as New Session opens, applies a change on screen first and then takes the Gateway's
 answer. The first app to reach a Gateway without a saved list imports the favorites it kept
 on the device before. Recent folders stay per device.

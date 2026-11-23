@@ -31,6 +31,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/notes"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/notifications"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/projects"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/claude"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers/codex"
@@ -43,6 +44,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/translation"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/uploads"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/usage"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/worktree"
 )
 
 const helpText = `herdr-mobile-gateway — Herdr Companion Gateway
@@ -196,6 +198,10 @@ func serve(args []string) error {
 	if err != nil {
 		return err
 	}
+	// Projects are the favorite folders: they group sessions and resident
+	// tasks and can turn their notifications down.
+	projectOf := &projects.Resolver{Store: favoriteDirs, MainCheckout: worktree.MainCheckout}
+	svc.Annotate = projectOf.Annotate
 	offlineWindow := time.Duration(cfg.OfflineSessionDays) * 24 * time.Hour
 	direct, err := runtime.New(filepath.Join(config.StateDir(), "direct-sessions.json"), offlineWindow, agentProviders(agents)...)
 	if err != nil {
@@ -279,7 +285,14 @@ func serve(args []string) error {
 		map[string]resident.Runner{resident.ProviderClaude: claudeResident, resident.ProviderCodex: codexResident, resident.ProviderDSH: dshProvider.ResidentRunner()},
 		resident.Config{MaxConcurrentRuns: cfg.ResidentMaxConcurrentRuns, CatchUpWindow: time.Duration(cfg.ResidentCatchUpHours) * time.Hour}, nil)
 	residents.OnChange = func() { hub.Publish(events.TypeResident, struct{}{}) }
-	residents.Notifier = &resident.Notifier{Store: residentStore, Sender: sender, Config: store, Prepare: prepareNotification}
+	residents.Notifier = &resident.Notifier{Store: residentStore, Sender: sender, Config: store, Prepare: prepareNotification,
+		Wants: func(cwd, kind string) bool {
+			level := ""
+			if p, ok := projectOf.Of(cwd); ok {
+				level = p.Notify
+			}
+			return projects.Wants(level, kind != resident.NotifyChange)
+		}}
 	if err := residents.Recover(ctx); err != nil {
 		return fmt.Errorf("recover resident runs: %w", err)
 	}
@@ -305,7 +318,7 @@ func serve(args []string) error {
 	}
 	srv := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           (&api.Server{Search: searchIndex, Translation: translator, MessageDelivery: delivery, AgentUpdates: agentupdate.New(ctx, cfg.CodexBinary), Sessions: svc, Uploads: up, Config: store, Sink: sink, Launcher: launch, Archive: archived, Usage: limits, DirectoryCheck: dirCheck, Direct: direct, Resident: residents, Notes: sessionNotes, Favorites: favoriteDirs, Listen: cfg.Listen, Events: hub, Kick: tracker.Kick}).Handler(),
+		Handler:           (&api.Server{Search: searchIndex, Translation: translator, MessageDelivery: delivery, AgentUpdates: agentupdate.New(ctx, cfg.CodexBinary), Sessions: svc, Uploads: up, Config: store, Sink: sink, Launcher: launch, Archive: archived, Usage: limits, DirectoryCheck: dirCheck, Direct: direct, Resident: residents, Notes: sessionNotes, Favorites: favoriteDirs, Projects: projectOf, Listen: cfg.Listen, Events: hub, Kick: tracker.Kick}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	// Event streams never end on their own; Shutdown waits for them.

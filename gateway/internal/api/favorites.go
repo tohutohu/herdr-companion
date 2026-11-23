@@ -20,6 +20,43 @@ func (s *Server) favoriteRoutes(api *http.ServeMux) {
 	api.HandleFunc("POST /v1/directories/favorites", s.addFavorite)
 	api.HandleFunc("DELETE /v1/directories/favorites", s.removeFavorite)
 	api.HandleFunc("POST /v1/directories/favorites/import", s.importFavorites)
+	if s.Projects != nil {
+		api.HandleFunc("GET /v1/projects", s.listProjects)
+		api.HandleFunc("PATCH /v1/projects", s.updateProject)
+	}
+}
+
+// listProjects returns the favorites as projects (docs/api.md#プロジェクト).
+func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"projects": s.Favorites.Projects()})
+}
+
+type projectUpdate struct {
+	Path   string  `json:"path"`
+	Name   *string `json:"name"`
+	Notify *string `json:"notify"`
+}
+
+// updateProject changes a project's name or notification level.
+func (s *Server) updateProject(w http.ResponseWriter, r *http.Request) {
+	var req projectUpdate
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		s.fail(w, r, "", "update_project", badRequest("invalid json"))
+		return
+	}
+	if req.Path == "" {
+		s.fail(w, r, "", "update_project", badRequest("path is required"))
+		return
+	}
+	p, err := s.Favorites.Update(req.Path, req.Name, req.Notify)
+	switch {
+	case errors.Is(err, favorites.ErrNotFound):
+		writeError(w, http.StatusNotFound, "not a project: add the folder to the favorites first")
+	case err != nil:
+		s.favoritesFail(w, r, "update_project", err)
+	default:
+		writeJSON(w, http.StatusOK, p)
+	}
 }
 
 type favoritesRequest struct {

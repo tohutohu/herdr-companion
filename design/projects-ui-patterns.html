@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>プロジェクト導入 UI パターン</title>
+<style>
+  :root {
+    --bg: #f3f1f7; --surface: #fffbfe; --surface2: #f1ecf6; --line: #e3dde9;
+    --text: #1d1b20; --sub: #625b71; --primary: #6750a4; --primary-c: #eaddff;
+    --run: #1e88e5; --wait: #ef6c00; --done: #2e7d32; --fail: #c62828; --idle: #9e9e9e;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Hiragino Sans", "Noto Sans JP", Roboto, sans-serif; font-size: 14px; }
+  header.page { padding: 16px 16px 8px; }
+  header.page h1 { font-size: 18px; margin: 0 0 6px; }
+  header.page p { margin: 0; color: var(--sub); font-size: 13px; line-height: 1.6; }
+  .pattern-tabs { position: sticky; top: 0; z-index: 10; display: flex; gap: 6px; overflow-x: auto;
+    padding: 10px 12px; background: var(--bg); border-bottom: 1px solid var(--line); }
+  .pattern-tabs button { flex: none; border: 1px solid var(--line); background: var(--surface);
+    border-radius: 999px; padding: 7px 12px; font-size: 13px; color: var(--text); }
+  .pattern-tabs button.on { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .explain { margin: 12px 14px; padding: 12px 14px; background: var(--surface); border-radius: 14px;
+    border: 1px solid var(--line); line-height: 1.65; font-size: 13px; }
+  .explain h2 { font-size: 15px; margin: 0 0 6px; }
+  .explain .pc { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+  .explain .pc div { background: var(--surface2); border-radius: 10px; padding: 8px 10px; font-size: 12px; }
+  .explain .pc b { display: block; margin-bottom: 2px; }
+  .phones { display: flex; gap: 16px; overflow-x: auto; padding: 4px 14px 24px; scroll-snap-type: x mandatory; }
+  .phone-wrap { flex: none; scroll-snap-align: center; }
+  .phone-cap { font-size: 12px; color: var(--sub); margin: 0 0 6px 4px; }
+  .phone { width: 330px; height: 690px; background: var(--surface); border-radius: 30px; border: 8px solid #222;
+    overflow: hidden; display: flex; flex-direction: column; position: relative; }
+  .status-bar { height: 22px; font-size: 11px; padding: 4px 18px 0; color: var(--sub); display: flex; justify-content: space-between; }
+  .appbar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; min-height: 48px; }
+  .appbar .title { font-size: 20px; font-weight: 500; flex: 1; display: flex; align-items: center; gap: 4px; }
+  .appbar .icon { width: 28px; text-align: center; color: var(--sub); font-size: 18px; }
+  .scroll { flex: 1; min-height: 0; overflow-y: auto; }
+  .chips { display: flex; gap: 6px; overflow-x: auto; padding: 4px 12px 8px; flex: none; }
+  .chip { flex: none; border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px; font-size: 12.5px;
+    background: var(--surface); display: flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; }
+  .chip.on { background: var(--primary-c); border-color: var(--primary-c); font-weight: 600; }
+  .chip .n { font-size: 11px; color: var(--sub); }
+  .row { display: flex; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); align-items: flex-start; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; flex: none; }
+  .row .main { flex: 1; min-width: 0; }
+  .row .t { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row.unread .t { font-weight: 700; }
+  .row .s { font-size: 12px; color: var(--sub); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+  .row .meta { font-size: 11px; color: var(--sub); text-align: right; flex: none; }
+  .tag { display: inline-block; font-size: 10.5px; padding: 1px 6px; border-radius: 6px; background: var(--surface2); color: var(--sub); margin-right: 4px; }
+  .muted { font-size: 11px; color: var(--sub); }
+  .badge { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--primary); color: #fff; font-size: 10.5px; text-align: center; line-height: 18px; }
+  .section-h { display: flex; align-items: center; gap: 6px; padding: 12px 14px 6px; font-size: 13px; font-weight: 600; color: var(--primary); background: var(--surface); position: sticky; top: 0; z-index: 1; }
+  .section-h .sp { flex: 1; }
+  .section-h .more { font-weight: 400; color: var(--sub); font-size: 12px; }
+  .navbar { display: flex; border-top: 1px solid var(--line); background: var(--surface2); flex: none; }
+  .navbar div { flex: 1; text-align: center; padding: 8px 0 10px; font-size: 11.5px; color: var(--sub); cursor: pointer; }
+  .navbar div .i { display: block; font-size: 18px; margin: 0 auto 2px; width: 56px; border-radius: 14px; padding: 2px 0; }
+  .navbar div.on { color: var(--text); font-weight: 600; }
+  .navbar div.on .i { background: var(--primary-c); }
+  .fab { position: absolute; right: 16px; bottom: 76px; background: var(--primary-c); border-radius: 16px; padding: 14px 16px; font-size: 13px; box-shadow: 0 2px 6px rgba(0,0,0,.2); }
+  .card { margin: 8px 12px; padding: 12px; border-radius: 14px; background: var(--surface2); cursor: pointer; }
+  .card .h { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 15px; }
+  .card .h .sp { flex: 1; }
+  .card .p { font-size: 11.5px; color: var(--sub); margin: 2px 0 8px; }
+  .card .stats { display: flex; gap: 10px; font-size: 12px; flex-wrap: wrap; }
+  .card .stats span { display: flex; align-items: center; gap: 4px; }
+  .seg { display: flex; margin: 4px 12px 8px; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; flex: none; }
+  .seg div { flex: 1; text-align: center; padding: 7px 0; font-size: 13px; cursor: pointer; }
+  .seg div.on { background: var(--primary-c); font-weight: 600; }
+  .bell { margin: 6px 12px; padding: 10px 12px; border-radius: 12px; background: var(--surface2); font-size: 12.5px; }
+  .bell .opts { display: flex; gap: 6px; margin-top: 8px; }
+  .bell .opts div { flex: 1; text-align: center; border: 1px solid var(--line); border-radius: 8px; padding: 6px 0; background: var(--surface); cursor: pointer; }
+  .bell .opts div.on { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .sheet-bg { position: absolute; inset: 0; background: rgba(0,0,0,.32); display: flex; align-items: flex-end; }
+  .sheet { background: var(--surface); width: 100%; border-radius: 22px 22px 0 0; padding: 8px 0 14px; max-height: 80%; overflow-y: auto; }
+  .sheet .grab { width: 36px; height: 4px; background: var(--line); border-radius: 2px; margin: 4px auto 10px; }
+  .sheet .item { display: flex; align-items: center; gap: 10px; padding: 11px 18px; font-size: 14px; cursor: pointer; }
+  .sheet .item.on { background: var(--primary-c); }
+  .sheet .item .sp { flex: 1; }
+  .sheet .lbl { padding: 6px 18px; font-size: 12px; color: var(--sub); }
+  .dropdown-title { cursor: pointer; }
+  .mac { width: 760px; height: 470px; border-radius: 12px; border: 1px solid #bbb; background: var(--surface); display: flex; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,.12); }
+  .mac .col1 { width: 170px; background: var(--surface2); border-right: 1px solid var(--line); padding: 10px 0; font-size: 13px; }
+  .mac .col1 .it { padding: 6px 14px; display: flex; gap: 6px; align-items: center; cursor: pointer; }
+  .mac .col1 .it.on { background: var(--primary-c); font-weight: 600; }
+  .mac .col1 .it .sp { flex: 1; }
+  .mac .col1 .lbl { padding: 10px 14px 4px; font-size: 11px; color: var(--sub); }
+  .mac .col2 { width: 260px; border-right: 1px solid var(--line); overflow-y: auto; }
+  .mac .col3 { flex: 1; padding: 16px; color: var(--sub); font-size: 13px; }
+  .note { font-size: 11px; color: var(--sub); padding: 6px 14px; }
+</style>
+</head>
+<body>
+<header class="page">
+  <h1>プロジェクト導入 UI パターン</h1>
+  <p>お気に入りのフォルダを「プロジェクト」に格上げし、セッションと常駐をプロジェクトごとにも見られるようにする案です。
+  通知は 3 段階（🔔 すべて／❗ 要対応のみ／🔕 オフ）、どこにも当てはまらないものは「その他」にまとめます。
+  上のボタンでパターンを切り替えてください。各モックはチップ・タブ・カードをタップすると動きます。端末の枠は横にスクロールすると複数あります。</p>
+</header>
+<nav class="pattern-tabs" id="ptabs"></nav>
+<section id="explain"></section>
+<section class="phones" id="phones"></section>
+
+<script>
+const PROJECTS = [
+  { id: 'bot', name: 'bot', path: '~/workspace/bot', notify: 'off' },
+  { id: 'klon', name: 'klon', path: '~/workspace/klon', notify: 'all' },
+  { id: 'herdr', name: 'herdr-android-client', path: '~/workspace/herdr-android-client', notify: 'all' },
+  { id: 'onnoti', name: 'onnoti-tracker', path: '~/workspace/onnoti-tracker', notify: 'attention' },
+  { id: 'isucon', name: 'isucon2026', path: '~/workspace/isucon2026', notify: 'all' },
+  { id: 'other', name: 'その他', path: '登録外のフォルダ', notify: 'all', other: true },
+];
+const SESSIONS = [
+  { p: 'herdr', t: 'プロジェクト機能の設計', s: 'UI パターンを HTML にまとめました', st: 'running', u: false, ago: '今' },
+  { p: 'bot', t: 'arbscan 採点の再実行（3件）', s: '採点を書き戻しました', st: 'completed', u: true, ago: '2分前' },
+  { p: 'bot', t: 'arbscan 検死: 11/23 の損失', s: '原因はスリッページの過小評価です', st: 'completed', u: true, ago: '6分前' },
+  { p: 'klon', t: 'PocketSign の署名フロー', s: '承認が必要です: Bash(gh pr create)', st: 'waiting_approval', u: true, ago: '9分前' },
+  { p: 'bot', t: 'arbscan 手動投入 Fable', s: 'ディスパッチャーから起動', st: 'running', u: false, ago: '11分前' },
+  { p: 'herdr', t: 'SSE でリアルタイム更新', s: 'main に取り込みました', st: 'idle', u: false, ago: '1時間前' },
+  { p: 'bot', t: 'arbscan 監査: 重複注文', s: '問題は見つかりませんでした', st: 'completed', u: true, ago: '1時間前' },
+  { p: 'klon', t: 'ログイン画面の崩れ', s: 'どちらの案にしますか？', st: 'waiting_input', u: true, ago: '2時間前' },
+  { p: 'bot', t: 'arbscan 反省会のまとめ', s: '反省を memory に書きました', st: 'idle', u: false, ago: '3時間前' },
+  { p: 'onnoti', t: 'TikTok 投稿キャプション', s: '下書きを 3 本作りました', st: 'completed', u: true, ago: '4時間前' },
+  { p: 'klon', t: 'エミュレーターのプール整理', s: '完了しました', st: 'idle', u: false, ago: '5時間前' },
+  { p: 'bot', t: 'arbscan 取り込みの失敗', s: 'API が 429 を返しました', st: 'failed', u: true, ago: '6時間前' },
+  { p: 'other', t: 'メルカリ監視の調整', s: '閾値を 3 万円にしました', st: 'idle', u: false, ago: '昨日' },
+];
+const RESIDENTS = [
+  { p: 'bot', t: 'arbscan ディスパッチャー', st: 'running', next: '01:05', u: 22 },
+  { p: 'bot', t: 'arbscan 採点役', st: 'needs_attention', next: '06:35', u: 94 },
+  { p: 'bot', t: 'arbscan 毎日の取り込み', st: 'needs_attention', next: '10:00', u: 14 },
+  { p: 'bot', t: 'arbscan 監査役', st: 'running', next: '06:50', u: 17 },
+  { p: 'bot', t: 'arbscan 反省役', st: 'idle', next: '09:00', u: 3 },
+  { p: 'bot', t: 'arbscan 検死役', st: 'idle', next: '-', u: 76 },
+  { p: 'klon', t: 'PocketSign 次やること', st: 'idle', next: '17:00', u: 12 },
+  { p: 'onnoti', t: 'TikTok分析', st: 'waiting_user', next: '09:00', u: 33 },
+  { p: 'onnoti', t: 'TikTok企画', st: 'idle', next: '10:30', u: 19 },
+  { p: 'onnoti', t: 'TikTok投稿', st: 'idle', next: '12:15', u: 20 },
+  { p: 'other', t: 'メルカリ監視: M1 MacBook Air', st: 'idle', next: '06:00', u: 53 },
+  { p: 'other', t: 'SUUMO監視: 東海道線 大阪・滋賀', st: 'idle', next: '09:15', u: 0 },
+];
+const STATUS = {
+  running: ['var(--run)', '実行中'], waiting_input: ['var(--wait)', '回答待ち'], waiting_approval: ['var(--wait)', '承認待ち'],
+  completed: ['var(--done)', '完了'], failed: ['var(--fail)', '失敗'], idle: ['var(--idle)', '待機'],
+  needs_attention: ['var(--fail)', '要確認'], waiting_user: ['var(--wait)', '判断待ち'],
+};
+const BELL = { all: '🔔', attention: '❗', off: '🔕' };
+const BELL_LABEL = { all: 'すべて', attention: '要対応のみ', off: 'オフ' };
+const proj = id => PROJECTS.find(p => p.id === id);
+
+// Shared mock state: each phone keeps its own.
+function makeState(extra) { return Object.assign({ tab: 'sessions', filter: 'all', open: null, seg: 'sessions', sheet: false, grouped: true }, extra || {}); }
+
+function bellMark(p) { return p.notify === 'all' ? '' : `<span class="muted" title="通知: ${BELL_LABEL[p.notify]}">${BELL[p.notify]}</span>`; }
+
+function sessionRow(s, showProject = true) {
+  const p = proj(s.p), [c, label] = STATUS[s.st];
+  return `<div class="row ${s.u ? 'unread' : ''}">
+    <div class="dot" style="background:${c}"></div>
+    <div class="main"><div class="t">${s.t}</div>
+      <div class="s">${showProject ? `<span class="tag">${p.name}</span>` : ''}${s.s}</div></div>
+    <div class="meta">${s.ago}<br>${label} ${bellMark(p)}</div></div>`;
+}
+function residentRow(r, showProject = true) {
+  const p = proj(r.p), [c, label] = STATUS[r.st];
+  return `<div class="row ${r.u ? 'unread' : ''}">
+    <div class="dot" style="background:${c}"></div>
+    <div class="main"><div class="t">${r.t}</div>
+      <div class="s">${showProject ? `<span class="tag">${p.name}</span>` : ''}次回 ${r.next}・${label}</div></div>
+    <div class="meta">${r.u ? `<span class="badge">${r.u}</span>` : ''}<br>${bellMark(p)}</div></div>`;
+}
+function counts(id) {
+  const ss = SESSIONS.filter(s => s.p === id), rs = RESIDENTS.filter(r => r.p === id);
+  return {
+    sessions: ss.length, residents: rs.length,
+    running: ss.filter(s => s.st === 'running').length + rs.filter(r => r.st === 'running').length,
+    waiting: ss.filter(s => s.st.startsWith('waiting')).length + rs.filter(r => r.st === 'waiting_user' || r.st === 'needs_attention').length,
+    unread: ss.filter(s => s.u).length + rs.reduce((a, r) => a + (r.u ? 1 : 0), 0),
+  };
+}
+function chips(st, kind) {
+  const list = kind === 'residents' ? RESIDENTS : SESSIONS;
+  const all = `<div class="chip ${st.filter === 'all' ? 'on' : ''}" data-act="filter" data-v="all">すべて <span class="n">${list.length}</span></div>`;
+  return `<div class="chips">${all}${PROJECTS.filter(p => list.some(x => x.p === p.id)).map(p =>
+    `<div class="chip ${st.filter === p.id ? 'on' : ''}" data-act="filter" data-v="${p.id}">${p.name} ${bellMark(p)}<span class="n">${list.filter(x => x.p === p.id).length}</span></div>`).join('')}</div>`;
+}
+function bellSetting(p) {
+  return `<div class="bell">通知 <span class="muted">（このプロジェクトのセッションと常駐）</span>
+    <div class="opts">${['all', 'attention', 'off'].map(k => `<div class="${p.notify === k ? 'on' : ''}" data-act="notify" data-p="${p.id}" data-v="${k}">${BELL[k]} ${BELL_LABEL[k]}</div>`).join('')}</div>
+    <div class="muted" style="margin-top:6px">要対応のみ = 質問・承認・失敗だけ通知。オフでも一覧と未読はそのまま残ります。</div></div>`;
+}
+function navbar(st, tabs) {
+  return `<div class="navbar">${tabs.map(([k, i, l]) => `<div class="${st.tab === k ? 'on' : ''}" data-act="tab" data-v="${k}"><span class="i">${i}</span>${l}</div>`).join('')}</div>`;
+}
+function phone(caption, st, body) {
+  return `<div class="phone-wrap"><p class="phone-cap">${caption}</p><div class="phone" data-state='${JSON.stringify(st)}'>
+    <div class="status-bar"><span>9:41</span><span>▮▮ 82%</span></div>${body(st)}</div></div>`;
+}
+function projectScreen(st, pid, backLabel) {
+  const p = proj(pid), c = counts(pid);
+  const ss = SESSIONS.filter(s => s.p === pid), rs = RESIDENTS.filter(r => r.p === pid);
+  return `<div class="appbar"><span class="icon" data-act="back">←</span><span class="title">${p.name}</span><span class="icon">⋮</span></div>
+    <div class="note" style="padding-top:0">${p.path}・実行中 ${c.running}・要対応 ${c.waiting}</div>
+    ${p.other ? '' : bellSetting(p)}
+    <div class="seg"><div class="${st.seg === 'sessions' ? 'on' : ''}" data-act="seg" data-v="sessions">セッション ${ss.length}</div><div class="${st.seg === 'residents' ? 'on' : ''}" data-act="seg" data-v="residents">常駐 ${rs.length}</div></div>
+    <div class="scroll">${st.seg === 'sessions' ? ss.map(s => sessionRow(s, false)).join('') : rs.map(r => residentRow(r, false)).join('')}</div>
+    <div class="fab" style="bottom:${backLabel ? 76 : 16}px">＋ ${st.seg === 'sessions' ? 'ここで新規セッション' : 'ここで常駐を作る'}</div>`;
+}
+
+function bodyB(st) {
+        if (st.tab === 'projects' && st.open) return projectScreen(st, st.open, true) + navbar(st, [['sessions', '💬', 'セッション'], ['residents', '⏰', '常駐'], ['projects', '📁', 'プロジェクト']]);
+        let body;
+        if (st.tab === 'projects') {
+          body = `<div class="appbar"><span class="title">プロジェクト</span><span class="icon">＋</span></div><div class="scroll">${PROJECTS.map(p => {
+            const c = counts(p.id);
+            return `<div class="card" data-act="open" data-v="${p.id}"><div class="h">${p.name}<span class="sp"></span>${BELL[p.notify]}</div>
+              <div class="p">${p.path}</div><div class="stats">
+              <span><i class="dot" style="background:var(--run);margin:0"></i>実行中 ${c.running}</span>
+              <span><i class="dot" style="background:var(--wait);margin:0"></i>要対応 ${c.waiting}</span>
+              <span>💬 ${c.sessions}</span><span>⏰ ${c.residents}</span>${c.unread ? `<span class="badge">${c.unread}</span>` : ''}</div></div>`;
+          }).join('')}</div>`;
+        } else if (st.tab === 'sessions') {
+          body = `<div class="appbar"><span class="title">セッション</span><span class="icon">🔍</span></div><div class="scroll">${SESSIONS.map(s => sessionRow(s)).join('')}</div>`;
+        } else {
+          body = `<div class="appbar"><span class="title">常駐</span></div><div class="scroll">${RESIDENTS.map(r => residentRow(r)).join('')}</div>`;
+        }
+        return body + navbar(st, [['sessions', '💬', 'セッション'], ['residents', '⏰', '常駐'], ['projects', '📁', 'プロジェクト']]);
+}
+
+const PATTERNS = {
+  A: {
+    name: 'A 絞り込みチップ',
+    explain: `<h2>A. 両タブの上に絞り込みチップ</h2>今の 2 タブ（セッション・常駐）はそのままで、上部にプロジェクトのチップを並べます。選んだプロジェクトはタブを移っても保たれます。
+      チップを長押しするとプロジェクトのシート（通知設定・ここで新規作成）が開きます。🔕❗ は通知を絞っているプロジェクトの印です。
+      <div class="pc"><div><b>良い点</b>画面が増えず、今の操作のまま。全体⇔プロジェクトの切り替えがワンタップ。</div><div><b>気になる点</b>1 つのプロジェクトのセッションと常駐を同時には見られない。チップが多いと横スクロール。</div></div>`,
+    phones: () => [
+      phone('セッション（タップで絞り込み）', makeState(), st => {
+        const list = SESSIONS.filter(s => st.filter === 'all' || s.p === st.filter);
+        const tabsHtml = navbar(st, [['sessions', '💬', 'セッション'], ['residents', '⏰', '常駐']]);
+        const kind = st.tab;
+        const rows = kind === 'sessions' ? list.map(s => sessionRow(s, st.filter === 'all')).join('')
+          : RESIDENTS.filter(r => st.filter === 'all' || r.p === st.filter).map(r => residentRow(r, st.filter === 'all')).join('');
+        return `<div class="appbar"><span class="title">${kind === 'sessions' ? 'セッション' : '常駐'}</span><span class="icon">🔍</span><span class="icon">⚙</span></div>
+          ${chips(st, kind)}<div class="scroll">${rows || '<div class="note">このプロジェクトにはありません</div>'}</div>
+          ${st.sheet ? sheetFor(st.sheet) : ''}${tabsHtml}`;
+      }),
+      phone('チップ長押しで開くシート', makeState({ filter: 'bot', sheet: 'bot' }), st => {
+        const rows = SESSIONS.filter(s => s.p === 'bot').map(s => sessionRow(s, false)).join('');
+        return `<div class="appbar"><span class="title">セッション</span><span class="icon">🔍</span><span class="icon">⚙</span></div>
+          ${chips(st, 'sessions')}<div class="scroll">${rows}</div>${st.sheet ? sheetFor(st.sheet) : ''}
+          ${navbar(st, [['sessions', '💬', 'セッション'], ['residents', '⏰', '常駐']])}`;
+      }),
+    ],
+  },
+  B: {
+    name: 'B プロジェクトタブ',
+    explain: `<h2>B. 下のタブに「プロジェクト」を足す</h2>セッション・常駐の 2 タブは全体の一覧のまま残し、3 つ目のタブでプロジェクトをカードで並べます。
+      カードには実行中・要対応・未読の数と通知の状態。開くとそのプロジェクトのセッションと常駐を切り替えて見られ、通知設定とここで新規作成もそこにあります。
+      <div class="pc"><div><b>良い点</b>「全体」と「プロジェクトごと」がはっきり分かれる。プロジェクトの様子が一目で分かる。</div><div><b>気になる点</b>タブが 1 つ増える。全体の一覧をプロジェクトで絞るには 1 段深く入る必要がある。</div></div>`,
+    phones: () => [
+      phone('プロジェクトタブ（カードをタップ）', makeState({ tab: 'projects' }), bodyB),
+      phone('プロジェクトを開いたところ（bot）', makeState({ tab: 'projects', open: 'bot' }), bodyB),
+    ],
+  },
+  C: {
+    name: 'C 見出しでまとめる',
+    explain: `<h2>C. 一覧をプロジェクトの見出しでまとめる</h2>セッション・常駐の一覧そのものを、プロジェクトごとの見出しで区切ります（右上で「まとめる／時系列」を切り替え）。
+      見出しには通知の状態と件数。見出しをタップするとそのプロジェクトの画面（通知設定・セッションと常駐）へ。各グループは新しい 3 件まで出し、残りは「さらに n 件」。
+      <div class="pc"><div><b>良い点</b>全体を見ながらプロジェクト単位で把握できる。画面もタブも増えない。</div><div><b>気になる点</b>時系列の並びが崩れる（切り替えで対応）。bot のように件数の多いグループが場所を取る。</div></div>`,
+    phones: () => [
+      phone('まとめる表示（見出しをタップ）', makeState(), st => {
+        if (st.open) return projectScreen(st, st.open, true) + navbar(st, [['sessions', '💬', 'セッション'], ['residents', '⏰', '常駐']]);
+        const kind = st.tab, list = kind === 'sessions' ? SESSIONS : RESIDENTS;
+        let rows;
+        if (st.grouped) {
+          rows = PROJECTS.filter(p => list.some(x => x.p === p.id)).map(p => {
+            const items = list.filter(x => x.p === p.id), shown = items.slice(0, 3);
+            return `<div class="section-h" data-act="open" data-v="${p.id}">${p.name} ${bellMark(p)}<span class="sp"></span><span class="more">${items.length} ›</span></div>
+              ${shown.map(x => kind === 'sessions' ? sessionRow(x, false) : residentRow(x, false)).join('')}
+              ${items.length > 3 ? `<div class="note" data-act="open" data-v="${p.id}">さらに ${items.length - 3} 件</div>` : ''}`;
+          }).join('');
+        } else {
+          rows = list.map(x => kind === 'sessions' ? sessionRow(x) : residentRow(x)).join('');
+        }
+        return `<div class="appbar"><span class="title">${kind === 'sessions' ? 'セッション' : '常駐'}</span>
+          <span class="chip ${st.grouped ? 'on' : ''}" data-act="group">${st.grouped ? 'まとめる' : '時系列'}</span></div>
+          <div class="scroll">${rows}</div>${navbar(st, [['sessions', '💬', 'セッション'], ['residents', '⏰', '常駐']])}`;
+      }),
+    ],
+  },
+  D: {
+    name: 'D 上部で切り替え',
+    explain: `<h2>D. 画面上部でプロジェクトを切り替える（Slack のワークスペース風）</h2>アプリバーのタイトルが「すべて ▾」になり、タップでプロジェクトを選ぶシートが開きます。
+      選ぶと<b>セッションと常駐の両タブ</b>がそのプロジェクトに切り替わり、シートの各行から通知設定もできます。
+      <div class="pc"><div><b>良い点</b>「今は bot の作業」とモードごと切り替えられる。一覧の見た目は今のまま。</div><div><b>気になる点</b>今どのプロジェクトを見ているかを忘れやすい（タイトルで表示）。2 つを並べて比べにくい。</div></div>`,
+    phones: () => [
+      phone('タイトルをタップして切り替え', makeState(), st => {
+        const kind = st.tab;
+        const title = st.filter === 'all' ? 'すべて' : proj(st.filter).name;
+        const list = (kind === 'sessions' ? SESSIONS : RESIDENTS).filter(x => st.filter === 'all' || x.p === st.filter);
+        const rows = list.map(x => kind === 'sessions' ? sessionRow(x, st.filter === 'all') : residentRow(x, st.filter === 'all')).join('');
+        const sheet = st.sheet ? `<div class="sheet-bg" data-act="close"><div class="sheet"><div class="grab"></div>
+          <div class="item ${st.filter === 'all' ? 'on' : ''}" data-act="pick" data-v="all">すべてのプロジェクト<span class="sp"></span></div>
+          <div class="lbl">プロジェクト（ベルで通知を切り替え）</div>
+          ${PROJECTS.map(p => { const c = counts(p.id); return `<div class="item ${st.filter === p.id ? 'on' : ''}" data-act="pick" data-v="${p.id}">
+            ${p.name}<span class="sp"></span><span class="muted">要対応 ${c.waiting}</span><span data-act="cycle" data-p="${p.id}">${BELL[p.notify]}</span></div>`; }).join('')}
+          <div class="item">＋ プロジェクトを追加</div></div></div>` : '';
+        return `<div class="appbar"><span class="title dropdown-title" data-act="sheet">${title} ▾</span><span class="icon">🔍</span></div>
+          <div class="note" style="padding-top:0">${kind === 'sessions' ? 'セッション' : '常駐'}・${list.length} 件</div>
+          <div class="scroll">${rows}</div>${sheet}${navbar(st, [['sessions', '💬', 'セッション'], ['residents', '⏰', '常駐']])}`;
+      }),
+    ],
+  },
+  M: {
+    name: 'Mac UI',
+    explain: `<h2>Mac UI</h2>画面が広いので、左端にプロジェクトの列を足します（メールのフォルダのように）。「すべて」と各プロジェクト、通知の状態と未読数。
+      選ぶと隣のセッション一覧（と常駐のパネル）が絞られます。右クリックで通知設定。スマホ側は A〜D のどれでも、Mac はこの形が自然です。`,
+    phones: () => [
+      `<div class="phone-wrap"><p class="phone-cap">Mac UI（左の列をクリック）</p><div class="mac" data-state='${JSON.stringify(makeState())}'>${macBody(makeState())}</div></div>`,
+    ],
+  },
+};
+
+function macBody(st) {
+  const list = SESSIONS.filter(s => st.filter === 'all' || s.p === st.filter);
+  return `<div class="col1"><div class="lbl">プロジェクト</div>
+    <div class="it ${st.filter === 'all' ? 'on' : ''}" data-act="filter" data-v="all">すべて<span class="sp"></span><span class="badge">${SESSIONS.filter(s => s.u).length}</span></div>
+    ${PROJECTS.map(p => { const u = SESSIONS.filter(s => s.p === p.id && s.u).length; return `<div class="it ${st.filter === p.id ? 'on' : ''}" data-act="filter" data-v="${p.id}">${p.name}<span class="sp"></span>${bellMark(p)}${u ? `<span class="badge">${u}</span>` : ''}</div>`; }).join('')}
+    <div class="lbl">常駐</div><div class="it">⏰ 常駐タスク ${RESIDENTS.filter(r => st.filter === 'all' || r.p === st.filter).length}</div></div>
+    <div class="col2">${list.map(s => sessionRow(s, st.filter === 'all')).join('')}</div>
+    <div class="col3">${st.filter === 'all' ? 'セッションを選ぶと会話がここに開きます。' : bellSetting(proj(st.filter))}</div>`;
+}
+
+function sheetFor(pid) {
+  const p = proj(pid), c = counts(pid);
+  return `<div class="sheet-bg" data-act="close"><div class="sheet"><div class="grab"></div>
+    <div class="lbl">${p.path}</div><div class="item"><b>${p.name}</b><span class="sp"></span><span class="muted">💬 ${c.sessions}・⏰ ${c.residents}</span></div>
+    ${p.other ? '' : bellSetting(p)}
+    <div class="item">＋ ここで新規セッション</div><div class="item">＋ ここで常駐を作る</div><div class="item">✎ 名前を変える</div></div></div>`;
+}
+
+let current = PATTERNS[location.hash.slice(1)] ? location.hash.slice(1) : 'A';
+function render() {
+  document.getElementById('ptabs').innerHTML = Object.entries(PATTERNS).map(([k, v]) => `<button class="${k === current ? 'on' : ''}" data-p="${k}">${v.name}</button>`).join('');
+  document.getElementById('explain').innerHTML = `<div class="explain">${PATTERNS[current].explain}</div>`;
+  document.getElementById('phones').innerHTML = PATTERNS[current].phones().join('');
+  document.getElementById('phones').scrollLeft = 0;
+}
+document.getElementById('ptabs').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return; current = b.dataset.p; render();
+});
+
+// Re-render one phone from its own state.
+const RENDERERS = {};
+function rerender(el, st) {
+  el.dataset.state = JSON.stringify(st);
+  const isMac = el.classList.contains('mac');
+  if (isMac) { el.innerHTML = macBody(st); return; }
+  const wraps = [...document.querySelectorAll('#phones .phone')];
+  const idx = wraps.indexOf(el);
+  const html = PATTERNS[current].phones()[idx];
+  // Render with this state by temporarily swapping makeState's defaults.
+  const tmp = document.createElement('div');
+  const saved = makeState; window.makeState = () => st;
+  try { tmp.innerHTML = PATTERNS[current].phones()[idx]; } finally { window.makeState = saved; }
+  el.innerHTML = tmp.querySelector('.phone').innerHTML;
+}
+document.getElementById('phones').addEventListener('click', e => {
+  if (suppressClick) { suppressClick = false; return; }
+  const a = e.target.closest('[data-act]'); if (!a) return;
+  const el = a.closest('.phone, .mac'); if (!el) return;
+  e.stopPropagation();
+  const st = JSON.parse(el.dataset.state);
+  const v = a.dataset.v;
+  switch (a.dataset.act) {
+    case 'filter': st.filter = v; st.sheet = false; break;
+    case 'tab': st.tab = v; st.open = null; st.filter = st.filter; break;
+    case 'open': st.open = v; st.seg = 'sessions'; break;
+    case 'back': st.open = null; break;
+    case 'seg': st.seg = v; break;
+    case 'group': st.grouped = !st.grouped; break;
+    case 'sheet': st.sheet = true; break;
+    case 'close': if (e.target === a) st.sheet = false; else return; break;
+    case 'pick': st.filter = v; st.sheet = false; break;
+    case 'notify': proj(a.dataset.p).notify = v; break;
+    case 'cycle': { const p = proj(a.dataset.p); p.notify = { all: 'attention', attention: 'off', off: 'all' }[p.notify]; break; }
+    default: return;
+  }
+  rerender(el, st);
+});
+// Long press on a chip opens the project sheet (pattern A).
+let pressTimer, suppressClick = false;
+document.getElementById('phones').addEventListener('pointerdown', e => {
+  const c = e.target.closest('.chip[data-act="filter"]'); if (!c || c.dataset.v === 'all') return;
+  pressTimer = setTimeout(() => {
+    const el = c.closest('.phone'); const st = JSON.parse(el.dataset.state);
+    st.sheet = c.dataset.v; st.filter = c.dataset.v; rerender(el, st);
+    suppressClick = true;
+  }, 500);
+});
+['pointerup', 'pointerleave', 'pointercancel'].forEach(t => document.getElementById('phones').addEventListener(t, () => clearTimeout(pressTimer)));
+render();
+</script>
+</body>
+</html>

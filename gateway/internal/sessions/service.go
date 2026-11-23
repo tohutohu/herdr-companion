@@ -34,6 +34,9 @@ type Service struct {
 	// kept out of the offline list in case an agent saved anything for
 	// them. Optional.
 	Hidden func(ctx context.Context) map[string]bool
+	// Annotate fills in what the service does not know about a session,
+	// such as its project (projects.Resolver.Annotate); may be nil.
+	Annotate func(*model.Session)
 }
 
 func New(offlineWindow time.Duration, ps ...providers.Provider) *Service {
@@ -365,6 +368,9 @@ func (s *Service) toSession(r *Resolved, sum *providers.Summary) model.Session {
 		if sess.Status == model.StatusFailed {
 			sess.Error = d.Error
 		}
+	}
+	if s.Annotate != nil {
+		s.Annotate(&sess)
 	}
 	return sess
 }

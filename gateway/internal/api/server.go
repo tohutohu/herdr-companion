@@ -32,6 +32,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/launcher"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/model"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/notes"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/projects"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/providers"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/resident"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/runtime"
@@ -68,6 +69,9 @@ type Server struct {
 	// Favorites are the favorite working folders; nil leaves
 	// /v1/directories/favorites out.
 	Favorites *favorites.Store
+	// Projects maps folders to projects (the favorites); nil leaves
+	// /v1/projects out.
+	Projects *projects.Resolver
 	// Listen is the address the server listens on, for telling clients behind
 	// a tunnel where to reach the localhost proxy directly.
 	Listen string

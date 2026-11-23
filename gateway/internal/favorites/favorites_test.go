@@ -2,8 +2,10 @@ package favorites
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -117,5 +119,52 @@ func Test相対パスや上限を超える一覧は拒否する(t *testing.T) {
 	}
 	if s.List().Saved {
 		t.Fatal("a refused change was saved")
+	}
+}
+
+func Testプロジェクトの名前と通知を保存し一覧から外すと設定も消える(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "favorites.json")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Set([]string{"/w/bot", "/w/klon"})
+	name, off := "Bot 群", NotifyOff
+	if p, err := st.Update("/w/bot", &name, &off); err != nil || p.Name != "Bot 群" || p.Notify != "off" {
+		t.Fatal(p, err)
+	}
+	bad := "loud"
+	if _, err := st.Update("/w/bot", nil, &bad); !errors.Is(err, ErrInvalid) {
+		t.Fatal("invalid level accepted:", err)
+	}
+	if _, err := st.Update("/w/none", &name, nil); !errors.Is(err, ErrNotFound) {
+		t.Fatal("unknown folder accepted:", err)
+	}
+
+	again, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := again.Projects()
+	if len(got) != 2 || got[0] != (Project{Path: "/w/bot", Name: "Bot 群", Notify: "off"}) || got[1] != (Project{Path: "/w/klon", Name: "klon", Notify: "all"}) {
+		t.Fatalf("projects = %+v", got)
+	}
+	// Reordering keeps the settings; removing drops them.
+	again.Set([]string{"/w/klon", "/w/bot"})
+	if again.Projects()[1].Notify != "off" {
+		t.Fatal("reorder lost the settings")
+	}
+	again.Remove("/w/bot")
+	again.Add("/w/bot", nil)
+	if p := again.Projects()[1]; p.Notify != "all" || p.Name != "bot" {
+		t.Fatalf("settings came back: %+v", p)
+	}
+	// Back to the defaults leaves nothing stored.
+	all, empty := NotifyAll, ""
+	again.Update("/w/klon", &name, &off)
+	again.Update("/w/klon", &empty, &all)
+	b, _ := os.ReadFile(path)
+	if strings.Contains(string(b), `"projects"`) {
+		t.Fatalf("defaults stored: %s", b)
 	}
 }
