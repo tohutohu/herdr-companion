@@ -7,6 +7,13 @@ import com.tohutohu.herdrcompanion.container
 import com.tohutohu.herdrcompanion.data.Attachment
 import com.tohutohu.herdrcompanion.data.Message
 import com.tohutohu.herdrcompanion.data.PendingMessage
+import com.tohutohu.herdrcompanion.data.StreamingReply
+import com.tohutohu.herdrcompanion.data.StreamingReplyState
+import com.tohutohu.herdrcompanion.data.api.onEvent
+import com.tohutohu.herdrcompanion.data.api.affectsSession
+import com.tohutohu.herdrcompanion.data.api.pollWithEvents
+import com.tohutohu.herdrcompanion.data.api.streaming
+import com.tohutohu.herdrcompanion.data.withStreaming
 import com.tohutohu.herdrcompanion.data.matchPending
 import com.tohutohu.herdrcompanion.data.api.GatewayException
 import com.tohutohu.herdrcompanion.data.api.InteractionResponseDto
@@ -14,6 +21,7 @@ import com.tohutohu.herdrcompanion.data.db.SessionEntity
 import com.tohutohu.herdrcompanion.push.Notifications
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -29,6 +37,9 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 private const val POLL_MS = 3_000L
+
+/** The poll while the gateway's event stream reports this session's changes. */
+private const val CONNECTED_POLL_MS = 30_000L
 private const val NOTICE_MS = 4_000L
 
 /**
@@ -72,11 +83,17 @@ private data class RawMessagePresentation(
 class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidViewModel(app) {
     private val repo = app.container.repository
     private val outbox = app.container.outbox
+    private val events = app.container.events
+
+    /** The reply being written, as the event stream reports it. */
+    private val streamingState = StreamingReplyState()
+    private val streaming = MutableStateFlow<StreamingReply?>(null)
 
     val session: StateFlow<SessionEntity?> =
         repo.observeSession(sessionId).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     val messages: StateFlow<List<Message>> =
-        repo.observeMessages(sessionId).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        combine(repo.observeMessages(sessionId), streaming) { m, reply -> m.withStreaming(reply) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /**
      * Keeps the local list-item key after a pending message arrives from the
@@ -149,15 +166,26 @@ class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidV
     suspend fun pollWhileVisible() {
         Notifications.cancel(getApplication(), sessionId)
         try {
-            while (true) {
-                refresh()
-                // Checked after every refresh: a turn can finish while this
-                // screen is open, and the conversation on screen is the one
-                // the user is reading, so it must not come back unread.
-                markSeen()
-                delay(POLL_MS)
+            coroutineScope {
+                launch {
+                    events.streaming(sessionId).collect { e ->
+                        streaming.value = streamingState.onEvent(e, System.currentTimeMillis())
+                    }
+                }
+                // Fetched at once when the gateway reports a change of this
+                // session, and on a poll that slows down while it can.
+                events.pollWithEvents(POLL_MS, CONNECTED_POLL_MS, { it.affectsSession(sessionId) }) {
+                    refresh()
+                    // Checked after every refresh: a turn can finish while this
+                    // screen is open, and the conversation on screen is the one
+                    // the user is reading, so it must not come back unread.
+                    markSeen()
+                }
             }
         } finally {
+            // Streamed text is not replayed: what was missed meanwhile comes
+            // from the next fetch.
+            streaming.value = streamingState.clear()
             Notifications.cancel(getApplication(), sessionId)
         }
     }
@@ -170,6 +198,8 @@ class SessionDetailViewModel(app: Application, val sessionId: String) : AndroidV
                     // The first fetch after opening replaces the cache entirely.
                     repo.refreshMessages(sessionId, full = !fullSyncDone)
                     fullSyncDone = true
+                    // A closed streamed reply is in the conversation now.
+                    streaming.value = streamingState.onFetched()
                 }
             } finally {
                 _loading.value = false

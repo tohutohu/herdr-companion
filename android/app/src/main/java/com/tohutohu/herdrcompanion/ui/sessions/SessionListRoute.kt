@@ -20,10 +20,14 @@ import com.tohutohu.herdrcompanion.ui.toUiModel
 import com.tohutohu.herdrcompanion.ui.toUiState
 import com.tohutohu.herdrcompanion.ui.usage.UsageCardRoute
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.delay
+import com.tohutohu.herdrcompanion.data.api.affectsSessionList
+import com.tohutohu.herdrcompanion.data.api.pollWithEvents
 import kotlinx.coroutines.launch
 
 private const val LIST_POLL_MS = 5_000L
+
+/** The list poll while the gateway's event stream reports changes. */
+private const val CONNECTED_LIST_POLL_MS = 60_000L
 
 /** Android route: owns the repository, lifecycle polling and session actions. */
 @Composable
@@ -65,13 +69,12 @@ fun SessionListRoute(
     val actions = rememberSessionActions(snackbar = snackbar, onChanged = { refresh() })
     actions.Dialogs()
 
-    // Poll only while visible; always refresh when returning to foreground.
+    // Refresh only while visible: at once when the gateway reports a change,
+    // and on a poll that slows down while its event stream is connected.
+    // Always refresh when returning to foreground.
     LaunchedEffect(lifecycle) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            while (true) {
-                refresh()
-                delay(LIST_POLL_MS)
-            }
+            container.events.pollWithEvents(LIST_POLL_MS, CONNECTED_LIST_POLL_MS, { it.affectsSessionList() }) { refresh() }
         }
     }
 

@@ -138,6 +138,13 @@ class GatewayApi(
     suspend fun resume(id: String, trust: Boolean): StartSessionResponse =
         slowPost(url("v1", "sessions", id, "resume"), json.encodeToString(ResumeRequest(trust)))
 
+    /** GET /v1/events, resuming after [lastEventId] when given ([GatewayEventStream]). */
+    internal fun eventsRequest(lastEventId: String?): Request =
+        request(url("v1", "events")).get()
+            .header("Accept", "text/event-stream")
+            .apply { if (lastEventId != null) header("Last-Event-ID", lastEventId) }
+            .build()
+
     suspend fun messages(id: String, after: String? = null): MessagesResponse =
         get(url("v1", "sessions", id, "messages", query = mapOf("after" to after)))
 

@@ -7,7 +7,15 @@ import androidx.compose.runtime.setValue
 import com.tohutohu.herdrcompanion.data.Message
 import com.tohutohu.herdrcompanion.data.SendState
 import com.tohutohu.herdrcompanion.data.api.SessionDto
+import com.tohutohu.herdrcompanion.data.StreamingReplyState
 import com.tohutohu.herdrcompanion.data.api.GatewayApi
+import com.tohutohu.herdrcompanion.data.api.GatewayEventStream
+import com.tohutohu.herdrcompanion.data.api.affectsSession
+import com.tohutohu.herdrcompanion.data.api.affectsSessionList
+import com.tohutohu.herdrcompanion.data.api.onEvent
+import com.tohutohu.herdrcompanion.data.api.pollWithEvents
+import com.tohutohu.herdrcompanion.data.api.streaming
+import com.tohutohu.herdrcompanion.data.withStreaming
 import com.tohutohu.herdrcompanion.data.api.GatewayNotesBackend
 import com.tohutohu.herdrcompanion.data.api.GatewayException
 import com.tohutohu.herdrcompanion.data.api.InteractionResponseDto
@@ -39,10 +47,12 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -55,10 +65,15 @@ import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicReference
 import java.util.logging.Logger
 
 private const val LIST_POLL_MS = 5_000L
 private const val DETAIL_POLL_MS = 3_000L
+
+/** The polls while the gateway's event stream reports changes. */
+private const val CONNECTED_LIST_POLL_MS = 60_000L
+private const val CONNECTED_DETAIL_POLL_MS = 30_000L
 private const val RELOAD_NOTICE_MS = 4_000L
 
 /** How long an accepted answer keeps its card disabled while the transcript catches up. */
@@ -87,6 +102,8 @@ class DesktopAppState(
 ) {
     private val logger = Logger.getLogger("com.tohutohu.herdrcompanion.desktop")
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    /** The gateway's change hints, open while the window lists or shows sessions. */
+    private val events = GatewayEventStream(api, http, scope)
     private val listMutex = Mutex()
     private val selection = DesktopSelectionState()
     private var listJob: Job? = null
@@ -220,11 +237,11 @@ class DesktopAppState(
         ?.previewModel
 
     init {
-        refreshSessions()
+        // At once when the gateway reports a change, and on a poll that slows
+        // down while its event stream is connected.
         listJob = scope.launch {
-            while (isActive) {
-                delay(LIST_POLL_MS)
-                refreshSessions()
+            events.pollWithEvents(LIST_POLL_MS, CONNECTED_LIST_POLL_MS, { it.affectsSessionList() }) {
+                if (!closed) refreshSessionsNow(false)
             }
         }
     }
@@ -651,13 +668,27 @@ class DesktopAppState(
         archivedPager.sessions.orEmpty().mapTo(HashSet()) { it.id } +
             detailsBySession.values.mapNotNull { detail -> detail.session?.takeIf { it.archived }?.id }
 
-    private suspend fun detailLoop(id: String) {
+    private suspend fun detailLoop(id: String) = coroutineScope {
         var first = true
         var messages = emptyList<Message>()
         var anchor: String? = null
         // The loop owns the merged messages, so a reload runs in it too.
-        val reloads = reloadSignals[id] ?: return
+        val reloads = reloadSignals[id] ?: return@coroutineScope
         var reload = false
+        // Changes the gateway reports for this session wake the loop at once.
+        val wakes = Channel<Unit>(Channel.CONFLATED)
+        val watch = launch { events.events.collect { if (it.affectsSession(id)) wakes.trySend(Unit) } }
+        // The reply being written is shown on top of the fetched messages.
+        val streaming = StreamingReplyState()
+        val shownMessages = { base: List<Message> -> synchronized(streaming) { base.withStreaming(streaming.current) } }
+        // The fetched messages, for the stream's collector on another thread.
+        val fetched = AtomicReference(emptyList<Message>())
+        val stream = launch {
+            events.streaming(id).collect { e ->
+                synchronized(streaming) { streaming.onEvent(e, System.currentTimeMillis()) }
+                if (isShown(id)) updateDetail(id) { it.copy(messages = shownMessages(fetched.get())) }
+            }
+        }
         while (currentCoroutineContext().isActive && !closed && isShown(id)) {
             try {
                 // Keep the explicit GET /sessions/{id} call on the first load;
@@ -681,11 +712,14 @@ class DesktopAppState(
                 } else {
                     messages = mergeMessages(messages, response.messages.map(MessageDto::toMessage), since)
                     anchor = messageAnchor(messages)
+                    fetched.set(messages)
                     settlePending(id, messages)
+                    // A closed streamed reply is in the conversation now.
+                    synchronized(streaming) { streaming.onFetched() }
                     updateDetail(id, SessionDetailUiState(
                         sessionId = id,
                         session = response.session.toUiModel(),
-                        messages = messages,
+                        messages = shownMessages(messages),
                         pending = pendingBySession[id].orEmpty(),
                         error = null,
                         answering = detailsBySession[id]?.answering == true,
@@ -715,7 +749,7 @@ class DesktopAppState(
                     val current = detailsBySession[id] ?: loadingDetail(id)
                     updateDetail(id, (current).copy(
                         sessionId = id,
-                        messages = messages,
+                        messages = shownMessages(messages),
                         pending = pendingBySession[id].orEmpty(),
                         attachments = composerAttachmentStates(id),
                         error = if (reload) "Reload failed: ${mapped.message}" else mapped.message,
@@ -726,8 +760,16 @@ class DesktopAppState(
                 }
                 logger.warning("session detail failed: ${mapped.kind}")
             }
-            reload = withTimeoutOrNull(DETAIL_POLL_MS) { reloads.receive() } != null
+            val wait = if (events.connected.value) CONNECTED_DETAIL_POLL_MS else DETAIL_POLL_MS
+            reload = withTimeoutOrNull(wait) {
+                select {
+                    reloads.onReceive { true }
+                    wakes.onReceive { false }
+                }
+            } == true
         }
+        watch.cancel()
+        stream.cancel()
     }
 
     /**

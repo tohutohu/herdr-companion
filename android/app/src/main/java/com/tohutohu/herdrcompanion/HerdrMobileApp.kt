@@ -28,6 +28,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.tasks.await
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import com.tohutohu.herdrcompanion.data.api.GatewayApi
+import com.tohutohu.herdrcompanion.data.api.GatewayEventStream
 import com.tohutohu.herdrcompanion.data.api.GatewayNotesBackend
 import com.tohutohu.herdrcompanion.data.api.ResidentGatewayBackend
 import com.tohutohu.herdrcompanion.ui.detail.SessionNotes
@@ -81,6 +82,8 @@ class AppContainer(private val app: Application) {
         .build()
 
     val api = GatewayApi(baseHttp) { settings.current }
+    /** The gateway's change hints, open while a screen listens in the foreground. */
+    val events = GatewayEventStream(api, baseHttp, scope)
     val favoriteDirectories = FavoriteDirectoriesSync(api, directoryShortcuts.favoritesCache)
     /** btw conversations, kept while the app runs. */
     val sideQuestions = SideQuestions(scope) { id, question, history -> api.sideQuestion(id, question, history) }
