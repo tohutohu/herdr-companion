@@ -98,7 +98,7 @@ func (p *Provider) streamEvent(method string, params json.RawMessage) {
 		}
 		report = &providers.StreamReport{NativeID: ev.ThreadID, MessageID: dt.streamID, Text: dt.streamText}
 	case dt.streamID != "" && ((method == "item/completed" && ev.Item.ID == dt.streamID) || method == "turn/completed" || method == "thread/closed"):
-		report = &providers.StreamReport{NativeID: ev.ThreadID, MessageID: dt.streamID, Done: true}
+		report = &providers.StreamReport{NativeID: ev.ThreadID, MessageID: dt.streamID, Text: dt.streamText, Done: true}
 		dt.streamID, dt.streamText = "", ""
 	}
 	stream := p.stream

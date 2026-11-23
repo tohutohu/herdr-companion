@@ -694,7 +694,7 @@ data: {"sessionId":"claude:…","messageId":"msg_…","text":"ここまでの全
 | `session` | `{sessionId, status?, removed?}` | Gateway が動かすセッションの状態・要約・会話が変わった。そのセッションを開いていれば `GET …/messages?after=` で取り直す。一覧も取り直す |
 | `sessions` | `{}` | API 経由の変更（アーカイブ、起動、メモ、既読など）で一覧が変わったかもしれない |
 | `resident` | `{}` | 常駐タスクか、その Run が変わった |
-| `streaming` | `{sessionId, messageId, text?, done?}` | エージェントが書いている返答の、ここまでの**全文**（差分ではない）。`done: true` で閉じた（会話に入った、または次の取得で入る）。`id` は付かず、送り直さない |
+| `streaming` | `{sessionId, messageId, text?, done?}` | エージェントが書いている返答の、ここまでの**全文**（差分ではない）。`done: true` で閉じた（会話に入った、または次の取得で入る）。そのときの `text` は最終の全文（間引きでまだ送っていない末尾を含む。思考ブロックのように本文がなければ空）。`id` は付かず、送り直さない |
 
 - `id` は `<epoch>-<連番>`。再接続では最後に受け取った `id` を `Last-Event-ID` ヘッダー（または `?lastEventId=`）で送ると、
   その後の分が `ready` の直後に届く。`epoch` は Gateway の起動ごとに変わり、直近 512 件だけをメモリに持つので、

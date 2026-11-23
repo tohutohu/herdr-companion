@@ -266,9 +266,9 @@ func Testエージェントのメッセージを書きかけの全文で知ら�
 	want := []providers.StreamReport{
 		{NativeID: id, MessageID: "i1", Text: "Hel"},
 		{NativeID: id, MessageID: "i1", Text: "Hello"},
-		{NativeID: id, MessageID: "i1", Done: true},
+		{NativeID: id, MessageID: "i1", Text: "Hello", Done: true},
 		{NativeID: id, MessageID: "i2", Text: "x"},
-		{NativeID: id, MessageID: "i2", Done: true},
+		{NativeID: id, MessageID: "i2", Text: "x", Done: true},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got  %+v\nwant %+v", got, want)

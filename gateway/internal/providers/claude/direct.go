@@ -539,7 +539,7 @@ func (p *Provider) sidecarEvent(ev sidecarEvent) {
 	// closePartial reports the reply being streamed as closed.
 	closePartial := func() {
 		if s.partialID != "" && !s.partialClosed {
-			report = &providers.StreamReport{NativeID: id, MessageID: s.partialID, Done: true}
+			report = &providers.StreamReport{NativeID: id, MessageID: s.partialID, Text: s.partialText, Done: true}
 			s.partialClosed = true
 		}
 	}

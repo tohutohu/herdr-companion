@@ -583,9 +583,9 @@ func Test書きかけの返答を全文で知らせ閉じたら完了を知ら�
 	want := []providers.StreamReport{
 		{NativeID: id, MessageID: "msg_1", Text: "こん"},
 		{NativeID: id, MessageID: "msg_1", Text: "こんにちは"},
-		{NativeID: id, MessageID: "msg_1", Done: true},
+		{NativeID: id, MessageID: "msg_1", Text: "こんにちは", Done: true},
 		{NativeID: id, MessageID: "msg_2", Text: "次"},
-		{NativeID: id, MessageID: "msg_2", Done: true},
+		{NativeID: id, MessageID: "msg_2", Text: "次", Done: true},
 	}
 	mu.Lock()
 	defer mu.Unlock()

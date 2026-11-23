@@ -45,7 +45,8 @@ type SessionChange struct {
 // Streaming is the data of a TypeStreaming event. Text is the whole reply so
 // far, not a delta, so a client that missed one event loses nothing. Done
 // means the reply is closed and the conversation has it (or will on the next
-// fetch); the client should drop its streamed copy once it has fetched.
+// fetch); Text is then the final text, which the throttle may not have sent
+// yet. The client should drop its streamed copy once it has fetched.
 type Streaming struct {
 	SessionID string `json:"sessionId"`
 	MessageID string `json:"messageId"`
