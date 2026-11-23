@@ -6,9 +6,15 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 import java.time.Instant
+import java.time.ZoneId
 import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 
 class UsageFormatTest {
+    private fun inZone(zone: ZoneId): (Long) -> String = { millis ->
+        DateTimeFormatter.ofPattern("M/d HH:mm").format(Instant.ofEpochMilli(millis).atZone(zone))
+    }
+
     private fun window(
         label: String,
         used: Int,
@@ -64,7 +70,7 @@ class UsageFormatTest {
 
         assertEquals(
             "Claude 23% (in 2h 15m) · Codex 53% (9/24 04:00)",
-            usageHeadlineWithReset(providers, now, ZoneOffset.UTC),
+            usageHeadlineWithReset(providers, now, inZone(ZoneOffset.UTC)),
         )
     }
 
@@ -97,7 +103,7 @@ class UsageFormatTest {
         assertNull(idealUsedPercent(valid.copy(resetsAt = "2026-09-18T00:00:00Z"), now))
         assertNull(idealUsedPercent(valid.copy(resetsAt = "2026-09-17T23:59:59Z"), now))
         assertEquals("Claude 23% (in 2h 30m)", usageHeadlineWithReset(
-            listOf(claude.copy(windows = listOf(valid.copy(windowMinutes = 0)))), now, ZoneOffset.UTC))
+            listOf(claude.copy(windows = listOf(valid.copy(windowMinutes = 0)))), now, inZone(ZoneOffset.UTC)))
     }
 
     @Test
@@ -120,7 +126,7 @@ class UsageFormatTest {
             windowMinutes = 10080,
         )
 
-        assertEquals("9/24 13:00", resetText(window, 0, ZoneOffset.ofHours(9)))
+        assertEquals("9/24 13:00", resetText(window, 0, inZone(ZoneOffset.ofHours(9))))
     }
 
     @Test

@@ -531,6 +531,7 @@ private fun FrameWindowScope.DesktopShell(
                                 )
                             },
                             onAction = { action -> handleListAction(state, action, openSettings = { settingsOpen = true }) },
+                            topContent = { if (!state.showingArchived) DesktopUsageCard(api) },
                             onLoadMore = state::loadMoreArchived,
                         )
                     }

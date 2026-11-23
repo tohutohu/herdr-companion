@@ -86,6 +86,7 @@ object DesktopPreferences {
     private const val DIRECTORY_RECENTS_KEY = "directoryRecents"
     private const val AGENT_PRESETS_KEY = "agentPresets"
     private const val LAYOUT_KEY = "sessionLayout"
+    private const val USAGE_EXPANDED_KEY = "usageExpanded"
 
     private val store: Preferences
         get() = Preferences.userRoot().node(NODE)
@@ -139,6 +140,12 @@ object DesktopPreferences {
 
     fun saveSidebarWidth(width: Float) {
         store.putFloat(SIDEBAR_KEY, width.coerceIn(MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH))
+    }
+
+    fun usageExpanded(): Boolean = store.getBoolean(USAGE_EXPANDED_KEY, false)
+
+    fun saveUsageExpanded(expanded: Boolean) {
+        store.putBoolean(USAGE_EXPANDED_KEY, expanded)
     }
 
     /**

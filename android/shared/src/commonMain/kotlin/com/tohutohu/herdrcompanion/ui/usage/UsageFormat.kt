@@ -2,15 +2,17 @@ package com.tohutohu.herdrcompanion.ui.usage
 
 import com.tohutohu.herdrcompanion.data.api.UsageProviderDto
 import com.tohutohu.herdrcompanion.data.api.UsageWindowDto
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 import kotlin.math.roundToInt
+import kotlin.time.Instant
 
 private const val MILLIS_PER_MINUTE = 60_000L
 private const val WEEKLY_WINDOW_MINUTES = 7 * 24 * 60
-private val RESET_DATE_TIME_FORMAT = DateTimeFormatter.ofPattern("M/d HH:mm", Locale.ROOT)
+
+/** Formats epoch millis as "M/d HH:mm" in the device's time zone. */
+internal expect fun localMonthDayTime(epochMillis: Long): String
+
+private fun parseMillis(iso: String?): Long? =
+    iso?.let { runCatching { Instant.parse(it).toEpochMilliseconds() }.getOrNull() }
 
 /** The window closest to its limit; the collapsed card shows only this one. */
 fun tightestWindow(provider: UsageProviderDto): UsageWindowDto? =
@@ -20,19 +22,18 @@ fun tightestWindow(provider: UsageProviderDto): UsageWindowDto? =
 fun usageHeadlineWithReset(
     providers: List<UsageProviderDto>,
     nowMillis: Long,
-    zoneId: ZoneId = ZoneId.systemDefault(),
+    formatDateTime: (Long) -> String = ::localMonthDayTime,
 ): String =
     providers.mapNotNull { p ->
         val w = tightestWindow(p) ?: return@mapNotNull null
-        val reset = resetText(w, nowMillis, zoneId)
+        val reset = resetText(w, nowMillis, formatDateTime)
         "${p.displayName} ${w.usedPercent}%" + (reset?.let { " ($it)" } ?: "")
     }.joinToString(" · ")
 
 /** Even consumption over the whole window, reaching 100% at its reset. */
 fun idealUsedPercent(window: UsageWindowDto, nowMillis: Long): Int? {
     if (window.windowMinutes <= 0) return null
-    val resetMillis = window.resetsAt?.let { runCatching { Instant.parse(it).toEpochMilli() }.getOrNull() }
-        ?: return null
+    val resetMillis = parseMillis(window.resetsAt) ?: return null
     // An expired cached reading cannot describe the new window's pace.
     if (resetMillis <= nowMillis) return null
     val durationMillis = window.windowMinutes.toLong() * MILLIS_PER_MINUTE
@@ -45,20 +46,18 @@ fun windowTitle(window: UsageWindowDto): String =
     if (window.scope.isNullOrBlank()) window.label else "${window.label} · ${window.scope}"
 
 /** Uses an exact local date/time for weekly windows and a countdown otherwise. */
-fun resetText(window: UsageWindowDto, nowMillis: Long, zoneId: ZoneId = ZoneId.systemDefault()): String? {
+fun resetText(
+    window: UsageWindowDto,
+    nowMillis: Long,
+    formatDateTime: (Long) -> String = ::localMonthDayTime,
+): String? {
     val weekly = window.windowMinutes >= WEEKLY_WINDOW_MINUTES || window.label == "7d"
-    return if (weekly) resetDateTime(window.resetsAt, zoneId) else resetCountdown(window.resetsAt, nowMillis)
-}
-
-private fun resetDateTime(resetsAt: String?, zoneId: ZoneId): String? {
-    val reset = resetsAt?.let { runCatching { Instant.parse(it) }.getOrNull() } ?: return null
-    return RESET_DATE_TIME_FORMAT.format(reset.atZone(zoneId))
+    return if (weekly) parseMillis(window.resetsAt)?.let(formatDateTime) else resetCountdown(window.resetsAt, nowMillis)
 }
 
 /** Formats the time left until a rate-limit window resets, e.g. "in 2h 15m". */
 fun resetCountdown(resetsAt: String?, nowMillis: Long): String? {
-    val resetMillis = resetsAt?.let { runCatching { Instant.parse(it).toEpochMilli() }.getOrNull() }
-        ?: return null
+    val resetMillis = parseMillis(resetsAt) ?: return null
     val millisLeft = resetMillis - nowMillis
     if (millisLeft <= 0) return "now"
 
