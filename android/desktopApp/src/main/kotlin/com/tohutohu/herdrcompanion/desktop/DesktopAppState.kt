@@ -16,6 +16,7 @@ import com.tohutohu.herdrcompanion.data.api.onEvent
 import com.tohutohu.herdrcompanion.data.api.pollWithEvents
 import com.tohutohu.herdrcompanion.data.api.streaming
 import com.tohutohu.herdrcompanion.data.withStreaming
+import com.tohutohu.herdrcompanion.ui.projects.projectWantsNotification
 import com.tohutohu.herdrcompanion.data.api.GatewayNotesBackend
 import com.tohutohu.herdrcompanion.data.api.GatewayException
 import com.tohutohu.herdrcompanion.data.api.InteractionResponseDto
@@ -374,7 +375,8 @@ class DesktopAppState(
                 }
                 val rows = repository.sessions()
                 if (wasLoaded) {
-                    rows.forEach { row ->
+                    // The session's project may turn its notifications down.
+                    rows.filter { projectWantsNotification(it.projectNotify, it.status) }.forEach { row ->
                         notificationForStatusTransition(
                             sessionId = row.id,
                             project = row.title ?: row.project,

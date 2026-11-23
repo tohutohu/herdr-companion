@@ -85,6 +85,8 @@ class AppContainer(private val app: Application) {
     /** The gateway's change hints, open while a screen listens in the foreground. */
     val events = GatewayEventStream(api, baseHttp, scope)
     val favoriteDirectories = FavoriteDirectoriesSync(api, directoryShortcuts.favoritesCache)
+    /** Projects: the favorite folders with their notification levels. */
+    val projects = com.tohutohu.herdrcompanion.data.ProjectsStore(api)
     /** btw conversations, kept while the app runs. */
     val sideQuestions = SideQuestions(scope) { id, question, history -> api.sideQuestion(id, question, history) }
     /** Notes on sessions (hc note), as last read from the gateway. */

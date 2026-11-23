@@ -263,6 +263,8 @@ fun SessionDto.toEntity(now: Long, listed: Boolean) = SessionEntity(
     notesJson = notes.takeIf { it.isNotEmpty() }?.let { list ->
         GatewayApi.json.encodeToString(noteTextsSerializer, list.map { it.text })
     },
+    projectPath = projectPath,
+    projectNotify = projectNotify,
 )
 
 internal val backgroundTasksSerializer = ListSerializer(BackgroundTaskDto.serializer())

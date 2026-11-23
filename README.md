@@ -20,6 +20,7 @@ The main benefit is that you can follow a session without keeping the app open o
 - Start new sessions from the app and choose the working directory, model, reasoning effort and mode
 - Color-code sessions: long-press a list entry, then use the palette button (Desktop also supports right-click → Session color). Apply or clear colors for multiple sessions; labels persist locally on each device, including archived sessions.
 - Change a running session's model and reasoning effort without losing its history
+- **Projects**: favorite folders are projects. The Projects tab lists each one with its running, waiting and unread sessions and resident tasks, opens a project to see both together and start either there, and sets its notifications to all, needs attention only (questions, approvals, failures) or off. A project whose agents are busy on their own can stay listed without interrupting you. See [docs/api.md](docs/api.md#プロジェクト)
 - **Resident tasks (常駐)**: a top-level tab for standing instructions the Gateway runs on a schedule (daily, weekly, cron, once, in an IANA timezone) or on request, remembering state between runs and notifying only when something needs you; follow-ups, questions and run history stay with the task. Runs use their own Claude Code / Codex processes and never show up among sessions. See [docs/resident.md](docs/resident.md)
 
 The notification-to-screen flow looks like this:

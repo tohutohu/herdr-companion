@@ -44,6 +44,8 @@ fun SessionEntity.toUiModel() = SessionUiModel(
     notes = notesJson
         ?.let { runCatching { GatewayApi.json.decodeFromString(noteTextsSerializer, it) }.getOrNull() }
         .orEmpty(),
+    projectPath = projectPath,
+    projectNotify = projectNotify,
 )
 
 /** Converts Android-owned launch tracking into the common list state. */

@@ -49,10 +49,10 @@ fun ResidentTaskEntry(
 
 /** Android route of the create / edit form. */
 @Composable
-fun ResidentFormEntry(taskId: String?, onSaved: (String) -> Unit, onCancel: () -> Unit) {
+fun ResidentFormEntry(taskId: String?, onSaved: (String) -> Unit, onCancel: () -> Unit, initialCwd: String? = null) {
     val container = LocalContext.current.container
     val backend = remember(container.settings.current.connectionId) { container.residentBackend() }
     val home by container.residentHome.collectAsState()
     val tz = (home.support as? ResidentSupport.Supported)?.defaultTimezone ?: "Asia/Tokyo"
-    ResidentTaskForm(backend = backend, existingId = taskId, defaultTimezone = tz, onSaved = onSaved, onCancel = onCancel)
+    ResidentTaskForm(backend = backend, existingId = taskId, defaultTimezone = tz, onSaved = onSaved, onCancel = onCancel, initialCwd = initialCwd)
 }

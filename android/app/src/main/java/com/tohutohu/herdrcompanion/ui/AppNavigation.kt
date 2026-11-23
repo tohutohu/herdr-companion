@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -13,7 +14,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -42,16 +43,19 @@ import com.tohutohu.herdrcompanion.ui.resident.ResidentFormEntry
 import com.tohutohu.herdrcompanion.ui.resident.ResidentHomeEntry
 import com.tohutohu.herdrcompanion.ui.resident.ResidentTaskEntry
 import com.tohutohu.herdrcompanion.ui.newsession.NewSessionRoute
+import com.tohutohu.herdrcompanion.ui.projects.ProjectEntry
+import com.tohutohu.herdrcompanion.ui.projects.ProjectsHomeEntry
 import com.tohutohu.herdrcompanion.ui.sessions.ArchivedSessionsScreen
 import com.tohutohu.herdrcompanion.ui.sessions.SessionListRoute
 import com.tohutohu.herdrcompanion.ui.settings.SettingsScreen
 
 /**
  * The app's screens, shown by Navigation 3 from back stacks that survive
- * configuration changes and process death. Sessions and 常駐 (resident
- * tasks) are top-level tabs, each with its own back stack, so switching
- * keeps where each one was. The user leaves the app through Sessions
- * ("exit through home"): back from the 常駐 home returns to it.
+ * configuration changes and process death. Sessions, 常駐 (resident tasks)
+ * and Projects are top-level tabs, each with its own back stack, so
+ * switching keeps where each one was. A session or a task opened from a
+ * project stays in the Projects tab. The user leaves the app through
+ * Sessions ("exit through home"): back from another tab's home returns to it.
  *
  * [openSession] is a session to bring up (from a notification tap); it
  * replaces any session detail already on the stack, so taps do not pile
@@ -72,18 +76,33 @@ fun AppNavigation(
     val residentStack = rememberSerializable(serializer = NavBackStackSerializer(Route.serializer())) {
         NavBackStack<Route>(ResidentHomeRoute)
     }
-    var residentTab by rememberSaveable { mutableStateOf(false) }
+    val projectStack = rememberSerializable(serializer = NavBackStackSerializer(Route.serializer())) {
+        NavBackStack<Route>(ProjectsRoute)
+    }
+    var tab by rememberSaveable { mutableIntStateOf(TAB_SESSIONS) }
     val nav = remember(backStack) { Navigator(backStack) }
     val resident = remember(residentStack) { Navigator(residentStack) }
+    val projects = remember(projectStack) { Navigator(projectStack) }
+    // Screens that can be in more than one tab act on the tab shown.
+    fun current(): Navigator = when (tab) {
+        TAB_RESIDENT -> resident
+        TAB_PROJECTS -> projects
+        else -> nav
+    }
+    fun currentStack(): NavBackStack<Route> = when (tab) {
+        TAB_RESIDENT -> residentStack
+        TAB_PROJECTS -> projectStack
+        else -> backStack
+    }
     LaunchedEffect(openSession) {
         openSession ?: return@LaunchedEffect
-        residentTab = false
+        tab = TAB_SESSIONS
         nav.openFromNotification(DetailRoute(openSession, focusLatest = true))
         onSessionOpened()
     }
     LaunchedEffect(openResidentTask) {
         openResidentTask ?: return@LaunchedEffect
-        residentTab = true
+        tab = TAB_RESIDENT
         resident.openResidentFromNotification(ResidentTaskRoute(openResidentTask, fromNotification = true))
         onResidentTaskOpened()
     }
@@ -118,10 +137,12 @@ fun AppNavigation(
             entry<StartingRoute> { route ->
                 com.tohutohu.herdrcompanion.ui.newsession.StartingSessionRoute(
                     route.startId,
-                    onBack = { nav.back(orReplaceWith = SessionsRoute) },
+                    onBack = { current().back(orReplaceWith = SessionsRoute.takeIf { tab == TAB_SESSIONS }) },
                     onReady = { id ->
-                        val at = backStack.indexOf(route)
-                        if (at >= 0) backStack[at] = DetailRoute(id)
+                        for (stack in listOf(backStack, projectStack)) {
+                            val at = stack.indexOf(route)
+                            if (at >= 0) stack[at] = DetailRoute(id)
+                        }
                     },
                 )
             }
@@ -133,10 +154,10 @@ fun AppNavigation(
                 SessionDetailRoute(
                     sessionId = route.sessionId,
                     focusLatest = route.focusLatest,
-                    onOpenSession = { id -> lifecycle.ifResumed { nav.openLinkedSession(id) } },
-                    onBack = { lifecycle.ifResumed { nav.back(orReplaceWith = SessionsRoute) } },
-                    onOpenFile = { path, line -> lifecycle.ifResumed { nav.push(FileRoute(route.sessionId, path, line)) } },
-                    onOpenImage = { url -> lifecycle.ifResumed { nav.push(ImageRoute(url)) } },
+                    onOpenSession = { id -> lifecycle.ifResumed { current().openLinkedSession(id) } },
+                    onBack = { lifecycle.ifResumed { current().back(orReplaceWith = SessionsRoute.takeIf { tab == TAB_SESSIONS }) } },
+                    onOpenFile = { path, line -> lifecycle.ifResumed { current().push(FileRoute(route.sessionId, path, line)) } },
+                    onOpenImage = { url -> lifecycle.ifResumed { current().push(ImageRoute(url)) } },
                 )
             }
             entry<LocalhostRoute> { route ->
@@ -144,8 +165,8 @@ fun AppNavigation(
                 LocalhostBrowserScreen(
                     url = route.url,
                     sessionId = route.sessionId,
-                    onBack = { lifecycle.ifResumed { nav.back() } },
-                    onOpenSession = { route.sessionId?.let { id -> lifecycle.ifResumed { nav.openLinkedSession(id) } } },
+                    onBack = { lifecycle.ifResumed { current().back() } },
+                    onOpenSession = { route.sessionId?.let { id -> lifecycle.ifResumed { current().openLinkedSession(id) } } },
                 )
             }
             entry<FileRoute> { route ->
@@ -154,13 +175,13 @@ fun AppNavigation(
                     route.sessionId,
                     route.path,
                     route.line,
-                    onBack = { lifecycle.ifResumed { nav.back() } },
-                    onOpenSession = { lifecycle.ifResumed { nav.openLinkedSession(route.sessionId) } },
+                    onBack = { lifecycle.ifResumed { current().back() } },
+                    onOpenSession = { lifecycle.ifResumed { current().openLinkedSession(route.sessionId) } },
                 )
             }
             entry<ImageRoute>(metadata = ScreenMotion.zoom) { route ->
                 val lifecycle = LocalLifecycleOwner.current.lifecycle
-                ImageViewerRoute(route.url, onBack = { lifecycle.ifResumed { nav.back() } })
+                ImageViewerRoute(route.url, onBack = { lifecycle.ifResumed { current().back() } })
             }
             entry<ResidentHomeRoute> {
                 val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -174,14 +195,18 @@ fun AppNavigation(
                 ResidentTaskEntry(
                     taskId = route.taskId,
                     fromNotification = route.fromNotification,
-                    onBack = { lifecycle.ifResumed { resident.back() } },
-                    onEdit = { id -> lifecycle.ifResumed { resident.push(ResidentFormRoute(id)) } },
-                    onDeleted = { resident.replaceAbove(ResidentHomeRoute, null) },
-                    // A run continued as a session opens in the Sessions tab;
-                    // the 常駐 tab keeps the task.
+                    onBack = { lifecycle.ifResumed { current().back() } },
+                    onEdit = { id -> lifecycle.ifResumed { current().push(ResidentFormRoute(id)) } },
+                    onDeleted = { if (tab == TAB_RESIDENT) resident.replaceAbove(ResidentHomeRoute, null) else current().back() },
+                    // A run continued as a session opens in the Sessions tab
+                    // (the 常駐 tab keeps the task), or on top of it in a project.
                     onOpenSession = { id ->
-                        residentTab = false
-                        nav.openFromNotification(DetailRoute(id, focusLatest = true))
+                        if (tab == TAB_PROJECTS) {
+                            projects.push(DetailRoute(id, focusLatest = true))
+                        } else {
+                            tab = TAB_SESSIONS
+                            nav.openFromNotification(DetailRoute(id, focusLatest = true))
+                        }
                     },
                 )
             }
@@ -189,10 +214,44 @@ fun AppNavigation(
                 val lifecycle = LocalLifecycleOwner.current.lifecycle
                 ResidentFormEntry(
                     taskId = route.taskId,
+                    initialCwd = route.cwd,
                     onSaved = { id ->
-                        if (route.taskId == null) resident.replaceAbove(ResidentHomeRoute, ResidentTaskRoute(id)) else resident.back()
+                        when {
+                            route.taskId != null -> current().back()
+                            tab == TAB_RESIDENT -> resident.replaceAbove(ResidentHomeRoute, ResidentTaskRoute(id))
+                            else -> {
+                                current().back()
+                                current().push(ResidentTaskRoute(id))
+                            }
+                        }
                     },
-                    onCancel = { lifecycle.ifResumed { resident.back() } },
+                    onCancel = { lifecycle.ifResumed { current().back() } },
+                )
+            }
+            entry<ProjectsRoute> {
+                val lifecycle = LocalLifecycleOwner.current.lifecycle
+                ProjectsHomeEntry(onOpen = { key -> lifecycle.ifResumed { projects.push(ProjectRoute(key)) } })
+            }
+            entry<ProjectRoute> { route ->
+                val lifecycle = LocalLifecycleOwner.current.lifecycle
+                ProjectEntry(
+                    key = route.key,
+                    onBack = { lifecycle.ifResumed { projects.back() } },
+                    onOpenSession = { id -> lifecycle.ifResumed { projects.push(DetailRoute(id)) } },
+                    onOpenTask = { id -> lifecycle.ifResumed { projects.push(ResidentTaskRoute(id)) } },
+                    onNewSession = { cwd -> lifecycle.ifResumed { projects.push(ProjectNewSessionRoute(cwd)) } },
+                    onNewTask = { cwd -> lifecycle.ifResumed { projects.push(ResidentFormRoute(cwd = cwd)) } },
+                )
+            }
+            entry<ProjectNewSessionRoute> { route ->
+                val lifecycle = LocalLifecycleOwner.current.lifecycle
+                NewSessionRoute(
+                    onBack = { lifecycle.ifResumed { projects.back() } },
+                    onStarted = { id ->
+                        projects.back()
+                        projects.push(StartingRoute(id))
+                    },
+                    initialCwd = route.cwd,
                 )
             }
         }
@@ -209,24 +268,35 @@ fun AppNavigation(
         entryDecorators = listOf(rememberSaveableStateHolderNavEntryDecorator(), rememberViewModelStoreNavEntryDecorator()),
         entryProvider = provider,
     )
-    val top = if (residentTab) residentStack.lastOrNull() else backStack.lastOrNull()
-    val showTabs = top == SessionsRoute || top == ResidentHomeRoute
+    val projectEntries = rememberDecoratedNavEntries(
+        backStack = projectStack,
+        entryDecorators = listOf(rememberSaveableStateHolderNavEntryDecorator(), rememberViewModelStoreNavEntryDecorator()),
+        entryProvider = provider,
+    )
+    val top = currentStack().lastOrNull()
+    val showTabs = top == SessionsRoute || top == ResidentHomeRoute || top == ProjectsRoute
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
             if (showTabs) {
                 NavigationBar {
                     NavigationBarItem(
-                        selected = !residentTab,
-                        onClick = { residentTab = false },
+                        selected = tab == TAB_SESSIONS,
+                        onClick = { tab = TAB_SESSIONS },
                         icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
                         label = { Text("Sessions") },
                     )
                     NavigationBarItem(
-                        selected = residentTab,
-                        onClick = { residentTab = true },
+                        selected = tab == TAB_RESIDENT,
+                        onClick = { tab = TAB_RESIDENT },
                         icon = { Icon(Icons.Default.Schedule, contentDescription = null) },
                         label = { Text("常駐") },
+                    )
+                    NavigationBarItem(
+                        selected = tab == TAB_PROJECTS,
+                        onClick = { tab = TAB_PROJECTS },
+                        icon = { Icon(Icons.Default.Folder, contentDescription = null) },
+                        label = { Text("Projects") },
                     )
                 }
             }
@@ -239,20 +309,24 @@ fun AppNavigation(
                 override fun openUri(uri: String) {
                     val local = localhostTarget(uri)
                     // Comments on the page go to the session the link was in.
-                    val session = backStack.lastOrNull { it is DetailRoute } as DetailRoute?
-                    if (local != null) nav.push(LocalhostRoute(local, session?.sessionId)) else defaultUris.openUri(uri)
+                    val session = currentStack().lastOrNull { it is DetailRoute } as DetailRoute?
+                    if (local != null) current().push(LocalhostRoute(local, session?.sessionId)) else defaultUris.openUri(uri)
                 }
             }
         }
         CompositionLocalProvider(LocalUriHandler provides uris) {
             NavDisplay(
-                entries = if (residentTab) sessionEntries + residentEntries else sessionEntries,
+                entries = when (tab) {
+                    TAB_RESIDENT -> sessionEntries + residentEntries
+                    TAB_PROJECTS -> sessionEntries + projectEntries
+                    else -> sessionEntries
+                },
                 modifier = Modifier.padding(padding).consumeWindowInsets(padding),
                 onBack = {
                     when {
-                        !residentTab -> nav.back()
-                        residentStack.size > 1 -> resident.back()
-                        else -> residentTab = false
+                        tab == TAB_SESSIONS -> nav.back()
+                        currentStack().size > 1 -> current().back()
+                        else -> tab = TAB_SESSIONS
                     }
                 },
                 transitionSpec = motion.push,
@@ -262,6 +336,10 @@ fun AppNavigation(
         }
     }
 }
+
+private const val TAB_SESSIONS = 0
+private const val TAB_RESIDENT = 1
+private const val TAB_PROJECTS = 2
 
 /**
  * Runs [block] only while the screen is resumed. NavDisplay holds screens at

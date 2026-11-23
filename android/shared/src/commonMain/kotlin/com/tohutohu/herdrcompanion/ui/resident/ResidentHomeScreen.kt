@@ -1,5 +1,6 @@
 package com.tohutohu.herdrcompanion.ui.resident
 
+import com.tohutohu.herdrcompanion.ui.projects.ProjectNotifyMark
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -188,7 +189,7 @@ fun ResidentHomeScreen(
 }
 
 @Composable
-private fun ResidentTaskRow(task: ResidentTaskDto, backend: ResidentBackend, selected: Boolean, onClick: () -> Unit) {
+internal fun ResidentTaskRow(task: ResidentTaskDto, backend: ResidentBackend, selected: Boolean, onClick: () -> Unit) {
     val style = taskStateStyle(task.state)
     val needsYou = task.state == TaskState.WAITING_USER || task.state == TaskState.NEEDS_ATTENTION
     Surface(
@@ -210,6 +211,7 @@ private fun ResidentTaskRow(task: ResidentTaskDto, backend: ResidentBackend, sel
                     Spacer(Modifier.width(8.dp))
                 }
                 Text(style.label, color = style.color, style = MaterialTheme.typography.labelMedium)
+                ProjectNotifyMark(task.projectNotify, Modifier.padding(start = 6.dp))
             }
             val facts = buildList {
                 if (!task.enabled) add(task.pausedUntil?.let { "${backend.formatInstant(it)} まで一時停止" } ?: "一時停止中")

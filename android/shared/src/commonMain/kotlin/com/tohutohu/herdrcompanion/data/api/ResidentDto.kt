@@ -150,6 +150,10 @@ data class ResidentTaskDto(
     val unread: Int = 0,
     val runsToday: Int = 0,
     val attention: String? = null,
+    /** The project (favorite folder) the task belongs to; null for none. */
+    val projectPath: String? = null,
+    /** The project's notification level when not "all": "attention" or "off". */
+    val projectNotify: String? = null,
 )
 
 object TaskState {

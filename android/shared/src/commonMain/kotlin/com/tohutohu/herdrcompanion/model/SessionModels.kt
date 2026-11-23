@@ -37,6 +37,10 @@ data class SessionUiModel(
     val translation: Boolean? = null,
     /** The text of the notes left on the session, oldest first. */
     val notes: List<String> = emptyList(),
+    /** The project the session belongs to; null for none. */
+    val projectPath: String? = null,
+    /** The project's notification level when turned down: "attention" or "off". */
+    val projectNotify: String? = null,
 )
 
 data class BackgroundTaskUiModel(

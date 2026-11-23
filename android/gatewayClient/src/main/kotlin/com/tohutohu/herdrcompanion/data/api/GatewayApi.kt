@@ -402,6 +402,22 @@ class GatewayApi(
         return json.decodeFromString<MkdirResponse>(body).path
     }
 
+    /** The projects (favorite folders with their settings); null from a gateway without projects (404). */
+    suspend fun projects(): List<ProjectDto>? = try {
+        get<ProjectsResponse>(url("v1", "projects")).projects
+    } catch (error: GatewayException) {
+        if (error.code == 404) null else throw error
+    }
+
+    /** Changes a project's notification level or name; null fields stay. */
+    suspend fun updateProject(path: String, notify: String? = null, name: String? = null): ProjectDto = json.decodeFromString(
+        execute(
+            request(url("v1", "projects"))
+                .patch(json.encodeToString(ProjectUpdateRequest(path, name, notify)).toRequestBody(jsonType))
+                .build(),
+        ),
+    )
+
     /** The gateway's favorite folders; null from a gateway that keeps none (404). */
     suspend fun favoriteDirectories(): FavoriteDirectoriesDto? = try {
         get(favoritesUrl())

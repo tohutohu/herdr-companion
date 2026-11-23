@@ -45,6 +45,10 @@ data class SessionDto(
     val originalTitle: String? = null,
     /** Effective translation mode; null when an older gateway has not reported it. */
     val translation: Boolean? = null,
+    /** The project (favorite folder) the session belongs to; null for none. */
+    val projectPath: String? = null,
+    /** The project's notification level when not "all": "attention" or "off". */
+    val projectNotify: String? = null,
     /** The notes left on the session, oldest first; empty from a gateway without notes. */
     val notes: List<NoteDto> = emptyList(),
 ) {
@@ -446,3 +450,27 @@ data class CreateNoteRequest(val text: String, val expiresAt: String? = null)
 /** Changes only the text: an update without `expiresAt` keeps the expiry. */
 @Serializable
 data class UpdateNoteRequest(val text: String)
+
+/** A project: a favorite folder with its display name and notification level (docs/api.md#プロジェクト). */
+@Serializable
+data class ProjectDto(
+    val path: String,
+    val name: String = "",
+    /** [NotifyLevel.ALL], [NotifyLevel.ATTENTION] or [NotifyLevel.OFF]. */
+    val notify: String = NotifyLevel.ALL,
+)
+
+@Serializable
+data class ProjectsResponse(val projects: List<ProjectDto> = emptyList())
+
+@Serializable
+data class ProjectUpdateRequest(val path: String, val name: String? = null, val notify: String? = null)
+
+/** How much of a project's activity is pushed. */
+object NotifyLevel {
+    /** Everything, as without projects. */
+    const val ALL = "all"
+    /** Only what needs the user: questions, approvals and failures. */
+    const val ATTENTION = "attention"
+    const val OFF = "off"
+}

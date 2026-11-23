@@ -154,9 +154,11 @@ fun ResidentTaskForm(
     onSaved: (String) -> Unit,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
+    /** The folder a new task starts with (made from a project). */
+    initialCwd: String? = null,
 ) {
     var existing by remember { mutableStateOf<ResidentTaskDto?>(null) }
-    var draft by remember { mutableStateOf(ResidentDraft(timezone = defaultTimezone)) }
+    var draft by remember { mutableStateOf(ResidentDraft(timezone = defaultTimezone, cwd = initialCwd.orEmpty())) }
     var loadError by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(existingId) {
         if (existingId != null) {

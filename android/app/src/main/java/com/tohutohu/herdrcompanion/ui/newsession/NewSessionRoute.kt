@@ -41,6 +41,8 @@ import kotlinx.coroutines.withContext
 fun NewSessionRoute(
     onBack: () -> Unit,
     onStarted: (startId: String) -> Unit,
+    /** The folder to start in (from a project) instead of the last one used. */
+    initialCwd: String? = null,
 ) {
     val context = LocalContext.current
     val container = context.container
@@ -54,7 +56,7 @@ fun NewSessionRoute(
     val scope = rememberCoroutineScope()
 
     var provider by rememberSaveable { mutableStateOf("claude") }
-    var path by rememberSaveable { mutableStateOf("") }
+    var path by rememberSaveable { mutableStateOf(initialCwd.orEmpty()) }
     var listing by remember { mutableStateOf<DirListingDto?>(null) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }

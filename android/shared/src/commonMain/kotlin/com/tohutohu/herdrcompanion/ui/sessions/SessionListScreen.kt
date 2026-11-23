@@ -1,5 +1,6 @@
 package com.tohutohu.herdrcompanion.ui.sessions
 
+import com.tohutohu.herdrcompanion.ui.projects.ProjectNotifyMark
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -438,6 +439,7 @@ internal fun SessionRow(
                     maxLines = 1,
                     modifier = Modifier.padding(start = 8.dp),
                 )
+                ProjectNotifyMark(s.projectNotify, Modifier.padding(start = 6.dp))
             }
             Text(
                 s.project.ifBlank { s.cwd ?: s.id },

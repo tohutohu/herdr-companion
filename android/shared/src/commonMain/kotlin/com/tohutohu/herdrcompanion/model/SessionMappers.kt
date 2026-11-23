@@ -33,6 +33,8 @@ fun SessionDto.toUiModel(): SessionUiModel = SessionUiModel(
     error = error,
     background = background.map { it.toUiModel() },
     notes = notes.map { it.text },
+    projectPath = projectPath,
+    projectNotify = projectNotify,
 )
 
 fun BackgroundTaskDto.toUiModel() = BackgroundTaskUiModel(

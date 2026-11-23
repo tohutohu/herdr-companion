@@ -54,6 +54,18 @@ data class ResidentTaskRoute(
     val fromNotification: Boolean = false,
 ) : Route
 
-/** Creates a task (null) or edits one. */
+/** Creates a task (null, in [cwd] when given) or edits one. */
 @Serializable
-data class ResidentFormRoute(val taskId: String? = null) : Route
+data class ResidentFormRoute(val taskId: String? = null, val cwd: String? = null) : Route
+
+/** The Projects tab's home: the project list. */
+@Serializable
+data object ProjectsRoute : Route
+
+/** One project; [key] is its folder, or "" for what belongs to no project. */
+@Serializable
+data class ProjectRoute(val key: String) : Route
+
+/** A new session in [cwd], started from a project. */
+@Serializable
+data class ProjectNewSessionRoute(val cwd: String) : Route
