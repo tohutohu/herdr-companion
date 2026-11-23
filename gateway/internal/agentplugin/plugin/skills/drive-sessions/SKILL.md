@@ -1,33 +1,33 @@
 ---
 name: drive-sessions
-description: このセッションから、この Mac の別の Claude Code / Codex セッションを hc CLI で起動・指示・監視し、質問や承認に答えられる。「別のセッションで」「他のエージェントに任せて」「あのセッションどうなった」「回答待ちに答えて」「あのセッションにメモを残して」で使う。この会話の中で済むサブエージェントには使わない。定期実行は schedule-resident-tasks。
+description: From this session, start, instruct and watch other Claude Code, Codex or DeepSeek Harness sessions on this Mac with the hc CLI, and answer their questions and approvals. Use for "do it in another session", "hand it to another agent", "how is that session doing", "answer the waiting question", "leave a note on that session". Not for subagents within this conversation. For recurring work, see schedule-resident-tasks.
 ---
 
-# 別のセッションを動かす
+# Driving other sessions
 
 ```bash
-hc ls                                  # 一覧。"!" は回答待ち、"(you)" は自分
-hc fav                                 # ユーザーのお気に入りのプロジェクト（番号・フォルダ名・パス）
-hc start --cwd DIR "指示"               # → started claude:<id>。DIR はお気に入りのフォルダ名でもよい。Codex は --provider codex、軽い作業は --model haiku
-hc until ID --timeout 9m               # 質問・承認・ターン終了・失敗まで待つ
-hc read ID                             # 新着を読む
-hc send ID "次の指示"
-hc show ID                             # 保留中の質問と、そのまま使える answer コマンド
-hc answer ID 2                         # 番号・ラベル・自由入力。承認は approve | deny
+hc ls                                  # list; "!" waits for an answer, "(you)" is this session
+hc fav                                 # the user's favorite projects (number, folder name, path)
+hc start --cwd DIR "instruction"       # → started claude:<id>. DIR may be a favorite's folder name. --provider codex|dsh; --model haiku for light work
+hc until ID --timeout 9m               # wait for a question, approval, end of turn or failure
+hc read ID                             # read what is new
+hc send ID "next instruction"
+hc show ID                             # pending questions and ready-to-run answer commands
+hc answer ID 2                         # a number, label or free text; approvals take approve | deny
 ```
 
-ID は短い前方一致でよい。並列の起動と合流、全セッションの見張りは `hc guide` を読む。フラグは推測せず `hc help COMMAND` で確かめる。
+A short ID prefix is enough. For starting and joining sessions in parallel and watching every session, read `hc guide`. Do not guess flags: check `hc help COMMAND`.
 
-## 落とし穴
+## Pitfalls
 
-- `hc` を待つ間はシェルのタイムアウトに注意する。`--timeout 9m` には Bash の `timeout: 600000` を合わせるか、バックグラウンドで実行する。
-- `hc until` の時間切れは終了コード 3 で、失敗ではない。表示された `continue:` のコマンドで待ち続ける。`hc send` の直後に呼んでよい（着手前の idle を終わりと誤認しない）。
-- `completed` でも裏でサブエージェントやコマンドが動いていることがある。`hc ls` の `[N in background]` が目印で、終わると新しいターンが自動で始まる。結果まで待つなら `hc until ID --for settled`。
-- `hc read` は読むたびに既読位置が進み、同じ内容は二度出ない。全体は `--all`、位置を動かさないなら `--peek`。
-- `--cwd` を省くと今のディレクトリで起動する。別のプロジェクトでは必ず指定する。どのプロジェクトか分からなければ `hc fav` から選ぶ。お気に入りの追加・削除（`hc fav add` / `rm`）はユーザーの一覧を変えるので、頼まれたときだけ。
-- 答える前に `hc show` を見る。ユーザーが先にアプリで答えていることがある。
-- ユーザーが操作中のセッションには、頼まれない限り送らない。`hc archive` はエージェントを止めるので、終わった作業にだけ使う。
-- `not supported here` で答えられない質問は、`hc interrupt ID` で止めてから `hc send` で指示し直す。
-- セッションの下に全文で出る `note n…(…): …` は、ユーザーや他のエージェントが見張り役に残した扱いの指示（「レビューが来たら対応させて」「マージされたらアーカイブしてよい」など）。そのセッションに手を出す前に従う。残すのは `hc note add ID "…"`、対応後は `hc note rm NOTE`。メモはそのセッションのエージェントには自動では届かない（自分の待ちを書くのは session-notes）。
-- 自分自身のセッションへの操作は拒否される。常駐タスクの Run は `hc ls` に出ない。
-- `hc` が無ければ入れる: `curl -fsSL -o ~/.local/bin/hc "https://github.com/tohutohu/herdr-companion/releases/latest/download/hc-darwin-$(uname -m | sed s/x86_64/amd64/)" && chmod +x ~/.local/bin/hc`
+- Mind the shell timeout while hc waits. Match `--timeout 9m` with a Bash `timeout: 600000`, or run it in the background.
+- `hc until` timing out exits with code 3 and is not a failure. Keep waiting with the printed `continue:` command. It is fine right after `hc send` (the idle state before work starts is not taken for the end).
+- `completed` can still have subagents or commands running behind it. `[N in background]` in `hc ls` shows it, and a new turn starts by itself when they finish. To wait for their result, `hc until ID --for settled`.
+- Each `hc read` moves the read position, so nothing is shown twice. `--all` for everything, `--peek` to leave the position.
+- Without `--cwd` the session starts in the current directory. Always pass it for another project; if unsure which, pick from `hc fav`. Adding or removing favorites (`hc fav add` / `rm`) changes the user's list: only when asked.
+- Look at `hc show` before answering: the user may have answered in the app already.
+- Do not send to a session the user is working in unless asked. `hc archive` stops the agent; use it only for finished work.
+- A question that answers `not supported here`: stop with `hc interrupt ID`, then instruct again with `hc send`.
+- `note n…(…): …` lines shown in full under a session are instructions the user or other agents left for whoever watches it ("have it answer the review", "archive once merged"). Follow them before touching that session. Leave one with `hc note add ID "…"`; once handled, `hc note rm NOTE`. Notes do not reach that session's agent (to note your own wait, see session-notes).
+- Operations on your own session are refused. Resident task runs do not appear in `hc ls`.
+- Without hc, install it: `curl -fsSL -o ~/.local/bin/hc "https://github.com/tohutohu/herdr-companion/releases/latest/download/hc-darwin-$(uname -m | sed s/x86_64/amd64/)" && chmod +x ~/.local/bin/hc`

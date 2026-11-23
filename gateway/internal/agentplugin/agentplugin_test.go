@@ -2,11 +2,13 @@ package agentplugin
 
 import (
 	"encoding/json"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -46,12 +48,12 @@ func TestInstallはプラグインとスキルを書き出して古い内容を�
 	}
 }
 
-// Claude Code and Codex read the same files, so the limits of the Agent Skills
-// specification apply. Every description sits in every session's context, and
-// Codex shortens them when many skills compete for its budget, so they stay
-// far below the 1024-character limit.
+// Claude Code, Codex and DeepSeek Harness read the same files, so the limits
+// of the Agent Skills specification apply. Every description sits in every
+// session's context, and Codex shortens them when many skills compete for its
+// budget, so they stay well below the 1024-character limit.
 func TestスキルはAgentSkillsの仕様と文字数の予算に収まる(t *testing.T) {
-	const maxDescription, maxBodyLines = 300, 80
+	const maxDescription, maxBodyLines = 600, 80
 	frontmatter := regexp.MustCompile(`\A---\nname: ([a-z0-9-]{1,64})\ndescription: ([^\n]+)\n---\n`)
 	entries, err := files.ReadDir("plugin/skills")
 	if err != nil {
@@ -84,5 +86,31 @@ func TestスキルはAgentSkillsの仕様と文字数の予算に収まる(t *te
 	}
 	if strings.Join(found, " ") != strings.Join(skillNames, " ") {
 		t.Errorf("skills = %v, want %v", found, skillNames)
+	}
+}
+
+// The skills are written in English for every agent; they tell the agent to
+// write to the user in the user's own language.
+func Testスキルとプラグインの説明は英語で書く(t *testing.T) {
+	err := fs.WalkDir(files, "plugin", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		b, err := files.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for i, line := range strings.Split(string(b), "\n") {
+			for _, r := range line {
+				if unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Hangul) {
+					t.Errorf("%s:%d is not in English: %s", path, i+1, line)
+					break
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

@@ -1,55 +1,57 @@
 ---
 name: session-notes
-description: このセッション自身に書き置きを残せる（hc note add self）。ユーザーと見張り役のエージェントがそれを読み、再開やアーカイブを決める。レビュー・マージ・他の人やユーザーの返事を待ってターンを終えるとき、長い待ちを sleep やループで粘る前に読む。「何待ちか残して」「マージされたらアーカイブしていいと書いておいて」と頼まれたら作業より先に読む。「続きを」と再開されたら何待ちだったか確かめるのにも使う。ID で指す他のセッションへのメモは drive-sessions。
+description: Leave a note on this session itself (hc note add self); the user and watching agents read it to decide when to resume or archive it. Read before ending a turn that waits on a review, a merge, or a reply or decision from others or the user, and before holding on with sleep or a loop. Read first when asked to "note what you are waiting for" or "write that it can be archived once merged", and on "continue" to check what you were waiting for. Notes on other sessions: drive-sessions.
 ---
 
-# 自分のセッションにメモを残す
+# Leaving a note on your own session
 
-`hc note add self "…"` で、このセッションに書き置きを残せる。Gateway が保存し、ユーザーはアプリの入力欄のすぐ上で、見張り役のエージェントは `hc ls` / `hc wait` の出力でいつでも全文を読む。見張り役はメモだけを見て、条件がそろえば再開の指示を送り、許されていればアーカイブする。メモは自分には自動では届かない。
+`hc note add self "…"` leaves a note on this session. The Gateway keeps it; the user reads it in full right above the composer in the app, and watching agents in the output of `hc ls` / `hc wait`. A watcher looks only at the note: when its conditions are met it sends the instruction to resume, and archives the session if allowed. Notes are not delivered back to you automatically.
 
-## いつ書くか
+## When to write one
 
-- 外部の出来事を待ってターンを終えるとき: 他の人のレビュー、PR のマージ、他チームやユーザーの返事・判断、デプロイ、決まった日時。
-- 何時間・何日も先になりうる待ちは、sleep・ループ・`hc wait` で粘らずにメモを書いてターンを終える。数分で終わる CI などはその場で待ってよい。
-- 終えた作業に条件付きの後始末があるとき（「マージされたらアーカイブしてよい」「このまま触らない」）。
-- 書かない: その場で完了した作業、最終返答の繰り返し、ユーザーがすぐ答えてくれる質問。
+- Ending a turn to wait for an outside event: someone else's review, a PR merge, a reply or decision from another team or the user, a deploy, a set date and time.
+- A wait that may take hours or days: write a note and end the turn instead of holding on with sleep, a loop or `hc wait`. Waiting a few minutes for CI in place is fine.
+- Finished work with a conditional cleanup ("archive once merged", "leave it as is").
+- The user has to check, try or approve something before you can continue (e.g. mark a PR ready for review).
+- Not for: work completed on the spot, repeating the final reply, or a question the user will answer right away in this conversation.
 
-## 何を書くか
+## What to write
 
-見張り役はこの会話を読まない。メモだけで判断できるよう、具体的に書く:
+The watcher does not read this conversation. Be specific enough to decide from the note alone:
 
-1. 待ち: 何を待っているか。
-2. 再開: 確かめられる条件。PR の URL か `owner/repo#番号`、誰のレビューか、CI のワークフロー名、日時。
-3. 指示: 条件がそろったら送ってほしい一文。そのまま `hc send` に使える形で。
-4. 後始末: 許すこと（「マージされたらアーカイブしてよい」「放置してよい」）。
-5. 禁止: してほしくないことがあれば（「Bob の返事が来るまで再開しない」）。
+1. Waiting for: what you wait for.
+2. Resume when: a checkable condition. A PR URL or `owner/repo#number`, whose review, the CI workflow name, a date and time.
+3. Then send: the one sentence to send when the condition is met, ready to use with `hc send`.
+4. Cleanup: what is allowed ("archive once merged", "fine to leave").
+5. Do not: anything you do not want ("do not resume before Bob replies").
 
 ```text
-待ち: owner/app#123 への alice のレビュー。
-再開: レビューコメントが付いたら「#123 のレビューコメントに対応して push まで」と送る。
-後始末: approve されてマージされたらアーカイブしてよい。
+Waiting for: alice's review of owner/app#123.
+Resume when: review comments arrive; then send "Address the review comments on #123 and push".
+Cleanup: archive once it is approved and merged.
 ```
 
-悪い例: 「レビュー待ち」（どの PR か、誰か、来たら何をするかが無い）。
+Bad: "waiting for review" (which PR, whose, and what to do then are missing).
 
-- ユーザーの言語で短く。1 つのメモに 1 つの件。別件は別のメモにする。
-- 自然に古くなる条件には `--ttl 3d` のように期限を付ける。
-- トークンやパスワードなどの秘密は書かない。ユーザーも他のエージェントも読む。
+- Write the note in the user's language, briefly. One matter per note; separate matters get separate notes.
+- Give conditions that go stale on their own an expiry, like `--ttl 3d`.
+- Never write secrets such as tokens or passwords: the user and other agents read notes.
 
-## コマンド
+## Commands
 
 ```bash
-hc note add self "…"           # 複数行は TEXT を "-" にして標準入力から。期限は --ttl 90m / 12h / 3d
-hc note ls self                # 自分のメモ
-hc note edit NOTE "…"          # 状況が変わったら書き換える。--ttl D / --no-expiry
-hc note rm NOTE                # 片付いたら消す
+hc note add self "…"           # TEXT "-" reads several lines from stdin. Expiry: --ttl 90m / 12h / 3d
+hc note ls self                # your notes
+hc note edit NOTE "…"          # rewrite when things change; --ttl D / --no-expiry
+hc note rm NOTE                # remove once settled
 ```
 
-## 落とし穴
+## Pitfalls
 
-- 再開されたら、まず `hc note ls self` を読む。片付いた件は `rm`、状況が変わった件は `edit`。古いメモは見張り役を誤らせる。
-- 同じ件のメモがもうあれば、足さずに書き換える。
-- メモは指示であってロックではない。人や見張り役が先に動いていることがある。
-- メモを残したことと何待ちかは、最終返答でもユーザーに一言伝える。
-- `"self" needs HC_SESSION_ID` は Gateway のセッションの外、`update the Gateway` はメモに対応しない Gateway。どちらもメモは諦め、待ちの内容を最終返答に書く。
-- 他のセッションのメモを読んだり残したりするのは drive-sessions の範囲。
+- When resumed, read `hc note ls self` first. `rm` what is settled, `edit` what changed. Stale notes mislead watchers.
+- If a note on the same matter exists, rewrite it instead of adding another.
+- A note is an instruction, not a lock. The user or a watcher may have acted already.
+- A work log the project keeps (e.g. `tasks/<id>/log.md`) does not replace the note: watchers read only notes.
+- Mention in your final reply that you left a note and what you wait for.
+- `"self" needs HC_SESSION_ID` means you run outside a Gateway session; `update the Gateway` means a Gateway without notes. In both cases skip the note and put the wait in your final reply.
+- Reading or leaving notes on other sessions belongs to drive-sessions.
