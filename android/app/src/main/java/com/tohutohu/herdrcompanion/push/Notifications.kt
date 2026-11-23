@@ -35,6 +35,7 @@ object Notifications {
     private const val SEEN_PREFS = "resident_notifications"
     private const val SEEN_KEEP = 64
     const val EXTRA_SESSION_ID = "session_id"
+    const val EXTRA_CONNECTION_ID = "connection_id"
     const val EXTRA_STATUS = "status"
     const val EXTRA_TITLE = "title"
     const val EXTRA_BODY = "body"
@@ -84,12 +85,22 @@ object Notifications {
     fun canReply(status: String, canSend: Boolean): Boolean =
         canSend && status != Status.WAITING_INPUT && status != Status.WAITING_APPROVAL
 
-    fun sessionIntent(context: Context, sessionId: String): PendingIntent {
-        val intent = Intent(context, MainActivity::class.java)
+    /** What a tap on a session notification hands to [MainActivity]. */
+    internal fun sessionTapIntent(context: Context, sessionId: String, connectionId: String): Intent =
+        tapIntent(context, connectionId).putExtra(EXTRA_SESSION_ID, sessionId)
+
+    /** What a tap on a resident notification hands to [MainActivity]. */
+    internal fun residentTapIntent(context: Context, taskId: String, connectionId: String): Intent =
+        tapIntent(context, connectionId).putExtra(EXTRA_RESIDENT_TASK, taskId)
+
+    private fun tapIntent(context: Context, connectionId: String): Intent =
+        Intent(context, MainActivity::class.java)
             .setAction(Intent.ACTION_VIEW)
-            .putExtra(EXTRA_SESSION_ID, sessionId)
-            .putExtra("connection_id", context.container.settings.current.connectionId)
+            .putExtra(EXTRA_CONNECTION_ID, connectionId)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+
+    fun sessionIntent(context: Context, sessionId: String): PendingIntent {
+        val intent = sessionTapIntent(context, sessionId, context.container.settings.current.connectionId)
         return PendingIntent.getActivity(
             context,
             sessionId.hashCode(),
@@ -219,11 +230,7 @@ object Notifications {
     }
 
     fun residentIntent(context: Context, taskId: String): PendingIntent {
-        val intent = Intent(context, MainActivity::class.java)
-            .setAction(Intent.ACTION_VIEW)
-            .putExtra(EXTRA_RESIDENT_TASK, taskId)
-            .putExtra("connection_id", context.container.settings.current.connectionId)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        val intent = residentTapIntent(context, taskId, context.container.settings.current.connectionId)
         return PendingIntent.getActivity(
             context,
             ("resident:$taskId").hashCode(),

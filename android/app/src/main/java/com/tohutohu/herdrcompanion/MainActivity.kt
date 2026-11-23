@@ -10,7 +10,6 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import com.tohutohu.herdrcompanion.data.SessionLink
 import com.tohutohu.herdrcompanion.push.Notifications
 import com.tohutohu.herdrcompanion.ui.AppNavigation
 import com.tohutohu.herdrcompanion.ui.HerdrTheme
@@ -64,23 +63,24 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIntent(intent: Intent?) {
-        if (intent?.action == Intent.ACTION_VIEW) {
-            // Any app or web page can send this, so it does nothing but navigate.
-            val id = intent.dataString?.let(SessionLink::sessionId)
-            intent.data = null
-            if (id != null && container.settings.current.isConfigured) pendingSession.value = id
-            return
+        val current = container.settings.current
+        val target = LaunchTarget.of(intent, current.connectionId, current.isConfigured)
+        // Consume the intent so a later recreation does not navigate again.
+        if (intent?.data != null) intent.data = null
+        intent?.removeExtra(Notifications.EXTRA_RESIDENT_TASK)
+        intent?.removeExtra(Notifications.EXTRA_SESSION_ID)
+        when (target) {
+            // Any app or web page can send a link, so it does nothing but navigate.
+            is LaunchTarget.Link -> pendingSession.value = target.sessionId
+            is LaunchTarget.SessionNotification -> {
+                Notifications.cancel(this, target.sessionId)
+                pendingSession.value = target.sessionId
+            }
+            is LaunchTarget.ResidentNotification -> {
+                Notifications.cancelResident(this, target.taskId)
+                pendingResident.value = target.taskId
+            }
+            null -> Unit
         }
-        if (intent?.getStringExtra("connection_id").orEmpty() != container.settings.current.connectionId) return
-        intent?.getStringExtra(Notifications.EXTRA_RESIDENT_TASK)?.let { task ->
-            intent.removeExtra(Notifications.EXTRA_RESIDENT_TASK)
-            Notifications.cancelResident(this, task)
-            pendingResident.value = task
-            return
-        }
-        val id = intent?.getStringExtra(Notifications.EXTRA_SESSION_ID) ?: return
-        intent.removeExtra(Notifications.EXTRA_SESSION_ID)
-        Notifications.cancel(this, id)
-        pendingSession.value = id
     }
 }
