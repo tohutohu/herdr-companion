@@ -220,6 +220,9 @@ func Testサイドカーで開始したセッションはIDを先に決め応答
 	if env["HC_SESSION_ID"] != "claude:"+id || env["CLAUDECODE"] != nil || env["CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS"] != "1" {
 		t.Errorf("env HC_SESSION_ID=%v CLAUDECODE=%v EMIT_SESSION_STATE=%v", env["HC_SESSION_ID"], env["CLAUDECODE"], env["CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS"])
 	}
+	if env["CLAUDE_CODE_ARTIFACT"] != "1" {
+		t.Errorf("env CLAUDE_CODE_ARTIFACT=%v, want 1 so the Artifact tools are offered", env["CLAUDE_CODE_ARTIFACT"])
+	}
 	eventually(t, "streamed text", func() bool {
 		msgs, _ := p.Messages(ctx, id, direct)
 		return len(msgs) == 1 && msgs[0].ID == streamingPrefix+"msg_1" && msgs[0].Blocks[0].Text == "Hello"
@@ -591,5 +594,17 @@ func Test書きかけの返答を全文で知らせ閉じたら完了を知ら�
 	defer mu.Unlock()
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got  %+v\nwant %+v", got, want)
+	}
+}
+
+func Testユーザーの環境でArtifactを切っていればサイドカーのセッションでも切ったままにする(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_ARTIFACT", "0")
+	p, log := newSidecarProvider(t)
+	if _, err := p.DirectStart(context.Background(), providers.DirectStart{Cwd: "/w", Prompt: model.Input{Text: "hi"}}); err != nil {
+		t.Fatal(err)
+	}
+	env, _ := sidecarRequests(t, log, "start")[0]["env"].(map[string]any)
+	if env["CLAUDE_CODE_ARTIFACT"] != "0" {
+		t.Errorf("env CLAUDE_CODE_ARTIFACT=%v, want the user's 0", env["CLAUDE_CODE_ARTIFACT"])
 	}
 }

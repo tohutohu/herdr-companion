@@ -23,6 +23,8 @@ A path written in the reply text gets a file chip the user can tap to open. A ch
 
 To show something interactive or a diagram, make one HTML file in the cwd. The app renders it in a WebView and loads its relative CSS, JS and images.
 
+Claude Code sessions may also have the `Artifact` tool, which publishes a page to the user's claude.ai account. Use it when the user asks for an artifact or wants to review a design there and leave comments (`ArtifactComments` reads them); put the page's link in the reply. Otherwise prefer the HTML file, which stays on this Mac.
+
 ## Pitfalls
 
 - Files outside the cwd, such as `/tmp`, get no chip.

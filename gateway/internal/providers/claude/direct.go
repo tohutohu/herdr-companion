@@ -262,6 +262,15 @@ func (p *Provider) DirectStart(ctx context.Context, opts providers.DirectStart) 
 		k, v, _ := strings.Cut(kv, "=")
 		envMap[k] = v
 	}
+	// Claude Code turns its claude.ai Artifact tools (publish an HTML page
+	// the user can open on the phone, read its comments) off by default for
+	// SDK entrypoints and on for the interactive CLI. Sessions here are the
+	// user's interactive sessions, so offer them unless the user's own
+	// environment chose otherwise. Resident runs are unattended and keep the
+	// SDK default.
+	if _, set := envMap["CLAUDE_CODE_ARTIFACT"]; !set {
+		envMap["CLAUDE_CODE_ARTIFACT"] = "1"
+	}
 	params := map[string]any{
 		"sessionId": id, "resume": opts.Resume != "", "cwd": opts.Cwd,
 		"model": opts.Model, "effort": opts.Effort, "permissionMode": sdkMode(opts.Mode),

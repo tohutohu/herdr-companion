@@ -61,7 +61,7 @@ func Test常駐実行はtranscriptを残し構造化出力と権限プロファ�
 		t.Errorf("allowed = %v, disallowed = %v", allowed, disallowed)
 	}
 	env, _ := s["env"].(map[string]any)
-	if env["HC_RESIDENT_RUN"] != "run_1" || env["HC_SESSION_ID"] != nil {
+	if env["HC_RESIDENT_RUN"] != "run_1" || env["HC_SESSION_ID"] != nil || env["CLAUDE_CODE_ARTIFACT"] != nil {
 		t.Errorf("env = %v", env)
 	}
 	if len(sidecarRequests(t, log, "stop")) != 1 {
