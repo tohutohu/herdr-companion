@@ -14,6 +14,7 @@ hc read ID                             # read what is new
 hc send ID "next instruction"
 hc show ID                             # pending questions and ready-to-run answer commands
 hc answer ID 2                         # a number, label or free text; approvals take approve | deny
+hc link ID [ID...]                     # [short id](hc://session/<id>): put it in the reply, the user taps it to open that session
 ```
 
 A short ID prefix is enough. For starting and joining sessions in parallel and watching every session, read `hc guide`. Do not guess flags: check `hc help COMMAND`.
@@ -25,6 +26,7 @@ A short ID prefix is enough. For starting and joining sessions in parallel and w
 - `completed` can still have subagents or commands running behind it. `[N in background]` in `hc ls` shows it, and a new turn starts by itself when they finish. To wait for their result, `hc until ID --for settled`.
 - Each `hc read` moves the read position, so nothing is shown twice. `--all` for everything, `--peek` to leave the position.
 - Without `--cwd` the session starts in the current directory. Always pass it for another project; if unsure which, pick from `hc fav`. Adding or removing favorites (`hc fav add` / `rm`) changes the user's list: only when asked.
+- When the reply names another session (waiting for an answer, started, blocking you), write it as the link `hc link` prints, not a bare ID: the user reads the reply in the app.
 - Look at `hc show` before answering: the user may have answered in the app already.
 - Do not send to a session the user is working in unless asked. `hc archive` stops the agent; use it only for finished work.
 - A question that answers `not supported here`: stop with `hc interrupt ID`, then instruct again with `hc send`.

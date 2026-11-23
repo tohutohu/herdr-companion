@@ -188,6 +188,7 @@ func (a *app) commands() map[string]func([]string) error {
 	return map[string]func([]string) error{
 		"ls":        a.cmdList,
 		"show":      a.cmdShow,
+		"link":      a.cmdLink,
 		"search":    a.cmdSearch,
 		"read":      a.cmdRead,
 		"export":    a.cmdExport,

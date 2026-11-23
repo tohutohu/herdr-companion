@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -845,4 +846,32 @@ func (a *app) waitSettled(ctx context.Context, id string, before time.Time, time
 		}
 		time.Sleep(min(pollInterval, time.Until(deadline)+time.Millisecond))
 	}
+}
+
+// sessionLink is the hc://session/<id> link the Android app and the Mac UI
+// open as that session (android/shared/.../SessionLink.kt).
+func sessionLink(id string) string {
+	return "hc://session/" + url.PathEscape(id)
+}
+
+// cmdLink prints a Markdown link per session that the user can tap in the
+// app to open it.
+func (a *app) cmdLink(args []string) error {
+	fs := flag.NewFlagSet("link", flag.ContinueOnError)
+	pos, err := parseFlags(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(pos) == 0 {
+		return usagef("link takes one or more session IDs")
+	}
+	ctx := context.Background()
+	for _, ref := range pos {
+		s, err := a.resolve(ctx, ref)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(a.out, "[%s](%s)\n", clipID(nativeID(s.ID), 8), sessionLink(s.ID))
+	}
+	return nil
 }

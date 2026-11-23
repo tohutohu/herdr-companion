@@ -276,7 +276,9 @@ private fun isEscaped(text: String, index: Int): Boolean {
 }
 
 private const val ESCAPABLE = "\\`*_{}[]()#+-.!~>|"
-private val LINK_URL = Regex("""https?://[^\s<>"']+""")
+// Besides web pages, a [label](url) link may name a session (`hc://session/<id>`, SessionLink),
+// which the app opens itself. Other schemes stay plain text.
+private val LINK_URL = Regex("""(?:https?://|hc://session/)[^\s<>"']+""", RegexOption.IGNORE_CASE)
 
 // A bare URL ends at the first non-ASCII character: Japanese text and its punctuation follow URLs
 // with no space. A URL with a raw non-ASCII path needs the [label](url) form.

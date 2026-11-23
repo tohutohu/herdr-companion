@@ -197,7 +197,9 @@ fun main() {
                 DesktopWindowPersistence(window)
                 LaunchedEffect(updater) { updater.startAutomaticChecks() }
                 SharedTheme {
-                    DesktopShell(appState, residentState, tearOff, api, updater, onCloseWindow = ::exitApplication)
+                    SessionLinkUris(onOpen = appState::openSession) {
+                        DesktopShell(appState, residentState, tearOff, api, updater, onCloseWindow = ::exitApplication)
+                    }
                 }
             }
             for (detached in appState.detachedWindows) {

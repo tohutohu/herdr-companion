@@ -902,3 +902,12 @@ func Test一緒に指定した状態のうち早く返るほうが裏の作業�
 		}
 	}
 }
+
+func Test短いIDからアプリで開けるセッションのMarkdownリンクを出す(t *testing.T) {
+	a, _ := newTestApp(t, sampleGateway())
+	got := a.mustRun(t, "link", "aaaa1111", "bbbb")
+	want := "[aaaa1111](hc://session/claude:aaaa1111-0000)\n[bbbb3333](hc://session/codex:bbbb3333)\n"
+	if got != want {
+		t.Errorf("got\n%s\nwant\n%s", got, want)
+	}
+}

@@ -34,6 +34,7 @@ import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.runtime.serialization.NavBackStackSerializer
 import androidx.navigation3.ui.NavDisplay
+import com.tohutohu.herdrcompanion.data.SessionLink
 import com.tohutohu.herdrcompanion.ui.detail.SessionDetailRoute
 import com.tohutohu.herdrcompanion.ui.files.FileViewerScreen
 import com.tohutohu.herdrcompanion.ui.forward.LocalhostBrowserScreen
@@ -307,6 +308,8 @@ fun AppNavigation(
         val uris = remember(defaultUris) {
             object : UriHandler {
                 override fun openUri(uri: String) {
+                    // A session link in a message (hc://session/<id>) opens that session here.
+                    SessionLink.sessionId(uri)?.let { id -> current().push(DetailRoute(id)); return }
                     val local = localhostTarget(uri)
                     // Comments on the page go to the session the link was in.
                     val session = currentStack().lastOrNull { it is DetailRoute } as DetailRoute?

@@ -50,7 +50,7 @@ var commandGroups = []struct {
 	title string
 	names []string
 }{
-	{"Look", []string{"ls", "search", "show", "read", "export"}},
+	{"Look", []string{"ls", "search", "show", "read", "export", "link"}},
 	{"Wait", []string{"until", "wait", "changes"}},
 	{"Act", []string{"send", "answer", "start", "archive", "resume"}},
 	{"Settings", []string{"model", "effort", "mode", "interrupt"}},
@@ -293,6 +293,22 @@ OUTPUT
 
 SEE ALSO
   hc read ID · hc answer ID
+`},
+	{"link", "Markdown links that open sessions in the user's app", `hc link — links the user can tap to open sessions
+
+USE WHEN
+  Your reply names other sessions (one waiting for an answer, one you started or
+  are waiting on). The user reads replies in the Herdr Companion app, where such a
+  link opens that session.
+
+USAGE
+  hc link ID [ID...]
+
+OUTPUT
+  one line per session: [short id](hc://session/<full id>). Put it in your reply as is.
+
+SEE ALSO
+  hc ls · hc show ID
 `},
 	{"read", "messages new since your last read of a session", `hc read — what a session said since you last read it
 

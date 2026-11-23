@@ -178,6 +178,19 @@ class MarkdownTest {
     }
 
     @Test
+    fun `セッションへのリンクはラベル付きならリンクにする`() {
+        val spans = parseInline("[1e695315](hc://session/claude:1e695315-aaaa) が回答待ち。hc://session/claude:x は裸")
+        assertEquals(listOf("hc://session/claude:1e695315-aaaa"), spans.mapNotNull { it.link })
+        assertEquals("1e695315 が回答待ち。hc://session/claude:x は裸", text(spans))
+    }
+
+    @Test
+    fun `hcスキームでもセッション以外のリンクは開かない`() {
+        val spans = parseInline("[常駐](hc://resident/task)")
+        assertTrue(spans.none { it.link != null })
+    }
+
+    @Test
     fun `裸のURLもリンクにする`() {
         val spans = parseInline("見て: https://example.com/x 。")
         val link = spans.first { it.link != null }

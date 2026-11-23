@@ -29,7 +29,8 @@ Claude Code sessions may also have the `Artifact` tool, which publishes a page t
 
 - Files outside the cwd, such as `/tmp`, get no chip.
 - `localhost` URLs do not open on the phone. Do not start a server and point to it; make a file.
-- `![alt](path)` does not become an image. Only `http(s)` links can be tapped.
+- `![alt](path)` does not become an image. Only `http(s)` links and session links can be tapped.
+- To point at another session, write `[1e695315](hc://session/claude:1e695315-…)` with its full ID; `hc link ID` prints it. Tapping opens that session in the app. A bare short ID is not a link.
 - SVG is not shown as an image. Convert it to PNG or embed it in HTML.
 - Files over 10 MiB and binaries are not previewed, only offered for download.
 - A push notification shows about the first 300 characters of the last message. Put the conclusion and what the user should do first.
