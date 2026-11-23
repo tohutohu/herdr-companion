@@ -30,6 +30,9 @@ type directThread struct {
 	lastFailed                      bool
 	err                             string
 	alive                           bool
+	// streamID / streamText are the agent message being written, for
+	// StreamReporter.
+	streamID, streamText string
 }
 
 func (p *Provider) isDirect(id string) bool {
@@ -51,6 +54,57 @@ func (p *Provider) notifyDirect(id string) {
 	p.directMu.Unlock()
 	if l != nil {
 		l(id)
+	}
+}
+
+// SetStreamListener registers a callback told the text so far of each agent
+// message (providers.StreamReporter). It runs on the connection's read loop.
+func (p *Provider) SetStreamListener(f func(providers.StreamReport)) {
+	p.directMu.Lock()
+	p.stream = f
+	p.directMu.Unlock()
+}
+
+// maxStreamText bounds a streamed message kept for StreamReporter; the
+// conversation has the whole text once the item completes.
+const maxStreamText = 256 << 10
+
+// streamEvent follows agent message items of a direct thread while they are
+// written and reports them.
+func (p *Provider) streamEvent(method string, params json.RawMessage) {
+	var ev struct {
+		ThreadID string `json:"threadId"`
+		ItemID   string `json:"itemId"`
+		Delta    string `json:"delta"`
+		Item     struct {
+			ID   string `json:"id"`
+			Type string `json:"type"`
+		} `json:"item"`
+	}
+	if json.Unmarshal(params, &ev) != nil || ev.ThreadID == "" {
+		return
+	}
+	var report *providers.StreamReport
+	p.directMu.Lock()
+	dt := p.direct[ev.ThreadID]
+	switch {
+	case dt == nil:
+	case method == "item/agentMessage/delta" && ev.ItemID != "":
+		if dt.streamID != ev.ItemID {
+			dt.streamID, dt.streamText = ev.ItemID, ""
+		}
+		if len(dt.streamText) < maxStreamText {
+			dt.streamText += ev.Delta
+		}
+		report = &providers.StreamReport{NativeID: ev.ThreadID, MessageID: dt.streamID, Text: dt.streamText}
+	case dt.streamID != "" && ((method == "item/completed" && ev.Item.ID == dt.streamID) || method == "turn/completed" || method == "thread/closed"):
+		report = &providers.StreamReport{NativeID: ev.ThreadID, MessageID: dt.streamID, Done: true}
+		dt.streamID, dt.streamText = "", ""
+	}
+	stream := p.stream
+	p.directMu.Unlock()
+	if report != nil && stream != nil {
+		stream(*report)
 	}
 }
 
@@ -285,6 +339,7 @@ func (p *Provider) directEvent(method string, params json.RawMessage) {
 	if ev.ThreadID == "" || !p.hasDirect(ev.ThreadID) {
 		return
 	}
+	p.streamEvent(method, params)
 	switch method {
 	case "turn/started":
 		p.turnStarted(ev.ThreadID, ev.Turn.ID)

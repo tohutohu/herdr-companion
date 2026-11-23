@@ -85,6 +85,8 @@ type directSession struct {
 	pending                         []*permissionRequest
 	partialID, partialText          string
 	partialAt                       time.Time
+	// partialClosed means the partial's reply was reported closed.
+	partialClosed bool
 	// autoModels are the model ids the account can run in auto mode.
 	autoModels map[string]bool
 	// background is what the latest background_tasks_changed listed.
@@ -97,6 +99,8 @@ type directState struct {
 	sc       *sidecar
 	sessions map[string]*directSession
 	listener func(string)
+	// stream is told the text of replies while they are written.
+	stream func(providers.StreamReport)
 }
 
 // SetDirect configures how sessions are run.
@@ -118,6 +122,14 @@ func (p *Provider) SetAgentPlugin(dir string) {
 func (p *Provider) SetDirectListener(f func(string)) {
 	p.direct.mu.Lock()
 	p.direct.listener = f
+	p.direct.mu.Unlock()
+}
+
+// SetStreamListener registers a callback told the text so far of each reply
+// (providers.StreamReporter). It runs on the sidecar's read loop.
+func (p *Provider) SetStreamListener(f func(providers.StreamReport)) {
+	p.direct.mu.Lock()
+	p.direct.stream = f
 	p.direct.mu.Unlock()
 }
 
@@ -522,6 +534,15 @@ func (p *Provider) sidecarEvent(ev sidecarEvent) {
 		return
 	}
 	notify := true
+	// report is the streamed reply to tell about, if any.
+	var report *providers.StreamReport
+	// closePartial reports the reply being streamed as closed.
+	closePartial := func() {
+		if s.partialID != "" && !s.partialClosed {
+			report = &providers.StreamReport{NativeID: id, MessageID: s.partialID, Done: true}
+			s.partialClosed = true
+		}
+	}
 	switch ev.Event {
 	case "init":
 		var d struct {
@@ -574,7 +595,10 @@ func (p *Provider) sidecarEvent(ev sidecarEvent) {
 			Model     string `json:"model"`
 		}
 		json.Unmarshal(ev.Data, &d)
-		s.partialID, s.partialText, s.partialAt = d.MessageID, "", time.Now()
+		if s.partialID != d.MessageID {
+			closePartial()
+		}
+		s.partialID, s.partialText, s.partialAt, s.partialClosed = d.MessageID, "", time.Now(), false
 		// This request runs with whatever was asked for before it.
 		s.requestedModel, s.requestedEffort = "", ""
 		if d.Model != "" {
@@ -588,6 +612,11 @@ func (p *Provider) sidecarEvent(ev sidecarEvent) {
 		if len(s.partialText) < maxPartial {
 			s.partialText += d.Text
 		}
+		if s.partialID != "" {
+			// A text block after a closed one (thinking first) reopens it.
+			s.partialClosed = false
+			report = &providers.StreamReport{NativeID: id, MessageID: s.partialID, Text: s.partialText}
+		}
 		notify = false
 	case "assistant":
 		var d struct {
@@ -597,6 +626,9 @@ func (p *Provider) sidecarEvent(ev sidecarEvent) {
 		if d.Model != "" && d.Model != "<synthetic>" {
 			s.model = d.Model
 		}
+		// The reply is closed; the transcript has it now or soon. The
+		// partial stays for reads until it does (withDirectState).
+		closePartial()
 		// A closed message can be translated while the rest of the turn runs.
 	case "result":
 		var d struct {
@@ -607,6 +639,7 @@ func (p *Provider) sidecarEvent(ev sidecarEvent) {
 		json.Unmarshal(ev.Data, &d)
 		s.turns++
 		s.running = false
+		closePartial()
 		s.partialID, s.partialText = "", ""
 		s.lastFailed = d.IsError && d.Subtype != "error_during_execution"
 		s.err = strings.Join(d.Errors, "; ")
@@ -626,11 +659,16 @@ func (p *Provider) sidecarEvent(ev sidecarEvent) {
 			Error *string `json:"error"`
 		}
 		json.Unmarshal(ev.Data, &d)
+		closePartial()
 		markExited(s, d.Error)
 	default:
 		notify = false
 	}
+	stream := p.direct.stream
 	p.direct.mu.Unlock()
+	if report != nil && stream != nil {
+		stream(*report)
+	}
 	if notify {
 		p.notifyDirect(id)
 	}

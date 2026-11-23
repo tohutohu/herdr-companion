@@ -382,6 +382,30 @@ Unknown provider data never fails a request: it becomes a
 the raw payload. `GET /messages?after=<id>` returns messages from that id on
 (the anchor is included so in-progress updates are seen).
 
+## Live updates
+
+`GET /v1/events` (`internal/events`, shapes in api.md) tells open screens what changed, so they
+fetch at once instead of on the next poll. Events are hints; the REST API stays the only way to
+read data, except the text of a reply being written.
+
+- `events.Hub` numbers replayable events `<epoch>-<seq>` and keeps the last 512 in memory. A
+  client reconnecting with `Last-Event-ID` gets what it missed, or `reset` (refetch everything)
+  for another epoch or an id that fell out. Providers are the source of truth, so nothing is
+  persisted and a Gateway restart is just a reset.
+- `events.Tracker` reads the live sessions (`LiveSessions`) on every runtime change and compares
+  each one's JSON with the last read; a difference is a `session` event. Transcripts grow between
+  runtime changes (tool results), so while a session runs and a client is connected it reads every
+  second, otherwise every 15 s.
+- A successful non-GET API request publishes `sessions` (or `resident` under `/v1/resident/`),
+  covering archive, notes and other changes the tracker does not see. Resident changes come from
+  `resident.Service.OnChange` too.
+- `events.Streamer` publishes `streaming` from `providers.StreamReporter` (Claude's sidecar
+  `delta`s, Codex's `item/agentMessage/delta`) at most every 150 ms per session, each carrying the
+  whole text so far, and `done` when the reply closes.
+- Apps connect only while a screen is in the foreground; FCM still covers the background. While
+  connected they poll only as a slow safety net, and fall back to the 3 s / 5 s polls when the
+  stream is down or the Gateway lacks `events`.
+
 ## Dead letters
 
 `~/.local/state/herdr-mobile/errors/YYYY-MM-DD.jsonl`, one JSON object per
@@ -671,7 +695,8 @@ Full request and response shapes, auth and connection details: [api.md](api.md).
 | GET | `/v1/usage` | cached subscription limits `{providers[{provider, displayName, plan?, account?, windows[{key, label, scope?, usedPercent, windowMinutes?, resetsAt?}], updatedAt?, error?}], fetchedAt?, error?}` |
 | POST | `/v1/usage/refresh` | re-read the limits now (takes ~10 s) → same shape |
 | POST / DELETE | `/v1/devices` | FCM token registration |
-| GET | `/v1/capabilities` | `{messageIdempotency, resident?}`: what the gateway offers |
+| GET | `/v1/events` | Server-Sent Events: change hints and replies being written (see Live updates) |
+| GET | `/v1/capabilities` | `{messageIdempotency, events, resident?}`: what the gateway offers |
 | * | `/v1/resident/…` | resident tasks (see api.md) |
 
 ## Advisory directory check

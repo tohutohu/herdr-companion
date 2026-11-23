@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -552,4 +554,42 @@ func Test呼び出し元が去った脇道の質問はサイドカーで取り�
 		c := sidecarRequests(t, log, "cancelSideQuestion")
 		return len(c) == 1 && c[0]["requestId"] == asked
 	})
+}
+
+func Test書きかけの返答を全文で知らせ閉じたら完了を知らせる(t *testing.T) {
+	p, _ := newSidecarProvider(t)
+	var mu sync.Mutex
+	var got []providers.StreamReport
+	p.SetStreamListener(func(r providers.StreamReport) { mu.Lock(); got = append(got, r); mu.Unlock() })
+	id, err := p.DirectStart(context.Background(), providers.DirectStart{Cwd: "/w", Mode: "manual", Prompt: model.Input{Text: "hi"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the turn ending", func() bool { return info(p, id).Turns == 1 })
+	mu.Lock()
+	got = nil
+	mu.Unlock()
+	ev := func(name, data string) {
+		p.sidecarEvent(sidecarEvent{SessionID: id, Event: name, Data: json.RawMessage(data)})
+	}
+	ev("messageStart", `{"messageId":"msg_1"}`)
+	ev("delta", `{"text":"こん"}`)
+	ev("delta", `{"text":"にちは"}`)
+	ev("assistant", `{"messageId":"msg_1"}`)
+	ev("messageStart", `{"messageId":"msg_2"}`)
+	ev("delta", `{"text":"次"}`)
+	ev("result", `{"isError":false,"subtype":"success"}`)
+
+	want := []providers.StreamReport{
+		{NativeID: id, MessageID: "msg_1", Text: "こん"},
+		{NativeID: id, MessageID: "msg_1", Text: "こんにちは"},
+		{NativeID: id, MessageID: "msg_1", Done: true},
+		{NativeID: id, MessageID: "msg_2", Text: "次"},
+		{NativeID: id, MessageID: "msg_2", Done: true},
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got  %+v\nwant %+v", got, want)
+	}
 }

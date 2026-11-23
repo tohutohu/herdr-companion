@@ -3,6 +3,7 @@ package codex
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -243,5 +244,33 @@ func Testアプリサーバーが終了すると実行中のターンは失敗�
 	}
 	if err := p.Send(ctx, id, &providers.Live{}, model.Input{Text: "x"}); err == nil {
 		t.Error("send to a dead app-server succeeded")
+	}
+}
+
+func Testエージェントのメッセージを書きかけの全文で知らせ完了で閉じる(t *testing.T) {
+	p, _, _ := newDirectProvider(t)
+	id, err := p.DirectStart(context.Background(), providers.DirectStart{Cwd: "/work", Prompt: model.Input{Text: "hi"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []providers.StreamReport
+	p.SetStreamListener(func(r providers.StreamReport) { got = append(got, r) })
+	ev := func(method, params string) { p.directEvent(method, json.RawMessage(params)) }
+	ev("item/agentMessage/delta", `{"threadId":"`+id+`","turnId":"t","itemId":"i1","delta":"Hel"}`)
+	ev("item/agentMessage/delta", `{"threadId":"`+id+`","turnId":"t","itemId":"i1","delta":"lo"}`)
+	ev("item/completed", `{"threadId":"`+id+`","item":{"id":"i1","type":"agentMessage"}}`)
+	ev("item/agentMessage/delta", `{"threadId":"`+id+`","turnId":"t","itemId":"i2","delta":"x"}`)
+	ev("turn/completed", `{"threadId":"`+id+`","turn":{"id":"t","status":"completed"}}`)
+	ev("item/agentMessage/delta", `{"threadId":"other","turnId":"t","itemId":"i3","delta":"no"}`)
+
+	want := []providers.StreamReport{
+		{NativeID: id, MessageID: "i1", Text: "Hel"},
+		{NativeID: id, MessageID: "i1", Text: "Hello"},
+		{NativeID: id, MessageID: "i1", Done: true},
+		{NativeID: id, MessageID: "i2", Text: "x"},
+		{NativeID: id, MessageID: "i2", Done: true},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got  %+v\nwant %+v", got, want)
 	}
 }

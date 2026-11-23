@@ -56,6 +56,7 @@ type Provider struct {
 	directMu sync.Mutex
 	direct   map[string]*directThread
 	listener func(string)
+	stream   func(providers.StreamReport)
 }
 
 type threadReadKey struct {

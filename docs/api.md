@@ -209,7 +209,8 @@ Gateway が動かすセッションは、プロセスが無い間（Gateway の�
 | GET / POST / DELETE | `/v1/sessions/{id}/notes` | 要 | セッションのメモの一覧／追加／全削除（[下記](#メモ)） |
 | GET | `/v1/notes` | 要 | 全セッションのメモ |
 | GET / PATCH / DELETE | `/v1/notes/{noteId}` | 要 | メモ 1 件の取得／更新／削除 |
-| GET | `/v1/capabilities` | 要 | 対応機能（常駐タスクの有無と版、セッション検索・メモ・お気に入りのフォルダの有無） |
+| GET | `/v1/events` | 要 | 変化の通知と書きかけの返答（Server-Sent Events、[下記](#イベント)） |
+| GET | `/v1/capabilities` | 要 | 対応機能（常駐タスクの有無と版、セッション検索・メモ・お気に入りのフォルダ・イベントの有無） |
 | * | `/v1/resident/…` | 要 | 常駐タスク（[下記](#常駐タスク)） |
 
 ## ペアリング
@@ -663,6 +664,50 @@ Gateway は **Mac のループバック宛てに限った HTTP プロキシ**と
   `ProxyController`、reverse bypass）。入口はチャットの `http://localhost:…` のリンクだけで、
   Mac で待ち受けているポートの一覧は出さない（セッションと関係のないものまで見えるため）。
 
+## イベント
+
+### `GET /v1/events`
+
+開いている画面を、ポーリングを待たずに更新するための Server-Sent Events（`text/event-stream`）。イベントは「何が変わったか」の
+知らせで、データそのものは今まで通り REST で取り直す（書きかけの返答だけは本文を載せる）。`/v1/capabilities` の `events` が
+`true` の Gateway だけが対応する。
+
+```text
+retry: 3000
+
+event: ready
+data: {"epoch":"3f9a0c1d2e4b","reset":false}
+
+id: 3f9a0c1d2e4b-41
+event: session
+data: {"sessionId":"claude:…","status":"running"}
+
+event: streaming
+data: {"sessionId":"claude:…","messageId":"msg_…","text":"ここまでの全文"}
+
+: ping
+```
+
+| `event` | `data` | アプリがすること |
+|---|---|---|
+| `ready` | `{epoch, reset}` | 接続できた。`reset: true` なら取りこぼしを送り直せないので、一覧と開いている会話を全部取り直す |
+| `session` | `{sessionId, status?, removed?}` | Gateway が動かすセッションの状態・要約・会話が変わった。そのセッションを開いていれば `GET …/messages?after=` で取り直す。一覧も取り直す |
+| `sessions` | `{}` | API 経由の変更（アーカイブ、起動、メモ、既読など）で一覧が変わったかもしれない |
+| `resident` | `{}` | 常駐タスクか、その Run が変わった |
+| `streaming` | `{sessionId, messageId, text?, done?}` | エージェントが書いている返答の、ここまでの**全文**（差分ではない）。`done: true` で閉じた（会話に入った、または次の取得で入る）。`id` は付かず、送り直さない |
+
+- `id` は `<epoch>-<連番>`。再接続では最後に受け取った `id` を `Last-Event-ID` ヘッダー（または `?lastEventId=`）で送ると、
+  その後の分が `ready` の直後に届く。`epoch` は Gateway の起動ごとに変わり、直近 512 件だけをメモリに持つので、
+  別の起動の `id` や古すぎる `id` には `reset: true` を返す。新しい接続（`id` なし）は取り直す前提なので何も送り直さない。
+- `session` は Gateway が動かすセッションを読み比べて出す。ランタイムの変化のほか、実行中のセッションがあり誰かが接続して
+  いる間は 1 秒ごとに読み直すので、ツールの結果のように状態が変わらない transcript の追記でも届く。Gateway が動かしていない
+  （`offline` の）セッションの変化は出ない。
+- `streaming` はセッションごとに最大 150 ms に 1 回。Claude はテキストの途中経過、Codex は agent message の途中経過。
+  Claude の書きかけは `GET …/messages` にも `streaming:<messageId>` として出る。
+- 20 秒ごとにコメント行（`: ping`）を送る。それより長く何も届かなければ切れたとみなして再接続してよい。
+  読みが遅いクライアントは切断される（再接続すれば続きから届く）。
+- Cloudflare Tunnel 経由でも使える。
+
 ## 起動の準備
 
 ### `GET /v1/models?provider=claude`
@@ -862,7 +907,7 @@ Run と会話のメッセージには `conversation`（`kept`: 昇格できる�
 ### 対応の判別: `GET /v1/capabilities`
 
 ```json
-{"messageIdempotency": true, "sessionSearch": true, "notes": true, "favoriteDirectories": true, "resident": {"version": 1, "providers": ["claude", "codex", "dsh"], "defaultTimezone": "Asia/Tokyo"}}
+{"messageIdempotency": true, "sessionSearch": true, "notes": true, "favoriteDirectories": true, "events": true, "resident": {"version": 1, "providers": ["claude", "codex", "dsh"], "defaultTimezone": "Asia/Tokyo"}}
 ```
 
 `resident` がない（または `/v1/capabilities` が 404 の）Gateway は常駐タスクに対応していない。アプリは 404 や通信エラーを

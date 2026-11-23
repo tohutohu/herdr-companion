@@ -25,6 +25,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/config"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/directorycheck"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/events"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/favorites"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/files"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/forward"
@@ -70,6 +71,11 @@ type Server struct {
 	// Listen is the address the server listens on, for telling clients behind
 	// a tunnel where to reach the localhost proxy directly.
 	Listen string
+	// Events streams change hints to apps (GET /v1/events); nil leaves it out.
+	Events *events.Hub
+	// Kick asks for a read of the live sessions soon, after a change made
+	// through the API (events.Tracker.Kick); may be nil.
+	Kick func()
 }
 
 func (s *Server) Handler() http.Handler {
@@ -125,7 +131,12 @@ func (s *Server) Handler() http.Handler {
 	s.favoriteRoutes(api)
 	api.HandleFunc("POST /v1/devices", s.registerDevice)
 	api.HandleFunc("DELETE /v1/devices", s.unregisterDevice)
-	mux.Handle("/v1/", s.auth(api))
+	var apiHandler http.Handler = api
+	if s.Events != nil {
+		api.HandleFunc("GET /v1/events", s.streamEvents)
+		apiHandler = s.publishMutations(api)
+	}
+	mux.Handle("/v1/", s.auth(apiHandler))
 	// Profiles contain runtime details and require the same token as the API.
 	mux.Handle("GET /debug/pprof/", s.auth(http.HandlerFunc(pprof.Index)))
 	mux.Handle("GET /debug/pprof/profile", s.auth(http.HandlerFunc(pprof.Profile)))
@@ -165,6 +176,9 @@ func (s *statusRecorder) WriteHeader(code int) {
 	s.status = code
 	s.ResponseWriter.WriteHeader(code)
 }
+
+// Unwrap lets http.ResponseController reach Flush (GET /v1/events).
+func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }
 
 // slowRequest is the duration from which a successful request is logged at
 // info level, so slow responses show up in the log without debug logging.

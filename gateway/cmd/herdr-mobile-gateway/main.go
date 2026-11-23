@@ -24,6 +24,7 @@ import (
 	"github.com/tohutohu/herdr-android-client/gateway/internal/config"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/deadletter"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/directorycheck"
+	"github.com/tohutohu/herdr-android-client/gateway/internal/events"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/favorites"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/launcher"
 	"github.com/tohutohu/herdr-android-client/gateway/internal/logging"
@@ -247,8 +248,24 @@ func serve(args []string) error {
 		sender = fcm
 		watcher.Sender = fcm
 	}
-	direct.SetListener(watcher.Kick)
+	// Change hints for connected apps (GET /v1/events).
+	hub := events.New()
+	tracker := &events.Tracker{Hub: hub, Live: svc.LiveSessions}
+	streamer := &events.Streamer{Hub: hub}
+	for _, p := range []providers.Provider{claudeProvider, codexProvider, dshProvider} {
+		if r, ok := p.(providers.StreamReporter); ok {
+			name := p.Name()
+			r.SetStreamListener(func(rep providers.StreamReport) {
+				streamer.Report(events.Streaming{SessionID: name + ":" + rep.NativeID, MessageID: rep.MessageID, Text: rep.Text, Done: rep.Done})
+			})
+		}
+	}
+	direct.SetListener(func() {
+		watcher.Kick()
+		tracker.Kick()
+	})
 	go watcher.Run(ctx)
+	go tracker.Run(ctx)
 
 	// Resident tasks: their own database, sidecar, app-server and DSH SDK; nothing
 	// is shared with the session runtime or its watcher but the FCM sender.
@@ -261,6 +278,7 @@ func serve(args []string) error {
 	residents := resident.New(residentStore, residentEnv{launch: launch, providers: []providers.Provider{claudeProvider, codexProvider, dshProvider}},
 		map[string]resident.Runner{resident.ProviderClaude: claudeResident, resident.ProviderCodex: codexResident, resident.ProviderDSH: dshProvider.ResidentRunner()},
 		resident.Config{MaxConcurrentRuns: cfg.ResidentMaxConcurrentRuns, CatchUpWindow: time.Duration(cfg.ResidentCatchUpHours) * time.Hour}, nil)
+	residents.OnChange = func() { hub.Publish(events.TypeResident, struct{}{}) }
 	residents.Notifier = &resident.Notifier{Store: residentStore, Sender: sender, Config: store, Prepare: prepareNotification}
 	if err := residents.Recover(ctx); err != nil {
 		return fmt.Errorf("recover resident runs: %w", err)
@@ -287,9 +305,11 @@ func serve(args []string) error {
 	}
 	srv := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           (&api.Server{Search: searchIndex, Translation: translator, MessageDelivery: delivery, AgentUpdates: agentupdate.New(ctx, cfg.CodexBinary), Sessions: svc, Uploads: up, Config: store, Sink: sink, Launcher: launch, Archive: archived, Usage: limits, DirectoryCheck: dirCheck, Direct: direct, Resident: residents, Notes: sessionNotes, Favorites: favoriteDirs, Listen: cfg.Listen}).Handler(),
+		Handler:           (&api.Server{Search: searchIndex, Translation: translator, MessageDelivery: delivery, AgentUpdates: agentupdate.New(ctx, cfg.CodexBinary), Sessions: svc, Uploads: up, Config: store, Sink: sink, Launcher: launch, Archive: archived, Usage: limits, DirectoryCheck: dirCheck, Direct: direct, Resident: residents, Notes: sessionNotes, Favorites: favoriteDirs, Listen: cfg.Listen, Events: hub, Kick: tracker.Kick}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+	// Event streams never end on their own; Shutdown waits for them.
+	srv.RegisterOnShutdown(hub.Close)
 	shutdownDone := make(chan struct{})
 	go func() {
 		defer close(shutdownDone)
